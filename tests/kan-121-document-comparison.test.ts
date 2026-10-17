@@ -8,6 +8,7 @@ vi.mock("next/headers", () => ({ cookies: async () => ({
 }), headers: async () => new Headers() }));
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/iegp/db";
+import type { IegpState } from "@/lib/iegp/types";
 import type { ComparisonOutcome } from "@/lib/ingest/comparison-types";
 import { sourceComparisons, sourceReviews } from "@/lib/iegp/schema";
 import { acceptTacticExpansion, tacticVersion } from "@/lib/iegp/tactic-expansions";
@@ -36,12 +37,17 @@ const actor = { name: "Incoming reviewer", function: "medical_affairs" as const 
 const fields = { actor_name: actor.name, actor_function: actor.function };
 const file = { title: "Incoming protocol", filename: "protocol.txt", source_type: "advisory_board" as const, stakeholder_function: actor.function, text: "The study includes children only. Outcomes improved. The appendix has no relevant scientific information." };
 let gap: string, tactic: string, coverage: string;
-let respond: (input: any) => unknown | Promise<unknown>;
-let calls: any[];
+/** Only the comparison prompt fields inspected by these provider doubles. */
+type ComparisonInput = Pick<IegpState, "blocks" | "gaps"> & {
+ tactic_source_provenance: { tactic_id: string; source_id: string; passage: string; retained: boolean }[];
+ provenance_source_ids: string[];
+};
+let respond: (input: ComparisonInput) => unknown | Promise<unknown>;
+let calls: ComparisonInput[];
 async function post(body: Record<string, unknown>) { const response = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...fields, ...body }) })); return { status: response.status, body: await response.json() }; }
 async function parse() { await runStage({ stage: "S0", input: { files: [file] }, actor, role: "medical_affairs" }); return runStage({ stage: "S1", input: {}, actor, role: "medical_affairs" }); }
 async function comparison() { const { listSourceComparisons } = await import("@/lib/ingest/compare-source"); return (await listSourceComparisons())[0]; }
-function outcome(input: any, judgment: ComparisonOutcome["judgment"] = "conflict", extra: Partial<ComparisonOutcome> = {}): ComparisonOutcome { return { block_id: input.blocks[0].id, passage: "The study includes children only.", match: "same", judgment, gap_id: gap, tactic_id: tactic, coverage_id: coverage, rationale: "The source challenges the adult population", ...extra }; }
+function outcome(input: ComparisonInput, judgment: ComparisonOutcome["judgment"] = "conflict", extra: Partial<ComparisonOutcome> = {}): ComparisonOutcome { return { block_id: input.blocks[0].id, passage: "The study includes children only.", match: "same", judgment, gap_id: gap, tactic_id: tactic, coverage_id: coverage, rationale: "The source challenges the adult population", ...extra }; }
 beforeEach(async () => {
  jar.values.clear();
  await store.resetDemoSetup(); await wipePlatform(["source_files", "parsed_documents"]); await setAiEnabled({ enabled: true, actor_name: actor.name });
@@ -51,7 +57,7 @@ beforeEach(async () => {
  coverage = (await store.loadState()).coverages.find(c => c.gap_id === gap)!.id;
  calls = []; respond = input => ({ outcomes: [outcome(input)] });
  vi.stubEnv("XAI_API_KEY", "task146-deterministic-provider");
- vi.spyOn(findProvider("xai-grok")!, "complete").mockImplementation(async request => { const input = JSON.parse(request.user); calls.push(input); return JSON.stringify(await respond(input)); });
+ vi.spyOn(findProvider("xai-grok")!, "complete").mockImplementation(async request => { const input = JSON.parse(request.user) as ComparisonInput; calls.push(input); return JSON.stringify(await respond(input)); });
 });
 afterEach(async () => { jar.values.clear(); vi.restoreAllMocks(); vi.unstubAllEnvs(); await setAiEnabled({ enabled: true, actor_name: actor.name }); });
 describe("KAN-146 incoming document comparison", () => {
@@ -81,7 +87,7 @@ describe("KAN-146 incoming document comparison", () => {
   const after = await store.loadState(); expect(after.source_reviews).toHaveLength(1);
   expect(after.source_reviews![0]).toMatchObject({ kind: "discrepancy", origin: "ai", status: "pending", coverage_id: coverage });
   expect(after.coverages).toEqual(before.coverages); expect(after.gaps).toEqual(before.gaps);
-  expect(calls[0].gaps.some((g: any) => g.id === gap)).toBe(true);
+  expect(calls[0].gaps.some((g) => g.id === gap)).toBe(true);
  });
  it("links support, treats unknown as neither agreement nor discrepancy, and ignores unrelated new claims", async () => {
   respond = input => ({ outcomes: [outcome(input, "support", { match: "overlaps" }), outcome(input, "unknown", { passage: "Outcomes improved." }), outcome(input, "unknown", { match: "new", gap_id: null, tactic_id: null, coverage_id: null, passage: "The appendix has no relevant scientific information." })] });
@@ -231,7 +237,7 @@ describe("KAN-146 incoming document comparison", () => {
   await acceptTacticExpansion({ proposal_id: "comparison-ambiguous", tactic_id: tactic, gap_id: gap,
    scope: { name: "Paediatric scope", evidence_question: "Paediatric outcomes", population: "Children", outcomes: "", geography: "", data_cut: "", analysis: "", instrument: "", study_design: "Cohort", gap_coverage: "Paediatric outcomes", cost_effort: "One team", timing: "Next year", feasibility_risks: "Recruitment", post_hoc: false, prospective_enrolment: false, protocol_amendment: true, start_date: null, evidence_available: null },
    rationale: "Reviewed additional scope", actor, expected_tactic_version: tacticVersion(parent) });
-  const reply = (input: any) => ({ outcomes: [outcome(input, "support"), outcome(input, "conflict", { coverage_id: null })] });
+  const reply = (input: ComparisonInput) => ({ outcomes: [outcome(input, "support"), outcome(input, "conflict", { coverage_id: null })] });
   respond = mode === "model" ? reply : input => ({ outcomes: [outcome(input, "conflict")] });
   await parse();
   let decided: NonNullable<Awaited<ReturnType<typeof store.loadState>>["source_reviews"]>[number] | undefined;
@@ -275,7 +281,7 @@ describe("KAN-146 incoming document comparison", () => {
   const workspace = await createWorkspace({ name: "Foreign incoming comparison", owner: "foreign-comparison@example.test" });
   const foreignGap = await runInWorkspace({ workspace_id: workspace.id, schema: workspace.schema_name }, () => store.createGap({ statement: "Foreign plan only scientific question", ...fields }));
   respond = input => {
-   expect(input.gaps.some((row: any) => row.id === foreignGap)).toBe(false);
+   expect(input.gaps.some((row) => row.id === foreignGap)).toBe(false);
    return { outcomes: [outcome(input, "conflict", { gap_id: foreignGap, tactic_id: null, coverage_id: null })] };
   };
   await parse(); expect(await comparison()).toMatchObject({ status: "failed" });

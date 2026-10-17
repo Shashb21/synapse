@@ -5,7 +5,7 @@ import { freshWorkspace } from "../support/session";
 
 freshWorkspace({ name: "Assessment freshness" });
 
-test("KAN-144 exposes the outdated reason and preserves judgement through keyboard reassessment", async ({ page, request }) => {
+test("KAN-144 exposes the outdated reason and preserves judgement through keyboard reassessment", async ({ page, request }, testInfo) => {
   await resetWorkspace(request);
   const gap = await iegpAction(request, { action: "create_gap", name: "Freshness decision", domain: "comparative_effectiveness", statement: "Comparative evidence for the current decision", rationale: "Freshness browser fixture" });
   const tactic = await iegpAction(request, { action: "record_missed_tactic", name: "Freshness protocol", type: "rwe_study", evidence_question: "Adult comparative outcomes", comparator: "Placebo", status: "ongoing", rationale: "Freshness browser fixture" });
@@ -18,10 +18,10 @@ test("KAN-144 exposes the outdated reason and preserves judgement through keyboa
   await expect(details.getByText("Outdated — explicit reassessment required", { exact: false })).toBeVisible();
   await expect(details.getByText("Tactic design changed: comparator.", { exact: true })).toBeVisible();
   await expect(page.getByText("Original human judgement before protocol amendment", { exact: false }).first()).toBeVisible();
-  await page.screenshot({ path: "/private/tmp/kan144-outdated-desktop.png", fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("kan144-outdated-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.screenshot({ path: "/private/tmp/kan144-outdated-mobile.png", fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("kan144-outdated-mobile.png"), fullPage: true });
   const trigger = page.getByRole("button", { name: "Change overall coverage", exact: true });
   await trigger.focus();
   await page.keyboard.press("Enter");

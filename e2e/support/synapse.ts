@@ -1,4 +1,6 @@
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
+import type { GapRecord } from "../../src/lib/iegp/gap-record";
+import { coverageReviewVersion } from "../../src/lib/iegp/requirement-basis";
 
 /**
  * Shared harness for the feature specs. Setup goes through the module API so each
@@ -381,6 +383,11 @@ export async function validateBandHigh(request: APIRequestContext, gap_id: strin
  * banded if Open. Roadmap checks (KAN-85) stay with the spec.
  */
 export async function resolveFinalPlanGaps(request: APIRequestContext) {
+  const readGap = async (id: string): Promise<GapRecord> => {
+    const response = await request.get(`/api/gaps/${id}`);
+    expect(response.ok(), await response.text()).toBe(true);
+    return response.json() as Promise<GapRecord>;
+  };
   for (let round = 0; round < 4; round += 1) {
     const plan = await request.get("/api/plan");
     expect(plan.ok()).toBeTruthy();
@@ -391,15 +398,7 @@ export async function resolveFinalPlanGaps(request: APIRequestContext) {
     if (gaps.length === 0) return;
     for (const { gap_id, issue } of gaps) {
       if (issue === "partial") {
-        const record = (await (await request.get(`/api/gaps/${gap_id}`)).json()) as {
-          gap: { name: string };
-          coverages: {
-            tactic_id: string;
-            expansion_id: string | null;
-            tactic: { status: string } | null;
-            expansion: { status: string } | null;
-          }[];
-        };
+        const record = await readGap(gap_id!);
         // Only completed, ongoing or planned work closes the addressed slice (a proposed scope does not).
         const counting = new Set(["completed", "ongoing", "planned"]);
         const tacticIds = [
@@ -425,7 +424,46 @@ export async function resolveFinalPlanGaps(request: APIRequestContext) {
                 }),
               })
             : null;
-        if (!addressed?.ok()) {
+        if (addressed?.ok()) {
+          // KAN-141: an Addressed rewrite proposes Full; the positive fixture
+          // must explicitly review its new requirements and then confirm fit.
+          const parent = await readGap(gap_id!);
+          const children = parent.children.filter(child => !record.children.some(old => old.id === child.id));
+          expect(children).toHaveLength(1);
+          const rewrittenId = children[0]!.id;
+          let rewritten = await readGap(rewrittenId);
+          const coverageId = rewritten.coverages[0]!.id;
+          const dimensions = rewritten.requirement_review.basis.dimensions;
+          await iegpAction(request, {
+            action: "review_requirement_basis", gap_id: rewrittenId,
+            expected_version: rewritten.requirement_review.version,
+            requirements: JSON.stringify(Object.fromEntries(Object.entries(dimensions).map(([dimension, requirement]) => [dimension, {
+              applicability: requirement.requirement.trim() ? "required" : "not_applicable",
+              requirement: requirement.requirement,
+              rationale: "Synthetic final-plan fixture: sourced requirements are required; unspecified dimensions are outside this fixture's decision",
+              resolution: requirement.conflicts.length ? "Fixture reviewer requires the combined sourced requirements" : "",
+            }]))),
+            rationale: "Explicit requirement review for the positive final-plan fixture",
+          });
+          rewritten = await readGap(rewrittenId);
+          for (const [dimension, requirement] of Object.entries(rewritten.requirement_review.basis.dimensions)) {
+            if (requirement.applicability !== "required") continue;
+            const current = (await readGap(rewrittenId)).coverages.find(coverage => coverage.id === coverageId)!;
+            await iegpAction(request, {
+              action: "lock_dimension", coverage_id: coverageId,
+              expected_version: coverageReviewVersion(current), dimension, value: "yes",
+              rationale: "Synthetic positive fixture: planned design satisfies this sourced requirement",
+            });
+          }
+          rewritten = await readGap(rewrittenId);
+          const current = rewritten.coverages.find(coverage => coverage.id === coverageId)!;
+          await iegpAction(request, {
+            action: "lock_overall", coverage_id: coverageId, overall: "full",
+            expected_version: coverageReviewVersion(current),
+            expected_basis_version: rewritten.requirement_review.version,
+            rationale: "Explicit Full review after all required positive-fixture dimensions are satisfied",
+          });
+        } else {
           await iegpAction(request, {
             action: "rewrite_partial_gap",
             gap_id,

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { iegpAction, resetWorkspace } from "../support/synapse";
 
-test("KAN-141 reviews the sourced basis with a keyboard and retains rejected Full input", async ({ page, request }) => {
+test("KAN-141 reviews the sourced basis with a keyboard and retains rejected Full input", async ({ page, request }, testInfo) => {
   await resetWorkspace(request);
   const created = await iegpAction(request, { action: "create_gap", domain: "comparative_effectiveness", statement: "Comparative payer evidence", rationale: "Manual requirement review journey" });
   const gapId = created.id as string;
@@ -13,7 +13,7 @@ test("KAN-141 reviews the sourced basis with a keyboard and retains rejected Ful
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByText("Gap context", { exact: false }).first()).toBeVisible();
   await expect(dialog.getByLabel("Comparator applicability")).toHaveValue("undetermined");
-  await page.screenshot({ path: "/private/tmp/kan141-requirement-dialog.png", fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("kan141-requirement-dialog.png"), fullPage: true });
   await dialog.getByLabel("Review rationale").fill("Reviewed linked needs and gap context together");
   await dialog.getByRole("button", { name: "Confirm requirement basis", exact: true }).click();
   await expect(dialog).toBeHidden();

@@ -5,7 +5,7 @@ import { freshWorkspace } from "../support/session";
 
 freshWorkspace({ name: "Cited source review" });
 
-test("KAN-145 keyboard review retains pending, dismissed and accepted outcomes with safe stale errors", async ({ page, request }) => {
+test("KAN-145 keyboard review retains pending, dismissed and accepted outcomes with safe stale errors", async ({ page, request }, testInfo) => {
   await resetWorkspace(request);
   const gap = await iegpAction(request, { action: "create_gap", name: "Cited review decision", domain: "comparative_effectiveness", statement: "Comparative outcomes in adults", rationale: "Cited review browser fixture" });
   const tactic = await iegpAction(request, { action: "record_missed_tactic", name: "Cited review protocol", type: "rwe_study", evidence_question: "Comparative outcomes", population: "Adults", status: "ongoing", rationale: "Cited review browser fixture" });
@@ -39,7 +39,7 @@ test("KAN-145 keyboard review retains pending, dismissed and accepted outcomes w
     const pending = await (await request.get(`/api/gaps/${gap.id}`)).json();
     expect(pending.coverages[0].overall).toBe("partial");
     expect(pending.coverages[0].fit.review_reasons.join(" ")).toMatch(/pending source discrepancy/i);
-    await page.screenshot({ path: "/private/tmp/kan145-pending-desktop.png", fullPage: true });
+    await page.screenshot({ path: testInfo.outputPath("kan145-pending-desktop.png"), fullPage: true });
     await page.goto(`/gaps/${gap.id}`);
     await expect(page.getByRole("region", { name: "Cited source review" }).getByText("The protocol challenges the recorded population", { exact: true })).toBeVisible();
     await page.goto(`/tactics/${tactic.id}`);
@@ -89,14 +89,14 @@ test("KAN-145 keyboard review retains pending, dismissed and accepted outcomes w
     expect(accepted.coverages[0]).toMatchObject({ overall: "partial", stale: true });
     await page.setViewportSize({ width: 390, height: 844 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    await page.screenshot({ path: "/private/tmp/kan145-accepted-mobile.png", fullPage: true });
+    await page.screenshot({ path: testInfo.outputPath("kan145-accepted-mobile.png"), fullPage: true });
   } finally {
     await request.post("/api/control", { data: { action: "set_ai_enabled", enabled: true } });
   }
 });
 
 
-test("KAN-146 failed comparison keeps parsed content, keyboard retry and manual review available", async ({ page, request }) => {
+test("KAN-146 failed comparison keeps parsed content, keyboard retry and manual review available", async ({ page, request }, testInfo) => {
   await resetWorkspace(request);
   await runStage(request, "S0", { files: [{ title: "Incoming comparison recovery", filename: "comparison-recovery.txt", source_type: "stakeholder_interview", stakeholder_function: "medical_affairs", text: "The protocol includes children only. Retained content for manual review." }] });
   const parsed = await runStage<{ documents: { source_id: string }[] }>(request, "S1");
@@ -126,7 +126,7 @@ test("KAN-146 failed comparison keeps parsed content, keyboard retry and manual 
     await expect(page.getByRole("region", { name: "Automatic source comparison" }).getByRole("status")).toContainText("AI is disabled");
     await page.setViewportSize({ width: 390, height: 844 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    await page.screenshot({ path: "/private/tmp/kan146-comparison-mobile.png", fullPage: true });
+    await page.screenshot({ path: testInfo.outputPath("kan146-comparison-mobile.png"), fullPage: true });
   } finally {
     await request.post("/api/control", { data: { action: "set_ai_enabled", enabled: true } });
   }

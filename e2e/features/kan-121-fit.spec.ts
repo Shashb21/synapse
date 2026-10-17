@@ -5,7 +5,7 @@ import { freshWorkspace } from "../support/session";
 
 freshWorkspace({ name: "Relationship fit" });
 
-test("KAN-142 explains saved fit, provisional Full and independent confirmation with AI off", async ({ page, request }) => {
+test("KAN-142 explains saved fit, provisional Full and independent confirmation with AI off", async ({ page, request }, testInfo) => {
   await resetWorkspace(request);
   const gap = await iegpAction(request, { action: "create_gap", domain: "comparative_effectiveness", statement: "Comparative adult payer evidence", rationale: "Fit browser fixture" });
   const tactic = await iegpAction(request, { action: "record_missed_tactic", name: "Shared fit study", type: "rwe_study", evidence_question: "Adult outcomes", population: "Adults", comparator: "Placebo", status: "ongoing", rationale: "Fit browser fixture" });
@@ -30,10 +30,10 @@ test("KAN-142 explains saved fit, provisional Full and independent confirmation 
     await page.keyboard.press("Space");
     await expect(full.getByText("Full coverage · Provisional", { exact: false })).toBeVisible();
     await expect(full.getByText("The saved overall judgement has not been confirmed by a human.", { exact: true })).toBeVisible();
-    await page.screenshot({ path: "/private/tmp/kan142-fit-desktop.png", fullPage: true });
+    await page.screenshot({ path: testInfo.outputPath("kan142-fit-desktop.png"), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    await page.screenshot({ path: "/private/tmp/kan142-fit-mobile.png", fullPage: true });
+    await page.screenshot({ path: testInfo.outputPath("kan142-fit-mobile.png"), fullPage: true });
   } finally {
     await controlAction(request, { action: "set_ai_enabled", enabled: true, rationale: "Restore browser test AI switch" });
   }
