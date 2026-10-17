@@ -1,3 +1,6 @@
+import { sourceClaimReviewData } from "./source-review";
+import { coverageReviewVersion, getRequirementBasisReview } from "./requirement-basis";
+import { relationshipFit } from "./engine";
 import { relationshipSnapshot, relationshipVersion } from "./relationship-version";
 import { entityHistory } from "./entity-history";
 import { lastResetAt } from "./gap-history";
@@ -20,9 +23,22 @@ export async function tacticRecord(id: string, preloaded?: IegpState) {
   const gaps = (ids: string[]) => state.gaps.filter(gap => ids.includes(gap.id)).map(gap => ({ id: gap.id, name: gap.name }));
   return {
     tactic,
+    source_review: sourceClaimReviewData(state, { tacticId: id }),
     version: tacticEditVersion(tactic),
     custom_types: state.tactics.flatMap(row => row.custom_type ? [row.custom_type] : []),
-    coverages: coverages.map(row => ({ ...row, relationship_version: relationshipVersion(relationshipSnapshot(state, row.gap_id, row.tactic_id)), gap: state.gaps.find(gap => gap.id === row.gap_id) ?? null })),
+    coverages: coverages.map(row => {
+      const expansion = row.expansion_id ? expansions.find(item => item.id === row.expansion_id) : undefined;
+      return {
+        ...row,
+        review_version: coverageReviewVersion(row),
+        requirement_review: getRequirementBasisReview(state, row.gap_id, row),
+        // Split/rewrite retains historical coverage after the child moves to its new gap.
+        fit: !row.expansion_id || (expansion && expansion.tactic_id === row.tactic_id && expansion.gap_ids.includes(row.gap_id))
+          ? relationshipFit(state, row.gap_id, row.tactic_id, row.expansion_id) : null,
+        relationship_version: relationshipVersion(relationshipSnapshot(state, row.gap_id, row.tactic_id)),
+        gap: state.gaps.find(gap => gap.id === row.gap_id) ?? null,
+      };
+    }),
     expansions,
     source_references: references.flatMap(reference => {
       const source = state.sources.find(row => row.id === reference.source_id);
@@ -39,4 +55,3 @@ export async function tacticRecord(id: string, preloaded?: IegpState) {
 export type TacticRecord = NonNullable<Awaited<ReturnType<typeof tacticRecord>>> & {
   permissions: { edit: boolean; coverage: boolean };
 };
-

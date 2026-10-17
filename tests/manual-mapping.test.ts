@@ -1,13 +1,14 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { gapRecord } from "@/lib/iegp/gap-record";
 import { relationshipSnapshot, relationshipVersion } from "@/lib/iegp/relationship-version";
 import { modelMappingSupport } from "./support/model-mapping";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import "@/modules";
 import { resetWorkspaceModules, wipePlatform } from "@/modules/kernel/db";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
+import { coverageReviewVersion } from "@/lib/iegp/requirement-basis";
 import { displayedGapStatus } from "@/lib/iegp/engine";
 import { buildMappingTableView } from "@/lib/iegp/mapping-table";
 import {
@@ -18,6 +19,7 @@ import {
   lockCoverageDimension,
   lockCoverageOverall,
   loadState,
+  modifyTactic,
   recordMissedTactic,
   rejectMapping,
   resetDemoSetup,
@@ -26,6 +28,9 @@ import {
   validateGap,
 } from "@/lib/iegp/store";
 import { kgMappingModule, type MappingTableRow } from "@/modules/stages/s4-kg-mapping/module";
+import { db, poolSize, withWorkspaceTransaction } from "@/lib/iegp/db";
+import { sql } from "drizzle-orm";
+import { acceptTacticExpansion, tacticVersion } from "@/lib/iegp/tactic-expansions";
 import { POST } from "@/app/api/iegp/route";
 
 const HUMAN = { actor_name: "A. Rao", actor_function: "heor" as const };
@@ -308,26 +313,26 @@ describe("/mappings row save is persisted and wins over S4", () => {
 });
 
 describe("manual create with coverage and manual coverage edits", () => {
-  it("maps a tactic with a locked overall and dimensions in one step", async () => {
+  it("confirms overall while supplied dimensions remain separately reviewable", async () => {
     const { gapId, tacticIds } = await workspace(1);
     const covId = await assignTacticToGap({
       gap_id: gapId,
       tactic_id: tacticIds[0]!,
       ...HUMAN,
       note: "Head-to-head RWE in the dossier population.",
-      coverage: "full",
+      coverage: "partial",
       dimensions: { relevance: "yes", population: "yes" },
       human: true,
       lock_coverage: true,
     });
     const cov = (await loadState()).coverages.find((c) => c.id === covId)!;
-    expect(cov.overall).toBe("full");
+    expect(cov.overall).toBe("partial");
     expect(cov.overall_lock.locked).toBe(true);
     expect(cov.dimensions.relevance).toMatchObject({ value: "yes" });
-    expect(cov.dimensions.relevance.lock.locked).toBe(true);
+    expect(cov.dimensions.relevance.lock.locked).toBe(false);
     expect(cov.dimensions.comparator.value).toBe("unknown");
     expect(cov.dimensions.comparator.lock.locked).toBe(false);
-    expect((await gapOf(gapId)).status).toBe("validated_addressed");
+    expect((await gapOf(gapId)).status).toBe("validated_partial");
     await expect(
       assignTacticToGap({
         gap_id: (await createGap({
@@ -386,7 +391,7 @@ describe("route actions", () => {
 
     expect((await post({ action: "lock_dimension", coverage_id: cov.id, dimension: "timing", value: "no" })).status).toBe(400);
     expect(
-      (await post({ action: "lock_dimension", coverage_id: cov.id, dimension: "timing", value: "no", rationale: "Readout is late." })).status,
+      (await post({ action: "lock_dimension", coverage_id: cov.id, dimension: "timing", value: "no", rationale: "Readout is late.", expected_version: coverageReviewVersion(cov) })).status,
     ).toBe(200);
     expect((await post({ action: "lock_overall", coverage_id: cov.id, overall: "full" })).status).toBe(400);
 
@@ -453,5 +458,78 @@ describe("KAN-68 the mapping table's status is the gap's", () => {
     const workbench = readFileSync(path.join(process.cwd(), "src/components/mapping-table-workbench.tsx"), "utf8");
     expect(workbench).toContain("AI view");
     expect(workbench).toContain("proposed tactics don't count until planned");
+  });
+});
+
+
+describe("batch mapping owner order", () => {
+  let savedStub: string | undefined;
+  beforeEach(() => { savedStub = process.env.SYNAPSE_TEST_STUB_LLM; });
+  afterEach(() => {
+    if (savedStub === undefined) delete process.env.SYNAPSE_TEST_STUB_LLM;
+    else process.env.SYNAPSE_TEST_STUB_LLM = savedStub;
+  });
+  it.skipIf(poolSize("workspace") < 3).each(["row save", "S4"])("reserves every tactic before gaps during %s versus a canonical edit", async mode => {
+    if (mode === "S4") delete process.env.SYNAPSE_TEST_STUB_LLM;
+    const { gapId, tacticIds } = await workspace(2);
+    // Reverse lexical input order: the first write must not lock the gap while a later owner is busy.
+    const [first, heldTactic] = [...tacticIds].sort().reverse();
+    const parent = (await loadState()).tactics.find(tactic => tactic.id === heldTactic)!;
+    const child = await acceptTacticExpansion({
+      proposal_id: `batch-${crypto.randomUUID()}`, tactic_id: heldTactic, gap_id: gapId,
+      scope: { name: "Child scope", evidence_question: "Additional question", population: "Older adults", outcomes: "Safety",
+        geography: "", data_cut: "", analysis: "Analysis", instrument: "", study_design: "Analysis", gap_coverage: "Safety",
+        cost_effort: "Low", timing: "Soon", feasibility_risks: "Small sample", post_hoc: true,
+        prospective_enrolment: false, protocol_amendment: false, start_date: null, evidence_available: null },
+      actor: { name: HUMAN.actor_name, function: HUMAN.actor_function }, rationale: "Additional scope",
+      expected_tactic_version: tacticVersion(parent),
+    });
+    let ready!: () => void, resume!: () => void;
+    const held = new Promise<void>(resolve => { ready = resolve; });
+    const continueEdit = new Promise<void>(resolve => { resume = resolve; });
+    let editorPid = 0;
+    const editing = withWorkspaceTransaction(async () => {
+      editorPid = Number((await db().execute(sql`select pg_backend_pid() as pid`))[0].pid);
+      await db().execute(sql`select id from tactics where id = ${heldTactic} for update`);
+      ready(); await continueEdit;
+      // This gap belongs to the held tactic through its child. NOWAIT detects the inverse order deterministically.
+      await db().execute(sql`select id from gaps where id = ${gapId} for update nowait`);
+      await modifyTactic({ tactic_id: heldTactic, fields: { population: "Children" }, ...HUMAN, rationale: "Concurrent canonical correction" });
+    }).then(() => null, error => error);
+    await held;
+    const ctx: ModuleContext = {
+      ai: true, workspace_id: "default", actor: { name: MODEL.actor_name, function: MODEL.actor_function }, role: "medical_affairs",
+      route: { stage: "S4", provider_id: "anthropic-claude", provider_label: "Claude", model: "claude-test", auth: "api_key",
+        connected: true, params: { temperature: 0, max_tokens: 4096 }, fallbacks: [], degraded: false, reason: null },
+      run: { id: "batch-test", step: async (_name, fn) => fn(), note: () => {}, steps: () => [] },
+      complete: async ({ purpose, user }) => {
+        const body = JSON.parse(user);
+        if (purpose === "mapping-table-proposer") return { rows: [{ gap_id: gapId, mapping_status: "partially_addressed",
+          confidence: 90, rationale: "Both studies contribute", mappings: [first, heldTactic].map(tactic_id => ({ tactic_id,
+            coverage: "partial", confidence: 90, rationale: "Relevant study", dimensions: Object.fromEntries(COVERAGE_DIMENSIONS.map(d => [d, "partial"])) })) }] };
+        if (purpose === "mapping-table-critic") return { reviews: body.rows.map((row: { gap: { id: string }; mappings: { tactic_id: string }[] }) => ({
+          gap_id: row.gap.id, verdict: "keep", confidence: 90, note: "Reviewed", mappings: row.mappings.map(m => ({ tactic_id: m.tactic_id, verdict: "keep", note: "Reviewed" })) })) };
+        return { verdicts: body.rows.map((row: { gap: { id: string } }) => ({ gap_id: row.gap.id, verdict: "accept", confidence: 90, reason: "Accepted" })) };
+      },
+    };
+    const batch = mode === "row save"
+      ? post({ action: "save_mapping_row", gap_id: gapId, tactic_ids: [first, heldTactic].join(","), mapping_status: "partially_addressed", rationale: "Both parents contribute" })
+      : withWorkspaceTransaction(() => kgMappingModule.run(kgMappingModule.inputSchema.parse({ gap_ids: [gapId], tactic_ids: tacticIds, dry_run: false }), ctx));
+    let completedResult: unknown;
+    void batch.then(result => { completedResult = result; });
+    try {
+      await vi.waitFor(async () => {
+        expect(completedResult, JSON.stringify(completedResult)).toBeUndefined();
+        const waiting = await db().execute(sql`select pid from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and ${editorPid} = any(pg_blocking_pids(pid))`);
+        expect(waiting.length).toBe(1);
+      }, { timeout: 5000, interval: 20 });
+    } finally { resume(); await editing; await batch; }
+    expect(await editing).toBeNull();
+    const result = await batch;
+    if ("status" in result) expect(result.status).toBe(200);
+    const state = await loadState();
+    expect(state.coverages.filter(c => c.gap_id === gapId && !c.expansion_id).map(c => c.tactic_id).sort()).toEqual([...tacticIds].sort());
+    expect(state.coverages.find(c => c.expansion_id === child.id)).toBeDefined();
+    expect(state.tactics.find(tactic => tactic.id === heldTactic)?.population).toBe("Children");
   });
 });

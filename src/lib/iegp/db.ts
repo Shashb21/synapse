@@ -289,6 +289,12 @@ CREATE TABLE IF NOT EXISTS sources (
   source_type text NOT NULL, stakeholder_function text NOT NULL,
   ingested_at text NOT NULL, full_text text NOT NULL
 );
+CREATE TABLE IF NOT EXISTS source_comparisons (
+  source_id text PRIMARY KEY, version text NOT NULL, record jsonb NOT NULL
+);
+CREATE TABLE IF NOT EXISTS source_reviews (
+  id text PRIMARY KEY, version text NOT NULL, record jsonb NOT NULL
+);
 CREATE TABLE IF NOT EXISTS source_blocks (
   id text PRIMARY KEY, source_id text NOT NULL, heading text NOT NULL,
   text text NOT NULL, location text NOT NULL
@@ -341,6 +347,9 @@ CREATE TABLE IF NOT EXISTS coverages (
   dimensions jsonb NOT NULL, overall text NOT NULL, overall_rationale text NOT NULL,
   overall_lock jsonb NOT NULL, stale boolean NOT NULL DEFAULT false,
   needs_review boolean NOT NULL DEFAULT false
+);
+CREATE TABLE IF NOT EXISTS library_link_requests (
+  request_id text PRIMARY KEY, payload text NOT NULL, coverage_id text NOT NULL
 );
 CREATE TABLE IF NOT EXISTS mapping_suggestions (
   gap_id text NOT NULL, tactic_id text NOT NULL,
@@ -419,6 +428,13 @@ function iegpStatements(): string[] {
     "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS expansion_id text",
     "CREATE UNIQUE INDEX IF NOT EXISTS coverage_expansion_scope_unique ON coverages (gap_id, tactic_id, expansion_id) WHERE expansion_id IS NOT NULL",
     "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS needs_review boolean NOT NULL DEFAULT false",
+    "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS requirement_basis jsonb",
+    "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS confirmed_requirement_basis jsonb",
+    "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS assessed_basis jsonb",
+    "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS stale_reasons jsonb NOT NULL DEFAULT '[]'::jsonb",
+    "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS assessment_history jsonb NOT NULL DEFAULT '[]'::jsonb",
+    "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS review_version text",
+    "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS assessment_origin text",
     "ALTER TABLE assets ADD COLUMN IF NOT EXISTS setup_complete boolean NOT NULL DEFAULT false",
     "ALTER TABLE assets ADD COLUMN IF NOT EXISTS planning_context jsonb NOT NULL DEFAULT '{}'::jsonb",
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS parked_at text",
@@ -442,6 +458,7 @@ function iegpStatements(): string[] {
     "ALTER TABLE needs ADD COLUMN IF NOT EXISTS run_id text",
     "ALTER TABLE needs ADD COLUMN IF NOT EXISTS candidate_row_id text",
     "ALTER TABLE needs ADD COLUMN IF NOT EXISTS block_id text",
+    "ALTER TABLE needs ADD COLUMN IF NOT EXISTS source_basis_text text",
     "ALTER TABLE gap_versions ADD COLUMN IF NOT EXISTS snapshot jsonb",
     // KAN-15: per-prefix id counters that only move up, so ids are never reissued.
     "CREATE TABLE IF NOT EXISTS id_counters (key text PRIMARY KEY, last bigint NOT NULL)",
@@ -555,6 +572,8 @@ export async function ensureCurrentSchemaTables(): Promise<void> {
 export async function wipeIegp() {
   const d = db();
   const tables = [
+    "source_comparisons",
+    "source_reviews",
     "tactic_suggestions",
     "tactic_source_references",
     "gap_suggestions",

@@ -29,6 +29,8 @@ import { listRuns } from "@/modules/kernel/observability";
 import { runStage } from "@/modules/kernel/run";
 import { loadState, resetDemoSetup } from "@/lib/iegp/store";
 import { displayedGapStatus, gapsReadyForPrioritize, isLiveGap } from "@/lib/iegp/engine";
+import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
+import { getRequirementBasisReview } from "@/lib/iegp/requirement-basis";
 import {
   buildMappingTableView,
   UNMAPPED_RATIONALE_AI,
@@ -227,11 +229,27 @@ describe("a whole plan by hand with AI off", () => {
   });
 
   it("maps a tactic with a coverage verdict and confirms every gap", async () => {
+    const requirements = Object.fromEntries(COVERAGE_DIMENSIONS.map((dimension) => [
+      dimension,
+      dimension === "population"
+        ? { applicability: "required", requirement: "Second-line patients", rationale: "The persistence question concerns second-line treatment" }
+        : { applicability: "not_applicable", requirement: "", rationale: `This persistence assessment has no additional ${dimension} requirement` },
+    ]));
+    const reviewed = await iegp({
+      action: "review_requirement_basis",
+      gap_id: addressedGap,
+      expected_version: getRequirementBasisReview(await loadState(), addressedGap).version,
+      requirements: JSON.stringify(requirements),
+      rationale: "Reviewed the complete requirement basis by hand",
+    });
+    expect(reviewed.status).toBe(200);
     const assigned = await iegp({
       action: "assign_tactic",
       gap_id: addressedGap,
       tactic_id: inventoryTactic,
       overall: "full",
+      dimensions: JSON.stringify({ population: "yes" }),
+      expected_basis_version: getRequirementBasisReview(await loadState(), addressedGap).version,
       rationale: "The registry answers persistence directly",
     });
     expect(assigned.status).toBe(200);

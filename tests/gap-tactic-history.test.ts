@@ -1,3 +1,4 @@
+import { coverageReviewVersion } from "@/lib/iegp/requirement-basis";
 import { POST as modulePost } from "@/app/api/modules/route";
 import { RunRecorder, openRun, closeRun } from "@/modules/kernel/observability";
 import { recordEdit } from "@/modules/kernel/edit-records";
@@ -30,6 +31,7 @@ let tacticId: string;
 const scoped = <T>(fn: () => PromiseLike<T>): Promise<T> => withWorkspace(workspace.id, async () => await fn());
 async function post(body: Record<string, unknown>) {
   return scoped(async () => {
+    if (["lock_overall", "lock_dimension"].includes(String(body.action)) && body.expected_version === undefined) body = { ...body, expected_version: coverageReviewVersion((await loadState()).coverages.find(row => row.id === body.coverage_id)!) };
     if (body.action === "assign_tactic" && body.expected_relationship === undefined) body = { ...body, expected_relationship: relationshipVersion(relationshipSnapshot(await loadState(), String(body.gap_id), String(body.tactic_id))) };
     const response = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...actor, ...body }) }));
     return { status: response.status, body: await response.json() };
@@ -74,7 +76,7 @@ it("keeps distinct coverage for a reused tactic and rejects competing opening sn
   const state = await scoped(loadState);
   const row = state.coverages.find(row => row.gap_id === gapId)!;
   const payload = { action: "lock_overall", coverage_id: row.id, expected_relationship: relationshipVersion(relationshipSnapshot(state, gapId, tacticId)), rationale: "Reviewed complete registry results" };
-  const results = await Promise.all([post({ ...payload, overall: "full" }), post({ ...payload, overall: "not_relevant" })]);
+  const results = await Promise.all([post({ ...payload, overall: "limited" }), post({ ...payload, overall: "not_relevant" })]);
   expect(results.map(result => result.status).sort()).toEqual([200, 400]);
   expect(results.find(result => result.status === 400)!.body.error).toContain("Relationship changed");
   const after = await scoped(() => tacticRecord(tacticId));

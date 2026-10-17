@@ -1,15 +1,19 @@
+import { compareSource } from "@/lib/ingest/compare-source";
 import { relationshipVersion } from "@/lib/iegp/relationship-version";
 import { lockRelationships, requireGapResolutionSnapshot, requireRelationshipSnapshot } from "@/lib/iegp/relationship-change";
 import { decidePartialSplit } from "@/modules/stages/s6-partial-split/module";
 import type { CustomTacticType } from "@/lib/iegp/custom-tactic-type";
 import { BREAKOUT_THEMES, createBreakoutGroupsByTheme, type BreakoutTheme } from "@/lib/iegp/breakout-themes";
 import { NextResponse } from "next/server";
-import { currentSchemaName, withWorkspaceTransaction } from "@/lib/iegp/db";
+import { sql } from "drizzle-orm";
+import { db, currentSchemaName, withWorkspaceTransaction } from "@/lib/iegp/db";
 import {
   acceptMapping,
   acceptResidualGap,
   assignGapToBreakoutGroup,
   assignTacticToGap,
+  beginLibraryLinkRequest,
+  completeLibraryLinkRequest,
   clearGapStatusOverride,
   clearNewSourceFlag,
   completeWizard,
@@ -25,6 +29,7 @@ import {
   unlinkNeedFromGap,
   TACTIC_EDIT_FIELDS,
   recordMissedTactic,
+  reviewRequirementBasis,
   lockCoverageDimension,
   lockCoverageOverall,
   confirmCoverageReview,
@@ -70,6 +75,7 @@ import {
   requireCustomerContext,
   type CustomerContext,
 } from "@/modules/auth/api-guard";
+import { linkSourceSupport, createSourceDiscrepancy, resolveSourceDiscrepancy } from "@/lib/iegp/source-review";
 import { iegpActionCapability, retiredActionMessage } from "./capabilities";
 import { latestS4MappingRows } from "@/lib/iegp/mapping-table";
 import { captureMappingRowDecision } from "@/lib/iegp/learning-capture";
@@ -159,6 +165,7 @@ const GATE_EDITS: Record<string, { stage: StageId; entity: string; field: string
   // modify_gap, modify_tactic, need edits, leftover decisions and promotions file
   // their own edit records (with before/after) in the store.
   save_mapping_row: { stage: "S4", entity: "gap", field: "mapping_table_row", action: "edit" },
+  review_requirement_basis: { stage: "S5", entity: "gap", field: "requirement_basis", action: "validate" },
   rewrite_partial_gap: { stage: "S6", entity: "gap", field: "statement", action: "edit" },
   lock_gap: { stage: "S5", entity: "gap", field: "status", action: "edit" },
   park_gap: { stage: "S5", entity: "gap", field: "parked_at", action: "edit" },
@@ -181,6 +188,8 @@ function gateFieldValue(state: IegpState, mapping: GateEdit, body: Record<string
     case "computed_status":
       if (!gap) return null;
       return gap.status_override ? `${gap.status_override.status} (override)` : gap.computed_status;
+    case "requirement_basis":
+      return gap?.requirement_basis ? JSON.stringify(gap.requirement_basis) : null;
     case "human_validated":
       return gap ? String(gap.human_validated) : null;
     case "status":
@@ -247,7 +256,7 @@ async function fileGateEdit(
  * Actions that run the stage pipeline (model calls). Their stages record their
  * own per-stage transactions and checkpoints, so no transaction spans the whole pipeline.
  */
-const NON_ATOMIC_ACTIONS = new Set(["ingest", "ingest_demo"]);
+const NON_ATOMIC_ACTIONS = new Set(["ingest", "ingest_demo", "retry_source_comparison"]);
 
 /** Carries a refused or failed action's response out of its rolled-back transaction. */
 class RolledBack extends Error {
@@ -322,9 +331,42 @@ async function handleAction(request: Request): Promise<Response> {
   const actor_name = identity.actor.name;
   const actor_function = identity.actor.function;
   try {
+    // Only the explicit library flow opts into retry semantics. Old mapping actions keep their contract.
+    let libraryRequest: { id: string; payload: string } | undefined;
+    if (body.action === "assign_tactic") {
+      // This surface previews original parent scope only; never reinterpret child input as parent.
+      if (body.expansion_id) throw new Error("Use the expansion review workflow to link a child scope.");
+      if (body.link_mode !== undefined) {
+        if (body.link_mode !== "unassessed" && body.link_mode !== "assessed") throw new Error("Choose Link as unassessed or Assess and link.");
+        const verdict = coverageInput(body);
+        if (body.link_mode === "unassessed" && (verdict.coverage && verdict.coverage !== "unassessed" || verdict.dimensions)) {
+          throw new Error("Link as unassessed cannot include an assessment.");
+        }
+        if (body.link_mode === "assessed" && (!verdict.coverage || verdict.coverage === "unassessed" || body.confirm_coverage === "false")) {
+          throw new Error("Assess and link requires an explicit confirmed overall verdict.");
+        }
+        const payload = JSON.stringify({
+          principal: identity.principal, actor: identity.actor, workspace: identity.workspace?.id ?? null,
+          gap_id: body.gap_id, tactic_id: body.tactic_id, mode: body.link_mode,
+          overall: verdict.coverage ?? "unassessed",
+          dimensions: Object.entries(verdict.dimensions ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+          rationale: rationaleOf(body), expected_basis_version: body.expected_basis_version ?? null,
+          // Preserve pre-design-token receipt encoding for exact retries from older clients.
+          ...(body.expected_design_version !== undefined ? { expected_design_version: body.expected_design_version } : {}),
+        });
+        libraryRequest = { id: body.request_id ?? "", payload };
+        const replay = await beginLibraryLinkRequest(libraryRequest.id, payload);
+        if (replay) return NextResponse.json({ ok: true, id: replay });
+      }
+    }
     if (["assign_tactic", "unassign_tactic", "accept_mapping", "reject_mapping", "save_mapping_row", "lock_dimension", "lock_overall", "confirm_coverage_review", "restore_mapping"].includes(body.action)) {
       requireRationale(rationaleOf(body));
       await lockRelationships();
+      if (body.action === "unassign_tactic") {
+        // Canonical design edits also own these rows. Recheck only after they commit.
+        await db().execute(sql`select id from tactics where id = ${body.tactic_id} for update`);
+        await db().execute(sql`select id from gaps where id = ${body.gap_id} for update`);
+      }
       requireRelationshipSnapshot(await loadState(), body);
     }
     if (["split_partial_gap", "rewrite_partial_gap"].includes(body.action)) {
@@ -336,6 +378,25 @@ async function handleAction(request: Request): Promise<Response> {
     // The id of a gap or tactic this action created, so the caller can address it without guessing (ids are never reissued).
     let createdId: string | undefined;
     switch (body.action) {
+      case "retry_source_comparison":
+        if (!body.source_id?.trim()) throw new Error("Choose a parsed source to compare.");
+        await compareSource(body.source_id, identity.actor);
+        break;
+      case "link_source_support":
+      case "create_source_discrepancy": {
+        const create = body.action === "link_source_support" ? linkSourceSupport : createSourceDiscrepancy;
+        createdId = await create({ source_id: body.source_id, block_id: body.block_id, passage: body.passage,
+          gap_id: body.gap_id, tactic_id: body.tactic_id, coverage_id: body.coverage_id,
+          rationale: rationaleOf(body), origin: "human", actor_name, actor_function });
+        break;
+      }
+      case "resolve_source_discrepancy":
+        if (body.decision === "accept" && body.correction_target === "tactic") requireCapability(identity, "ideate");
+        await resolveSourceDiscrepancy({ review_id: body.review_id, expected_version: body.expected_version,
+          decision: body.decision, rationale: rationaleOf(body), reviewed_change: body.reviewed_change === "true",
+          correction_target: body.correction_target, correction_field: body.correction_field, correction_value: body.correction_value,
+          expected_target_version: body.expected_target_version, actor_name, actor_function });
+        break;
       case "clear_ingested_files":
         if (body.confirmation !== "clear_ingested_files") return NextResponse.json({ error: "Confirm clearing all current ingested files first.", code: "invalid_request" }, { status: 400 });
         await clearIngestedFiles();
@@ -502,12 +563,29 @@ async function handleAction(request: Request): Promise<Response> {
           actor_function,
         });
         break;
+      case "review_requirement_basis":
+        await reviewRequirementBasis({
+          gap_id: body.gap_id,
+          expected_version: body.expected_version,
+          dimensions: body.requirements ? JSON.parse(body.requirements) : Object.fromEntries(COVERAGE_DIMENSIONS.map(dim => [dim, {
+            applicability: body[`req_${dim}_applicability`] || "undetermined",
+            requirement: body[`req_${dim}_requirement`] || "",
+            rationale: body[`req_${dim}_rationale`] || "",
+            resolution: body[`req_${dim}_resolution`] || "",
+          }])),
+          rationale: rationaleOf(body),
+          actor_name, actor_function,
+          origin: "human", confirm: true,
+        });
+        break;
       case "lock_dimension":
+        if (!body.expected_version) return NextResponse.json({ error: "Refresh coverage before reviewing." }, { status: 400 });
         if (rationaleOf(body).length < 3) {
           return NextResponse.json({ error: RATIONALE_REQUIRED }, { status: 400 });
         }
         await lockCoverageDimension({
           coverage_id: body.coverage_id,
+          expected_version: body.expected_version,
           dimension: body.dimension as CoverageDimension,
           value: body.value as never,
           rationale: body.rationale || body.note || "",
@@ -516,11 +594,15 @@ async function handleAction(request: Request): Promise<Response> {
         });
         break;
       case "lock_overall":
+        if (body.overall === "full" && !body.expected_basis_version) return NextResponse.json({ error: "Review the requirement basis before confirming Full." }, { status: 400 });
+        if (!body.expected_version) return NextResponse.json({ error: "Refresh coverage before reviewing." }, { status: 400 });
         if (rationaleOf(body).length < 3) {
           return NextResponse.json({ error: RATIONALE_REQUIRED }, { status: 400 });
         }
         await lockCoverageOverall({
           coverage_id: body.coverage_id,
+          expected_version: body.expected_version,
+          expected_basis_version: body.expected_basis_version,
           overall: body.overall as never,
           rationale: body.rationale || body.note || "",
           actor_name,
@@ -615,11 +697,18 @@ async function handleAction(request: Request): Promise<Response> {
       case "assign_tactic": {
         // A person's mapping. A coverage verdict set in the same step is theirs and is locked.
         const verdict = coverageInput(body);
-        if (rationaleOf(body).length < 3) {
+        if (verdict.coverage === "full" && body.confirm_coverage !== "false" && !body.expected_basis_version) return NextResponse.json({ error: "Review the requirement basis before confirming Full." }, { status: 400 });
+        const hasVerdict =
+          Boolean(verdict.coverage && verdict.coverage !== "unassessed") || Boolean(verdict.dimensions);
+        if (hasVerdict && rationaleOf(body).length < 3) {
           return NextResponse.json({ error: RATIONALE_REQUIRED }, { status: 400 });
         }
-        await assignTacticToGap({
+        createdId = await assignTacticToGap({
           gap_id: body.gap_id,
+          require_preview_basis: body.link_mode === "assessed",
+          expected_design_version: body.expected_design_version,
+          expected_basis_version: body.expected_basis_version,
+          confirm_coverage: body.confirm_coverage !== "false",
           tactic_id: body.tactic_id,
           actor_name,
           actor_function,
@@ -1028,6 +1117,7 @@ async function handleAction(request: Request): Promise<Response> {
         return NextResponse.json({ error: `Unknown action ${body.action}` }, { status: 400 });
     }
     await fileGateEdit(body, before, actor_name, actor_function);
+    if (libraryRequest && createdId) await completeLibraryLinkRequest(libraryRequest.id, libraryRequest.payload, createdId);
     return NextResponse.json(createdId ? { ok: true, id: createdId } : { ok: true });
   } catch (error) {
     return apiErrorResponse(error, "Failed");

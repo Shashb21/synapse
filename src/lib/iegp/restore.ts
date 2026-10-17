@@ -5,7 +5,7 @@ import { db, withWorkspaceTransaction } from "./db";
 import * as t from "./schema";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import type { ActorFunction } from "./enums";
-import { appendAudit, ensureGapHasConstituentNeed, isMappingRowKey, loadState, lockTacticReview, makeLock, NOT_CONFIRMED, syncComputedGapStatuses } from "./store";
+import { appendAudit, lockAssessmentOwners, invalidateRelationshipAssessments, ensureGapHasConstituentNeed, isMappingRowKey, loadState, lockTacticReview, makeLock, NOT_CONFIRMED, syncComputedGapStatuses } from "./store";
 
 /**
  * Undo for every "set aside" decision (KAN-16): an excluded gap, a rejected
@@ -99,27 +99,31 @@ export async function restoreExcludedGap(args: RestoreActor & { gap_id: string }
 
 /** A rejected need goes back to a candidate for a person to accept or reject again. */
 export async function restoreRejectedNeed(args: RestoreActor & { need_id: string }) {
-  const rationale = requireRationale(args.rationale);
-  const state = await loadState();
-  const need = state.needs.find((n) => n.id === args.need_id);
-  if (!need) throw new Error("Need not found");
-  if (need.status !== "rejected") throw new Error("This need is not rejected.");
-  await db()
-    .update(t.needs)
-    .set({ status: "candidate", lock: makeLock(args.actor_name, args.actor_function, rationale) })
-    .where(eq(t.needs.id, args.need_id));
-  await fileRestore({
-    stage: "S2",
-    entity_type: "need",
-    entity_id: args.need_id,
-    field: "status",
-    before: "rejected",
-    after: "candidate",
-    rationale,
-    actor_name: args.actor_name,
-    actor_function: args.actor_function,
-    audit_entity: "need",
-    audit_action: "restore",
+  return withWorkspaceTransaction(async () => {
+    const rationale = requireRationale(args.rationale);
+    const assessmentGapIds = await lockAssessmentOwners({ need_ids: [args.need_id] });
+    const state = await loadState();
+    const need = state.needs.find((n) => n.id === args.need_id);
+    if (!need) throw new Error("Need not found");
+    if (need.status !== "rejected") throw new Error("This need is not rejected.");
+    await db()
+      .update(t.needs)
+      .set({ status: "candidate", lock: makeLock(args.actor_name, args.actor_function, rationale) })
+      .where(eq(t.needs.id, args.need_id));
+    await fileRestore({
+      stage: "S2",
+      entity_type: "need",
+      entity_id: args.need_id,
+      field: "status",
+      before: "rejected",
+      after: "candidate",
+      rationale,
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+      audit_entity: "need",
+      audit_action: "restore",
+    });
+    await invalidateRelationshipAssessments({ before: state, gap_ids: assessmentGapIds, reason: "Supporting need restored for review.", ...args });
   });
 }
 

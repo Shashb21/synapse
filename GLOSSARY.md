@@ -39,3 +39,35 @@ _Avoid_: Evidence deadline when referring to the decision date
 **Priority rationale**:
 The explanation for assigning a gap its priority judgement. It is distinct from the reason a person later gives for changing that judgement or its supporting context.
 _Avoid_: Reason for change when referring only to why the current priority is appropriate
+
+**Design fit**:
+How well a tactic's documented design addresses a particular gap's evidence requirements. A design match does not establish that the tactic has delivered evidence or that the gap is Addressed.
+_Avoid_: Evidence delivered when referring only to design alignment
+
+**Recorded coverage assessment**:
+The saved judgement of how much a particular tactic addresses a particular gap. Its origin, human review and continued applicability are separate facts; saving a judgement does not itself establish human confirmation.
+_Avoid_: Human-confirmed coverage when referring only to a saved judgement
+
+**Relationship assessment review**:
+A person's review of a particular gap–tactic assessment. Prior confirmation remains part of its history even if later changes make another review necessary.
+_Avoid_: Gap confirmation when referring only to review of one tactic's contribution
+
+**Unanswered requirements for a tactic**:
+The parts of a gap's evidence requirements that a particular tactic leaves unanswered. Another tactic's contribution does not remove these limitations from the first tactic's assessment.
+_Avoid_: Overall remaining need when referring to one tactic's limitations
+
+**Outdated relationship assessment**:
+A gap–tactic judgement whose supporting requirements or tactic design have substantively changed and need renewed review. The previous judgement and human confirmation remain part of its history.
+_Avoid_: Rejected assessment when referring only to one needing renewed review
+
+**Unassessed tactic link**:
+A connection between a gap and a tactic for which no coverage judgement has been made. Linking expresses relevance for consideration, not confirmed contribution.
+_Avoid_: Confirmed coverage when referring only to a linked tactic
+
+**Gap requirement basis**:
+The explicit evidence requirements against which tactics are assessed for a particular gap, with their supporting sources and unresolved disagreements. A requirement can be required, not applicable, or not yet determined; omission alone does not establish non-applicability.
+_Avoid_: Gap summary when referring to the complete assessment basis
+
+**Possible discrepancy**:
+A source-backed claim that may conflict with a current gap requirement, tactic design or relationship assessment and requires human review. Raising a discrepancy does not establish that the incoming claim is correct or replace the existing judgement.
+_Avoid_: Accepted correction when referring only to a detected possible conflict

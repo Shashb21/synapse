@@ -2,6 +2,9 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type RefObject } from "react";
 import Link from "next/link";
+import { SourceClaimReviewContent } from "./source-claim-review-content";
+import { RelationshipFit } from "./relationship-fit";
+import { RequirementBasisReview } from "./requirement-basis-review";
 import type { GapRecord } from "@/lib/iegp/gap-record";
 import { gapNumberLabel } from "@/lib/iegp/gap-number";
 import { RecordNavigation, RecordPanel } from "@/components/record-panel";
@@ -115,6 +118,8 @@ function GapPanelRecord({ gapId, priorityEditor, refreshVersion }: { gapId: stri
     {record ? <>
       <h2 className="font-medium">{gapNumberLabel(record.gap.number)} · {record.gap.name}</h2>
       <GapCoverageContext record={record} />
+      {record.permissions?.coverage ? <RequirementBasisReview onRefresh={() => setAttempt(value => value + 1)} gapId={gapId} review={record.requirement_review} /> : null}
+      {record.source_review ? <SourceClaimReviewContent onRefresh={() => setAttempt(value => value + 1)} data={record.source_review} identity={{ signed_in: true, actor_name: "", actor_function: "medical_affairs" }} canReview={record.permissions?.coverage ?? false} /> : null}
       <EvidenceDecisionContext statement={record.gap.statement} objective={record.objective} />
       <SettingChips settings={record.gap.settings} />
       <GapMetadataView metadata={record.gap.metadata} />
@@ -124,6 +129,7 @@ function GapPanelRecord({ gapId, priorityEditor, refreshVersion }: { gapId: stri
         <h2 className="font-medium">Linked tactics</h2>
         {record.coverages.length ? <ul className="grid gap-2">{record.coverages.map(coverage => <li key={coverage.id}>
           <TacticRecordLink tacticId={coverage.tactic_id}>{coverage.tactic?.name || coverage.tactic_id}</TacticRecordLink> · {coverage.tactic?.status ?? "Tactic unavailable"} · {coverage.overall}
+          {coverage.fit ? <RelationshipFit fit={coverage.fit} tacticName={coverage.tactic?.name ?? coverage.tactic_id} /> : null}
         </li>)}</ul> : <p>No tactics mapped.</p>}
       </section>
       <section aria-label="Constituent needs">

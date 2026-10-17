@@ -1,0 +1,32 @@
+import { expect, test } from "@playwright/test";
+import { iegpAction, resetWorkspace } from "../support/synapse";
+
+test("KAN-141 reviews the sourced basis with a keyboard and retains rejected Full input", async ({ page, request }, testInfo) => {
+  await resetWorkspace(request);
+  const created = await iegpAction(request, { action: "create_gap", domain: "comparative_effectiveness", statement: "Comparative payer evidence", rationale: "Manual requirement review journey" });
+  const gapId = created.id as string;
+  await iegpAction(request, { action: "record_missed_tactic", name: "Requirement review study", type: "rwe_study", evidence_question: "Comparative outcomes", status: "ongoing", rationale: "Existing ongoing study" });
+  await page.goto(`/gaps/${gapId}`);
+  const review = page.getByRole("button", { name: "Review requirement basis", exact: true });
+  await review.focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText("Gap context", { exact: false }).first()).toBeVisible();
+  await expect(dialog.getByLabel("Comparator applicability")).toHaveValue("undetermined");
+  await page.screenshot({ path: testInfo.outputPath("kan141-requirement-dialog.png"), fullPage: true });
+  await dialog.getByLabel("Review rationale").fill("Reviewed linked needs and gap context together");
+  await dialog.getByRole("button", { name: "Confirm requirement basis", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await page.getByRole("button", { name: "Map tactic with coverage", exact: true }).click();
+  const assessment = page.getByRole("dialog");
+  await assessment.getByRole("button", { name: "Assess and link", exact: true }).click();
+  await assessment.getByLabel("Overall coverage").selectOption("full");
+  await assessment.getByLabel("Rationale (required)").fill("This attempted Full must retain my input");
+  await assessment.getByRole("button", { name: "Assess and link", exact: true }).click();
+  await expect(assessment.getByRole("alert")).toContainText("not yet determined");
+  await expect(assessment.getByLabel("Rationale (required)")).toHaveValue("This attempted Full must retain my input");
+  await assessment.getByLabel("Overall coverage").selectOption("partial");
+  await assessment.getByRole("button", { name: "Assess and link", exact: true }).click();
+  await expect(assessment).toBeHidden();
+  await expect(page.getByText("Requirement review study", { exact: true }).first()).toBeVisible();
+});

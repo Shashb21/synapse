@@ -1,3 +1,8 @@
+import { SourceClaimReview } from "@/components/source-claim-review";
+import { can } from "@/modules/auth/roles";
+import { RelationshipFit } from "@/components/relationship-fit";
+import { RequirementBasisReview } from "@/components/requirement-basis-review";
+import { coverageReviewVersion, getRequirementBasisReview } from "@/lib/iegp/requirement-basis";
 import { relationshipSnapshot, relationshipVersion } from "@/lib/iegp/relationship-version";
 import { TacticRecordLink } from "@/components/tactic-ideation/tactic-panel";
 import Link from "next/link";
@@ -40,6 +45,8 @@ import { EntityHistory } from "@/components/entity-history";
 import { GapConfirmationAndObjective, GapRecordSections, NeedProvenance } from "@/components/gap-record-sections";
 import {
   buildTacticLibrary,
+  relationshipFit,
+  computeGapStatus,
   coverageDimensionValues,
   liveGapsMappedToTactic,
   mappedTactics,
@@ -100,6 +107,7 @@ export default async function GapDetailPage({
   return (
     <AppShell active="gaps">
       <PageIntro kicker={`Gap ${gapNumberLabel(gap.number)}`} title={gap.name} />
+      <SourceClaimReview state={state} identity={identity} canReview={can(session.role, "validate")} gapId={gap.id} />
       <div id="gap-coverage-actions" className="mb-4 flex flex-wrap items-center gap-2">
         {shown === "validated_partial" ? (
           <>
@@ -310,6 +318,7 @@ export default async function GapDetailPage({
           Each row shows the recorded coverage verdict (from AI mapping or a person) and its ten
           dimensions. A tactic existing is not coverage. A publication existing is not coverage.
         </p>
+        <RequirementBasisReview gapId={gap.id} review={record.requirement_review} />
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <MapExistingTactic
             gapId={gap.id}
@@ -318,6 +327,8 @@ export default async function GapDetailPage({
             expectedRelationships={JSON.stringify(Object.fromEntries(library.map(tactic => [tactic.id, relationshipVersion(relationshipSnapshot(state, gap.id, tactic.id))])))}
           />
           <AssignTacticWithCoverage
+            previews={Object.fromEntries(library.map(tactic => [tactic.id, relationshipFit(state, gap.id, tactic.id)]))}
+            requirementBasisVersion={record.requirement_review.version}
             gapId={gap.id}
             availableTactics={library}
             mappedTacticIds={coverages.map((c) => c.tactic_id)}
@@ -326,7 +337,9 @@ export default async function GapDetailPage({
           <RecordMissedTactic gapId={gap.id} />
         </div>
         {coverages.map((c) => {
+          const review = getRequirementBasisReview(state, gap.id, c);
           const tactic = state.tactics.find((t) => t.id === c.tactic_id);
+          const relationship = record.coverages.find(row => row.id === c.id);
           const siblings = liveGapsMappedToTactic(state, c.tactic_id, gap.id);
           return (
             <article key={c.id} className="mb-4 border border-border bg-card p-4 rounded-lg">
@@ -342,6 +355,10 @@ export default async function GapDetailPage({
                 />
                 <UnassignTactic gapId={gap.id} tacticId={c.tactic_id} expectedRelationship={relationshipVersion(relationshipSnapshot(state, gap.id, c.tactic_id))} />
               </div>
+              {relationship?.fit ? (
+                <RelationshipFit fit={relationship.fit} tacticName={relationship.expansion?.scope.name ?? tactic?.name ?? c.tactic_id} />
+              ) : null}
+              {review.legacy_unsupported_full ? <p className="mt-3 text-sm text-amber-700 dark:text-amber-400">Historical Full needs review: no confirmed requirement basis was recorded. It does not provide verified current Full coverage.</p> : null}
               {siblings.length > 0 ? (
                 <div className="mt-3 border border-amber-500/30 bg-amber-500/10 p-3">
                   <p className="text-[12px] text-foreground">
@@ -405,7 +422,7 @@ export default async function GapDetailPage({
                             <LockForm
                               label="Change dimension"
                               action="lock_dimension"
-                              extra={{ expected_relationship: relationshipVersion(relationshipSnapshot(state, gap.id, c.tactic_id)), coverage_id: c.id, dimension: dim }}
+                              extra={{ expected_relationship: relationshipVersion(relationshipSnapshot(state, gap.id, c.tactic_id)), coverage_id: c.id, dimension: dim, expected_version: coverageReviewVersion(c) }}
                               confirmLabel="Change dimension"
                               description="This records who changed coverage and flags other gaps that use this tactic. Dimension values are not copied across gaps."
                             >
@@ -450,7 +467,7 @@ export default async function GapDetailPage({
                 <LockForm
                   label="Change overall coverage"
                   action="lock_overall"
-                  extra={{ expected_relationship: relationshipVersion(relationshipSnapshot(state, gap.id, c.tactic_id)), coverage_id: c.id }}
+                  extra={{ expected_relationship: relationshipVersion(relationshipSnapshot(state, gap.id, c.tactic_id)), coverage_id: c.id, expected_version: coverageReviewVersion(c), expected_basis_version: record.requirement_review.version }}
                   confirmLabel="Change overall coverage"
                   description="This records who changed coverage and flags other gaps that use this tactic. Overall values stay per gap."
                 >

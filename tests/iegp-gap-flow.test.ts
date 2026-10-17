@@ -17,6 +17,8 @@ import {
   createAddressedGap,
   assignTacticToGap,
   lockCoverageDimension,
+  lockCoverageOverall,
+  reviewRequirementBasis,
   confirmCoverageReview,
   recordMissedTactic,
   createTacticFromGaps,
@@ -28,6 +30,9 @@ import {
   displayedGapStatus,
   gapsReadyForPrioritize,
 } from "@/lib/iegp/engine";
+
+import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
+import { getRequirementBasisReview } from "@/lib/iegp/requirement-basis";
 
 async function makePartialGap() {
   await resetDemoSetup();
@@ -71,7 +76,7 @@ async function makePartialGap() {
 }
 
 describe("partial split and rewrite", () => {
-  it("splits a partial into addressed + open children and retires the original into history", async () => {
+  it("splits a partial into provisional + open children and retires the original into history", async () => {
     const { gapId, tacticId } = await makePartialGap();
     const result = await splitPartialGap({
       expected_resolution: gapResolutionVersion(await loadState(), gapId), note: "Separate the covered and remaining evidence scope",
@@ -87,14 +92,14 @@ describe("partial split and rewrite", () => {
     expect(original.retired).toBe(true);
     const addressed = after.gaps.find((g) => g.id === result.addressedId)!;
     const open = after.gaps.find((g) => g.id === result.openId)!;
-    expect(displayedGapStatus(addressed)).toBe("validated_addressed");
+    expect(displayedGapStatus(addressed)).toBe("validated_partial");
     expect(displayedGapStatus(open)).toBe("validated_open");
     expect(open.human_validated).toBe(true);
-    expect(addressed.human_validated).toBe(true);
+    expect(addressed.human_validated).toBe(false);
     expect(after.gap_versions.some((v) => v.live_gap_id === open.id && v.retired_gap_id === gapId && v.event === "split")).toBe(true);
     expect(after.gap_versions.some((v) => v.live_gap_id === addressed.id && v.retired_gap_id === gapId && v.event === "split")).toBe(true);
     expect(buildPlanWorkspace(after).review.some((c) => c.gap_id === original.id)).toBe(false);
-    expect(gapsReadyForPrioritize(after)).toBe(true);
+    expect(gapsReadyForPrioritize(after)).toBe(false);
   });
 
   it("KAN-68: a tactic's gap list leaves out the retired parent of a split", async () => {
@@ -164,7 +169,7 @@ describe("partial split and rewrite", () => {
     expect(gapsReadyForPrioritize(state)).toBe(false);
   });
 
-  it("lets the user add an Addressed gap with a tactic, and requires validation before Prioritize", async () => {
+  it("keeps a proposed Addressed gap provisional until requirements, coverage and status are reviewed", async () => {
     await resetDemoSetup();
     const tacticId = await createProposedTactic({
       name: "Completed publication",
@@ -203,7 +208,7 @@ describe("partial split and rewrite", () => {
       actor_function: "heor",
     });
     let state = await loadState();
-    expect(displayedGapStatus(state.gaps.find((g) => g.id === addressedId)!)).toBe("validated_addressed");
+    expect(displayedGapStatus(state.gaps.find((g) => g.id === addressedId)!)).toBe("validated_partial");
     expect(gapsReadyForPrioritize(state)).toBe(false);
     await validateGap({
       gap_id: openId,
@@ -211,6 +216,21 @@ describe("partial split and rewrite", () => {
       actor_function: "heor",
     });
     state = await loadState();
+    expect(gapsReadyForPrioritize(state)).toBe(false);
+    const coverageId = state.coverages.find(c => c.gap_id === addressedId)!.id;
+    await reviewRequirementBasis({
+      gap_id: addressedId, expected_version: getRequirementBasisReview(state, addressedId).version,
+      dimensions: Object.fromEntries(COVERAGE_DIMENSIONS.map(d => [d, {
+        applicability: d === "relevance" ? "required" : "not_applicable",
+        requirement: d === "relevance" ? "PFS question is answered by the pivotal publication" : "",
+        rationale: "This fixture asks only whether the pivotal PFS publication answers the question",
+      }])), rationale: "Reviewed the narrow publication requirement", actor_name: "A. Rao", actor_function: "heor",
+    });
+    await lockCoverageDimension({ coverage_id: coverageId, dimension: "relevance", value: "yes", rationale: "Publication answers the specified PFS question", actor_name: "A. Rao", actor_function: "heor" });
+    await lockCoverageOverall({ coverage_id: coverageId, overall: "full", rationale: "Reviewed publication meets the complete requirement", actor_name: "A. Rao", actor_function: "heor" });
+    await validateGap({ gap_id: addressedId, actor_name: "A. Rao", actor_function: "heor" });
+    state = await loadState();
+    expect(displayedGapStatus(state.gaps.find(g => g.id === addressedId)!)).toBe("validated_addressed");
     expect(gapsReadyForPrioritize(state)).toBe(true);
     expect(buildPlanWorkspace(state).review.every((c) => c.gap_status !== "candidate")).toBe(true);
   });
@@ -530,7 +550,8 @@ describe("Gaps map existing vs record missed vs proposed", () => {
       actor_function: "heor",
     });
     const after = await loadState();
-    expect(displayedGapStatus(after.gaps.find((g) => g.id === viaMissed)!)).toBe("validated_addressed");
+    expect(displayedGapStatus(after.gaps.find((g) => g.id === viaMissed)!)).toBe("validated_partial");
+    expect(after.coverages.find(c => c.gap_id === viaMissed)).toMatchObject({ overall: "full", overall_lock: { locked: false }, confirmed_requirement_basis: null });
     expect(after.coverages.some((c) => c.gap_id === viaMissed)).toBe(true);
     expect(after.tactics.find((t) => t.name === "VEL-301 PFS manuscript")?.status).toBe("completed");
   });

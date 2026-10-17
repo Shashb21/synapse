@@ -83,6 +83,7 @@ export function LockForm({
   size = "md",
   href,
   triggerName,
+  onSuccess,
 }: {
   label: string;
   /**
@@ -90,6 +91,8 @@ export function LockForm({
    * "Accept merge" per suggestion). Starts with the label, so it still matches it.
    */
   triggerName?: string;
+  /** Reload locally fetched panel records after a successful action. */
+  onSuccess?: () => void;
   action: string;
   extra?: Record<string, string>;
   children?: React.ReactNode;
@@ -175,8 +178,9 @@ export function LockForm({
       return;
     }
     // The dialog closes as the new data (or the next page) arrives, not before it.
-    if (href) navigate(href, () => setOpen(false));
-    else refresh(() => setOpen(false));
+    const saved = () => { setOpen(false); onSuccess?.(); };
+    if (href) navigate(href, saved);
+    else refresh(saved);
   }
 
   return (

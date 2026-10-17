@@ -1,3 +1,4 @@
+import { assessmentDesignVersion, getRequirementBasisReview, hasSupportedFullConfirmation } from "./requirement-basis";
 import { gapResolutionVersion } from "./relationship-version";
 import { relationshipVersionsForGap } from "./relationship-version";
 import {
@@ -21,6 +22,8 @@ import type {
   IegpState,
   Tactic,
   GapMetadata,
+  Lock,
+  RequirementDimension,
 } from "./types";
 import { statementSimilarity } from "@/lib/text";
 import { plannedSettings } from "./planning-context";
@@ -148,7 +151,7 @@ export function computeGapStatus(
   const pool = tactics ? countingCoverages(coverages, tactics, extras?.expansions) : coverages.filter((c) => !c.expansion_id);
   const relevant = pool.filter((c) => c.overall !== "not_relevant");
   if (relevant.length === 0) return "validated_open";
-  if (relevant.some((c) => c.overall === "full" && c.overall_lock.locked)) {
+  if (relevant.some((c) => hasSupportedFullConfirmation(c))) {
     return "validated_addressed";
   }
   return "validated_partial";
@@ -882,7 +885,122 @@ export type PlanTactic = {
   counts_toward_addressing: boolean;
   /** Per-dimension yes/partial/no/unknown for this gap–tactic pair. Null when there is no coverage row. */
   dimensions: Record<CoverageDimension, DimensionValue> | null;
+  /** Relationship-specific explanation; optional for old serialized plan snapshots. */
+  fit?: RelationshipFitModel;
 };
+
+/** Recorded fit facts for one pair. Design text supplies context, never a computed match. */
+export type RelationshipFitModel = {
+  /** Optimistic requirement-basis token for deliberate library confirmation. */
+  requirement_basis_version?: string;
+  design_version?: string;
+  gap_id: string;
+  tactic_id: string;
+  expansion_id: string | null;
+  coverage_id: string | null;
+  overall: OverallCoverage;
+  overall_rationale: string;
+  assessment_origin: GapTacticCoverage["assessment_origin"];
+  confirmation: Lock;
+  requirement_confirmation: Lock;
+  stale: boolean;
+  needs_review: boolean;
+  source_changed: boolean;
+  full_eligible: boolean;
+  review_reasons: string[];
+  dimensions: {
+    dimension: CoverageDimension;
+    requirement: RequirementDimension;
+    documented_tactic: string | null;
+    verdict: DimensionValue;
+    rationale: string;
+    confirmation: Lock;
+    fit: "documented_match" | "known_mismatch" | "partial" | "unknown" | "not_applicable";
+    unanswered: boolean;
+  }[];
+  contribution: {
+    evidence_question: string;
+    description: string;
+    status: TacticStatus;
+    evidence_available: string | null;
+    counts_toward_addressing: boolean;
+  };
+};
+
+/**
+ * Explain a linked or previewed pair from recorded facts, without writes or text matching.
+ * Invalid gap, tactic or expansion identities throw before any scoped data is exposed.
+ */
+export function relationshipFit(state: IegpState, gapId: string, tacticId: string, expansionId?: string | null): RelationshipFitModel {
+  const gap = state.gaps.find(g => g.id === gapId);
+  if (!gap) throw new Error("Gap not found");
+  const tactic = state.tactics.find(t => t.id === tacticId);
+  if (!tactic) throw new Error("Tactic not found");
+  const expansion = expansionId ? state.expansions.find(e => e.id === expansionId) : undefined;
+  if (expansionId && (!expansion || expansion.tactic_id !== tacticId || !expansion.gap_ids.includes(gapId))) {
+    throw new Error("Expansion scope does not belong to this tactic and gap");
+  }
+  const coverage = state.coverages.find(c => c.gap_id === gapId && c.tactic_id === tacticId && (c.expansion_id ?? null) === (expansionId ?? null));
+  const review = getRequirementBasisReview(state, gapId, coverage);
+  // A child scope must never borrow missing design details from its parent.
+  const scope = expansion?.scope;
+  const design: Partial<Record<CoverageDimension, string | null | undefined>> = scope ? {
+    relevance: scope.evidence_question, population: scope.population, comparator: scope.comparator,
+    outcomes: scope.outcomes, geography: scope.geography, timing: scope.timing,
+    methodology: scope.study_design, decision_utility: scope.gap_coverage,
+  } : {
+    relevance: tactic.evidence_question, population: tactic.population, intervention: tactic.intervention,
+    comparator: tactic.comparator, outcomes: tactic.outcomes, geography: tactic.geography,
+    timing: tactic.evidence_available, methodology: tactic.study_design, decision_utility: tactic.intended_use,
+  };
+  const reasons: string[] = [];
+  if (!coverage || coverage.overall === "unassessed") reasons.push("This relationship has not been assessed.");
+  else if (!coverage.overall_lock.locked) reasons.push("The saved overall judgement has not been confirmed by a human.");
+  for (const finding of state.source_reviews ?? []) {
+    if (finding.kind === "discrepancy" && finding.status === "pending" &&
+      (finding.coverage_id ? finding.coverage_id === coverage?.id :
+        (!finding.gap_id || finding.gap_id === gapId) && (!finding.tactic_id || finding.tactic_id === tacticId))) {
+      reasons.push(`Pending source discrepancy (${finding.id}): ${finding.rationale}. Current confirmation is challenged; recorded verdict is retained.`);
+    }
+  }
+  if (coverage?.stale) reasons.push(...(coverage.stale_reasons?.length ? coverage.stale_reasons : ["The recorded assessment is outdated; review it against the current question and tactic design."]));
+  if (coverage?.needs_review) reasons.push("A sibling assessment changed; this relationship is marked for review independently. Acknowledgement does not reassess an outdated basis.");
+  if (review.source_changed) reasons.push("Requirement sources changed since the saved basis review.");
+  if (review.legacy_unsupported_full) reasons.push("Historical Full has no confirmed requirement basis and does not supply verified current Full.");
+  if (!review.basis.confirmation.locked) reasons.push("The requirement basis has not been confirmed by a human.");
+  reasons.push(...review.issues);
+  return {
+    gap_id: gapId, tactic_id: tacticId, expansion_id: expansionId ?? null, coverage_id: coverage?.id ?? null,
+    overall: coverage?.overall ?? "unassessed", overall_rationale: coverage?.overall_rationale ?? "",
+    assessment_origin: coverage?.assessment_origin ?? null, confirmation: coverage?.overall_lock ?? unlocked(),
+    requirement_basis_version: review.version,
+    design_version: assessmentDesignVersion(state, { tactic_id: tacticId, expansion_id: expansionId }),
+    requirement_confirmation: review.basis.confirmation,
+    stale: coverage?.stale ?? false, needs_review: coverage?.needs_review ?? false,
+    source_changed: review.source_changed, full_eligible: review.full_eligible, review_reasons: [...new Set(reasons)],
+    dimensions: COVERAGE_DIMENSIONS.map(dimension => {
+      const assessment = coverage?.dimensions[dimension];
+      const requirement = review.basis.dimensions[dimension];
+      const verdict = assessment?.value ?? "unknown";
+      const fit = requirement.applicability === "not_applicable" ? "not_applicable" :
+        verdict === "yes" ? "documented_match" : verdict === "no" ? "known_mismatch" : verdict === "partial" ? "partial" : "unknown";
+      return { dimension, requirement, documented_tactic: design[dimension]?.trim() || null,
+        verdict, rationale: assessment?.rationale ?? "", confirmation: assessment?.lock ?? unlocked(), fit,
+        unanswered: requirement.applicability === "undetermined" || (requirement.applicability === "required" && verdict !== "yes") ||
+          (requirement.conflicts.length > 0 && !requirement.resolution.trim()),
+      };
+    }),
+    contribution: {
+      evidence_question: scope ? scope.evidence_question : tactic.evidence_question,
+      description: scope ? scope.gap_coverage : tactic.description,
+      status: expansion?.status ?? tactic.status,
+      evidence_available: scope ? scope.evidence_available : tactic.evidence_available,
+      counts_toward_addressing: coverage
+        ? countingCoverages([coverage], state.tactics, state.expansions).length > 0
+        : !expansion && tacticCountsTowardAddressing(tactic),
+    },
+  };
+}
 
 export type PlanGapCard = {
   relationship_versions?: Record<string, string>;
@@ -943,6 +1061,8 @@ export type ReviewGapCard = {
 };
 
 export type OpenGapCard = {
+  /** Pure parent-tactic previews scoped to this gap; optional for historical snapshots. */
+  fit_previews?: Record<string, RelationshipFitModel>;
   relationship_versions?: Record<string, string>;
   gap_id: string;
   gap_name: string;
@@ -1033,7 +1153,7 @@ export function mappedTactics(state: IegpState, gapId: string): PlanTactic[] {
     const tactic = state.tactics.find((t) => t.id === coverage.tactic_id);
     if (!tactic) continue;
     const child = coverage.expansion_id ? state.expansions?.find(e => e.id === coverage.expansion_id) : undefined;
-    if (coverage.expansion_id && !child) continue;
+    if (coverage.expansion_id && (!child || child.tactic_id !== tactic.id || !child.gap_ids.includes(gapId))) continue;
     const row = asPlanTactic(
         tactic,
         coverage.overall,
@@ -1041,6 +1161,7 @@ export function mappedTactics(state: IegpState, gapId: string): PlanTactic[] {
         coverage.needs_review,
         coverageDimensionValues(coverage.dimensions),
       );
+    row.fit = relationshipFit(state, gapId, tactic.id, coverage.expansion_id);
     if (child) {
       row.expansion_id = child.id;
       row.name = child.scope.name;
@@ -1152,6 +1273,7 @@ export function buildPlanWorkspace(state: IegpState): {
       suggested_status: computed,
       status_override: gap.status_override ?? null,
       counting_join_count: countingCoverages(coverages, state.tactics, state.expansions).length,
+      fit_previews: Object.fromEntries(state.tactics.map(tactic => [tactic.id, relationshipFit(state, gap.id, tactic.id)])),
       tactics: mappedTactics(state, gap.id),
       parent_gap_id: gap.parent_gap_id,
       residual: residualByParent.get(gap.id) ?? null,
