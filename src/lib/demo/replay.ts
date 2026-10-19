@@ -75,13 +75,15 @@ export function similarity(a: string, b: string): number {
 
 /**
  * What each id is, read from the prompt: the text that follows where the prompt
- * defines it (`"id":"GAP-004","name":"Caregiver burden…`), else its first use.
+ * defines it (`"id":"GAP-004","name":"Caregiver burden…`, or inside a wrapping
+ * id such as `"id":"ACT-TAC-028"`), else its first use.
  * Two runs list the same gaps in different orders; the anchor still matches.
  */
 export function anchorsFor(text: string, ids: string[]): string[] {
   return ids.map((id) => {
-    const at = text.indexOf(`"id":"${id}"`);
-    const start = at >= 0 ? at + `"id":"${id}"`.length : text.indexOf(id) + id.length;
+    // The id may sit inside a wrapping id, e.g. a timeline activity "ACT-TAC-028".
+    const defined = new RegExp(`"id":"[A-Za-z0-9_-]*?${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`).exec(text);
+    const start = defined ? defined.index + defined[0].length : text.indexOf(id) + id.length;
     // Only what describes this id: stop where its object (or the next id's entry) begins.
     const window = text.slice(start, start + 160);
     const end = window.search(/[{}]|"id":/);

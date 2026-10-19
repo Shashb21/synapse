@@ -116,6 +116,27 @@ describe("replaying a call", () => {
     ]);
   });
 
+  it("finds an id defined inside a wrapping id, such as a timeline activity", () => {
+    const recorded: Recording = {
+      recorded_at: null,
+      calls: [
+        recordedCallFrom({
+          stage: "S10",
+          purpose: "timeline-estimates",
+          system_prompt: "",
+          user_prompt: JSON.stringify({ activities: [{ id: "ACT-TAC-001", name: "Registry" }, { id: "ACT-TAC-002", name: "CNS sub-study" }] }),
+          reply: JSON.stringify({ activities: [{ id: "ACT-TAC-001", start_offset_months: 6 }, { id: "ACT-TAC-002", start_offset_months: 0 }] }),
+        }),
+      ],
+    };
+    const user = JSON.stringify({ activities: [{ id: "ACT-TAC-041", name: "CNS sub-study" }, { id: "ACT-TAC-040", name: "Registry" }] });
+    const reply = JSON.parse(replayReply({ stage: "S10", purpose: "timeline-estimates", system: "", user }, recorded));
+    expect(reply.activities).toEqual([
+      { id: "ACT-TAC-040", start_offset_months: 6 },
+      { id: "ACT-TAC-041", start_offset_months: 0 },
+    ]);
+  });
+
   it("still finds the closest recorded call when this prompt differs a little", () => {
     const found = findRecordedCall(
       { stage: "S2", purpose: `gap-proposer:${DOC_B}`, system: "x", user: `Document ${DOC_B}: payer interviews about the burden of recurrence.` },
