@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { BrandMark } from "@/components/brand-mark";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import {
   ChartGantt,
   ClipboardList,
@@ -429,7 +429,11 @@ export function PlanChrome({
           <p className="text-[13px] font-medium text-foreground">{current}</p>
         </header>
         )}
-        {workspace?.current.demo && !present ? <DemoResetBar workspace={workspace.current} /> : null}
+        {workspace?.current.demo && !present ? (
+          <Suspense fallback={null}>
+            <DemoResetBar workspace={workspace.current} />
+          </Suspense>
+        ) : null}
         {showReadiness && !present ? <ReadinessStrip nav={nav} /> : null}
         <main className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-4 sm:px-6">{children}</main>
       </div>
