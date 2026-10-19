@@ -5,13 +5,13 @@ import path from "node:path";
 
 const dir = path.join(process.cwd(), "src/lib/demo/client-pack");
 const META = [
-  ["payer-hta-interviews", "01-payer-hta-stakeholder-interviews.txt", "Payer and HTA stakeholder interviews", "stakeholder_interview", "market_access"],
-  ["kol-advisory-board", "02-medical-kol-advisory-board-report.txt", "Medical KOL advisory board report", "advisory_board", "medical_affairs"],
-  ["targeted-literature-review", "03-targeted-literature-review.txt", "Targeted literature review", "targeted_literature_review", "heor"],
-  ["clinical-development-plan", "04-clinical-development-plan-excerpt.txt", "Clinical development plan (excerpt)", "clinical_development_plan", "clinical_development"],
-  ["rwe-strategy", "05-real-world-evidence-strategy.txt", "Real-world evidence strategy 2026-2028", "rwe_strategy", "rwe"],
-  ["medical-action-plan", "06-medical-action-plan-2027.txt", "Medical action plan 2027", "medical_strategy", "medical_affairs"],
-  ["field-medical-insights", "07-field-medical-insights-report.txt", "Field medical insights report Q3 2026", "other_internal", "medical_affairs"],
+  ["client-payer-hta-interviews", "01-payer-hta-stakeholder-interviews.txt", "Payer and HTA stakeholder interviews", "stakeholder_interview", "market_access"],
+  ["client-kol-advisory-board", "02-medical-kol-advisory-board-report.txt", "Medical KOL advisory board report", "advisory_board", "medical_affairs"],
+  ["client-targeted-literature-review", "03-targeted-literature-review.txt", "Targeted literature review", "targeted_literature_review", "heor"],
+  ["client-clinical-development-plan", "04-clinical-development-plan-excerpt.txt", "Clinical development plan (excerpt)", "clinical_development_plan", "clinical_development"],
+  ["client-rwe-strategy", "05-real-world-evidence-strategy.txt", "Real-world evidence strategy 2026-2028", "rwe_strategy", "rwe"],
+  ["client-medical-action-plan", "06-medical-action-plan-2027.txt", "Medical action plan 2027", "medical_strategy", "medical_affairs"],
+  ["client-field-medical-insights", "07-field-medical-insights-report.txt", "Field medical insights report Q3 2026", "other_internal", "medical_affairs"],
 ];
 
 const entries = META.map(([id, filename, title, source_type, stakeholder_function]) => {

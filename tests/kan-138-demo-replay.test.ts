@@ -12,6 +12,7 @@ import {
 } from "@/lib/demo/replay";
 import { clientDemoFileFor } from "@/lib/demo/client-files";
 import { CLIENT_DEMO_PACK } from "@/lib/demo/client-pack";
+import { DEMO_PACK, demoSourceById } from "@/lib/iegp/demo-pack";
 
 /** KAN-138: a client-demo workspace answers every AI step from the recorded run. */
 
@@ -114,5 +115,15 @@ describe("demo uploads", () => {
     }
     expect(clientDemoFileFor("A client's own strategy document.")).toBeNull();
     expect(clientDemoFileFor(CLIENT_DEMO_PACK[0]!.text.replace("twelve", "eleven"))).toBeNull();
+  });
+});
+
+describe("demo document ids", () => {
+  it("never collide with the test demo pack, so each id finds its own document", () => {
+    const testIds = new Set(DEMO_PACK.map((file) => file.id));
+    for (const file of CLIENT_DEMO_PACK) {
+      expect(testIds.has(file.id), file.id).toBe(false);
+      expect(demoSourceById(file.id)?.text).toBe(file.text);
+    }
   });
 });
