@@ -93,6 +93,29 @@ describe("replaying a call", () => {
     expect(JSON.parse(reply).placements.map((p: { gap_id: string }) => p.gap_id)).toEqual(["GAP-047", "GAP-048"]);
   });
 
+  it("keeps each gap's answer on that gap when this run lists the gaps in another order", () => {
+    const recordedPrompt = JSON.stringify({ gaps: [{ id: "GAP-001", name: "Economic burden" }, { id: "GAP-002", name: "Elderly comparison" }] });
+    const shuffled: Recording = {
+      recorded_at: null,
+      calls: [
+        recordedCallFrom({
+          stage: "S4",
+          purpose: "mapping-table-critic",
+          system_prompt: "",
+          user_prompt: recordedPrompt,
+          reply: JSON.stringify({ reviews: [{ gap_id: "GAP-001", verdict: "keep burden" }, { gap_id: "GAP-002", verdict: "keep elderly" }] }),
+        }),
+      ],
+    };
+    // This run: the elderly gap is listed first, and both have new ids.
+    const user = JSON.stringify({ gaps: [{ id: "GAP-031", name: "Elderly comparison" }, { id: "GAP-030", name: "Economic burden" }] });
+    const reply = JSON.parse(replayReply({ stage: "S4", purpose: "mapping-table-critic", system: "", user }, shuffled));
+    expect(reply.reviews).toEqual([
+      { gap_id: "GAP-030", verdict: "keep burden" },
+      { gap_id: "GAP-031", verdict: "keep elderly" },
+    ]);
+  });
+
   it("still finds the closest recorded call when this prompt differs a little", () => {
     const found = findRecordedCall(
       { stage: "S2", purpose: `gap-proposer:${DOC_B}`, system: "x", user: `Document ${DOC_B}: payer interviews about the burden of recurrence.` },

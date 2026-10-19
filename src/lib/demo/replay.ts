@@ -19,6 +19,8 @@ export type RecordedCall = {
   user_words: string;
   /** Distinct ids in the recorded prompt (system then user), in order of first appearance. */
   ids: string[];
+  /** For each id (same order), the text that follows where the prompt defines it: what it is. */
+  anchors?: string[];
   reply: string;
 };
 
@@ -72,23 +74,59 @@ export function similarity(a: string, b: string): number {
 }
 
 /**
- * Maps the recorded run's ids onto this run's. Ids are paired by kind (GAP with
- * GAP, DOC with DOC) in order of first appearance, which is how the same inputs
- * produce them in both runs.
+ * What each id is, read from the prompt: the text that follows where the prompt
+ * defines it (`"id":"GAP-004","name":"Caregiver burden…`), else its first use.
+ * Two runs list the same gaps in different orders; the anchor still matches.
  */
-export function idMapping(recorded: string[], current: string[]): Map<string, string> {
-  const kind = (id: string) => id.match(/^[A-Za-z]+/)?.[0] ?? "";
-  const byKind = new Map<string, string[]>();
-  for (const id of current) byKind.set(kind(id), [...(byKind.get(kind(id)) ?? []), id]);
-  const taken = new Map<string, number>();
+export function anchorsFor(text: string, ids: string[]): string[] {
+  return ids.map((id) => {
+    const at = text.indexOf(`"id":"${id}"`);
+    const start = at >= 0 ? at + `"id":"${id}"`.length : text.indexOf(id) + id.length;
+    // Only what describes this id: stop where its object (or the next id's entry) begins.
+    const window = text.slice(start, start + 160);
+    const end = window.search(/[{}]|"id":/);
+    return normalizePrompt(end >= 0 ? window.slice(0, end) : window);
+  });
+}
+
+const kindOf = (id: string) => id.match(/^[A-Za-z]+/)?.[0] ?? "";
+
+/**
+ * Maps the recorded run's ids onto this run's. An id pairs first with the
+ * current id of the same kind that the prompt describes the same way (its
+ * anchor), so a different listing order cannot swap two gaps; ids left over
+ * pair by kind in order of first appearance.
+ */
+export function idMapping(
+  recorded: string[],
+  current: string[],
+  recordedAnchors?: string[],
+  currentAnchors?: string[],
+): Map<string, string> {
   const map = new Map<string, string>();
-  for (const id of recorded) {
-    const k = kind(id);
-    const index = taken.get(k) ?? 0;
-    const next = byKind.get(k)?.[index];
-    taken.set(k, index + 1);
-    if (next && next !== id) map.set(id, next);
+  const used = new Set<string>();
+  if (recordedAnchors && currentAnchors) {
+    const byAnchor = new Map<string, string[]>();
+    current.forEach((id, i) => {
+      const key = `${kindOf(id)}|${currentAnchors[i]}`;
+      byAnchor.set(key, [...(byAnchor.get(key) ?? []), id]);
+    });
+    recorded.forEach((id, i) => {
+      const hits = byAnchor.get(`${kindOf(id)}|${recordedAnchors[i]}`);
+      if (hits?.length === 1 && !used.has(hits[0]!)) {
+        map.set(id, hits[0]!);
+        used.add(hits[0]!);
+      }
+    });
   }
+  const left = new Map<string, string[]>();
+  for (const id of current) if (!used.has(id)) left.set(kindOf(id), [...(left.get(kindOf(id)) ?? []), id]);
+  for (const id of recorded) {
+    if (map.has(id)) continue;
+    const next = left.get(kindOf(id))?.shift();
+    if (next) map.set(id, next);
+  }
+  for (const [from, to] of map) if (from === to) map.delete(from);
   return map;
 }
 
@@ -135,8 +173,9 @@ export function replayReply(
 ): string {
   const recorded = findRecordedCall(call, recording);
   if (!recorded) throw new DemoReplayMissError(call.purpose);
-  const current = idsIn(`${call.system}\n${call.user}`);
-  return applyMapping(recorded.reply, idMapping(recorded.ids, current));
+  const prompt = `${call.system}\n${call.user}`;
+  const current = idsIn(prompt);
+  return applyMapping(recorded.reply, idMapping(recorded.ids, current, recorded.anchors, anchorsFor(prompt, current)));
 }
 
 /** A recorded call, from one llm_calls row of the recording run. */
@@ -146,6 +185,7 @@ export function recordedCallFrom(row: { stage: string | null; purpose: string; s
     purpose: row.purpose,
     ...promptSignature(normalizePrompt(row.user_prompt)),
     ids: idsIn(`${row.system_prompt}\n${row.user_prompt}`),
+    anchors: anchorsFor(`${row.system_prompt}\n${row.user_prompt}`, idsIn(`${row.system_prompt}\n${row.user_prompt}`)),
     reply: row.reply,
   };
 }
