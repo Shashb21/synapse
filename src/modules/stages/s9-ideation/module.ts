@@ -433,9 +433,11 @@ type PromptGap = IdeationGap & {
 /**
  * Gaps per proposer call, tactics per critic call and gaps per judge call. Asking
  * for every High gap in one reply runs past the output budget (KAN-66), so each
- * step asks in slices, in parallel.
+ * step asks in slices, in parallel. The proposer asks one gap at a time: a
+ * revision round restates each design with the critic's objection, and two gaps'
+ * worth ran past the 16k output budget on Claude (KAN-148).
  */
-export const PROPOSER_GAPS_PER_CALL = 2;
+export const PROPOSER_GAPS_PER_CALL = 1;
 export const CRITIC_TACTICS_PER_CALL = 4;
 export const JUDGE_GAPS_PER_CALL = 2;
 
