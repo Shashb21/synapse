@@ -200,17 +200,17 @@ function readSnapshot(): Promise<IegpState> {
 }
 
 /**
- * Gives every gap without one a number (KAN-56): GAP-007 style ids keep their own digits
- * where free, the rest follow in the order they were created. Numbers are never reused.
+ * Gives every gap without one a number (KAN-56), in the order they were created.
+ * Numbers are never reused within a plan; a reset starts them at 001 again. Ids
+ * are never reissued (KAN-15), so a gap's number does not follow its id's digits:
+ * after a reset GAP-051 is plan gap 001 (KAN-149).
  */
 async function numberGaps(state: IegpState): Promise<IegpState> {
   const taken = new Set(state.gaps.map((gap) => gap.number).filter((n): n is number => Boolean(n)));
   const floor = Math.max(0, ...taken) + 1;
   for (const gap of state.gaps) {
     if (gap.number) continue;
-    const own = /^GAP-(\d+)$/.exec(gap.id);
-    const wanted = own ? Number(own[1]) : null;
-    const number = wanted && !taken.has(wanted) ? wanted : await allocateNumber("gap_number", floor);
+    const number = await allocateNumber("gap_number", floor);
     taken.add(number);
     await db().update(t.gaps).set({ number }).where(eq(t.gaps.id, gap.id));
     gap.number = number;
