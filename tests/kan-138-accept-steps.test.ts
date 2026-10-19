@@ -45,7 +45,7 @@ describe("accepting a step", () => {
   it("gaps: splits each Partial gap as proposed, then confirms every gap and moves the plan on", async () => {
     const calls = stubServer(
       [
-        { ...base, gaps: { partial: ["GAP-003"], unvalidated: [], wizard_complete: false, tactics_unlocked: false } },
+        { ...base, gaps: { partial: [{ id: "GAP-003", name: "Elderly", statement: "Elderly CE" }], unvalidated: [], wizard_complete: false, tactics_unlocked: false } },
         { ...base, gaps: { partial: [], unvalidated: ["GAP-001", "GAP-014"], wizard_complete: false, tactics_unlocked: false } },
       ],
       {
@@ -62,7 +62,6 @@ describe("accepting a step", () => {
       "validate_gap",
       "validate_gap",
       "complete_wizard",
-      "unlock_tactics",
     ]);
     expect(calls[1]!.body).toMatchObject({
       parent_gap_id: "GAP-003",
@@ -73,10 +72,26 @@ describe("accepting a step", () => {
     });
   });
 
+  it("gaps: keeps a Partial gap whole, as Open, when no split holds up", async () => {
+    const calls = stubServer(
+      [
+        { ...base, gaps: { partial: [{ id: "GAP-013", name: "Community re-biopsy rate", statement: "How often?" }], unvalidated: [], wizard_complete: true, tactics_unlocked: true } },
+        { ...base, gaps: { partial: [], unvalidated: ["GAP-013"], wizard_complete: true, tactics_unlocked: true } },
+      ],
+      { S6: { run_id: "run_s6", output: { mode: "llm", proposal: null } } },
+    );
+    await acceptDemoStep("gaps");
+    expect(calls.map((c) => c.body?.action ?? c.body?.stage)).toEqual(["S6", "rewrite_partial_gap", "validate_gap"]);
+    expect(calls[1]!.body).toMatchObject({ gap_id: "GAP-013", name: "Community re-biopsy rate", statement: "How often?", status: "validated_open" });
+  });
+
   it("prioritize, ideation and timeline accept what the AI suggested", async () => {
-    let calls = stubServer([{ ...base, prioritize: { suggested: [{ gap_id: "GAP-001", band: "high" }] } }]);
+    let calls = stubServer([
+      { ...base, gaps: { ...base.gaps, tactics_unlocked: false }, prioritize: { suggested: [{ gap_id: "GAP-001", band: "high" }] } },
+    ]);
     await acceptDemoStep("prioritize");
     expect(calls[0]!.body).toMatchObject({ action: "validate_band", gap_id: "GAP-001", band: "high" });
+    expect(calls[1]!.body).toMatchObject({ action: "unlock_tactics" });
 
     calls = stubServer([{ ...base, ideation: { proposed: ["IDEA-1", "IDEA-2"] } }]);
     expect(await acceptDemoStep("ideation")).toBe(2);

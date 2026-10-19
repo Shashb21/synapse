@@ -9,8 +9,8 @@ import { postJson } from "@/lib/post-json";
 export type DemoStep = "gaps" | "prioritize" | "ideation" | "timeline";
 
 export const DEMO_STEP_LABELS: Record<DemoStep, string> = {
-  gaps: "confirm every gap (splitting Partially Addressed ones as proposed)",
-  prioritize: "validate every suggested priority band",
+  gaps: "confirm every gap (splitting Partially Addressed ones as proposed, or keeping them Open where no split holds up)",
+  prioritize: "validate every suggested priority band and open tactic ideation",
   ideation: "accept every proposed tactic",
   timeline: "accept every proposed dependency and date estimate",
 };
@@ -18,7 +18,7 @@ export const DEMO_STEP_LABELS: Record<DemoStep, string> = {
 const NOTE = "Accepted as in the demo";
 
 type Pending = {
-  gaps: { partial: string[]; unvalidated: string[]; wizard_complete: boolean; tactics_unlocked: boolean };
+  gaps: { partial: { id: string; name: string; statement: string }[]; unvalidated: string[]; wizard_complete: boolean; tactics_unlocked: boolean };
   prioritize: { suggested: { gap_id: string; band: string }[] };
   ideation: { proposed: string[] };
   timeline: { dependencies: { id: string; upstream_id: string }[]; estimates: boolean };
@@ -62,12 +62,19 @@ export async function acceptDemoStep(step: DemoStep, onProgress: (line: string) 
   let done = 0;
   if (step === "gaps") {
     const before = await pending();
-    for (const gap_id of before.gaps.partial) {
+    for (const gap of before.gaps.partial) {
+      const gap_id = gap.id;
       onProgress(`Proposing a split for ${gap_id}…`);
       const run = await post("/api/modules", { stage: "S6", input: { gap_id } });
       const output = run.output as { mode?: string; proposal?: SplitProposal | null } | undefined;
       const proposal = output?.proposal;
-      if (!proposal) throw new Error(`No split was proposed for ${gap_id}; split it by hand on its gap page.`);
+      if (!proposal) {
+        // The model's judge found no split that holds up: keep the gap whole, as Open.
+        onProgress(`Keeping ${gap_id} as Open…`);
+        await post("/api/iegp", { action: "rewrite_partial_gap", gap_id, name: gap.name, statement: gap.statement, status: "validated_open", note: NOTE });
+        done += 1;
+        continue;
+      }
       await post("/api/iegp", {
         action: "split_partial_gap",
         ...(output?.mode === "llm" && typeof run.run_id === "string" ? { originating_run_id: run.run_id } : {}),
@@ -89,7 +96,6 @@ export async function acceptDemoStep(step: DemoStep, onProgress: (line: string) 
       done += 1;
     }
     if (!after.gaps.wizard_complete) await post("/api/iegp", { action: "complete_wizard", note: NOTE });
-    if (!after.gaps.tactics_unlocked) await post("/api/iegp", { action: "unlock_tactics", note: NOTE });
     return done;
   }
   const now = await pending();
@@ -99,6 +105,8 @@ export async function acceptDemoStep(step: DemoStep, onProgress: (line: string) 
       await post("/api/plan", { action: "validate_band", gap_id, band, rationale: NOTE });
       done += 1;
     }
+    // Every Open gap banded: tactic ideation opens.
+    if (!now.gaps.tactics_unlocked) await post("/api/iegp", { action: "unlock_tactics", note: NOTE });
     return done;
   }
   if (step === "ideation") {

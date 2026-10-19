@@ -33,7 +33,9 @@ export async function GET() {
     return NextResponse.json(
       {
         gaps: {
-          partial: live.filter((gap) => displayedGapStatus(gap) === "validated_partial").map((gap) => gap.id),
+          partial: live
+            .filter((gap) => displayedGapStatus(gap) === "validated_partial")
+            .map((gap) => ({ id: gap.id, name: gap.name, statement: gap.statement })),
           unvalidated: live
             .filter((gap) => !gap.human_validated && ["validated_open", "validated_addressed"].includes(displayedGapStatus(gap)))
             .map((gap) => gap.id),
