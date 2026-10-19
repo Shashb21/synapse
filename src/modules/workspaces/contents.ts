@@ -26,6 +26,7 @@ const RESET_ACTIONS: Record<WorkspaceContents, string> = {
   blank: "workspace.reset_blank",
   demo: "workspace.load_demo",
   demo_setup: "workspace.load_demo_setup",
+  client_demo: "workspace.reset_client_demo",
 };
 
 /**

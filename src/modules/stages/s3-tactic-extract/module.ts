@@ -22,7 +22,7 @@ import {
   type TacticStatus,
   type TacticType,
 } from "@/lib/iegp/enums";
-import { tacticVersion, expansionScopeSchema } from "@/lib/iegp/tactic-expansions";
+import { tacticVersion, expansionScopeSchema, modelExpansionScope } from "@/lib/iegp/tactic-expansions";
 import { createTacticSuggestion, separateTacticOptionSchema } from "./suggestions";
 import type { ExpansionScope, SeparateTacticOption, Tactic } from "@/lib/iegp/types";
 import { commitExtractedRecords, loadState } from "@/lib/iegp/store";
@@ -450,7 +450,7 @@ async function llmDecisions(
     const shared_scope = row.match === "overlaps" ? text(row.shared_scope) : null;
     const new_scope = row.match === "overlaps" ? text(row.new_scope) : null;
     if (row.match === "overlaps") {
-      const parsedExpansion = expansionScopeSchema.safeParse(row.expansion), parsedSeparate = separateTacticOptionSchema.safeParse(row.separate);
+      const parsedExpansion = expansionScopeSchema.safeParse(modelExpansionScope(row.expansion)), parsedSeparate = separateTacticOptionSchema.safeParse(row.separate);
       const candidate = args.batch.find(c => c.id === id);
       if (!shared_scope || !new_scope || !parsedExpansion.success || !parsedSeparate.success || parsedSeparate.data.status !== candidate?.status || parsedSeparate.data.type !== candidate?.type) continue;
       const target = args.library.find(t => t.id === target_tactic_id);

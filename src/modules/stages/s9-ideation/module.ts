@@ -26,7 +26,7 @@ import { prioritizationContextFromState } from "@/lib/iegp/planning-context";
 import { displayedGapStatus, isLiveGap, emptyDimensions, unlocked } from "@/lib/iegp/engine";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 import { plural } from "@/lib/plural";
-import { acceptTacticExpansion, expansionScopeSchema, tacticVersion, type ExpansionTransaction } from "@/lib/iegp/tactic-expansions";
+import { acceptTacticExpansion, expansionScopeSchema, modelExpansionScope, tacticVersion, type ExpansionTransaction } from "@/lib/iegp/tactic-expansions";
 import type { ExpansionScope, Tactic } from "@/lib/iegp/types";
 import { captureProposalDecision } from "@/lib/iegp/learning-capture";
 
@@ -132,7 +132,7 @@ When a gap carries revise requests, answer each one: return that tactic with its
 
 Return JSON only: {"tactics":[{"id":"","gap_id":"","name":"","type":"","evidence_question":"","rationale":"","proposal_kind":"new","target_tactic_id":null,"expansion_scope":null,"comparative_rationale":"",${DESIGN_FIELDS},"withdraw":false,"withdraw_reason":""}]}`;
 
-const EXPANSION_CONTRACT = `Expansion scope fields (all explicit): name, evidence_question, population, outcomes, geography, data_cut, analysis, instrument, study_design, gap_coverage, cost_effort, timing, feasibility_risks, post_hoc, prospective_enrolment, protocol_amendment, start_date, evidence_available. Unused added scope is an empty string; dates are null or ISO dates. Compare expansion and new alternatives for evidence quality, time/cost and feasibility. Never claim an amendment or data access is already approved.`;
+const EXPANSION_CONTRACT = `Expansion scope fields (all explicit): name, evidence_question, population, outcomes, geography, data_cut, analysis, instrument, study_design, gap_coverage, cost_effort, timing, feasibility_risks, post_hoc, prospective_enrolment, protocol_amendment, start_date, evidence_available. post_hoc, prospective_enrolment and protocol_amendment are JSON booleans (true or false), never text: explain them in feasibility_risks. Unused added scope is an empty string; dates are null or ISO dates (YYYY-MM-DD). Compare expansion and new alternatives for evidence quality, time/cost and feasibility. Never claim an amendment or data access is already approved.`;
 
 const CRITIC_SYSTEM = `You critique proposed evidence tactics for prioritized evidence gaps in a pharma Integrated Evidence Generation Plan.
 
@@ -394,7 +394,7 @@ function parseTactic(raw: Record<string, unknown>, library: LibraryTactic[]): { 
   if (kind === "expansion") {
     try {
       if (!target?.trim()) throw new Error("Expansion requires an explicit nonempty target_tactic_id");
-      scope = expansionScopeSchema.parse(raw.expansion_scope);
+      scope = expansionScopeSchema.parse(modelExpansionScope(raw.expansion_scope));
       assertExpansionDesign({name: fields.name, evidence_question: fields.evidence_question, type, design: fields}, scope);
       validateExpansion(library.find(t => t.id === target), scope, text(raw.comparative_rationale));
     } catch (error) { problems.push(error instanceof Error ? error.message : "Invalid expansion"); }
@@ -433,9 +433,11 @@ type PromptGap = IdeationGap & {
 /**
  * Gaps per proposer call, tactics per critic call and gaps per judge call. Asking
  * for every High gap in one reply runs past the output budget (KAN-66), so each
- * step asks in slices, in parallel.
+ * step asks in slices, in parallel. The proposer asks one gap at a time: a
+ * revision round restates each design with the critic's objection, and two gaps'
+ * worth ran past the 16k output budget on Claude (KAN-148).
  */
-export const PROPOSER_GAPS_PER_CALL = 2;
+export const PROPOSER_GAPS_PER_CALL = 1;
 export const CRITIC_TACTICS_PER_CALL = 4;
 export const JUDGE_GAPS_PER_CALL = 2;
 

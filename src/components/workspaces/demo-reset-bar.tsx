@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, RotateCcw } from "lucide-react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { CheckCheck, Download, Loader2, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -14,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { DemoBadge } from "./demo-badge";
 import { sendJson, type WorkspaceTagModel } from "./model";
+import { acceptDemoStep, DEMO_STEP_LABELS, demoStepFor } from "@/lib/demo/accept-steps";
 
 /**
  * Shown on every page of a demo workspace (KAN-127): says it holds the Velmara
@@ -25,6 +27,25 @@ export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["curr
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const owner = workspace.role === "owner";
+  const pathname = usePathname() ?? "";
+  const place = useSearchParams()?.get("place") ?? null;
+  const step = workspace.demo_mode ? demoStepFor(pathname, place) : null;
+  const [accepting, setAccepting] = useState<string | null>(null);
+  const [acceptError, setAcceptError] = useState<string | null>(null);
+
+  // Client demo (KAN-138): the presenter can take this step's AI suggestions as they are, as the recording did.
+  async function acceptAll() {
+    if (!step) return;
+    setAccepting("Starting…");
+    setAcceptError(null);
+    try {
+      await acceptDemoStep(step, setAccepting);
+      window.location.reload();
+    } catch (err) {
+      setAcceptError(err instanceof Error ? err.message : "Could not accept this step.");
+      setAccepting(null);
+    }
+  }
 
   async function reset() {
     setPending(true);
@@ -46,7 +67,38 @@ export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["curr
       className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-amber-500/30 bg-amber-500/5 px-4 py-1 text-[11px] text-muted-foreground sm:px-6"
     >
       <DemoBadge testId="demo-bar-badge" />
-      <span>Demo workspace with the Velmara sample plan.</span>
+      <span>
+        {workspace.demo_mode
+          ? "Client demo mode: AI steps replay a recorded run, so no model is called."
+          : "Demo workspace with the Velmara sample plan."}
+      </span>
+      {step ? (
+        <Button
+          type="button"
+          size="xs"
+          variant="outline"
+          disabled={accepting !== null}
+          title={`Accept all as in demo: ${DEMO_STEP_LABELS[step]}`}
+          onClick={() => void acceptAll()}
+        >
+          {accepting ? <Loader2 className="size-3 animate-spin" aria-hidden /> : <CheckCheck className="size-3" aria-hidden />}
+          {accepting ?? "Accept all as in demo"}
+        </Button>
+      ) : null}
+      {acceptError ? (
+        <span role="alert" className="text-destructive">
+          {acceptError}
+        </span>
+      ) : null}
+      {/* The seven input documents, to upload during the demo or hand to the client (KAN-139). */}
+      <a
+        href="/api/demo/files"
+        download
+        className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-foreground underline-offset-2 hover:underline"
+      >
+        <Download className="size-3" aria-hidden />
+        Download demo files
+      </a>
       {owner ? (
         <Dialog
           open={open}
@@ -56,7 +108,7 @@ export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["curr
             if (!next) setError(null);
           }}
         >
-          <Button type="button" size="xs" variant="outline" className="ml-auto" onClick={() => setOpen(true)}>
+          <Button type="button" size="xs" variant="outline" onClick={() => setOpen(true)}>
             <RotateCcw className="size-3" aria-hidden />
             Reset demo
           </Button>
@@ -64,8 +116,9 @@ export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["curr
             <DialogHeader>
               <DialogTitle>Reset the demo?</DialogTitle>
               <DialogDescription>
-                Everything changed in {workspace.name} since the demo was loaded is deleted, including saved plan versions,
-                and the clean Velmara demo is put back. Use it before each client demo.
+                {workspace.demo_mode
+                  ? `Everything in ${workspace.name} is deleted, including uploads and saved plan versions, and the demo restarts at upload with setup done. Use it before each client demo.`
+                  : `Everything changed in ${workspace.name} since the demo was loaded is deleted, including saved plan versions, and the clean Velmara demo is put back. Use it before each client demo.`}
               </DialogDescription>
             </DialogHeader>
             {error ? (

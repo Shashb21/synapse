@@ -6,6 +6,8 @@ import { nowIso } from "./ids";
 import { STAGES, STAGE_IDS, type JsonCompletion, type ResolvedRoute, type RunHandle, type StageId } from "./contracts";
 import { extractJsonObject } from "@/lib/llm/anthropic";
 import { tracedCompletion } from "./llm-calls";
+import { replaysDemo } from "@/lib/demo/mode";
+import { DEMO_REPLAY_PROVIDER, isDemoReplayProvider } from "@/lib/demo/replay-provider";
 import { missingKeyReason, providerApiKey, providerConfigured } from "@/modules/llm/api-keys";
 import {
   DEFAULT_ROUTE_FALLBACKS,
@@ -194,6 +196,21 @@ const KEY_PROMPT =
  */
 export async function resolveRoute(stage: StageId, frozenConfig?: RouteConfig): Promise<ResolvedRoute> {
   const config = frozenConfig ?? await routeConfig(stage);
+  // A client-demo workspace answers from the recorded run, whatever the routing says (KAN-138).
+  if (await replaysDemo()) {
+    return {
+      stage,
+      provider_id: DEMO_REPLAY_PROVIDER.id,
+      provider_label: DEMO_REPLAY_PROVIDER.label,
+      model: DEMO_REPLAY_PROVIDER.default_model,
+      auth: "api_key",
+      connected: true,
+      params: config.params,
+      fallbacks: [],
+      degraded: false,
+      reason: null,
+    };
+  }
   const candidates = scrubFallbacks([config.provider_id, ...config.fallbacks]);
   const reasons: string[] = [];
   for (const [index, id] of candidates.entries()) {
@@ -268,9 +285,10 @@ export function completionFor(route: ResolvedRoute, run: RunHandle): JsonComplet
     if (!canPrompt(route)) {
       throw new NoRouteError(`${route.provider_label} cannot serve ${purpose}. ${KEY_PROMPT}`);
     }
-    const provider = findProvider(route.provider_id)!;
+    const replay = isDemoReplayProvider(route.provider_id);
+    const provider = replay ? DEMO_REPLAY_PROVIDER : findProvider(route.provider_id)!;
     // Read at call time and handed straight to the provider; never logged or traced.
-    const api_key = providerApiKey(route.provider_id);
+    const api_key = replay ? DEMO_REPLAY_PROVIDER.id : providerApiKey(route.provider_id);
     if (!api_key) throw new NoRouteError(`${missingKeyReason(provider)}. ${KEY_PROMPT}`);
     let invalid: string | null = null;
     for (let attempt = 1; attempt <= JSON_REPLY_ATTEMPTS; attempt += 1) {

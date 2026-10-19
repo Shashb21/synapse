@@ -88,3 +88,17 @@ export function buildDemoSetupWorkspace(): IegpState {
   );
   return { ...state, objectives: seed.objectives.map((objective) => ({ ...objective })) };
 }
+
+/**
+ * The client demo's starting point (KAN-138): the Velmara asset, objectives and
+ * planning context with setup done, and no sources, gaps or tactics, so the
+ * presenter starts the walkthrough at upload.
+ */
+export function buildClientDemoWorkspace(): IegpState {
+  const seed = buildSeed();
+  const state = emptyState(
+    { ...seed.asset, wizard_complete: false, tactics_unlocked: false, setup_complete: true },
+    "Client demo (Velmara): setup done, ready to upload the demo files.",
+  );
+  return { ...state, objectives: seed.objectives.map((objective) => ({ ...objective })) };
+}

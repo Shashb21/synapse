@@ -1,7 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { currentSchemaName, db, ensureSchema, inWorkspaceTransaction, wipeIegp, withWorkspaceTransaction } from "./db";
 import * as t from "./schema";
-import { buildBlankWorkspace, buildDemoSetupWorkspace } from "./blank";
+import { buildBlankWorkspace, buildClientDemoWorkspace, buildDemoSetupWorkspace } from "./blank";
 import { buildSeed } from "./seed";
 import { WORKSPACE_RESET_ACTION } from "./gap-history";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
@@ -200,17 +200,17 @@ function readSnapshot(): Promise<IegpState> {
 }
 
 /**
- * Gives every gap without one a number (KAN-56): GAP-007 style ids keep their own digits
- * where free, the rest follow in the order they were created. Numbers are never reused.
+ * Gives every gap without one a number (KAN-56), in the order they were created.
+ * Numbers are never reused within a plan; a reset starts them at 001 again. Ids
+ * are never reissued (KAN-15), so a gap's number does not follow its id's digits:
+ * after a reset GAP-051 is plan gap 001 (KAN-149).
  */
 async function numberGaps(state: IegpState): Promise<IegpState> {
   const taken = new Set(state.gaps.map((gap) => gap.number).filter((n): n is number => Boolean(n)));
   const floor = Math.max(0, ...taken) + 1;
   for (const gap of state.gaps) {
     if (gap.number) continue;
-    const own = /^GAP-(\d+)$/.exec(gap.id);
-    const wanted = own ? Number(own[1]) : null;
-    const number = wanted && !taken.has(wanted) ? wanted : await allocateNumber("gap_number", floor);
+    const number = await allocateNumber("gap_number", floor);
     taken.add(number);
     await db().update(t.gaps).set({ number }).where(eq(t.gaps.id, gap.id));
     gap.number = number;
@@ -465,11 +465,12 @@ export async function persistState(state: IegpState) {
  * - `demo_setup`: the Velmara demo's asset and objectives only, setup not done
  *   (what the stage tests start from).
  */
-export type WorkspaceContents = "blank" | "demo" | "demo_setup";
+export type WorkspaceContents = "blank" | "demo" | "demo_setup" | "client_demo";
 
 export function buildWorkspaceContents(contents: WorkspaceContents): IegpState {
   if (contents === "demo") return buildSeed();
   if (contents === "demo_setup") return buildDemoSetupWorkspace();
+  if (contents === "client_demo") return buildClientDemoWorkspace();
   return buildBlankWorkspace();
 }
 
@@ -488,7 +489,13 @@ export async function replaceWorkspaceContents(
     "plan",
     state.asset.id,
     WORKSPACE_RESET_ACTION,
-    contents === "blank" ? "Reset the workspace to blank." : contents === "demo" ? "Loaded the demo data." : "Loaded the demo setup.",
+    contents === "blank"
+      ? "Reset the workspace to blank."
+      : contents === "demo"
+        ? "Loaded the demo data."
+        : contents === "client_demo"
+          ? "Reset the client demo."
+          : "Loaded the demo setup.",
   );
   return loadState();
 }

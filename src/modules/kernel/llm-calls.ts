@@ -6,6 +6,8 @@ import { redactSecrets } from "@/modules/llm/provider-error";
 import { PROVIDERS, type LlmProvider, type LlmRequest, type LlmUsage } from "@/modules/llm/provider";
 import type { RunHandle } from "./contracts";
 import { providerApiKey } from "@/modules/llm/api-keys";
+import { isDemoReplayProvider } from "@/lib/demo/replay-provider";
+import { replayDelayMs, replayReply } from "@/lib/demo/replay";
 
 /**
  * Every model call, kept whole (KAN-91): the prompts (secrets redacted), the
@@ -227,7 +229,13 @@ export async function tracedCompletion(args: {
       };
       let text: string;
       try {
-        text = await args.provider.complete(args.request, { api_key: args.api_key }, { onUsage: (reported) => (usage = reported) });
+        if (isDemoReplayProvider(args.provider.id)) {
+          // Client demo (KAN-138): the recorded run's answer, after a short "thinking" pause. No model is called.
+          await new Promise((resolve) => setTimeout(resolve, replayDelayMs()));
+          text = replayReply({ stage: args.stage, purpose: args.purpose, system: args.request.system, user: args.request.user });
+        } else {
+          text = await args.provider.complete(args.request, { api_key: args.api_key }, { onUsage: (reported) => (usage = reported) });
+        }
       } catch (error) {
         const id = await record(null, error instanceof Error ? error.message : String(error));
         // The trace step names the failed call too (observability.ts reads this).

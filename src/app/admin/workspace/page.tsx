@@ -35,12 +35,13 @@ export default async function AdminWorkspacePage({ searchParams }: { searchParam
         </Link>
       </p>
       <AdminWorkspacePicker
-        workspaces={workspaces.map(({ id, name, created_by, created_at, demo, member_count }) => ({
+        workspaces={workspaces.map(({ id, name, created_by, created_at, demo, demo_mode, member_count }) => ({
           id,
           name,
           created_by,
           created_at,
           demo,
+          demo_mode,
           member_count,
         }))}
         currentId={current.id}

@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { isDemoModeWorkspace } from "@/lib/demo/mode";
+import { clientDemoFileFor, DEMO_UPLOAD_REFUSED } from "@/lib/demo/client-files";
 import { desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
@@ -185,6 +187,23 @@ export const uploadModule: SynapseModule<UploadInput, UploadOutput> = {
         };
       }),
     ];
+    // Client demo mode (KAN-138) runs on the seven demo documents only: anything else is
+    // refused before it is stored, and a matching upload takes the document's own details.
+    if (await isDemoModeWorkspace(ctx.workspace_id)) {
+      for (const [index, file] of requested.entries()) {
+        const text = file.content_base64 ? Buffer.from(file.content_base64, "base64").toString("utf8") : (file.text ?? "");
+        const match = clientDemoFileFor(text);
+        if (!match) throw new Error(DEMO_UPLOAD_REFUSED(file.filename));
+        requested[index] = {
+          filename: match.filename,
+          title: match.title,
+          source_type: match.source_type,
+          stakeholder_function: match.stakeholder_function,
+          text: match.text,
+          mime: "text/plain",
+        };
+      }
+    }
     const accepted: UploadOutput["files"] = [];
     const skipped: UploadOutput["skipped"] = [];
 

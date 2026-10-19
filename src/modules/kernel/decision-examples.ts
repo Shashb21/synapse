@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { isDemoModeWorkspace } from "@/lib/demo/mode";
 import { sql } from "drizzle-orm";
 import { DEFAULT_SCHEMA, DEFAULT_WORKSPACE_ID, runInWorkspace, scopedWorkspaceId } from "@/modules/workspaces/context";
 import type { Actor, JsonCompletion, StageId } from "./contracts";
@@ -149,6 +150,8 @@ export async function recordDecisionExample(draft: DecisionExampleDraft): Promis
   try {
     await ensureTable();
     const workspace_id = draft.workspace_id ?? (await scopedWorkspaceId()) ?? "default";
+    // Scripted client demos (KAN-138) teach nothing: no example, and no lesson call.
+    if (await isDemoModeWorkspace(workspace_id)) return null;
     const run = draft.run_id ? await originatingRun(workspace_id, draft.run_id, draft.stage) : null;
     if (draft.require_originating_run && (!run || run.status !== "ok")) {
       console.warn("[learning] decision omitted: originating AI run unavailable", draft.kind, draft.subject_id);

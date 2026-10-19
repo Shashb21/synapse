@@ -1,0 +1,96 @@
+FICTIONAL DEMONSTRATION DOCUMENT. Velmara (velmaratinib) and NX-441 are invented products. Data sources are described generically and are not real named databases.
+
+VELMARA (velmaratinib) — REAL-WORLD EVIDENCE STRATEGY 2026 TO 2028
+Second-line EGFR-mutant NSCLC
+Version 1.3, August 2026
+Owner: Real-World Evidence and Epidemiology, Global HEOR
+Status: Draft for the integrated evidence planning workshop
+
+1. STRATEGIC CONTEXT
+
+Velmara will launch into a market where payers and HTA bodies have little routine-practice evidence on post-osimertinib treatment. Our RWE strategy aims to (a) complement VEL-301 with evidence that the trial cannot provide, (b) feed the value models before key decisions, and (c) build a durable real-world evidence base for the first three years after launch.
+
+Key decisions this strategy must support:
+- CEA and budget-impact model input freeze: 30 November 2026.
+- US national payer P&T reviews and Aetna and UHC formulary decisions: from 1 December 2026.
+- HTA elderly subgroup package: 15 January 2027.
+- EU5 HTA filings: by 31 March 2027.
+- Medical sequencing narrative: 1 June 2027.
+
+2. CURRENT PORTFOLIO (ONGOING OR APPROVED)
+
+2.1 Retrospective chart review in patients aged 65 and over (EU5)
+Status: ongoing in two centres (one in Germany, one in Italy), started in March 2026.
+Design: single-arm, retrospective review of patients aged 65 and over treated with velmaratinib through the early-access programme.
+Sample: target 120 patients; 74 abstracted to date.
+Outcomes: real-world PFS, time to treatment discontinuation, adverse events.
+Limitation: there is no comparator arm. HTA advisers have said it does not answer the comparative question against regional standard of care. Options to add an external comparator are being explored (see section 4).
+Expected completion: November 2026.
+
+2.2 US claims persistence study
+Status: protocol approved in July 2026.
+Design: retrospective cohort in a US administrative claims database covering commercial and Medicare Advantage lives.
+Outcomes: six-month persistence, time to discontinuation, discontinuation reasons where inferable, adherence (proportion of days covered).
+Timing: first read-out six months after launch. A pre-launch analogue analysis (osimertinib and NX-441) is available from October 2026.
+Purpose: answer US payer questions on six-month discontinuation and persistence in routine care.
+
+2.3 Natural-history study of recurrence
+Status: protocol in development.
+Design: retrospective cohort in a US oncology electronic health record (EHR) database with linked claims.
+Population: patients with EGFR-mutant advanced NSCLC progressing on osimertinib (pre-Velmara era).
+Outcomes: clinical course after recurrence (progression patterns, new brain metastases, subsequent therapies, overall survival).
+Purpose: characterise the natural-history clinical burden of recurrence, distinct from cost.
+Timing: results expected in Q1 2027.
+
+2.4 HCRU study after recurrence
+Status: concept approved; protocol to be written.
+Design: same EHR-claims linked data as 2.3.
+Outcomes: hospitalisations, emergency department visits, outpatient visits, imaging, repeat biopsies, radiotherapy for brain lesions, and per-procedure direct costs.
+Purpose: provide routine-practice inputs for the economic burden of recurrence in the cost-effectiveness model.
+Timing: target results before the 30 November 2026 model freeze. This timeline is at risk: protocol approval and data access must happen by mid-September.
+
+2.5 Prospective Velmara registry
+Status: planned. Feasibility done with 14 sites in the US and EU.
+Design: prospective, multinational, observational registry of patients starting Velmara in routine care.
+Target size: 800 patients over three years.
+Outcomes: treatment patterns and sequencing, real-world effectiveness, survival, hospitalisations, safety (including ILD and QT), and PROs (EORTC QLQ-C30, LC13 and EQ-5D-5L).
+Important: the registry has no internal comparator and must not be presented as a standard-of-care comparison.
+First patient in: Q2 2027.
+
+3. MODELLING ACTIVITIES (HEOR)
+
+3.1 Cost-effectiveness model versus osimertinib
+Status: model structure agreed (partitioned survival, three health states). Inputs from VEL-301 are pending. Post-progression costs currently rely on assumptions, so the HCRU study (2.4) is critical.
+Deliverable: country adaptations for England, Germany and France by February 2027.
+
+3.2 Budget-impact model with IRA scenario
+Status: in development.
+Design: US payer perspective, three-year horizon. It includes list price and IRA negotiated-price scenarios for the class as a structural feature.
+Deliverable: ready for P&T dossiers by December 2026.
+
+4. GAPS NOT YET COVERED BY THE PORTFOLIO
+
+4.1 Comparative effectiveness in elderly patients
+Neither the VEL-301 elderly subgroup nor the EU5 chart review provides a comparison against regional standard of care. Options under evaluation:
+(a) Add an external comparator arm to the chart review, drawn from the same centres' historical patients treated with chemotherapy or best supportive care, with propensity score methods.
+(b) A new multi-country retrospective comparative study in patients aged 65 and over.
+(c) An indirect treatment comparison using published elderly data. This is likely to be weak given the sparse literature.
+Recommendation: option (a) is the fastest route for the HTA elderly package; option (b) is better for durable evidence.
+
+4.2 Real-world sequencing after osimertinib
+No activity yet. The registry will capture sequencing from 2027, but medical needs an earlier view. Proposal: a sequencing analysis within the US EHR database (2.3) once enough patients have received NX-441 or Velmara after osimertinib.
+
+4.3 PROs in frail patients and caregiver burden
+The registry includes PROs, but frail patients may be under-enrolled. No caregiver evidence is planned. Proposal: a cross-sectional patient and caregiver survey.
+
+4.4 Real-world ILD and QT
+The PASS is in the risk management plan. Its design should include community oncology sites. To be coordinated with Pharmacovigilance.
+
+5. GOVERNANCE AND RISKS
+
+- All protocols go through the RWE review board and, where required, independent ethics review.
+- Data access agreements for the EHR-claims linked database are on the critical path.
+- Risk: the HCRU study may miss the 30 November 2026 model freeze. Mitigation: use a pre-specified interim extract.
+- Risk: the elderly external comparator may be criticised for residual confounding. Mitigation: pre-registered protocol, sensitivity analyses, and early HTA scientific advice.
+
+END OF DOCUMENT

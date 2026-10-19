@@ -1,0 +1,98 @@
+FICTIONAL DEMONSTRATION DOCUMENT. Velmara (velmaratinib) and NX-441 are invented products. Study identifiers below (TLR-01 and so on) refer to fictional publications and are not real references.
+
+VELMARA (velmaratinib) — TARGETED LITERATURE REVIEW
+Evidence landscape in EGFR-mutant advanced NSCLC after osimertinib
+Version 2.1, August 2026
+Prepared by: Evidence Synthesis team, Global HEOR
+
+1. OBJECTIVES
+
+This targeted literature review (TLR) summarises published evidence relevant to the Velmara evidence plan, with focus on:
+(a) clinical outcomes after progression on osimertinib;
+(b) outcomes in patients aged 65 and over, and in frail patients;
+(c) intracranial efficacy in patients with brain metastases;
+(d) healthcare resource utilisation (HCRU) and costs after recurrence;
+(e) real-world treatment patterns and sequencing;
+(f) patient-reported outcomes (PROs), quality of life and caregiver burden;
+(g) safety of EGFR tyrosine kinase inhibitors (TKIs) in routine care, specifically interstitial lung disease (ILD) and QT prolongation.
+
+2. METHODS
+
+Sources: MEDLINE and Embase (via a standard bibliographic platform), the Cochrane Library, and abstracts from major oncology and thoracic congresses from 2022 to 2026.
+Search period: January 2018 to June 2026.
+Eligibility: adults with EGFR-mutant advanced or metastatic NSCLC; English-language publications; randomised trials, prospective and retrospective observational studies, economic evaluations and systematic reviews.
+Screening: one reviewer screened titles and abstracts; a second reviewer checked a 20 percent random sample. This is a targeted, not a systematic, review, and it may miss relevant studies.
+
+Results of the search: 1,412 records identified; 1,108 after de-duplication; 164 full texts reviewed; 58 publications included.
+
+3. SUMMARY OF FINDINGS BY THEME
+
+3.1 Clinical outcomes after progression on osimertinib
+
+Eleven publications reported outcomes after osimertinib progression. Most were single-arm or retrospective. Median PFS with subsequent platinum-based chemotherapy ranged from 4.2 to 6.1 months (TLR-03, TLR-07, TLR-11). Two small trials of next-generation agents reported preliminary activity (TLR-14, TLR-15).
+Gap: no randomised evidence compares a next-generation EGFR TKI with osimertinib re-challenge or investigator's choice in this setting. VEL-301 is designed to answer this.
+
+3.2 Patients aged 65 and over, and frail patients
+
+Nine publications reported outcomes by age. In pivotal TKI trials, patients aged 65 and over made up 30 to 45 percent of participants, but patients aged 75 and over were fewer than 10 percent (TLR-18, TLR-19). One retrospective single-arm chart review in patients aged 65 and over is ongoing in two EU5 centres; interim descriptive results were presented as an abstract (TLR-22) with no comparator arm.
+No study compared an EGFR TKI with regional standard of care (chemotherapy or best supportive care) in elderly patients using adjusted comparative methods.
+Frail patients: only one study (TLR-24, n=61) reported outcomes by a validated frailty score.
+Gap: comparative effectiveness versus regional standard of care in elderly and frail patients is not established. A single-arm chart review does not close this gap.
+
+3.3 Intracranial efficacy in brain metastases
+
+Thirteen publications reported intracranial outcomes for EGFR TKIs. Intracranial objective response rates ranged from 40 to 77 percent in first-line settings (TLR-26 to TLR-31), but data after osimertinib progression were sparse (three studies, total n=94). Duration of intracranial response was reported in only two studies.
+Gap: limited evidence on CNS response and especially duration of intracranial response after osimertinib progression.
+
+3.4 HCRU and costs after recurrence
+
+Seven publications reported HCRU or costs. Most predate third-generation TKIs or were modelled rather than observed. One US claims analysis (TLR-36) reported mean monthly all-cause costs after progression on first-generation TKIs but did not break costs down by procedure. No study reported emergency department use or outpatient burden after recurrence on a third-generation TKI.
+Gap: the economic burden of recurrence, including direct costs of repeat procedures (imaging, biopsy, radiotherapy for new brain lesions), hospitalisations, ED use and outpatient burden, is not characterised for current practice.
+
+3.5 Real-world treatment patterns and sequencing
+
+Five publications described treatment patterns after osimertinib, all from before newer agents were available (TLR-40 to TLR-44). Up to 30 percent of patients received no further systemic therapy.
+Gap: no real-world evidence on sequencing between newer agents (for example Velmara and NX-441) and chemotherapy after osimertinib, or on outcomes by sequence.
+
+3.6 PROs, quality of life and caregiver burden
+
+Six trials reported EORTC QLQ-C30 or LC13 outcomes, all in mixed-age trial populations (TLR-46 to TLR-51). One qualitative study described caregiver experience in advanced lung cancer generally (TLR-52); none was specific to EGFR TKIs.
+Gap: PROs and quality of life in routine care, especially in frail patients, and caregiver burden are essentially unstudied for this class.
+
+3.7 Safety in routine care: ILD and QT
+
+Seven publications reported real-world safety. ILD incidence with EGFR TKIs in observational studies ranged from 1.2 to 4.8 percent, higher in some Asian cohorts (TLR-53 to TLR-56). QT prolongation was rarely reported outside trials. No study specifically examined community oncology settings, where monitoring practices differ.
+Gap: ILD and QT incidence and management in routine care, including outside academic centres, are not well characterised.
+
+3.8 Long-term overall survival
+
+Overall survival data for agents after osimertinib are immature in all identified trials (TLR-57, TLR-58).
+Gap: long-term overall survival beyond primary PFS analyses is not yet available. This is expected and should be addressed by long-term follow-up.
+
+4. EVIDENCE TABLE (ABBREVIATED)
+
+Study | Design | Population | n | Key outcomes | Relevance
+TLR-03 | Retrospective cohort | Post-osimertinib, chemotherapy | 212 | Median PFS 5.3 months | Comparator context
+TLR-14 | Phase II single-arm | Post-osimertinib, novel TKI | 88 | ORR 31 percent | Class activity
+TLR-18 | Pooled trial analysis | Age 65 and over subgroup | 640 | PFS hazard ratio similar to overall | Elderly, descriptive only
+TLR-22 | Single-arm chart review (abstract) | Age 65 and over, EU5 | 74 | Descriptive outcomes, no comparator | Elderly, does not close comparative gap
+TLR-24 | Prospective cohort | Frail patients | 61 | Higher discontinuation | Frailty signal
+TLR-29 | Phase II | Brain metastases, first line | 41 | Intracranial ORR 66 percent | CNS, first line only
+TLR-36 | US claims | Post-progression, first-generation TKI | 1,930 | Mean monthly cost; no procedure breakdown | HCRU, outdated
+TLR-42 | Registry | Post-osimertinib treatment patterns | 506 | 30 percent no further therapy | Sequencing, pre-dates newer agents
+TLR-55 | Observational | Real-world ILD | 3,204 | ILD 2.9 percent | Safety, academic centres only
+
+5. CONCLUSIONS AND IMPLICATIONS
+
+The TLR confirms the evidence gaps raised in stakeholder interviews and the advisory board:
+1. Comparative effectiveness versus regional standard of care in elderly patients: not established.
+2. Economic burden and HCRU after recurrence: not characterised for current practice.
+3. Intracranial duration of response after osimertinib progression: sparse.
+4. Real-world sequencing after osimertinib including newer agents: absent.
+5. PROs in frail patients and caregiver burden: essentially absent.
+6. ILD and QT in routine care including community settings: limited.
+7. Long-term OS: immature (expected).
+
+The review also notes that the pivotal comparison of PFS versus osimertinib in the second-line setting is addressed by the ongoing VEL-301 trial and does not need a separate evidence-generation activity.
+
+END OF DOCUMENT
