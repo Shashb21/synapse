@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import recordingFile from "./recording.json";
 
 /**
@@ -12,9 +13,10 @@ import recordingFile from "./recording.json";
 export type RecordedCall = {
   stage: string | null;
   purpose: string;
-  /** The prompt with ids replaced by placeholders, for matching. */
-  user_norm: string;
-  system_norm: string;
+  /** Fingerprint of the prompt with ids replaced by placeholders: an exact match. */
+  user_hash: string;
+  /** The prompt's distinct words, for the closest match when nothing is exact. */
+  user_words: string;
   /** Distinct ids in the recorded prompt (system then user), in order of first appearance. */
   ids: string[];
   reply: string;
@@ -22,7 +24,7 @@ export type RecordedCall = {
 
 export type Recording = { recorded_at: string | null; calls: RecordedCall[] };
 
-const RECORDING = recordingFile as Recording;
+const RECORDING = recordingFile as unknown as Recording;
 
 /**
  * Ids the app mints: `GAP-001` style (allocateId) and `DOC_20261016T120000_0001_ab12`
@@ -51,15 +53,22 @@ function words(text: string): Set<string> {
   return new Set(text.toLowerCase().split(/[^a-z0-9⟨⟩]+/).filter((w) => w.length > 2));
 }
 
-/** Word-set overlap of two prompts, 0 to 1 (1: the same words). */
-export function similarity(a: string, b: string): number {
-  if (a === b) return 1;
-  const left = words(a);
-  const right = words(b);
+/** A normalized prompt's fingerprint and distinct words, as the recording keeps them. */
+export function promptSignature(normalized: string): { user_hash: string; user_words: string } {
+  return { user_hash: createHash("sha256").update(normalized).digest("hex").slice(0, 32), user_words: [...words(normalized)].join(" ") };
+}
+
+function overlap(left: Set<string>, right: Set<string>): number {
   if (!left.size || !right.size) return 0;
   let shared = 0;
   for (const word of left) if (right.has(word)) shared += 1;
   return (2 * shared) / (left.size + right.size);
+}
+
+/** Word-set overlap of two prompts, 0 to 1 (1: the same words). */
+export function similarity(a: string, b: string): number {
+  if (a === b) return 1;
+  return overlap(words(a), words(b));
 }
 
 /**
@@ -105,10 +114,12 @@ export function findRecordedCall(
   const candidates = recording.calls.filter((c) => c.stage === call.stage && purposeKey(c.purpose) === key);
   if (!candidates.length) return null;
   const user = normalizePrompt(call.user);
+  const { user_hash } = promptSignature(user);
+  const mine = words(user);
   let best = candidates[0]!;
   let bestScore = -1;
   for (const candidate of candidates) {
-    const score = candidate.user_norm === user ? 2 : similarity(candidate.user_norm, user);
+    const score = candidate.user_hash === user_hash ? 2 : overlap(new Set(candidate.user_words.split(" ")), mine);
     if (score > bestScore) {
       best = candidate;
       bestScore = score;
@@ -133,8 +144,7 @@ export function recordedCallFrom(row: { stage: string | null; purpose: string; s
   return {
     stage: row.stage,
     purpose: row.purpose,
-    user_norm: normalizePrompt(row.user_prompt),
-    system_norm: normalizePrompt(row.system_prompt),
+    ...promptSignature(normalizePrompt(row.user_prompt)),
     ids: idsIn(`${row.system_prompt}\n${row.user_prompt}`),
     reply: row.reply,
   };

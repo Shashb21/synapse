@@ -8,8 +8,8 @@ vi.mock("@/lib/demo/recording.json", () => ({
       {
         stage: "S8",
         purpose: "priority-suggester",
-        system_norm: "You suggest priority bands.",
-        user_norm: "Gaps: ⟨GAP⟩ economic burden.",
+        user_hash: "not-a-match",
+        user_words: "gaps ⟨gap⟩ economic burden",
         ids: ["GAP-001"],
         reply: '{"placements":[{"gap_id":"GAP-001","band":"high"}]}',
       },
