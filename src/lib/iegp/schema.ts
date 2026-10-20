@@ -30,6 +30,7 @@ export const objectives = pgTable("objectives", {
   strategic_importance: integer("strategic_importance").notNull(),
   key_decision: text("key_decision").notNull(),
   decision_date: text("decision_date").notNull(),
+  evidence_needed_by: text("evidence_needed_by"),
   owner: text("owner").notNull(),
 });
 
@@ -41,6 +42,20 @@ export const sources = pgTable("sources", {
   stakeholder_function: text("stakeholder_function").notNull(),
   ingested_at: text("ingested_at").notNull(),
   full_text: text("full_text").notNull(),
+});
+
+/** Citations survive changes to the original source and keep immutable human decisions. */
+export const sourceReviews = pgTable("source_reviews", {
+  id: text("id").primaryKey(),
+  version: text("version").notNull(),
+  record: jsonb("record").$type<import("./types").SourceReview>().notNull(),
+});
+
+/** Per-source comparison checkpoint; independent of document parsing. */
+export const sourceComparisons = pgTable("source_comparisons", {
+  source_id: text("source_id").primaryKey(),
+  version: text("version").notNull(),
+  record: jsonb("record").$type<import("../ingest/comparison-types").SourceComparison>().notNull(),
 });
 
 export const sourceBlocks = pgTable("source_blocks", {
@@ -66,6 +81,8 @@ export const needs = pgTable("needs", {
   timing: text("timing").notNull(),
   source_id: text("source_id").notNull(),
   source_quote: text("source_quote").notNull(),
+  /** Original cited block text retained through structural edits for legacy unquoted needs. */
+  source_basis_text: text("source_basis_text"),
   /** Null until a model or a human scores it; never a placeholder. */
   confidence: real("confidence"),
   status: text("status").notNull(),
@@ -77,11 +94,13 @@ export const needs = pgTable("needs", {
 });
 
 export const gaps = pgTable("gaps", {
+  requirement_basis: jsonb("requirement_basis").$type<import("./types").RequirementBasis>(),
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   statement: text("statement").notNull(),
   domain: text("domain").notNull(),
   objective_id: text("objective_id").notNull(),
+  priority_context_version: text("priority_context_version"),
   status: text("status").notNull(),
   exclusion_reason: text("exclusion_reason"),
   exclusion_note: text("exclusion_note"),
@@ -220,6 +239,12 @@ export const tacticExpansions = pgTable("tactic_expansions", {
 });
 
 export const coverages = pgTable("coverages", {
+  assessment_origin: text("assessment_origin").$type<"human" | "ai" | "workflow">(),
+  assessed_basis: jsonb("assessed_basis").$type<{ requirements: string; design: string }>(),
+  stale_reasons: jsonb("stale_reasons").$type<string[]>().notNull().default([]),
+  assessment_history: jsonb("assessment_history").$type<import("./types").AssessmentHistoryEntry[]>().notNull().default([]),
+  confirmed_requirement_basis: jsonb("confirmed_requirement_basis").$type<import("./types").RequirementBasis>(),
+  review_version: text("review_version"),
   expansion_id: text("expansion_id"),
   id: text("id").primaryKey(),
   gap_id: text("gap_id").notNull(),
@@ -230,6 +255,13 @@ export const coverages = pgTable("coverages", {
   overall_lock: jsonb("overall_lock").notNull(),
   stale: boolean("stale").notNull().default(false),
   needs_review: boolean("needs_review").notNull().default(false),
+});
+
+/** Successful explicit library requests survive relationship removal for safe network retries. */
+export const libraryLinkRequests = pgTable("library_link_requests", {
+  request_id: text("request_id").primaryKey(),
+  payload: text("payload").notNull(),
+  coverage_id: text("coverage_id").notNull(),
 });
 
 export const mappingSuggestions = pgTable(

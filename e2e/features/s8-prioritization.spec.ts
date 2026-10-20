@@ -74,10 +74,10 @@ test.describe("S8 prioritization matrix", () => {
     await expect(page.getByRole("heading", { name: /^prioritization matrix$/i })).toBeVisible();
     const matrix = page.getByRole("group", { name: /^Prioritization matrix: / });
     await expect(matrix).toBeVisible();
-    await expect(page.getByText(new RegExp(`^0 of ${open.length} Open gaps with validated priority across all settings$`))).toBeVisible();
-    await expect(page.getByText(/A dashed edge means the band is not validated yet/)).toBeVisible();
+    await expect(page.getByText(new RegExp(`\\b0 of ${open.length} Open gaps? with priority confirmed`))).toBeVisible();
+    await expect(page.getByText(/A dashed edge means the priority is not confirmed yet/)).toBeVisible();
     // Each gap is a card on the plot, with its suggested band and not yet validated.
-    const cards = matrix.getByRole("button", { name: /: (High|Medium|Low), not validated\. Arrow keys move it\.$/ });
+    const cards = matrix.getByRole("button", { name: /: (High|Medium|Low), priority not confirmed\. Arrow keys move it\.$/ });
     await expect(cards).toHaveCount(open.length);
   });
 
@@ -157,8 +157,8 @@ test.describe("S8 prioritization matrix", () => {
 
     await page.goto("/?place=plan&setting=all");
     const matrix = page.getByRole("group", { name: /^Prioritization matrix: / });
-    await expect(matrix.getByRole("button", { name: /: High, validated\. Arrow keys move it\.$/ })).toHaveCount(1);
-    await expect(page.getByText(/^1 of \d+ Open gaps with validated priority across all settings$/)).toBeVisible();
+    await expect(matrix.getByRole("button", { name: /: High, priority confirmed\. Arrow keys move it\.$/ })).toHaveCount(1);
+    await expect(page.getByText(/\b1 of \d+ Open gaps? with priority confirmed/).first()).toBeVisible();
   });
 
   test("a re-run keeps the validated band and the suggestion the human judged", async ({ request }) => {
@@ -184,5 +184,102 @@ test.describe("S8 prioritization matrix", () => {
     expect(names).toContain("axis_scores_complete");
     expect(names).toContain("suggestions_explained");
     expect(body.metrics.find((metric) => metric.name === "axis_scores_complete")!.value).toBe(1);
+  });
+});
+
+
+test.describe("KAN-128 priority context and next actions", () => {
+  let knownGap = "";
+  let unknownGap = "";
+  freshWorkspace({
+    name: "priority context",
+    seed: async (request) => {
+      await controlAction(request, { action: "set_ai_enabled", enabled: false, rationale: "KAN-128 manual planning" });
+      const unknown = await iegpAction(request, {
+        action: "create_gap", name: "Unlinked evidence need", statement: "Caregiver burden evidence is missing.", domain: "unmet_need", settings: "2L",
+      });
+      unknownGap = String(unknown.id);
+      await iegpAction(request, { action: "save_product_setup", reason: "Record decision context", context: {
+        asset_name: "Context test", objectives: [{ name: "Support access", key_decision: "Submit the reimbursement dossier", decision_date: "2027-06-20" }],
+      } });
+      const known = await iegpAction(request, {
+        action: "create_gap", name: "Comparative persistence", statement: "Comparative persistence evidence is missing.", domain: "comparative_effectiveness", settings: "1L, 2L",
+      });
+      knownGap = String(known.id);
+      for (const gap_id of [knownGap, unknownGap]) await iegpAction(request, { action: "validate_gap", gap_id });
+      // Complete Gaps through its action before priority confirmation can unlock Tactics.
+      await iegpAction(request, { action: "complete_wizard" });
+      await planAction(request, { action: "save_scope_axes", scope: "all", x_axis: "decision_impact", y_axis: "time_pressure" });
+    },
+  });
+
+  test.afterAll(async ({ request }) => {
+    await controlAction(request, { action: "set_ai_enabled", enabled: true, rationale: "KAN-128 restore suite settings" });
+  });
+
+  test("manual priorities show decision context, unknowns and settings-wide next actions after refresh", async ({ page, request }) => {
+    await page.goto(`/gaps/${unknownGap}`);
+    for (const label of ["Objective", "Affected decision", "Evidence needed by", "Decision date"]) {
+      await expect(page.locator("dt").filter({ hasText: new RegExp(`^${label}$`) }).locator("..").locator("dd")).toHaveText("Unknown");
+    }
+    await expect(page.getByTestId("gap-priority").getByRole("link", { name: "Set priority", exact: true })).toBeVisible();
+    await expect(page.getByTestId("gap-confirmation")).toContainText("Evidence coverage review");
+
+    await page.goto("/?place=plan&setting=all");
+    await page.getByTestId("unplaced-gap").filter({ hasText: "Comparative persistence" }).click();
+    const detail = page.getByRole("dialog", { name: "Gap details", exact: true });
+    await expect(detail).toContainText("Evidence needed");
+    await expect(detail).toContainText("Comparative persistence evidence is missing.");
+    await expect(detail).toContainText("Support access");
+    await expect(detail).toContainText("Submit the reimbursement dossier");
+    await expect(detail).toContainText("2027-06-20");
+    await expect(detail.locator("dt").filter({ hasText: /^Evidence needed by$/ }).locator("..").locator("dd")).toHaveText("Unknown");
+    await expect(detail).toContainText("Priority applies across all settings");
+    const setPriority = detail.getByRole("button", { name: "Set priority", exact: true });
+    await setPriority.focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog").filter({ hasNot: page.getByRole("heading", { name: "Gap details", exact: true }) });
+    await expect(dialog).toBeVisible();
+    await dialog.locator('input[name="x_score"]').fill("82");
+    await dialog.locator('input[name="y_score"]').fill("76");
+    await dialog.locator('textarea[name="rationale"]').fill("Human placement for the dossier");
+    await dialog.getByLabel("Reason for change (required)").fill("Initial manual priority assessment");
+    await dialog.getByRole("button", { name: "Save placement", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await detail.getByRole("button", { name: "Review and confirm priority", exact: true }).click();
+    await dialog.getByLabel("Reason for change (required)").fill("Blocks reimbursement briefing papers");
+    await dialog.getByRole("button", { name: "Confirm priority", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(detail).toContainText("Priority confirmed");
+    await expect(detail.getByRole("link", { name: "Continue to tactics", exact: true })).toHaveCount(0);
+    await expect(detail.getByRole("link", { name: "Review remaining plan-wide priorities" })).toBeVisible();
+
+    await page.goto("/?place=plan&setting=1L");
+    await expect(page.getByTestId("prioritize-toolbar")).toContainText("In 1L: 1 of 1 priorities confirmed.");
+    await expect(page.getByTestId("prioritize-toolbar")).toContainText("1 remaining across the whole plan.");
+    const highRows = page.getByRole("region", { name: "High gaps", exact: true });
+    await expect(highRows).toContainText("High · Evidence needed by: Unknown");
+    await expect(highRows).toContainText("Priority confirmed");
+    await page.goto("/?place=plan&setting=2L");
+    await expect(page.getByRole("group", { name: /^Prioritization matrix:/ }).getByRole("button", { name: /^Comparative persistence: High, priority confirmed/ })).toBeVisible();
+
+    await planAction(request, { action: "set_placement", gap_id: unknownGap, band: "low", validate: true, rationale: "Unknown context does not prevent manual judgement" });
+    await iegpAction(request, { action: "unlock_tactics" });
+    // Newly unresolved Inventory work must not revoke access already unlocked.
+    await iegpAction(request, { action: "create_gap", name: "Later evidence need", domain: "unmet_need" });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`/gaps/${knownGap}`);
+    await page.reload();
+    const priority = page.getByTestId("gap-priority");
+    await expect(priority).toContainText("Priority confirmed");
+    await expect(priority).toContainText("82 / 100");
+    await expect(priority).toContainText("76 / 100");
+    await expect(priority).toContainText("Human placement for the dossier");
+    await expect(page.getByTestId("entity-history")).toContainText("Blocks reimbursement briefing papers");
+    await expect(priority.getByRole("link", { name: "Continue to tactics", exact: true })).toBeVisible();
+    await expect(page.locator("dt").filter({ hasText: /^Evidence needed by$/ }).locator("..").locator("dd")).toHaveText("Unknown");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    const retained = (await planState(request)).placements.find((row) => row.gap_id === knownGap)!;
+    expect(retained).toMatchObject({ validated: true, band: "high", axis_scores: { decision_impact: 82, time_pressure: 76 }, rationale: "Human placement for the dossier" });
   });
 });

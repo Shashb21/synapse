@@ -196,13 +196,15 @@ describe("Prioritization Matrix follows the refreshed placements", () => {
     expect(highCount()).toMatch(/2$/);
   });
 
-  it("shows Validated once the refreshed placement is validated", () => {
+  it("shows Priority confirmed once the refreshed placement is confirmed", () => {
     const placed = { axis_scores: { impact: 90, urgency: 90 }, band: "high" as const };
     render(matrix([gap("GAP-001", placed)]));
-    expect(container.textContent).toContain("Draft");
+    const highRows = () => container.querySelector('[aria-label="High gaps"]')?.textContent;
+    expect(highRows()).toContain("Review and confirm priority");
+    expect(highRows()).not.toContain("Priority confirmed");
     render(matrix([gap("GAP-001", { ...placed, validated: true, actor_name: "A. Rao" })]));
-    expect(container.textContent).not.toContain("Draft");
-    expect(container.textContent).toContain("Validated");
+    expect(highRows()).not.toContain("Review and confirm priority");
+    expect(highRows()).toContain("Priority confirmed");
   });
 });
 

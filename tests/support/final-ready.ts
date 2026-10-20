@@ -1,6 +1,10 @@
-import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
-import { loadState, lockGapStatus, rewritePartialGap, validateGap } from "@/lib/iegp/store";
-import type { ActorFunction } from "@/lib/iegp/enums";
+/** Positive final-plan fixtures complete the same explicit reviews as the application. */
+import { countingCoverages, displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
+import { loadState, lockCoverageDimension, lockCoverageOverall, lockGapStatus, reviewRequirementBasis, rewritePartialGap, validateGap } from "@/lib/iegp/store";
+import { COVERAGE_DIMENSIONS, type ActorFunction } from "@/lib/iegp/enums";
+import { getRequirementBasisReview } from "@/lib/iegp/requirement-basis";
+import { gapResolutionVersion } from "@/lib/iegp/relationship-version";
+import { priorityDecision } from "./priority-decision";
 import { listPlacements, validatePlacement } from "@/modules/stages/s8-prioritization/module";
 
 /**
@@ -13,9 +17,10 @@ export async function makeFinalReady(actor: { name: string; function: ActorFunct
   let state = await loadState();
   for (const gap of state.gaps.filter(isLiveGap)) {
     if (displayedGapStatus(gap) !== "validated_partial") continue;
-    const tacticIds = [...new Set(state.coverages.filter((c) => c.gap_id === gap.id).map((c) => c.expansion_id ?? c.tactic_id))];
-    await rewritePartialGap({
+    const tacticIds = [...new Set(countingCoverages(state.coverages.filter((c) => c.gap_id === gap.id), state.tactics, state.expansions).map((c) => c.expansion_id ?? c.tactic_id))];
+    const rewrittenGapId = await rewritePartialGap({
       gap_id: gap.id,
+      expected_resolution: gapResolutionVersion(await loadState(), gap.id),
       name: gap.name,
       status: tacticIds.length > 0 ? "validated_addressed" : "validated_open",
       tactic_ids: tacticIds.length > 0 ? tacticIds : undefined,
@@ -23,6 +28,39 @@ export async function makeFinalReady(actor: { name: string; function: ActorFunct
       actor_function: actor.function,
       note: "Resolved before the final plan",
     });
+    if (tacticIds.length > 0) {
+      // Rewriting proposes Full; this synthetic positive fixture then reviews it explicitly.
+      const rewritten = await loadState();
+      const coverage = countingCoverages(rewritten.coverages.filter(c => c.gap_id === rewrittenGapId), rewritten.tactics, rewritten.expansions)[0]!;
+      const review = getRequirementBasisReview(rewritten, rewrittenGapId, coverage);
+      const basis = await reviewRequirementBasis({
+        gap_id: rewrittenGapId, expected_version: review.version,
+        dimensions: Object.fromEntries(COVERAGE_DIMENSIONS.map(dimension => {
+          const requirement = review.basis.dimensions[dimension];
+          return [dimension, {
+            applicability: requirement.requirement.trim() ? "required" : "not_applicable",
+            requirement: requirement.requirement,
+            rationale: "Synthetic final-plan fixture: sourced requirements are required; unspecified dimensions are outside this fixture's decision",
+            resolution: requirement.conflicts.length ? "Fixture reviewer requires the combined sourced requirements" : "",
+          }];
+        })),
+        rationale: "Explicit requirement review for the positive final-plan fixture",
+        actor_name: actor.name, actor_function: actor.function,
+      });
+      for (const dimension of COVERAGE_DIMENSIONS) {
+        if (basis.dimensions[dimension].applicability !== "required") continue;
+        await lockCoverageDimension({
+          coverage_id: coverage.id, dimension, value: "yes",
+          rationale: "Synthetic positive fixture: planned design satisfies this sourced requirement",
+          actor_name: actor.name, actor_function: actor.function,
+        });
+      }
+      await lockCoverageOverall({
+        coverage_id: coverage.id, overall: "full",
+        rationale: "Explicit Full review after all required positive-fixture dimensions are satisfied",
+        actor_name: actor.name, actor_function: actor.function,
+      });
+    }
   }
   state = await loadState();
   for (const gap of state.gaps.filter(isLiveGap)) {
@@ -38,6 +76,6 @@ export async function makeFinalReady(actor: { name: string; function: ActorFunct
   const banded = new Set((await listPlacements()).filter((p) => p.validated && p.band).map((p) => p.gap_id));
   for (const gap of state.gaps.filter(isLiveGap)) {
     if (displayedGapStatus(gap) !== "validated_open" || banded.has(gap.id)) continue;
-    await validatePlacement({ gap_id: gap.id, band: "low", rationale: "Banded for the final plan", actor });
+    await validatePlacement({ ...await priorityDecision(gap.id, "Banded for the final plan"), gap_id: gap.id, band: "low", rationale: "Banded for the final plan", actor });
   }
 }

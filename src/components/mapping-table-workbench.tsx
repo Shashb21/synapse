@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { relationshipVersion } from "@/lib/iegp/relationship-version";
 import type { MappingTableViewRow } from "@/lib/iegp/mapping-table";
 import type { TacticLibraryItem } from "@/lib/iegp/engine";
 import { LockForm } from "@/components/lock-form";
@@ -175,8 +176,9 @@ function ProposalDecisions({ row }: { row: MappingTableViewRow }) {
           <p className="text-[10px] text-muted-foreground">{mapping.rationale}</p>
           <Link href={`/tactics/${mapping.parent_tactic_id}`} className="text-[12px] underline">Review expansion scope and coverage</Link>
         </li>;
+        const references = row.supporting_references?.[mapping.tactic_id] ?? [];
         const decision = row.decisions[mapping.tactic_id];
-        const pair = { gap_id: row.gap_id, tactic_id: mapping.tactic_id };
+        const pair = { gap_id: row.gap_id, tactic_id: mapping.tactic_id, expected_relationship: row.relationship_versions?.[mapping.tactic_id] ?? "" };
         return (
           <li key={mapping.tactic_id} className="border border-border/70 p-2">
             <p className="text-[11px] text-foreground">
@@ -184,6 +186,9 @@ function ProposalDecisions({ row }: { row: MappingTableViewRow }) {
               {mapping.coverage.replaceAll("_", " ")} ({mapping.confidence})
             </p>
             <p className="text-[10px] text-muted-foreground">{mapping.rationale}</p>
+            {references.length ? <details className="mt-1 text-[11px]"><summary>Inspect supporting references</summary><ul>{references.map((reference, index) => <li key={index}>
+              <Link href={reference.href}>{reference.title}</Link><p className="whitespace-pre-wrap">{reference.excerpt}</p><p>Supports: {reference.reason}</p>
+            </li>)}</ul></details> : <p className="text-[11px] text-muted-foreground">{mapping.references?.length ? "Supporting references unavailable for this suggestion" : "Supporting references not recorded for this suggestion"}. Make a manual judgement with a reason on the gap record.</p>}
             {decision ? (
               <p className="mt-1 text-[10px] text-[var(--chart-3)]">
                 {decision.status === "accepted" ? "Accepted" : "Rejected"} by {decision.actor_name ?? "a person"}
@@ -197,11 +202,13 @@ function ProposalDecisions({ row }: { row: MappingTableViewRow }) {
                   action="accept_mapping"
                   extra={{
                     ...pair,
+                    judgement_origin: "model",
+                    expected_suggestion: relationshipVersion(mapping),
                     overall: mapping.coverage,
                     dimensions: JSON.stringify(mapping.dimensions ?? {}),
                   }}
                   confirmLabel="Accept mapping"
-                  description="Maps this tactic to the gap with the AI's coverage verdict (or marks an already committed pair as accepted). You can still edit coverage on the gap page."
+                  description="Requires inspectable supporting records. Maps this tactic to the gap with the AI's coverage verdict (or marks an already committed pair as accepted). You can still edit coverage on the gap page."
                 >
                   <RationaleField placeholder="Why this tactic bears on the gap" />
                 </LockForm>
@@ -318,7 +325,7 @@ function MappingRowEditor({
             {ai ? "Pick a status, or choose Re-run mapping, before saving." : "Pick a status before saving."}
           </p>
         )}
-        <LockForm label="Save row" action="save_mapping_row" confirmLabel="Save mapping row">
+        <LockForm label="Save row" action="save_mapping_row" extra={{ expected_relationship: row.relationships_version ?? "" }} confirmLabel="Save mapping row">
           <input type="hidden" name="gap_id" value={row.gap_id} />
           <input type="hidden" name="tactic_ids" value={tacticIds} />
           <input type="hidden" name="mapping_status" value={status ?? ""} />

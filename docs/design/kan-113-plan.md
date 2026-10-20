@@ -139,4 +139,3 @@ Preserve the current visual identity, scientific definitions, permissions, requi
 ## Blocked by
 
 None (can start immediately).
-

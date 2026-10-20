@@ -168,10 +168,12 @@ export function MapExistingTactic({
   gapId,
   availableTactics,
   mappedTacticIds,
+  expectedRelationships,
 }: {
   gapId: string;
   availableTactics: TacticLibraryItem[];
   mappedTacticIds: string[];
+  expectedRelationships: string;
 }) {
   const ai = useAiEnabled("mapping");
   const unmapped = availableTactics.filter((tactic) => !mappedTacticIds.includes(tactic.id));
@@ -180,10 +182,10 @@ export function MapExistingTactic({
     <LockForm
       label="Map existing tactic"
       action="assign_tactic"
-      extra={{ gap_id: gapId }}
+      extra={{ gap_id: gapId, expected_relationships: expectedRelationships }}
       confirmLabel="Map tactic"
       description="Attach a library tactic onto this gap. The tactic is not copied."
-      note={{ label: "Rationale (needed when you set coverage)" }}
+      note={{ label: "Reason (required)", required: true }}
     >
       <label className="grid gap-1 text-[12px] text-muted-foreground">
         From tactic library
@@ -225,6 +227,7 @@ export function MapExistingTactic({
 export function RecordMissedTactic({ gapId }: { gapId: string }) {
   return (
     <LockForm
+      note={{ label: "Reason (required)", required: true }}
       label="Record missed tactic"
       action="record_missed_tactic"
       extra={{ gap_id: gapId, origin: "gaps" }}

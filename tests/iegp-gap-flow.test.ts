@@ -1,3 +1,4 @@
+import { gapResolutionVersion } from "@/lib/iegp/relationship-version";
 import { describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/iegp/db";
@@ -16,6 +17,8 @@ import {
   createAddressedGap,
   assignTacticToGap,
   lockCoverageDimension,
+  lockCoverageOverall,
+  reviewRequirementBasis,
   confirmCoverageReview,
   recordMissedTactic,
   createTacticFromGaps,
@@ -28,6 +31,9 @@ import {
   gapsReadyForPrioritize,
 } from "@/lib/iegp/engine";
 
+import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
+import { getRequirementBasisReview } from "@/lib/iegp/requirement-basis";
+
 async function makePartialGap() {
   await resetDemoSetup();
   const gapId = await createGap({
@@ -38,6 +44,7 @@ async function makePartialGap() {
     actor_function: "heor",
   });
   const tacticId = await createProposedTactic({
+    rationale: "Develop a study for the remaining evidence need",
     name: "Elderly chart review",
     type: "chart_review",
     description: "Chart review in patients aged 65 and over.",
@@ -55,6 +62,7 @@ async function makePartialGap() {
     actor_function: "heor",
   });
   await lockTactic({
+    note: "The reviewer confirmed resources for this tactic lifecycle",
     tactic_id: tacticId,
     status: "planned",
     actor_name: "A. Rao",
@@ -68,9 +76,10 @@ async function makePartialGap() {
 }
 
 describe("partial split and rewrite", () => {
-  it("splits a partial into addressed + open children and retires the original into history", async () => {
+  it("splits a partial into provisional + open children and retires the original into history", async () => {
     const { gapId, tacticId } = await makePartialGap();
     const result = await splitPartialGap({
+      expected_resolution: gapResolutionVersion(await loadState(), gapId), note: "Separate the covered and remaining evidence scope",
       parent_gap_id: gapId,
       addressed_name: "Elderly outcomes covered by the chart review",
       open_name: "Comparator evidence versus regional SoC in frail elderly",
@@ -83,19 +92,20 @@ describe("partial split and rewrite", () => {
     expect(original.retired).toBe(true);
     const addressed = after.gaps.find((g) => g.id === result.addressedId)!;
     const open = after.gaps.find((g) => g.id === result.openId)!;
-    expect(displayedGapStatus(addressed)).toBe("validated_addressed");
+    expect(displayedGapStatus(addressed)).toBe("validated_partial");
     expect(displayedGapStatus(open)).toBe("validated_open");
     expect(open.human_validated).toBe(true);
-    expect(addressed.human_validated).toBe(true);
+    expect(addressed.human_validated).toBe(false);
     expect(after.gap_versions.some((v) => v.live_gap_id === open.id && v.retired_gap_id === gapId && v.event === "split")).toBe(true);
     expect(after.gap_versions.some((v) => v.live_gap_id === addressed.id && v.retired_gap_id === gapId && v.event === "split")).toBe(true);
     expect(buildPlanWorkspace(after).review.some((c) => c.gap_id === original.id)).toBe(false);
-    expect(gapsReadyForPrioritize(after)).toBe(true);
+    expect(gapsReadyForPrioritize(after)).toBe(false);
   });
 
   it("KAN-68: a tactic's gap list leaves out the retired parent of a split", async () => {
     const { gapId, tacticId } = await makePartialGap();
     const result = await splitPartialGap({
+      expected_resolution: gapResolutionVersion(await loadState(), gapId), note: "Separate the covered and remaining evidence scope",
       parent_gap_id: gapId,
       addressed_name: "Elderly outcomes covered by the chart review",
       open_name: "Comparator evidence versus regional SoC in frail elderly",
@@ -110,6 +120,7 @@ describe("partial split and rewrite", () => {
   it("rewrites a partial as Open and keeps the original in version history", async () => {
     const { gapId } = await makePartialGap();
     const liveId = await rewritePartialGap({
+      expected_resolution: gapResolutionVersion(await loadState(), gapId), note: "Separate the covered and remaining evidence scope",
       gap_id: gapId,
       name: "Comparative effectiveness versus regional SoC in elderly patients",
       status: "validated_open",
@@ -126,6 +137,7 @@ describe("partial split and rewrite", () => {
     const { gapId } = await makePartialGap();
     await expect(
       rewritePartialGap({
+        expected_resolution: gapResolutionVersion(await loadState(), gapId), note: "Separate the covered and remaining evidence scope",
         gap_id: gapId,
         name: "Fully covered elderly outcomes",
         status: "validated_addressed",
@@ -157,7 +169,7 @@ describe("partial split and rewrite", () => {
     expect(gapsReadyForPrioritize(state)).toBe(false);
   });
 
-  it("lets the user add an Addressed gap with a tactic, and requires validation before Prioritize", async () => {
+  it("keeps a proposed Addressed gap provisional until requirements, coverage and status are reviewed", async () => {
     await resetDemoSetup();
     const tacticId = await createProposedTactic({
       name: "Completed publication",
@@ -176,12 +188,14 @@ describe("partial split and rewrite", () => {
       actor_function: "heor",
     });
     await lockTactic({
+      note: "The reviewer confirmed resources for this tactic lifecycle",
       tactic_id: tacticId,
       status: "completed",
       actor_name: "A. Rao",
       actor_function: "heor",
     });
     const addressedId = await createAddressedGap({
+      note: "Existing study answers this evidence need",
       name: "PFS versus osimertinib in the pivotal trial",
       statement: "PFS versus osimertinib in the pivotal trial",
       tactic_id: tacticId,
@@ -194,7 +208,7 @@ describe("partial split and rewrite", () => {
       actor_function: "heor",
     });
     let state = await loadState();
-    expect(displayedGapStatus(state.gaps.find((g) => g.id === addressedId)!)).toBe("validated_addressed");
+    expect(displayedGapStatus(state.gaps.find((g) => g.id === addressedId)!)).toBe("validated_partial");
     expect(gapsReadyForPrioritize(state)).toBe(false);
     await validateGap({
       gap_id: openId,
@@ -202,6 +216,21 @@ describe("partial split and rewrite", () => {
       actor_function: "heor",
     });
     state = await loadState();
+    expect(gapsReadyForPrioritize(state)).toBe(false);
+    const coverageId = state.coverages.find(c => c.gap_id === addressedId)!.id;
+    await reviewRequirementBasis({
+      gap_id: addressedId, expected_version: getRequirementBasisReview(state, addressedId).version,
+      dimensions: Object.fromEntries(COVERAGE_DIMENSIONS.map(d => [d, {
+        applicability: d === "relevance" ? "required" : "not_applicable",
+        requirement: d === "relevance" ? "PFS question is answered by the pivotal publication" : "",
+        rationale: "This fixture asks only whether the pivotal PFS publication answers the question",
+      }])), rationale: "Reviewed the narrow publication requirement", actor_name: "A. Rao", actor_function: "heor",
+    });
+    await lockCoverageDimension({ coverage_id: coverageId, dimension: "relevance", value: "yes", rationale: "Publication answers the specified PFS question", actor_name: "A. Rao", actor_function: "heor" });
+    await lockCoverageOverall({ coverage_id: coverageId, overall: "full", rationale: "Reviewed publication meets the complete requirement", actor_name: "A. Rao", actor_function: "heor" });
+    await validateGap({ gap_id: addressedId, actor_name: "A. Rao", actor_function: "heor" });
+    state = await loadState();
+    expect(displayedGapStatus(state.gaps.find(g => g.id === addressedId)!)).toBe("validated_addressed");
     expect(gapsReadyForPrioritize(state)).toBe(true);
     expect(buildPlanWorkspace(state).review.every((c) => c.gap_status !== "candidate")).toBe(true);
   });
@@ -209,6 +238,7 @@ describe("partial split and rewrite", () => {
   it("splits with multiple tactics and copies constituent need links onto both children", async () => {
     const { gapId, tacticId } = await makePartialGap();
     const secondTacticId = await createProposedTactic({
+      rationale: "Develop a study for the remaining evidence need",
       name: "Elderly claims study",
       type: "rwe_study",
       description: "Claims study in patients aged 65 and over.",
@@ -226,6 +256,7 @@ describe("partial split and rewrite", () => {
       actor_function: "heor",
     });
     await lockTactic({
+      note: "The reviewer confirmed resources for this tactic lifecycle",
       tactic_id: secondTacticId,
       status: "planned",
       actor_name: "A. Rao",
@@ -269,6 +300,7 @@ describe("partial split and rewrite", () => {
       ],
     });
     const result = await splitPartialGap({
+      expected_resolution: gapResolutionVersion(await loadState(), gapId), note: "Separate the covered and remaining evidence scope",
       parent_gap_id: gapId,
       addressed_name: "Elderly outcomes covered by existing studies",
       addressed_statement: "Chart review and claims cover elderly outcomes already in hand.",
@@ -324,12 +356,14 @@ describe("partial split and rewrite", () => {
       actor_function: "heor",
     });
     await assignTacticToGap({
+      note: "The study informs this gap assessment",
       gap_id: gapA,
       tactic_id: tacticId,
       actor_name: "A. Rao",
       actor_function: "heor",
     });
     await assignTacticToGap({
+      note: "The study informs this gap assessment",
       gap_id: gapB,
       tactic_id: tacticId,
       actor_name: "A. Rao",
@@ -362,6 +396,7 @@ describe("partial split and rewrite", () => {
     expect(buildPlanWorkspace(after).review.find((c) => c.gap_id === gapA)?.needs_review).toBe(false);
 
     await confirmCoverageReview({
+      note: "Reviewed the sibling study assessment without changing its dimensions",
       coverage_id: covB.id,
       actor_name: "A. Rao",
       actor_function: "heor",
@@ -396,6 +431,7 @@ describe("Gaps map existing vs record missed vs proposed", () => {
     const before = await loadState();
     expect(before.coverages.some((c) => c.gap_id === gapId && c.tactic_id === tacticId)).toBe(false);
     await assignTacticToGap({
+      note: "The study informs this gap assessment",
       gap_id: gapId,
       tactic_id: tacticId,
       actor_name: "A. Rao",
@@ -417,7 +453,7 @@ describe("Gaps map existing vs record missed vs proposed", () => {
     const statuses = ["ongoing", "completed", "planned"] as const;
     const ids: string[] = [];
     for (const [index, status] of statuses.entries()) {
-      const tacticId = await recordMissedTactic({
+      const tacticId = await recordMissedTactic({ rationale: "Record existing work omitted from the inventory",
         ...missedDraft(`Catch-up ${status} study`, status),
         gap_id: gapId,
         catch_up_reason: reasons[index],
@@ -447,12 +483,13 @@ describe("Gaps map existing vs record missed vs proposed", () => {
       actor_name: "A. Rao" as const,
       actor_function: "heor" as const,
     };
-    await expect(recordMissedTactic({ ...draft, status: "proposed" })).rejects.toThrow(/proposed/i);
-    await expect(createTacticFromGaps({ ...draft, status: "proposed" })).rejects.toThrow(
+    await expect(recordMissedTactic({ ...draft, rationale: "Record the omitted study", status: "proposed" })).rejects.toThrow(/proposed/i);
+    await expect(createTacticFromGaps({ ...draft, rationale: "Record existing study evidence", status: "proposed" })).rejects.toThrow(
       /Tactics after you prioritize/i,
     );
     await expect(
       createAddressedGap({
+        note: "Existing study answers this evidence need",
         statement: "White-space leftover after mapping",
         missed_name: "Invented chart review",
         missed_type: "chart_review",
@@ -471,7 +508,7 @@ describe("Gaps map existing vs record missed vs proposed", () => {
     await resetDemoSetup();
     const before = await loadState();
     await expect(
-      createAddressedGap({ statement: "Gap with a made-up tactic", tactic_id: "TAC-NOPE", actor_name: "A. Rao", actor_function: "heor" }),
+      createAddressedGap({ note: "Existing study answers this evidence need", statement: "Gap with a made-up tactic", tactic_id: "TAC-NOPE", actor_name: "A. Rao", actor_function: "heor" }),
     ).rejects.toThrow(/does not exist/i);
     const draft = await recordMissedTactic({
       name: "Planned registry",
@@ -485,7 +522,7 @@ describe("Gaps map existing vs record missed vs proposed", () => {
     const cancelled = state.tactics.find((t) => t.id === draft)!;
     await db().update(t.tactics).set({ status: "cancelled" }).where(eq(t.tactics.id, cancelled.id));
     await expect(
-      createAddressedGap({ statement: "Gap with a cancelled tactic", tactic_id: draft, actor_name: "A. Rao", actor_function: "heor" }),
+      createAddressedGap({ note: "Existing study answers this evidence need", statement: "Gap with a cancelled tactic", tactic_id: draft, actor_name: "A. Rao", actor_function: "heor" }),
     ).rejects.toThrow(/cancelled/i);
     const after = await loadState();
     expect(after.gaps.length).toBe(before.gaps.length);
@@ -495,12 +532,14 @@ describe("Gaps map existing vs record missed vs proposed", () => {
     await resetDemoSetup();
     await expect(
       createAddressedGap({
+        note: "Existing study answers this evidence need",
         statement: "PFS versus osimertinib in the pivotal trial",
         actor_name: "A. Rao",
         actor_function: "heor",
       }),
     ).rejects.toThrow(/accompanying tactic/i);
     const viaMissed = await createAddressedGap({
+      note: "Existing study answers this evidence need",
       statement: "PFS versus osimertinib in the pivotal trial",
       missed_name: "VEL-301 PFS manuscript",
       missed_type: "publication",
@@ -511,7 +550,8 @@ describe("Gaps map existing vs record missed vs proposed", () => {
       actor_function: "heor",
     });
     const after = await loadState();
-    expect(displayedGapStatus(after.gaps.find((g) => g.id === viaMissed)!)).toBe("validated_addressed");
+    expect(displayedGapStatus(after.gaps.find((g) => g.id === viaMissed)!)).toBe("validated_partial");
+    expect(after.coverages.find(c => c.gap_id === viaMissed)).toMatchObject({ overall: "full", overall_lock: { locked: false }, confirmed_requirement_basis: null });
     expect(after.coverages.some((c) => c.gap_id === viaMissed)).toBe(true);
     expect(after.tactics.find((t) => t.name === "VEL-301 PFS manuscript")?.status).toBe("completed");
   });

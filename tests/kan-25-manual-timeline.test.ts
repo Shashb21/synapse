@@ -1,3 +1,4 @@
+import { priorityDecision } from "./support/priority-decision";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
@@ -127,8 +128,8 @@ describe("KAN-25 manual timeline, no stage run, AI off", () => {
     expect(open.length).toBeGreaterThan(2);
     // Validate two bands by hand; every other open gap stays not prioritized.
     [low, high] = [open[0]!.id, open[1]!.id];
-    await validatePlacement({ gap_id: low, band: "low", rationale: "Nice to have", actor: ACTOR });
-    await validatePlacement({ gap_id: high, band: "high", rationale: "Launch critical", actor: ACTOR });
+    await validatePlacement({ ...await priorityDecision(low, "Nice to have"), gap_id: low, band: "low", rationale: "Nice to have", actor: ACTOR });
+    await validatePlacement({ ...await priorityDecision(high, "Launch critical"), gap_id: high, band: "high", rationale: "Launch critical", actor: ACTOR });
   }, 60_000);
 
   beforeEach(() => {

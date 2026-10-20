@@ -78,6 +78,7 @@ test.describe.serial("IEGP setup wizard", () => {
     await page.getByRole("radio", { name: "5", exact: true }).click();
     await page.getByLabel(/Key decision/).fill("EU5 HTA filing");
     await page.getByLabel(/Decision date/).fill("2028-03-01");
+    await page.getByLabel("Reason for objective changes").fill("Record the initial HTA objective");
     await continueTo(page, "setup-step-landscape");
 
     // Evidence landscape

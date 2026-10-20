@@ -14,10 +14,11 @@ test.describe("KAN-115 next action", () => {
     await expect(next).toBeVisible();
     await next.focus();
     await next.press("Enter");
-    const details = page.locator(`article[data-gap-id="${gap.gap_id}"]`);
+    const details = page.getByRole("region", { name: "Outstanding gap review" });
     await expect(details).toBeVisible();
     await expect(details.locator("button:focus, a:focus, [tabindex='-1']:focus")).toHaveCount(1);
-    await details.getByRole("button", { name: /Change status of this gap/ }).click();
+    await page.goto(`/gaps/${gap.gap_id}`);
+    await page.getByRole("button", { name: /Change status of this gap/ }).click();
     const dialog = page.getByRole("dialog");
     await dialog.getByRole("button", { name: "Save override" }).click();
     const reason = dialog.getByRole("textbox", { name: "Reason" });

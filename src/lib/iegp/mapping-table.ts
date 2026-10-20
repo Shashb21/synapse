@@ -1,3 +1,5 @@
+import { inspectJudgementReferences, type InspectableReference } from "./judgement-references";
+import { relationshipSnapshot, relationshipVersion } from "./relationship-version";
 import { z } from "zod";
 import {
   mappingTableRowSchema,
@@ -42,6 +44,9 @@ export type MappingTableViewRow = Omit<MappingTableRow, "mapping_status" | "conf
    * status; `mapping_status` is the AI's (or the saved row's) view (KAN-68).
    */
   gap_status: MappingStatus;
+  relationship_versions?: Record<string, string>;
+  relationships_version?: string;
+  supporting_references?: Record<string, InspectableReference[]>;
 };
 
 const GAP_TO_MAPPING_STATUS: Record<string, MappingStatus> = {
@@ -98,6 +103,8 @@ export function buildMappingTableView(
   const proposedByGap = new Map((proposed ?? []).map((row) => [row.gap_id, row]));
   const tacticName = (id: string) => state.tactics.find((t) => t.id === id)?.name ?? id;
   return gaps.map((gap) => {
+    const relationship_versions = Object.fromEntries(state.tactics.map(tactic => [tactic.id, relationshipVersion(relationshipSnapshot(state, gap.id, tactic.id))]));
+    const relationships_version = relationshipVersion({ coverages: state.coverages.filter(row => row.gap_id === gap.id), decisions: state.mapping_suggestions.filter(row => row.gap_id === gap.id) });
     const locked = state.coverages.filter((c) => !c.expansion_id && c.gap_id === gap.id).map((c) => c.tactic_id);
     const decisions = decisionsFor(state, gap.id);
     const unreviewed = locked.filter((id) => decisions[id]?.status !== "accepted");
@@ -120,20 +127,21 @@ export function buildMappingTableView(
         decisions,
         human_lock: human.lock,
         unreviewed_tactic_ids: unreviewed,
-        gap_status,
+        gap_status, relationship_versions, relationships_version,
       };
     }
     const proposal = proposedByGap.get(gap.id);
     if (proposal) {
       return {
         ...proposal,
+        supporting_references: Object.fromEntries(proposal.mappings.map(mapping => [mapping.tactic_id, inspectJudgementReferences(state, [gap.id], mapping.references)])),
         gap_name: gap.name,
         source: "proposal" as const,
         locked_tactic_ids: locked,
         decisions,
         human_lock: null,
         unreviewed_tactic_ids: unreviewed,
-        gap_status,
+        gap_status, relationship_versions, relationships_version,
       };
     }
     return {
@@ -151,7 +159,7 @@ export function buildMappingTableView(
       decisions,
       human_lock: null,
       unreviewed_tactic_ids: unreviewed,
-      gap_status,
+      gap_status, relationship_versions, relationships_version,
     };
   });
 }

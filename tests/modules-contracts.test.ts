@@ -442,6 +442,7 @@ describe("timeline build", () => {
 
   const validated = (gapId: string, band: "high" | "medium" | "low", isValidated = true) => ({
     gap_id: gapId,
+    version: "fixture",
     axis_scores: { decision_impact: 80 },
     suggested_band: band,
     suggested_rationale: "seeded",

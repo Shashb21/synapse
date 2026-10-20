@@ -13,6 +13,7 @@ test.describe("Create tactic", () => {
   });
 
   test("records an ongoing study with its dates, and asks for no note", async ({ page }) => {
+    test.setTimeout(90_000);
     await page.goto("/tactics");
     const trigger = page.getByRole("button", { name: "Create tactic" });
     const dialog = page.getByRole("dialog");
@@ -43,9 +44,23 @@ test.describe("Create tactic", () => {
     await library.getByRole("button", { name: /tactic library/i }).click();
     // "Edit" opens the side panel (KAN-50); the panel links to the full tactic page.
     await library.getByRole("button", { name: /edit E2E ongoing registry/i }).first().click();
-    await page.getByTestId("tactic-panel").getByRole("link", { name: /open full page/i }).click();
+    await page.getByTestId("tactic-panel").getByRole("link", { name: "Open full record", exact: true }).click();
     await expect(page).toHaveURL(/\/tactics\/TAC-/);
     await expect(page.getByText("ongoing", { exact: true }).first()).toBeVisible();
     await expect(page.getByText("2026-02-01").first()).toBeVisible();
+    // The consolidated editor keeps the full record's month-only and clearing capability.
+    const form = page.getByRole("form", { name: "Edit E2E ongoing registry", exact: true });
+    await page.getByRole("button", { name: "Edit tactic", exact: true }).click();
+    await form.getByLabel("Start date", { exact: true }).fill("2026-03");
+    await form.getByLabel(/why\? \(required\)/i).fill("Plan the start month before the exact day is known");
+    await form.getByRole("button", { name: "Save changes", exact: true }).click();
+    await expect(form).toBeHidden();
+    await expect(page.getByRole("definition").filter({ hasText: "2026-03" })).toBeVisible();
+    await page.getByRole("button", { name: "Edit tactic", exact: true }).click();
+    await form.getByLabel("Start date", { exact: true }).fill("");
+    await form.getByLabel(/why\? \(required\)/i).fill("The start month is no longer confirmed");
+    await form.getByRole("button", { name: "Save changes", exact: true }).click();
+    await expect(form).toBeHidden();
+    await expect(page.getByRole("term").filter({ hasText: /^Start date$/ }).locator("..")).toHaveText("Start date—");
   });
 });

@@ -23,7 +23,7 @@ it("completes mapping, source and status independently through real store mutati
   // Exercise the primary-action order with the same independent flags still outstanding.
   await persistState(seed);
   for (const coverage of seed.coverages.filter(c => c.gap_id === gap.id)) {
-    await confirmCoverageReview({ coverage_id: coverage.id, ...actor });
+    await confirmCoverageReview({ coverage_id: coverage.id, note: "Reviewed the tactic mapping against the gap", ...actor });
   }
   expect(reviewGapTasks(await current())).toEqual(["Review new source", "Confirm status"]);
   await clearNewSourceFlag({ gap_id: gap.id, rationale: "Checked the new source", ...actor });

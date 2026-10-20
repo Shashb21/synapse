@@ -1,3 +1,5 @@
+import { modelMappingSupport } from "./support/model-mapping";
+import { gapResolutionVersion } from "@/lib/iegp/relationship-version";
 import { describe, expect, it, vi } from "vitest";
 import { persistState, resetDemoSetup, resetDemo, loadState, lockGapStatus, commitExtractedRecords, modifyGap, assignTacticToGap, lockTactic, completeWizard, createProposedTactic, createGap, acceptMapping, lockCoverageOverall, acceptResidualGap, rejectResidualGap, modifyResidualGap, listResidualGapDrafts, classifyMappedGap, overrideGapStatus, rewritePartialGap, ensureAllLiveGapsHaveNeeds, parkGap, unparkGap, createBreakoutGroup, deleteBreakoutGroup, assignGapToBreakoutGroup, unassignGapFromBreakoutGroup, persistSourceAndBlocks, saveMappingTableRow, requireMappingRowStatus } from "@/lib/iegp/store";
 import { isLiveGap, gapsReadyForPrioritize } from "@/lib/iegp/engine";
@@ -146,6 +148,7 @@ describe("IEGP postgres store", () => {
     expect(gap).toBeTruthy();
     await modifyGap({
       gap_id: gap!.id,
+      expected_gap: gap,
       name: "Routine-care ILD / QT",
       statement: "Need ILD and QT characterisation in routine US care, not only the label.",
       rationale: "Tighter wording for the plan.",
@@ -173,6 +176,7 @@ describe("IEGP postgres store", () => {
     );
     if (!already) {
       await assignTacticToGap({
+        note: "The study informs this gap assessment",
         gap_id: before.gaps[0]!.id,
         tactic_id: tactic!.id,
         actor_name: "A. Rao",
@@ -215,6 +219,7 @@ describe("IEGP postgres store", () => {
     expect(firstGap && secondGap).toBeTruthy();
     if (!ingested.coverages.some((c) => c.gap_id === firstGap!.id && c.tactic_id === tactic.id)) {
       await assignTacticToGap({
+        note: "The study informs this gap assessment",
         gap_id: firstGap!.id,
         tactic_id: tactic.id,
         actor_name: "A. Rao",
@@ -223,6 +228,7 @@ describe("IEGP postgres store", () => {
     }
     if (!ingested.coverages.some((c) => c.gap_id === secondGap!.id && c.tactic_id === tactic.id)) {
       await assignTacticToGap({
+        note: "The study informs this gap assessment",
         gap_id: secondGap!.id,
         tactic_id: tactic.id,
         actor_name: "A. Rao",
@@ -388,11 +394,12 @@ describe("IEGP postgres store", () => {
       population: "", intervention: "", comparator: "", outcomes: "", geography: "US", owner: "A. Rao", function: "heor",
       residual_ids: [], actor_name: "A. Rao", actor_function: "heor",
     });
-    await lockTactic({ tactic_id: tacticId, status: "planned", actor_name: "A. Rao", actor_function: "heor" });
+    await lockTactic({ note: "The reviewer confirmed resources for this tactic lifecycle", tactic_id: tacticId, status: "planned", actor_name: "A. Rao", actor_function: "heor" });
     await expect(
-      assignTacticToGap({ gap_id: gapId, tactic_id: tacticId, actor_name: "S4", actor_function: "heor", coverage: "bogus" as never }),
+      assignTacticToGap({ note: "The study informs this gap assessment", ...await modelMappingSupport(gapId, tacticId), gap_id: gapId, tactic_id: tacticId, actor_name: "S4", actor_function: "heor", coverage: "bogus" as never }),
     ).rejects.toThrow(/Unknown coverage/i);
     await assignTacticToGap({
+      note: "The study informs this gap assessment", ...await modelMappingSupport(gapId, tacticId),
       gap_id: gapId, tactic_id: tacticId, actor_name: "S4", actor_function: "heor",
       coverage: "full", dimensions: { population: "yes", comparator: "no" },
     });
@@ -410,8 +417,9 @@ describe("IEGP postgres store", () => {
     expect(state.residual_gap_suggestions).toHaveLength(0);
     expect(state.residuals.filter((r) => r.gap_id === gapId)).toHaveLength(0);
     expect(await listResidualGapDrafts()).toHaveLength(0);
-    await lockCoverageOverall({ coverage_id: row.id, overall: "full", rationale: "Closes it.", actor_name: "A. Rao", actor_function: "heor" });
-    expect((await loadState()).gaps.find((g) => g.id === gapId)?.status).toBe("validated_addressed");
+    // A contradictory model proposal cannot be upgraded without a reviewed requirement basis.
+    await expect(lockCoverageOverall({ coverage_id: row.id, overall: "full", rationale: "Closes it.", actor_name: "A. Rao", actor_function: "heor" })).rejects.toThrow(/requirement basis/i);
+    expect((await loadState()).gaps.find((g) => g.id === gapId)?.status).toBe("validated_partial");
     await expect(
       lockCoverageOverall({ coverage_id: row.id, overall: "unassessed", rationale: "x", actor_name: "A. Rao", actor_function: "heor" }),
     ).rejects.toThrow(/coverage verdict/i);
@@ -476,6 +484,7 @@ describe("IEGP postgres store", () => {
     });
     // No engine-ranked suggestion: a human maps it (or S4 does).
     await acceptMapping({
+      note: "Reviewed the study against this evidence need",
       gap_id: createdId,
       tactic_id: tactic.id,
       actor_name: "A. Rao",
@@ -523,12 +532,14 @@ describe("IEGP postgres store", () => {
       function: "heor",
       residual_ids: [],
       gap_id: gapId,
+      rationale: "Chart review answers the observed community outcome slice",
       actor_name: "A. Rao",
       actor_function: "heor",
     });
     expect((await loadState()).gaps.find((g) => g.id === gapId)?.status).toBe("validated_open");
 
     await lockTactic({
+      note: "The reviewer confirmed resources for this tactic lifecycle",
       tactic_id: tacticId,
       status: "planned",
       actor_name: "A. Rao",
@@ -552,6 +563,8 @@ describe("IEGP postgres store", () => {
     expect(cancelled.status_override).toBeNull();
 
     const liveId = await rewritePartialGap({
+      expected_resolution: gapResolutionVersion(await loadState(), gapId),
+      note: "Retain only the unanswered white-space evidence need",
       gap_id: gapId,
       name: "White-space leftover after mapping",
       status: "validated_open",

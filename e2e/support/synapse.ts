@@ -1,4 +1,7 @@
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
+import type { GapRecord } from "../../src/lib/iegp/gap-record";
+import { relationshipVersion } from "../../src/lib/iegp/relationship-version";
+import { gapEditSnapshot } from "../../src/lib/iegp/gap-edit";
 
 /**
  * Shared harness for the feature specs. Setup goes through the module API so each
@@ -98,6 +101,15 @@ export async function runStageExpectingError(
 }
 
 export async function planAction(request: APIRequestContext, body: Record<string, unknown>) {
+  if (["edit_proposal", "decide_proposal", "restore_proposal"].includes(String(body.action)) && body.expected_version === undefined) {
+    const current = (await planState(request)).proposals.find(row => row.id === body.id);
+    body = { expected_version: current?.version ?? "", ...body };
+  }
+  if (["validate_band", "set_placement", "move_placement"].includes(String(body.action))) {
+    const snapshot = await planState(request);
+    const current = snapshot.placements.find((row) => row.gap_id === body.gap_id);
+    body = { expected_version: current?.version ?? null, expected_context_version: snapshot.priority_context_versions[String(body.gap_id)] ?? null, reason: body.rationale, ...body };
+  }
   return postJson(request, "/api/plan", body);
 }
 
@@ -105,6 +117,11 @@ export async function planActionExpectingError(
   request: APIRequestContext,
   body: Record<string, unknown>,
 ): Promise<{ status: number; error: string }> {
+  if (["validate_band", "set_placement", "move_placement"].includes(String(body.action))) {
+    const snapshot = await planState(request);
+    const current = snapshot.placements.find((row) => row.gap_id === body.gap_id);
+    body = { expected_version: current?.version ?? null, expected_context_version: snapshot.priority_context_versions[String(body.gap_id)] ?? null, reason: body.rationale, ...body };
+  }
   const response = await request.post("/api/plan", {
     headers: { "content-type": "application/json" },
     data: JSON.stringify({ ...ACTOR, ...body }),
@@ -113,7 +130,45 @@ export async function planActionExpectingError(
   return { status: response.status(), error: payload.error ?? "" };
 }
 
+/** Read opening tokens explicitly for a valid current-coverage fixture review. */
+export async function coverageOpeningTokens(request: APIRequestContext, tacticId: string, coverageId: string) {
+  const response = await request.get(`/api/tactics/${encodeURIComponent(tacticId)}`);
+  if (!response.ok()) throw new Error(`Opening tactic record failed: ${response.status()} ${await response.text()}`);
+  const record = await response.json() as {
+    coverages: { id: string; review_version: string; relationship_version: string }[];
+  };
+  const coverage = record.coverages.find(row => row.id === coverageId);
+  if (!coverage?.review_version || !coverage.relationship_version) {
+    throw new Error(`Opening coverage ${coverageId} is missing its review tokens`);
+  }
+  return { expected_version: coverage.review_version, expected_relationship: coverage.relationship_version };
+}
+
 export async function iegpAction(request: APIRequestContext, body: Record<string, unknown>) {
+  // Fixtures open the same record as a person; explicitly supplied stale tokens stay intact.
+  if (["assign_tactic", "unassign_tactic", "accept_mapping", "reject_mapping"].includes(String(body.action)) && body.expected_relationship === undefined) {
+    const response = await request.get(`/api/gaps/${encodeURIComponent(String(body.gap_id))}`);
+    if (!response.ok()) throw new Error(`Opening gap record failed: ${response.status()}`);
+    const record = await response.json() as GapRecord;
+    const coverages = record.coverages.filter(row => row.tactic_id === body.tactic_id)
+      .map(coverage => {
+        const row = { ...coverage };
+        for (const field of ["fit", "requirement_review", "tactic", "expansion"]) Reflect.deleteProperty(row, field);
+        return row;
+      })
+      .sort((a, b) => a.id.localeCompare(b.id));
+    body = { expected_relationship: relationshipVersion({ coverages, decision: record.mapping_rejections.find(row => row.tactic_id === body.tactic_id) ?? null }), ...body };
+  }
+  if (["modify_tactic", "lock_tactic_review"].includes(String(body.action)) && body.expected_tactic === undefined) {
+    const response = await request.get(`/api/tactics/${encodeURIComponent(String(body.tactic_id))}`);
+    if (!response.ok()) throw new Error(`Opening tactic record failed: ${response.status()}`);
+    body = { expected_tactic: (await response.json()).version, ...body };
+  }
+  if (body.action === "modify_gap" && body.expected_gap === undefined) {
+    const response = await request.get(`/api/gaps/${encodeURIComponent(String(body.gap_id))}`);
+    if (!response.ok()) throw new Error(`Opening gap record failed: ${response.status()}`);
+    body = { expected_gap: gapEditSnapshot((await response.json() as GapRecord).gap), ...body };
+  }
   return postJson(request, "/api/iegp", body);
 }
 
@@ -137,8 +192,10 @@ export async function planState(request: APIRequestContext) {
   const response = await request.get("/api/plan");
   expect(response.ok()).toBeTruthy();
   return (await response.json()) as {
+    priority_context_versions: Record<string, string | null>;
     placements: {
       gap_id: string;
+      version: string;
       axis_scores: Record<string, number>;
       suggested_band: string;
       suggested_rationale: string;
@@ -154,6 +211,7 @@ export async function planState(request: APIRequestContext) {
       updated_by: string;
     };
     proposals: {
+      version: string;
       id: string;
       gap_id: string;
       name: string;
@@ -381,6 +439,11 @@ export async function validateBandHigh(request: APIRequestContext, gap_id: strin
  * banded if Open. Roadmap checks (KAN-85) stay with the spec.
  */
 export async function resolveFinalPlanGaps(request: APIRequestContext) {
+  const readGap = async (id: string): Promise<GapRecord> => {
+    const response = await request.get(`/api/gaps/${id}`);
+    expect(response.ok(), await response.text()).toBe(true);
+    return response.json() as Promise<GapRecord>;
+  };
   for (let round = 0; round < 4; round += 1) {
     const plan = await request.get("/api/plan");
     expect(plan.ok()).toBeTruthy();
@@ -391,15 +454,7 @@ export async function resolveFinalPlanGaps(request: APIRequestContext) {
     if (gaps.length === 0) return;
     for (const { gap_id, issue } of gaps) {
       if (issue === "partial") {
-        const record = (await (await request.get(`/api/gaps/${gap_id}`)).json()) as {
-          gap: { name: string };
-          coverages: {
-            tactic_id: string;
-            expansion_id: string | null;
-            tactic: { status: string } | null;
-            expansion: { status: string } | null;
-          }[];
-        };
+        const record = await readGap(gap_id!);
         // Only completed, ongoing or planned work closes the addressed slice (a proposed scope does not).
         const counting = new Set(["completed", "ongoing", "planned"]);
         const tacticIds = [
@@ -417,6 +472,7 @@ export async function resolveFinalPlanGaps(request: APIRequestContext) {
                 data: JSON.stringify({
                   ...ACTOR,
                   action: "rewrite_partial_gap",
+                  expected_resolution: record.resolution_version,
                   gap_id,
                   name: record.gap.name,
                   status: "validated_addressed",
@@ -425,9 +481,49 @@ export async function resolveFinalPlanGaps(request: APIRequestContext) {
                 }),
               })
             : null;
-        if (!addressed?.ok()) {
+        if (addressed?.ok()) {
+          // KAN-141: an Addressed rewrite proposes Full; the positive fixture
+          // must explicitly review its new requirements and then confirm fit.
+          const parent = await readGap(gap_id!);
+          const children = parent.children.filter(child => !record.children.some(old => old.id === child.id));
+          expect(children).toHaveLength(1);
+          const rewrittenId = children[0]!.id;
+          let rewritten = await readGap(rewrittenId);
+          const coverageId = rewritten.coverages[0]!.id;
+          const dimensions = rewritten.requirement_review.basis.dimensions;
+          await iegpAction(request, {
+            action: "review_requirement_basis", gap_id: rewrittenId,
+            expected_version: rewritten.requirement_review.version,
+            requirements: JSON.stringify(Object.fromEntries(Object.entries(dimensions).map(([dimension, requirement]) => [dimension, {
+              applicability: requirement.requirement.trim() ? "required" : "not_applicable",
+              requirement: requirement.requirement,
+              rationale: "Synthetic final-plan fixture: sourced requirements are required; unspecified dimensions are outside this fixture's decision",
+              resolution: requirement.conflicts.length ? "Fixture reviewer requires the combined sourced requirements" : "",
+            }]))),
+            rationale: "Explicit requirement review for the positive final-plan fixture",
+          });
+          rewritten = await readGap(rewrittenId);
+          for (const [dimension, requirement] of Object.entries(rewritten.requirement_review.basis.dimensions)) {
+            if (requirement.applicability !== "required") continue;
+            const current = (await readGap(rewrittenId)).coverages.find(coverage => coverage.id === coverageId)!;
+            await iegpAction(request, {
+              action: "lock_dimension", coverage_id: coverageId,
+              ...await coverageOpeningTokens(request, current.tactic_id, current.id), dimension, value: "yes",
+              rationale: "Synthetic positive fixture: planned design satisfies this sourced requirement",
+            });
+          }
+          rewritten = await readGap(rewrittenId);
+          const current = rewritten.coverages.find(coverage => coverage.id === coverageId)!;
+          await iegpAction(request, {
+            action: "lock_overall", coverage_id: coverageId, overall: "full",
+            ...await coverageOpeningTokens(request, current.tactic_id, current.id),
+            expected_basis_version: rewritten.requirement_review.version,
+            rationale: "Explicit Full review after all required positive-fixture dimensions are satisfied",
+          });
+        } else {
           await iegpAction(request, {
             action: "rewrite_partial_gap",
+            expected_resolution: record.resolution_version,
             gap_id,
             name: record.gap.name,
             status: "validated_open",

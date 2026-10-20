@@ -1,3 +1,4 @@
+import { priorityDecision } from "./support/priority-decision";
 import { makeFinalReady } from "./support/final-ready";
 import { beforeAll, describe, expect, it } from "vitest";
 import "@/modules";
@@ -135,6 +136,7 @@ describe("modular pipeline, S0 to S10", () => {
       input: {
         action: "edit_gap",
         gap_id: gap.id,
+        expected_gap: gap,
         name: gap.name,
         statement: `${gap.statement} Restated for the HTA submission.`,
         rationale: "Sharpened for the HTA submission question",
@@ -177,7 +179,7 @@ describe("modular pipeline, S0 to S10", () => {
     expect(suggested.output.axes.length).toBeGreaterThanOrEqual(2);
 
     const target = suggested.output.placements[0]!;
-    await validatePlacement({
+    await validatePlacement({ ...await priorityDecision(target.gap_id, "Blocks the reimbursement submission"),
       gap_id: target.gap_id,
       band: "high",
       rationale: "Blocks the reimbursement submission",
@@ -276,9 +278,18 @@ describe("modular pipeline, S0 to S10", () => {
   it("traces every run with route, steps and eval scores", async () => {
     const runs = await listRuns({ limit: 100 });
     expect(runs.length).toBeGreaterThan(8);
-    // The only failures so far are the contract violations this suite provoked.
+    const state = await loadState();
+    // Provider comparison attempts own separate traces from stage contract failures.
     for (const record of runs.filter((candidate) => candidate.status === "error")) {
-      expect(record.error ?? "").toMatch(/rejected its input/i);
+      if (record.module_id === "incoming-source-comparison") {
+        const comparison = state.source_comparisons?.find((row) => row.version === record.id);
+        expect(record).toMatchObject({ stage: "S1", finished_at: expect.any(String), route: null });
+        expect(record.error ?? "").toMatch(/no API key/i);
+        expect(comparison).toMatchObject({ status: "failed", error: record.error });
+        expect(record.input).toMatchObject({ source_id: comparison?.source_id, basis_version: comparison?.basis_version });
+      } else {
+        expect(record.error ?? "").toMatch(/rejected its input/i);
+      }
     }
     for (const stage of ["S0", "S1", "S2", "S3", "S4", "S7", "S8", "S9", "S10"] as const) {
       expect(runs.some((record) => record.stage === stage && record.status === "ok")).toBe(true);

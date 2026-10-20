@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { TacticRecordLink } from "@/components/tactic-ideation/tactic-panel";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { proposalFields } from "@/components/ideation/proposal-fields";
 import { TACTIC_TYPE_LABELS, type TacticType } from "@/lib/iegp/enums";
@@ -37,10 +38,13 @@ export function ProposalCard({
   proposal,
   identity,
   mayIdeate,
+  readOnly = false,
 }: {
   proposal: ProposalCardModel;
   identity: ActionIdentity;
   mayIdeate: boolean;
+  /** Record inspection keeps decisions in their existing review surface. */
+  readOnly?: boolean;
 }) {
   const settled = proposal.status !== "proposed";
   return (
@@ -109,7 +113,7 @@ export function ProposalCard({
           Rationale and critic note
         </summary>
         <div className="mt-1 grid gap-1 border-l border-border pl-2">
-          <p className="text-[11px] leading-4 text-muted-foreground">{proposal.rationale}</p>
+          <p className="text-[11px] leading-4 text-muted-foreground">{proposal.rationale || "Reason not recorded"}</p>
           <p className="text-[11px] leading-4 text-muted-foreground">
             Critic: {proposal.critic_note?.trim() ? proposal.critic_note : "no note recorded"}
           </p>
@@ -119,26 +123,35 @@ export function ProposalCard({
         </div>
       </details>
 
+      {proposal.origin !== "human" ? <div className="grid gap-1 text-[12px]" aria-label="Model suggestion support">
+        <p>Model suggestion; acceptance or rejection is a human decision.</p>
+        {proposal.supporting_references?.length ? <ul aria-label="Option supporting references">
+          {proposal.supporting_references.map((reference, index) => <li key={index}>
+            {reference.target ? <Link href={reference.target.href}>{reference.target.title}</Link> : <span>Reference unavailable</span>}: {reference.reason}
+          </li>)}
+        </ul> : <p>Supporting references not recorded for this suggestion</p>}
+      </div> : null}
       {settled ? (
         <div className="grid gap-1 border-t border-border pt-2">
           <p className="text-[11px] text-muted-foreground">
             {proposal.status === "accepted" ? "Accepted" : "Rejected"} by{" "}
             {proposal.decided_by ?? "unknown"}
-            {proposal.decision_rationale ? ` — ${proposal.decision_rationale}` : ""}
+            {proposal.decision_rationale ? ` — ${proposal.decision_rationale}` : " — Reason not recorded"}
           </p>
           {proposal.tactic_id ? (
-            <Link
-              href={`/tactics/${proposal.tactic_id}`}
+            <TacticRecordLink
+              tacticId={proposal.tactic_id}
               className="text-[11px] text-[color:var(--known-foreground)] no-underline hover:underline"
             >
               {proposal.expansion_id ? `Expansion ${proposal.expansion_id} on tactic ${proposal.tactic_id}` : `Tactic ${proposal.tactic_id}`}
-            </Link>
+            </TacticRecordLink>
           ) : null}
-          {proposal.status === "rejected" && mayIdeate ? (
+          {proposal.status === "rejected" && mayIdeate && !readOnly ? (
             <div>
               <ActionDialog
+                protectUnsavedChanges
                 endpoint="/api/plan"
-                payload={{ action: "restore_proposal", id: proposal.id }}
+                payload={{ action: "restore_proposal", id: proposal.id, expected_version: proposal.version }}
                 label="Restore"
                 title={`Restore ${proposal.name}`}
                 description="Puts the idea back to Proposed so you can edit, accept or reject it again. The earlier rejection stays on the record."
@@ -152,13 +165,14 @@ export function ProposalCard({
             </div>
           ) : null}
         </div>
-      ) : (
+      ) : readOnly ? null : (
         <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2">
           {mayIdeate ? (
             <>
               <ActionDialog
+                protectUnsavedChanges
                 endpoint="/api/plan"
-                payload={{ action: "edit_proposal", id: proposal.id }}
+                payload={{ action: "edit_proposal", id: proposal.id, expected_version: proposal.version }}
                 fields={proposalFields(proposal)}
                 label="Edit"
                 title={`Edit ${proposal.name}`}
@@ -170,8 +184,10 @@ export function ProposalCard({
                 size="sm"
               />
               <ActionDialog
+                protectUnsavedChanges
                 endpoint="/api/plan"
-                payload={{ action: "decide_proposal", id: proposal.id, decision: "accept" }}
+                payload={{ action: "decide_proposal", id: proposal.id, expected_version: proposal.version, decision: "accept" }}
+                fields={proposal.origin !== "human" ? [{ name: "judgement_origin", label: "Decision basis", type: "select", defaultValue: "model", options: [{ value: "model", label: "Accept supported model suggestion" }, { value: "manual", label: "Manual judgement with my reason" }] }] : []}
                 label="Accept"
                 title={`Accept ${proposal.name}`}
                 description={proposal.proposal_kind === "expansion" ? "Accepting creates a proposed expansion on the existing tactic. Its coverage starts unassessed and does not count until its own lifecycle and coverage are validated." : "Accepting creates a proposed tactic mapped to this gap. The rationale is stored on the edit record."}
@@ -182,8 +198,9 @@ export function ProposalCard({
                 size="sm"
               />
               <ActionDialog
+                protectUnsavedChanges
                 endpoint="/api/plan"
-                payload={{ action: "decide_proposal", id: proposal.id, decision: "reject" }}
+                payload={{ action: "decide_proposal", id: proposal.id, expected_version: proposal.version, decision: "reject" }}
                 label="Reject"
                 title={`Reject ${proposal.name}`}
                 description="Rejecting keeps the proposal on the record with your reason."

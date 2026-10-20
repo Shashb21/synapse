@@ -27,6 +27,7 @@ test.describe("gap details", () => {
     }).toPass({ timeout: 30_000 });
     await details.getByLabel("Geography").fill("US, EU5");
     await details.getByLabel("Regional nuances").fill("Germany: G-BA wants a head-to-head comparator.");
+    await details.getByLabel("Reason for details change (required)").fill("Record the payer interview details");
     await save.click();
     await expect(details.getByRole("status")).toHaveText("Details saved.");
     // Case-insensitive duplicates collapse to the first spelling.
@@ -40,9 +41,11 @@ test.describe("gap details", () => {
     const inventory = page.getByTestId("evidence-inventory");
     const row = inventory.locator(`tr[data-gap-id="${gap.gap_id}"]`);
     const toggle = row.getByTestId("gap-row-toggle");
-    await expect(async () => {
-      if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click({ timeout: 5_000 });
-      await expect(inventory.getByTestId("gap-metadata").getByLabel("Geography")).toHaveValue("US, EU5", { timeout: 1_000 });
-    }).toPass({ timeout: 30_000 });
+    await toggle.click();
+    const panel = page.getByRole("dialog", { name: "Gap details", exact: true });
+    await expect(panel).toContainText("US, EU5");
+    await expect(panel).toContainText("Germany: G-BA wants a head-to-head comparator.");
+    await panel.getByRole("link", { name: "Edit gap and mappings", exact: true }).click();
+    await expect(page.getByTestId("gap-metadata").getByLabel("Geography")).toHaveValue("US, EU5");
   });
 });

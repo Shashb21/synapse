@@ -84,6 +84,7 @@ describe("manual gap edits", () => {
     ).rejects.toThrow(/domain/i);
     const changes = await modifyGap({
       gap_id: gapId,
+      expected_gap: (await loadState()).gaps.find(gap => gap.id === gapId),
       name: "Human name",
       statement: "Human statement.",
       domain: "safety",
@@ -114,7 +115,7 @@ describe("manual gap edits", () => {
     const src = await source();
     const first = await commitGap(src.source_id, null);
     const gapId = first.gap_ids[0]!;
-    await modifyGap({ gap_id: gapId, name: "Human name", statement: "Human statement.", rationale: "Human wording", ...who });
+    await modifyGap({ gap_id: gapId, expected_gap: (await loadState()).gaps.find(gap => gap.id === gapId), name: "Human name", statement: "Human statement.", rationale: "Human wording", ...who });
     const src2 = await source("KOL interview");
     const rerun = await commitGap(src2.source_id, gapId);
     expect(rerun.merged_gap_ids).toEqual([gapId]);
@@ -171,6 +172,7 @@ describe("manual tactic create and edit", () => {
       function: "heor",
       residual_ids: [],
       gap_id: gapId,
+      rationale: "Claims study answers the health resource evidence need",
       ...who,
     });
     const state = await loadState();
@@ -375,6 +377,7 @@ describe("leftovers and rejected AI candidates", () => {
 
     const tacticId = await promoteTacticCandidate({ candidate_id: "tc-1", gap_id: gapId, rationale: "Real study", ...who });
     const tactic = (await loadState()).tactics.find((x) => x.id === tacticId)!;
+    expect((await listEdits({ entity_id: `${gapId}::${tacticId}` })).find(row => row.rationale === "Real study")).toBeDefined();
     expect(tactic.source_quote).toBe("Evidence on elderly patients is missing.");
     expect(tactic.data_source).toBe("HTA briefing");
     expect((await listRejectedTacticCandidates())[0]!.promoted_tactic_id).toBe(tacticId);
@@ -387,7 +390,7 @@ describe("leftovers and rejected AI candidates", () => {
     for (const action of ["modify_gap", "edit_need", "move_need", "unlink_need", "create_need", "accept_residual_gap", "modify_residual_gap", "reject_residual_gap"]) {
       expect(gapPage).toContain(`action: "${action}"`);
     }
-    const tacticPage = read("src/app/tactics/[id]/page.tsx");
+    const tacticPage = read("src/components/tactic-ideation/tactic-editor.tsx") + read("src/components/tactic-record-content.tsx");
     expect(tacticPage).toContain('action: "modify_tactic"');
     expect(tacticPage).toContain('action: "lock_tactic_review"');
     expect(read("src/app/needs/page.tsx")).toContain('action: "promote_gap_candidate"');

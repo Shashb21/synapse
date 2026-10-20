@@ -76,7 +76,7 @@ test.describe("gaps then prioritize then tactics", () => {
     await openInventoryRow(page);
     await expect(
       page
-        .getByRole("button", { name: /confirm status|resolve this partially addressed gap/i })
+        .getByRole("link", { name: /Confirm evidence coverage|Resolve — split or rewrite|Review evidence coverage and mappings/i })
         .first(),
     ).toBeVisible();
   });

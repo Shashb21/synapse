@@ -61,6 +61,9 @@ export function ActionDialog({
   description,
   confirmLabel,
   rationaleLabel,
+  rationaleFieldName = "rationale",
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
   requireRationale = true,
   identity,
   variant = "outline",
@@ -69,7 +72,12 @@ export function ActionDialog({
   trigger,
   triggerContent,
   validateForm,
+  protectUnsavedChanges = false,
+  onSuccess,
 }: {
+  protectUnsavedChanges?: boolean;
+  /** Revalidate a containing record after a successful save, retaining its open drafts. */
+  onSuccess?: () => void;
   endpoint: string;
   payload: Record<string, unknown>;
   fields?: ActionField[];
@@ -78,12 +86,15 @@ export function ActionDialog({
   description?: string;
   confirmLabel?: string;
   rationaleLabel?: string;
+  rationaleFieldName?: "rationale" | "reason";
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   requireRationale?: boolean;
   identity: ActionIdentity;
   variant?: "default" | "outline" | "ghost" | "secondary";
   size?: "sm" | "default" | "icon-sm";
   className?: string;
-  trigger?: React.ReactElement;
+  trigger?: React.ReactElement | null;
   /** Shown on the trigger instead of `label` (e.g. an icon); `title` then names the button. */
   triggerContent?: React.ReactNode;
   /** A check across fields (by name, as typed) once each field passes its own; message or null. */
@@ -91,7 +102,15 @@ export function ActionDialog({
 }) {
   const { refreshing, refresh } = usePageRefresh();
   const formId = useId();
-  const [open, setOpen] = useState(false);
+  const [localOpen, setLocalOpen] = useState(false);
+  const open = controlledOpen ?? localOpen;
+  const [openedPayload, setOpenedPayload] = useState(payload);
+  const [openedFields, setOpenedFields] = useState(fields);
+  function setOpen(value: boolean) {
+    setLocalOpen(value);
+    controlledOnOpenChange?.(value);
+  }
+  const [dirty, setDirty] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actorName, setActorName] = useState(identity.signed_in ? identity.actor_name : "");
@@ -99,10 +118,10 @@ export function ActionDialog({
 
   async function submit(form: HTMLFormElement) {
     const data = new FormData(form);
-    const rationale = String(data.get("rationale") ?? "").trim();
+    const rationale = String(data.get(rationaleFieldName) ?? "").trim();
     setError(null);
     if (requireRationale && rationale.length < 3) {
-      setError("A short rationale is required. It is stored with the edit.");
+      setError(rationaleFieldName === "reason" ? "A meaningful reason is required. It is stored with the decision." : "A short rationale is required. It is stored with the edit.");
       return;
     }
     if (!identity.signed_in && !actorName.trim()) {
@@ -111,7 +130,7 @@ export function ActionDialog({
     }
     const extra: Record<string, unknown> = {};
     const typed: Record<string, string> = {};
-    for (const field of fields) {
+    for (const field of openedFields) {
       const value = data.get(field.name);
       if (value !== null) extra[field.name] = field.type === "number" ? Number(value) : String(value);
       typed[field.name] = String(value ?? "");
@@ -135,9 +154,9 @@ export function ActionDialog({
     }
     setPending(true);
     const res = await postJson(endpoint, {
-        ...payload,
+        ...openedPayload,
         ...extra,
-        rationale,
+        [rationaleFieldName]: rationale,
         actor_name: actorName.trim() || identity.actor_name,
         actor_function: actorFunction,
       });
@@ -149,31 +168,36 @@ export function ActionDialog({
     }
     setError(null);
     // The dialog closes as the refreshed data arrives, so the page never shows the old value.
-    refresh(() => setOpen(false));
+    refresh(() => { setOpen(false); onSuccess?.(); });
   }
 
   function onOpenChange(next: boolean) {
     // Each opening starts clean: an error from an earlier attempt does not linger.
     if (next) {
+      setDirty(false);
+      setOpenedPayload(payload);
+      setOpenedFields(fields);
       setError(null);
       setPending(false);
     }
+    if (!next && protectUnsavedChanges && (pending || refreshing || (dirty && !window.confirm("Discard unsaved changes?")))) return;
     setOpen(next);
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogTrigger
+      {trigger !== null ? <DialogTrigger
         render={trigger ?? <Button size={size} variant={variant} className={className} />}
         aria-label={triggerContent ? (title ?? label) : triggerName(label, title)}
         title={triggerContent ? (title ?? label) : undefined}
       >
         {triggerContent ?? label}
-      </DialogTrigger>
+      </DialogTrigger> : null}
       <DialogContent className="z-[60] sm:max-w-md">
         <form
           id={formId}
           noValidate
+          onChange={() => setDirty(true)}
           onSubmit={(event) => {
             event.preventDefault();
             void submit(event.currentTarget);
@@ -184,7 +208,7 @@ export function ActionDialog({
             {description ? <DialogDescription>{description}</DialogDescription> : null}
           </DialogHeader>
           <div className="grid gap-3 py-3">
-            {fields.map((field) => (
+            {openedFields.map((field) => (
               // A new default (the page refreshed after a save) remounts the control: Base UI
               // refuses to change an uncontrolled field's default in place (KAN-68).
               <label key={`${field.name}:${field.defaultValue ?? ""}`} className="grid gap-1 text-[12px] text-muted-foreground">
@@ -223,13 +247,13 @@ export function ActionDialog({
             {requireRationale ? (
               <label className="grid gap-1 text-[12px] text-muted-foreground">
                 {rationaleLabel ?? "Rationale (required)"}
-                <Textarea name="rationale" rows={3} placeholder="Why this decision, in one line" />
+                <Textarea name={rationaleFieldName} rows={3} placeholder="Why this decision, in one line" />
                 <span className="text-[11px] text-muted-foreground/80">
                   Stored on the edit record.
                 </span>
               </label>
             ) : (
-              <input type="hidden" name="rationale" value="" />
+              <input type="hidden" name={rationaleFieldName} value="" />
             )}
             {!identity.signed_in ? (
               <div className="grid gap-2 border-t border-border pt-3">

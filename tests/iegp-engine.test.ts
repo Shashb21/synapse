@@ -31,7 +31,7 @@ import {
 import { emptyDimensions, unlocked } from "@/lib/iegp/engine";
 import { buildSeed } from "@/lib/iegp/seed";
 import { buildBlankWorkspace } from "@/lib/iegp/blank";
-import type { GapTacticCoverage } from "@/lib/iegp/types";
+import type { GapTacticCoverage, RequirementBasis } from "@/lib/iegp/types";
 import { COVERAGE_DIMENSIONS, GAP_STATUS_DEFINITIONS, GAP_STATUS_LABELS } from "@/lib/iegp/enums";
 
 function cov(overall: GapTacticCoverage["overall"], dims: Partial<GapTacticCoverage["dimensions"]>): GapTacticCoverage {
@@ -49,6 +49,23 @@ function cov(overall: GapTacticCoverage["overall"], dims: Partial<GapTacticCover
     overall_lock: unlocked(),
     stale: false,
     needs_review: false,
+  };
+}
+
+
+/** A human-reviewed safety question with a required population and justified remaining dimensions. */
+function confirmedPopulationBasis(): RequirementBasis {
+  const dimensions = {} as RequirementBasis["dimensions"];
+  for (const dim of COVERAGE_DIMENSIONS) {
+    dimensions[dim] = {
+      applicability: dim === "population" ? "required" : "not_applicable", requirement: dim === "population" ? "Community patients" : "",
+      rationale: "This narrow safety question requires population fit only", sources: [], conflicts: [], resolution: "",
+    };
+  }
+  return {
+    version: "reviewed-population", source_version: "fixture-source", origin: "human", rationale: "Safety scope reviewed", history: [],
+    confirmation: { ...unlocked(), locked: true, actor_name: "A. Rao", actor_function: "heor", locked_at: "2026-09-18T00:00:00Z" },
+    dimensions,
   };
 }
 
@@ -122,8 +139,7 @@ describe("IEGP engine", () => {
       locked_at: "2026-09-18T00:00:00Z",
       note: "Human verdict.",
     };
-    // A human-locked Full closes the gap even when every dimension is "no":
-    // the verdict decides, not a weighted fraction of dimensions.
+    // A historical human lock without reviewed requirements cannot establish current Full.
     const lockedFullThinDims: GapTacticCoverage = {
       ...cov("full", {
         comparator: { value: "no", rationale: "", lock: unlocked() },
@@ -132,7 +148,12 @@ describe("IEGP engine", () => {
       }),
       overall_lock: humanLock,
     };
-    expect(computeGapStatus([lockedFullThinDims], [planned])).toBe("validated_addressed");
+    expect(computeGapStatus([lockedFullThinDims], [planned])).toBe("validated_partial");
+    const supportedFull: GapTacticCoverage = {
+      ...lockedFullThinDims, confirmed_requirement_basis: confirmedPopulationBasis(),
+      dimensions: { ...lockedFullThinDims.dimensions, population: { value: "yes", rationale: "Population matches", lock: unlocked() } },
+    };
+    expect(computeGapStatus([supportedFull], [planned])).toBe("validated_addressed");
     // A model verdict of Full that no human has locked stays Partial.
     expect(computeGapStatus([cov("full", {})], [planned])).toBe("validated_partial");
     // Partial, limited or not-yet-assessed coverage is Partial.
@@ -145,7 +166,7 @@ describe("IEGP engine", () => {
     // A locked Partial next to a locked Full: the locked Full closes it.
     expect(
       computeGapStatus(
-        [{ ...cov("partial", {}), overall_lock: humanLock }, lockedFullThinDims],
+        [{ ...cov("partial", {}), overall_lock: humanLock }, supportedFull],
         [planned],
       ),
     ).toBe("validated_addressed");
@@ -246,6 +267,7 @@ describe("IEGP engine", () => {
     expect(suggestGapStatus([unlockedFull], [planned])).toBe("validated_partial");
     const lockedFull: GapTacticCoverage = {
       ...unlockedFull,
+      confirmed_requirement_basis: confirmedPopulationBasis(),
       overall_lock: {
         locked: true,
         actor_name: "A. Rao",

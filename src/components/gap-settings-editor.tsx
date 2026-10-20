@@ -3,6 +3,7 @@
 import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { postJson } from "@/lib/post-json";
 
@@ -26,7 +27,7 @@ export function SettingChips({ settings, className }: { settings: string[]; clas
 /**
  * Treatment settings on one gap (1L, Perioperative, Metastatic…). Free tags, so
  * typing suggests the tags already used on other gaps to keep one spelling per
- * setting. Saves on every add or remove.
+ * setting. Changes are saved together with a reason.
  */
 export function GapSettingsEditor({
   gapId,
@@ -41,22 +42,31 @@ export function GapSettingsEditor({
   const listId = useId();
   const errorId = useId();
   const [tags, setTags] = useState(settings);
+  const [savedTags, setSavedTags] = useState(settings);
+  const [reason, setReason] = useState("");
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  async function save(next: string[]) {
-    setTags(next);
+  const dirty = JSON.stringify(tags) !== JSON.stringify(savedTags);
+
+  async function save() {
+    if (reason.trim().length < 3) {
+      setError("A meaningful reason is required for the settings change.");
+      return;
+    }
     setPending(true);
     setError(null);
-    const res = await postJson("/api/plan", { action: "set_gap_settings", gap_id: gapId, settings: next });
+    const res = await postJson("/api/plan", { action: "set_gap_settings", gap_id: gapId, settings: tags, expected_settings: savedTags, rationale: reason });
     const json = res.json as { settings?: string[]; error?: string };
     setPending(false);
     if (!res.ok) {
       setError(json.error ?? "Could not save the settings.");
       return;
     }
-    setTags(json.settings ?? next);
+    setTags(json.settings ?? tags);
+    setSavedTags(json.settings ?? tags);
+    setReason("");
     router.refresh();
   }
 
@@ -67,7 +77,7 @@ export function GapSettingsEditor({
     const tag = options.find((option) => option.toLowerCase() === typed.toLowerCase()) ?? typed;
     setDraft("");
     if (tags.some((existing) => existing.toLowerCase() === tag.toLowerCase())) return;
-    void save([...tags, tag]);
+    setTags([...tags, tag]);
   }
 
   const suggestions = options.filter(
@@ -87,7 +97,7 @@ export function GapSettingsEditor({
             <button
               type="button"
               disabled={pending}
-              onClick={() => void save(tags.filter((existing) => existing !== tag))}
+              onClick={() => setTags(tags.filter((existing) => existing !== tag))}
               className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
               aria-label={`Remove ${tag}`}
             >
@@ -125,10 +135,22 @@ export function GapSettingsEditor({
           </datalist>
         </form>
       </div>
+      {dirty ? (
+        <div className="grid gap-2">
+          <label className="grid gap-1 text-[12px] text-muted-foreground">
+            Reason for settings change (required)
+            <textarea value={reason} onChange={event => setReason(event.target.value)} disabled={pending} className="rounded-lg border border-input bg-card px-2.5 py-1.5" />
+          </label>
+          <div className="flex gap-2">
+            <Button type="button" size="sm" disabled={pending} onClick={() => void save()}>Save settings</Button>
+            <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={() => { setTags(savedTags); setDraft(""); setReason(""); setError(null); }}>Discard settings</Button>
+          </div>
+        </div>
+      ) : null}
       {pending ? <p role="status" className="text-[11px] text-muted-foreground">Saving settings…</p> : null}
       {error ? <>
         <p id={errorId} role="alert" className="text-[11px] text-destructive">{error} Changes have not been saved.</p>
-        <button type="button" disabled={pending} onClick={() => void save(tags)} className="justify-self-start text-[12px] underline focus-visible:outline-2 focus-visible:outline-ring">Retry saving settings</button>
+        <button type="button" disabled={pending} onClick={() => void save()} className="justify-self-start text-[12px] underline focus-visible:outline-2 focus-visible:outline-ring">Retry saving settings</button>
       </> : null}
     </div>
   );

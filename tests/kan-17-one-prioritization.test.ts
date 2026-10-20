@@ -1,3 +1,4 @@
+import { priorityDecision } from "./support/priority-decision";
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { sql } from "drizzle-orm";
@@ -56,7 +57,7 @@ describe("KAN-17: one prioritization system", () => {
   });
 
   it("carries locked legacy bands into S8 as validated bands, once, without overwriting S8", async () => {
-    await validatePlacement({
+    await validatePlacement({ ...await priorityDecision("GAP-CNS", "Set on the matrix before the board retired"),
       gap_id: "GAP-CNS",
       band: "high",
       rationale: "Set on the matrix before the board retired",
@@ -145,7 +146,7 @@ describe("KAN-17: one prioritization system", () => {
   });
 
   it("no longer mirrors S8 bands into the legacy board", async () => {
-    await validatePlacement({
+    await validatePlacement({ ...await priorityDecision("GAP-PERSIST", "Matrix decision only"),
       gap_id: "GAP-PERSIST",
       band: "medium",
       rationale: "Matrix decision only",

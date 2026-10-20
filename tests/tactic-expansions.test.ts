@@ -1,3 +1,8 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { TacticRecordContent } from "@/components/tactic-record-content";
+import { tacticRecord } from "@/lib/iegp/tactic-record";
+import { gapResolutionVersion } from "@/lib/iegp/relationship-version";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import postgres from "postgres";
 import { eq, sql } from "drizzle-orm";
@@ -5,15 +10,18 @@ import "@/modules";
 import * as tables from "@/lib/iegp/schema";
 import { db } from "@/lib/iegp/db";
 import { buildSeed } from "@/lib/iegp/seed";
-import { assignTacticToGap, loadState, persistState, rejectMapping, lockCoverageOverall, lockCoverageDimension, saveMappingTableRow, splitPartialGap, rewritePartialGap, syncComputedGapStatuses } from "@/lib/iegp/store";
+import { assignTacticToGap, loadState, persistState, rejectMapping, lockCoverageOverall, lockCoverageDimension, saveMappingTableRow, splitPartialGap, rewritePartialGap, reviewRequirementBasis } from "@/lib/iegp/store";
 import { acceptTacticExpansion, setExpansionStatus, tacticVersion } from "@/lib/iegp/tactic-expansions";
 import { runInWorkspace } from "@/modules/workspaces/context";
 import { POST } from "@/app/api/plan/route";
 import { kgMappingModule } from "@/modules/stages/s4-kg-mapping/module";
 import type { ModuleContext } from "@/modules/kernel/contracts";
-import { computeGapStatus, unlocked, countingCoverages } from "@/lib/iegp/engine";
+import { computeGapStatus, unlocked, countingCoverages, relationshipFit } from "@/lib/iegp/engine";
 import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
+import { coverageReviewVersion, getRequirementBasisReview } from "@/lib/iegp/requirement-basis";
 import type { ExpansionScope } from "@/lib/iegp/types";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh() {} }) }));
 
 const actor = { name: "A. Rao", function: "heor" as const };
 const scope: ExpansionScope = {
@@ -24,6 +32,17 @@ const scope: ExpansionScope = {
   protocol_amendment: false, start_date: "2026-10-08", evidence_available: "2026-12-01",
 };
 let args: Parameters<typeof acceptTacticExpansion>[0];
+const suppliedSupport = () => [{ entity_type: "gap" as const, entity_id: args.gap_id, reason: "The supplied gap defines the added scope’s evidence need" }];
+
+/** Review this fixture's narrow population question without inventing requirements from omissions. */
+async function reviewPopulationRequirement(gapId: string) {
+  const state = await loadState();
+  await reviewRequirementBasis({ gap_id: gapId, expected_version: getRequirementBasisReview(state, gapId).version,
+    dimensions: Object.fromEntries(COVERAGE_DIMENSIONS.map(dim => [dim, {
+      applicability: dim === "population" ? "required" : "not_applicable", requirement: dim === "population" ? "Community patients" : "",
+      rationale: "This fixture's narrow safety question requires only population fit", resolution: "Population scope limited to community clinics",
+    }])), rationale: "Reviewed the scope of this population-only safety question", actor_name: actor.name, actor_function: actor.function });
+}
 
 beforeEach(async () => {
   const state = buildSeed();
@@ -41,12 +60,30 @@ describe("canonical expansion acceptance", () => {
     await db().execute(sql.raw(`CREATE FUNCTION reject_split_scope() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.expansion_id IS NOT NULL AND NEW.gap_id <> '${args.gap_id}' THEN RAISE EXCEPTION 'injected scoped split failure'; END IF; RETURN NEW; END $$`));
     await db().execute(sql`CREATE TRIGGER reject_split_scope BEFORE INSERT ON coverages FOR EACH ROW EXECUTE FUNCTION reject_split_scope()`);
     try {
-      await expect(splitPartialGap({parent_gap_id: args.gap_id, addressed_name: "Covered scope", open_name: "Uncovered scope", tactic_ids: [child.id], actor_name: actor.name, actor_function: actor.function})).rejects.toMatchObject({cause: {message: "injected scoped split failure"}});
+      await expect(splitPartialGap({expected_resolution: gapResolutionVersion(await loadState(), args.gap_id), parent_gap_id: args.gap_id, addressed_name: "Covered scope", open_name: "Uncovered scope", tactic_ids: [child.id], note: "Reviewed the evidence scope and remaining need", actor_name: actor.name, actor_function: actor.function})).rejects.toMatchObject({cause: {message: "injected scoped split failure"}});
       expect(await loadState()).toEqual(before);
     } finally {
       await db().execute(sql`DROP TRIGGER reject_split_scope ON coverages`);
       await db().execute(sql`DROP FUNCTION reject_split_scope()`);
     }
+  });
+  it.each(["split", "rewrite"])("rejects %s after reviewed child scope or coverage changes", async operation => {
+    const child = await acceptTacticExpansion(args);
+    const planned = await setExpansionStatus({ expansion_id: child.id, status: "planned", rationale: "Funded child", actor, expected_version: child.version });
+    const opening = gapResolutionVersion(await loadState(), args.gap_id);
+    await setExpansionStatus({ expansion_id: child.id, status: "ongoing", rationale: "Child has begun", actor, expected_version: planned.version });
+    const changedScope = await loadState();
+    const resolve = (expected_resolution: string) => operation === "split"
+      ? splitPartialGap({ expected_resolution, parent_gap_id: args.gap_id, addressed_name: "Covered child scope", open_name: "Unanswered comparison", tactic_ids: [child.id], note: "Reviewed scoped split reason", actor_name: actor.name, actor_function: actor.function })
+      : rewritePartialGap({ expected_resolution, gap_id: args.gap_id, name: "Covered child scope", status: "validated_addressed", tactic_ids: [child.id], note: "Reviewed scoped rewrite reason", actor_name: actor.name, actor_function: actor.function });
+    await expect(resolve(opening)).rejects.toThrow("scope changed");
+    expect(await loadState()).toEqual(changedScope);
+    const nextOpening = gapResolutionVersion(changedScope, args.gap_id);
+    const coverage = changedScope.coverages.find(row => row.expansion_id === child.id)!;
+    await lockCoverageOverall({ coverage_id: coverage.id, overall: "limited", rationale: "Revised judgement of the child evidence", actor_name: actor.name, actor_function: actor.function });
+    const changedCoverage = await loadState();
+    await expect(resolve(nextOpening)).rejects.toThrow("scope changed");
+    expect(await loadState()).toEqual(changedCoverage);
   });
   it("cold migration upgrades isolated legacy parent tables without changing IDs, counts or locks", async () => {
     const pg = postgres(process.env.DATABASE_URL!);
@@ -84,18 +121,52 @@ describe("canonical expansion acceptance", () => {
       await pg.end();
     }
   });
-  it("split retains addressed and residual child identities, locks and cancellation eligibility", async () => {
+  it.each(["split", "rewrite"])("keeps historical coverage readable after an expansion %s while explaining current fit", async operation => {
+    const child = await acceptTacticExpansion(args);
+    await setExpansionStatus({ expansion_id: child.id, status: "planned", rationale: "Funded child", actor, expected_version: child.version });
+    const before = await loadState();
+    const historical = before.coverages.find(row => row.expansion_id === child.id)!;
+    const opening = gapResolutionVersion(before, args.gap_id);
+    const currentGapId = operation === "split"
+      ? (await splitPartialGap({ expected_resolution: opening, parent_gap_id: args.gap_id, addressed_name: "Covered child scope", open_name: "Unanswered comparator", tactic_ids: [child.id], note: "Reviewed child scope and remaining question", actor_name: actor.name, actor_function: actor.function })).addressedId
+      : await rewritePartialGap({ expected_resolution: opening, gap_id: args.gap_id, name: "Covered child scope", status: "validated_addressed", tactic_ids: [child.id], note: "Reviewed child scope and remaining question", actor_name: actor.name, actor_function: actor.function });
+    const after = await loadState();
+    expect(after.gaps.find(row => row.id === args.gap_id)!.retired).toBe(true);
+    expect(after.coverages.find(row => row.id === historical.id)).toEqual(historical);
+    expect(() => relationshipFit(after, args.gap_id, args.tactic_id, child.id)).toThrow("Expansion scope does not belong to this tactic and gap");
+
+    const record = (await tacticRecord(args.tactic_id))!;
+    expect(record.coverages.map(row => row.id).sort()).toEqual(after.coverages.filter(row => row.tactic_id === args.tactic_id).map(row => row.id).sort());
+    expect(record.coverages.find(row => row.id === historical.id)).toMatchObject({ ...historical, review_version: coverageReviewVersion(historical), fit: null });
+    expect(record.coverages.find(row => row.gap_id === currentGapId && row.expansion_id === child.id)!.fit).toEqual(relationshipFit(after, currentGapId, args.tactic_id, child.id));
+    expect(await loadState()).toEqual(after);
+  });
+  it.each([false, true])("renders a mapped gap with nullable fit=%s without losing its link", async missingFit => {
+    const record = (await tacticRecord(args.tactic_id))!;
+    const coverage = record.coverages.find(row => row.gap_id === args.gap_id)!;
+    expect(coverage.fit).not.toBeNull();
+    const html = renderToStaticMarkup(createElement(TacticRecordContent, {
+      panel: false,
+      record: { ...record, permissions: { edit: false, coverage: false },
+        coverages: [{ ...coverage, fit: missingFit ? null : coverage.fit }] },
+    }));
+    expect(html).toContain(`href="/gaps/${coverage.gap_id}"`);
+    expect(html).toContain(coverage.gap!.name);
+    expect(html.includes('data-testid="relationship-fit"')).toBe(!missingFit);
+  });
+  it("split retains child identities and dimension locks while Full remains provisional", async () => {
     const child = await acceptTacticExpansion(args);
     const sibling = await acceptTacticExpansion({...args, proposal_id: "s9:sibling", scope: {...scope, name: "Sibling scope"}});
     const planned = await setExpansionStatus({expansion_id: child.id, status: "planned", rationale: "Funded child", actor, expected_version: child.version});
     await lockCoverageDimension({coverage_id: (await loadState()).coverages.find(c => c.expansion_id === child.id)!.id, dimension: "population", value: "yes", rationale: "Scoped population checked", actor_name: actor.name, actor_function: actor.function});
     const before = await loadState();
     const source = before.coverages.find(c => c.expansion_id === child.id)!;
-    const result = await splitPartialGap({parent_gap_id: args.gap_id, addressed_name: "Community evidence covered", open_name: "Comparator still missing", tactic_ids: [child.id], open_tactic_ids: [sibling.id], actor_name: actor.name, actor_function: actor.function});
+    const result = await splitPartialGap({expected_resolution: gapResolutionVersion(await loadState(), args.gap_id), parent_gap_id: args.gap_id, addressed_name: "Community evidence covered", open_name: "Comparator still missing", tactic_ids: [child.id], open_tactic_ids: [sibling.id], note: "Reviewed the evidence scope and remaining need", actor_name: actor.name, actor_function: actor.function});
     const after = await loadState();
     const addressed = after.coverages.filter(c => c.gap_id === result.addressedId);
+    expect(after.gaps.find(g => g.id === result.addressedId)).toMatchObject({ status: "validated_partial", computed_status: "validated_partial", human_validated: false });
     expect(addressed).toHaveLength(1);
-    expect(addressed[0]).toMatchObject({tactic_id: args.tactic_id, expansion_id: child.id, overall: "full", overall_lock: {locked: true}, dimensions: source.dimensions});
+    expect(addressed[0]).toMatchObject({tactic_id: args.tactic_id, expansion_id: child.id, overall: "full", overall_lock: {locked: false}, confirmed_requirement_basis: null, dimensions: source.dimensions});
     expect(after.coverages.find(c => c.gap_id === result.openId)).toMatchObject({tactic_id: args.tactic_id, expansion_id: sibling.id, overall: "unassessed"});
     const inherited = after.expansions.find(e => e.id === child.id)!;
     expect(inherited.gap_ids).toContain(result.addressedId);
@@ -113,28 +184,32 @@ describe("canonical expansion acceptance", () => {
     const child = await acceptTacticExpansion(args);
     if (status === "cancelled") await setExpansionStatus({expansion_id: child.id, status: "cancelled", rationale: "Cancel child", actor, expected_version: child.version});
     const before = await loadState();
-    await expect(splitPartialGap({parent_gap_id: args.gap_id, addressed_name: "Covered slice", open_name: "Unanswered slice", tactic_ids: [status === "missing" ? "EXP-MISSING" : child.id], actor_name: actor.name, actor_function: actor.function})).rejects.toThrow();
+    await expect(splitPartialGap({expected_resolution: gapResolutionVersion(await loadState(), args.gap_id), parent_gap_id: args.gap_id, addressed_name: "Covered slice", open_name: "Unanswered slice", tactic_ids: [status === "missing" ? "EXP-MISSING" : child.id], note: "Reviewed the evidence scope and remaining need", actor_name: actor.name, actor_function: actor.function})).rejects.toThrow();
     expect(await loadState()).toEqual(before);
   });
   it("preserves independently selected parent and child Full evidence on the same addressed gap", async () => {
     const child = await acceptTacticExpansion(args);
     await setExpansionStatus({expansion_id: child.id, status: "planned", rationale: "Child funded", actor, expected_version: child.version});
-    const result = await splitPartialGap({parent_gap_id: args.gap_id, addressed_name: "Parent and added scope covered", open_name: "Uncovered comparator", tactic_ids: [args.tactic_id, child.id], actor_name: actor.name, actor_function: actor.function});
+    const result = await splitPartialGap({expected_resolution: gapResolutionVersion(await loadState(), args.gap_id), parent_gap_id: args.gap_id, addressed_name: "Parent and added scope covered", open_name: "Uncovered comparator", tactic_ids: [args.tactic_id, child.id], note: "Reviewed the evidence scope and remaining need", actor_name: actor.name, actor_function: actor.function});
     const after = await loadState();
     const inherited = after.coverages.filter(c => c.gap_id === result.addressedId);
     expect(inherited).toHaveLength(2);
+    expect(inherited.every(c => !c.overall_lock.locked && c.confirmed_requirement_basis === null)).toBe(true);
+    expect(after.gaps.find(g => g.id === result.addressedId)).toMatchObject({ status: "validated_partial", computed_status: "validated_partial" });
     expect(new Set(inherited.map(c => c.expansion_id ?? "parent"))).toEqual(new Set([child.id, "parent"]));
     await setExpansionStatus({expansion_id: child.id, status: "cancelled", rationale: "Cancel child only", actor, expected_version: after.expansions.find(e => e.id === child.id)!.version});
     const cancelled = await loadState();
     expect(countingCoverages(cancelled.coverages.filter(c => c.gap_id === result.addressedId), cancelled.tactics, cancelled.expansions)).toHaveLength(1);
-    expect(cancelled.gaps.find(g => g.id === result.addressedId)!.computed_status).toBe("validated_addressed");
+    // The split proposal is still provisional, so the remaining parent cannot verify Full.
+    expect(cancelled.gaps.find(g => g.id === result.addressedId)!.computed_status).toBe("validated_partial");
   });
   it("rewrite keeps child Full scoped and cancellation recomputes it Open", async () => {
     const child = await acceptTacticExpansion(args);
     await setExpansionStatus({expansion_id: child.id, status: "planned", rationale: "Child funded", actor, expected_version: child.version});
-    const id = await rewritePartialGap({gap_id: args.gap_id, name: "Community addressed", status: "validated_addressed", tactic_ids: [child.id], actor_name: actor.name, actor_function: actor.function});
+    const id = await rewritePartialGap({expected_resolution: gapResolutionVersion(await loadState(), args.gap_id), gap_id: args.gap_id, name: "Community addressed", status: "validated_addressed", tactic_ids: [child.id], note: "Reviewed the evidence scope and remaining need", actor_name: actor.name, actor_function: actor.function});
     const after = await loadState();
-    expect(after.coverages.filter(c => c.gap_id === id)).toMatchObject([{expansion_id: child.id, overall: "full"}]);
+    expect(after.coverages.filter(c => c.gap_id === id)).toMatchObject([{expansion_id: child.id, overall: "full", overall_lock: {locked: false}, confirmed_requirement_basis: null}]);
+    expect(after.gaps.find(g => g.id === id)).toMatchObject({ status: "validated_partial", computed_status: "validated_partial" });
     await setExpansionStatus({expansion_id: child.id, status: "cancelled", rationale: "Cancel child", actor, expected_version: after.expansions[0]!.version});
     expect((await loadState()).gaps.find(g => g.id === id)!.computed_status).toBe("validated_open");
   });
@@ -147,6 +222,8 @@ describe("canonical expansion acceptance", () => {
     await persistState(state);
     const child = await acceptTacticExpansion({...args, expected_tactic_version: tacticVersion(state.tactics.find(t => t.id === args.tactic_id)!)});
     const coverage = (await loadState()).coverages[0]!;
+    await reviewPopulationRequirement(gap.id);
+    await lockCoverageDimension({coverage_id: coverage.id, dimension: "population", value: "yes", rationale: "Community population fits", actor_name: actor.name, actor_function: actor.function});
     await lockCoverageOverall({coverage_id: coverage.id, overall: "full", rationale: "Human validates child only", actor_name: actor.name, actor_function: actor.function});
     expect((await loadState()).gaps.find(g => g.id === gap.id)!.computed_status).toBe("validated_open");
     await setExpansionStatus({expansion_id: child.id, status: "planned", rationale: "Resources committed", actor, expected_version: child.version});
@@ -157,7 +234,7 @@ describe("canonical expansion acceptance", () => {
     expect(after.expansions[0]!.history).toHaveLength(2);
   });
   it("publishes changed S4 implementation identity for stale evaluation rejection", () => {
-    expect(kgMappingModule.manifest.version).toBe("3.2.0");
+    expect(kgMappingModule.manifest.version).toBe("3.3.0");
   });
   it("accepts and changes lifecycle successfully inside a nondefault workspace", async () => {
     await runInWorkspace({workspace_id: "expansion-success", schema: "ws_expansion_success"}, async () => {
@@ -167,6 +244,7 @@ describe("canonical expansion acceptance", () => {
       const planned = await setExpansionStatus({expansion_id: child.id, status: "planned", rationale: "Separate workspace approved", actor, expected_version: child.version});
       expect((await loadState()).expansions[0]!.status).toBe("planned");
       expect(planned.history).toHaveLength(2);
+      expect(await setExpansionStatus({ expansion_id: child.id, status: "planned", rationale: "No substantive lifecycle change", actor, expected_version: planned.version })).toEqual(planned);
     });
   });
   it("legacy parent mapping row edits preserve distinct child scopes", async () => {
@@ -180,7 +258,7 @@ describe("canonical expansion acceptance", () => {
     const before = await loadState();
     const coverage = before.coverages.find(c => c.expansion_id === child.id)!;
     await assignTacticToGap({gap_id: args.gap_id, tactic_id: args.tactic_id, expansion_id: child.id,
-      coverage: "full", actor_name: "S4", actor_function: "heor"});
+      coverage: "full", references: suppliedSupport(), note: "The model assessed the supplied gap against this scope", actor_name: "S4", actor_function: "heor"});
     let state = await loadState();
     let row = state.coverages.find(c => c.id === coverage.id)!;
     expect(computeGapStatus([row], state.tactics, {expansions: state.expansions})).toBe("validated_open");
@@ -189,15 +267,17 @@ describe("canonical expansion acceptance", () => {
     expect(row.overall_lock.locked).toBe(false);
     expect(computeGapStatus([row], state.tactics, {expansions: state.expansions})).toBe("validated_partial");
     await lockCoverageDimension({coverage_id: coverage.id, dimension: "population", value: "yes", rationale: "Community population fits", actor_name: actor.name, actor_function: actor.function});
+    await reviewPopulationRequirement(args.gap_id);
     await lockCoverageOverall({coverage_id: coverage.id, overall: "full", rationale: "Scoped question fully covered", actor_name: actor.name, actor_function: actor.function});
     state = await loadState(); row = state.coverages.find(c => c.id === coverage.id)!;
     expect(row.overall_lock.locked).toBe(true);
     expect(row.dimensions.population.lock.locked).toBe(true);
     expect(computeGapStatus([row], state.tactics, {expansions: state.expansions})).toBe("validated_addressed");
+    const parentAssessmentsAfterRequirementReview = state.coverages.filter(c => !c.expansion_id);
     await setExpansionStatus({expansion_id: child.id, status: "proposed", rationale: "Resources withdrawn", actor, expected_version: planned.version});
     state = await loadState(); row = state.coverages.find(c => c.id === coverage.id)!;
     expect(computeGapStatus([row], state.tactics, {expansions: state.expansions})).toBe("validated_open");
-    expect(state.coverages.filter(c => !c.expansion_id)).toEqual(before.coverages.filter(c => !c.expansion_id));
+    expect(state.coverages.filter(c => !c.expansion_id)).toEqual(parentAssessmentsAfterRequirementReview);
   });
   it.each(["status", "evidence_question"] as const)("detects an actual changed parent %s rather than an inert version field", async field => {
     const before = await loadState();
@@ -209,34 +289,14 @@ describe("canonical expansion acceptance", () => {
   });
   it("keeps a human lock acquired after the model read and before its scoped write", async () => {
     const child = await acceptTacticExpansion(args);
-    const state = await loadState();
-    const coverage = state.coverages.find(c => c.expansion_id === child.id)!;
-    const d = db(), originalUpdate = d.update.bind(d);
-    let injected = false;
-    const spy = vi.spyOn(d, "update").mockImplementation((table) => {
-      const builder = originalUpdate(table);
-      if (table !== tables.coverages) return builder;
-      const wrap = (object: object): object => new Proxy(object, {get(target, key) {
-        const value = Reflect.get(target, key);
-        if (key === "then") return async (resolve: (value: unknown) => unknown, reject: (error: unknown) => unknown) => {
-          if (!injected) {
-            injected = true;
-            await originalUpdate(tables.coverages).set({overall: "limited", overall_lock: {...coverage.overall_lock, locked: true, actor_name: actor.name}}).where(eq(tables.coverages.id, coverage.id));
-          }
-          return Reflect.apply(value, target, [resolve, reject]);
-        };
-        if (["set", "where", "returning"].includes(String(key))) return (...values: unknown[]) => wrap(Reflect.apply(value, target, values));
-        return typeof value === "function" ? value.bind(target) : value;
-      }});
-      return wrap(builder) as typeof builder;
-    });
-    try {
-      await expect(assignTacticToGap({gap_id: args.gap_id, tactic_id: args.tactic_id, expansion_id: child.id,
-        actor_name: "S4", actor_function: "heor", coverage: "full"})).rejects.toThrow(/changed|review|locked/i);
-      const after = (await loadState()).coverages.find(c => c.id === coverage.id)!;
-      expect(after.overall).toBe("limited");
-      expect(after.overall_lock.locked).toBe(true);
-    } finally { spy.mockRestore(); }
+    const modelRead = await loadState();
+    const coverage = modelRead.coverages.find(c => c.expansion_id === child.id)!;
+    await lockCoverageOverall({coverage_id: coverage.id, overall: "limited", rationale: "Human corrected the scope while the model was running", actor_name: actor.name, actor_function: actor.function});
+    await expect(assignTacticToGap({gap_id: args.gap_id, tactic_id: args.tactic_id, expansion_id: child.id,
+      actor_name: "S4", actor_function: "heor", coverage: "full", note: "Model assessed the earlier supplied gap", references: suppliedSupport()})).rejects.toThrow(/already|changed|review|locked/i);
+    const after = (await loadState()).coverages.find(c => c.id === coverage.id)!;
+    expect(after.overall).toBe("limited");
+    expect(after.overall_lock.locked).toBe(true);
   });
   it("lets source owners compose child acceptance with their decision in one transaction", async () => {
     const before = await loadState();
@@ -260,10 +320,10 @@ describe("canonical expansion acceptance", () => {
     const child = await acceptTacticExpansion(args);
     const baseline = await loadState();
     for (const target of [{expansion_id: "missing", tactic_id: args.tactic_id}, {expansion_id: child.id, tactic_id: baseline.tactics[1]!.id}]) {
-      await expect(assignTacticToGap({...target, gap_id: args.gap_id, actor_name: "S4", actor_function: "heor", coverage: "full"})).rejects.toThrow(/scope/i);
+      await expect(assignTacticToGap({...target, gap_id: args.gap_id, actor_name: "S4", actor_function: "heor", coverage: "full", references: suppliedSupport(), note: "The model assessed the supplied gap against this scope"})).rejects.toThrow(/scope/i);
     }
     await setExpansionStatus({expansion_id: child.id, status: "cancelled", rationale: "No resources", actor, expected_version: child.version});
-    await expect(assignTacticToGap({expansion_id: child.id, tactic_id: child.tactic_id, gap_id: args.gap_id, actor_name: "S4", actor_function: "heor", coverage: "full"})).rejects.toThrow(/cancelled/i);
+    await expect(assignTacticToGap({expansion_id: child.id, tactic_id: child.tactic_id, gap_id: args.gap_id, actor_name: "S4", actor_function: "heor", coverage: "full", references: suppliedSupport(), note: "The model assessed the supplied gap against this scope"})).rejects.toThrow(/cancelled/i);
     expect((await loadState()).coverages).toEqual(baseline.coverages);
   });
   it("offers a versioned human status API while arbitrary proposal acceptance stays unavailable", async () => {
@@ -290,7 +350,7 @@ describe("canonical expansion acceptance", () => {
         const body = JSON.parse(user);
         if (purpose === "mapping-table-proposer") {
           inventory = body.tactics;
-          return {rows: [{gap_id: args.gap_id, mapping_status: "partially_addressed", confidence: 90, rationale: "Added scope covers population", mappings: [{tactic_id: child.id, coverage: "full", confidence: 90, rationale: "Scoped analysis", dimensions: Object.fromEntries(COVERAGE_DIMENSIONS.map(d => [d, "yes"]))}]}]};
+          return {rows: [{gap_id: args.gap_id, mapping_status: "partially_addressed", confidence: 90, rationale: "Added scope covers population", mappings: [{tactic_id: child.id, coverage: "full", references: suppliedSupport(), note: "The model assessed the supplied gap against this scope", confidence: 90, rationale: "Scoped analysis", dimensions: Object.fromEntries(COVERAGE_DIMENSIONS.map(d => [d, "yes"]))}]}]};
         }
         if (purpose === "mapping-table-critic") return {reviews: [{gap_id: args.gap_id, verdict: "keep", confidence: 90, note: "Scoped", mappings: [{tactic_id: child.id, verdict: "keep", note: "Scoped"}]}]};
         return {verdicts: [{gap_id: args.gap_id, verdict: "accept", confidence: 90, reason: "Scoped"}]};
@@ -379,7 +439,7 @@ describe("canonical expansion acceptance", () => {
     const expansion = await acceptTacticExpansion(args);
     expect((await loadState()).mapping_suggestions.find(m => m.gap_id === args.gap_id && m.tactic_id === args.tactic_id)?.status).toBe("rejected");
     await expect(assignTacticToGap({gap_id: args.gap_id, tactic_id: args.tactic_id, actor_name: "S4", actor_function: "heor"})).rejects.toThrow(/rejected|person/i);
-    await assignTacticToGap({gap_id: args.gap_id, tactic_id: args.tactic_id, expansion_id: expansion.id, coverage: "full", actor_name: "S4", actor_function: "heor"});
+    await assignTacticToGap({gap_id: args.gap_id, tactic_id: args.tactic_id, expansion_id: expansion.id, coverage: "full", references: suppliedSupport(), note: "The model assessed the supplied gap against this scope", actor_name: "S4", actor_function: "heor"});
     const sibling = {...expansion, id: "EXP-UNACCEPTED", proposal_id: "sibling-without-acceptance", history: []};
     await db().insert(tables.tacticExpansions).values(sibling);
     await expect(assignTacticToGap({gap_id: args.gap_id, tactic_id: args.tactic_id, expansion_id: sibling.id, actor_name: "S4", actor_function: "heor"})).rejects.toThrow(/rejected|person/i);
@@ -387,10 +447,11 @@ describe("canonical expansion acceptance", () => {
   });
   it("uses independent status/version/history and updates coverage eligibility without validating Full", async () => {
     const expansion = await acceptTacticExpansion(args);
-    await assignTacticToGap({gap_id:args.gap_id, tactic_id:args.tactic_id, expansion_id:expansion.id, coverage:"full", note:"Scoped model assessment", actor_name:"S4",actor_function:"heor"});
+    await assignTacticToGap({gap_id:args.gap_id, tactic_id:args.tactic_id, expansion_id:expansion.id, coverage: "full", references: suppliedSupport(), note: "The model assessed the supplied gap against this scope", actor_name:"S4",actor_function:"heor"});
     const before = await loadState();
     const planned = await setExpansionStatus({expansion_id:expansion.id,status:"planned",rationale:"Resource committed",actor,expected_version:expansion.version});
     expect(planned.history).toHaveLength(2);
+    expect(await setExpansionStatus({ expansion_id: expansion.id, status: "planned", rationale: "No substantive lifecycle change", actor, expected_version: planned.version })).toEqual(planned);
     expect(planned.version).not.toBe(expansion.version);
     const after = await loadState();
     expect(after.tactics).toEqual(before.tactics);

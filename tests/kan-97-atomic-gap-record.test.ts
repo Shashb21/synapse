@@ -1,3 +1,4 @@
+import { gapResolutionVersion } from "@/lib/iegp/relationship-version";
 import { describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import "@/modules";
@@ -66,6 +67,7 @@ async function makePartialGap() {
     ...who,
   });
   const tacticId = await createProposedTactic({
+    rationale: "Develop a study for the remaining evidence need",
     name: "Elderly chart review",
     type: "chart_review",
     description: "Chart review in patients aged 65 and over.",
@@ -81,7 +83,7 @@ async function makePartialGap() {
     gap_id: gapId,
     ...who,
   });
-  await lockTactic({ tactic_id: tacticId, status: "planned", ...who });
+  await lockTactic({ note: "The reviewer confirmed resources for this tactic lifecycle", tactic_id: tacticId, status: "planned", ...who });
   await syncComputedGapStatuses(gapId);
   const gap = (await loadState()).gaps.find((g) => g.id === gapId)!;
   expect(displayedGapStatus(gap)).toBe("validated_partial");
@@ -125,6 +127,7 @@ describe("KAN-97 split and rewrite carry the gap's record", () => {
     const { suggestionId } = await decorate(gapId, tacticId);
     const before = (await loadState()).gaps.find((g) => g.id === gapId)!;
     const { addressedId, openId } = await splitPartialGap({
+      expected_resolution: gapResolutionVersion(await loadState(), gapId), note: "Separate the covered and remaining evidence scope",
       parent_gap_id: gapId,
       addressed_name: "Elderly outcomes covered by the chart review",
       open_name: "Comparator evidence in frail elderly",
@@ -148,12 +151,13 @@ describe("KAN-97 split and rewrite carry the gap's record", () => {
     }
     expect(state.gap_suggestions.find((row) => row.id === suggestionId)!.gap_id).toBe(openId);
     expect(state.residuals.filter((r) => r.gap_id === gapId).every((r) => r.review_status === "rejected")).toBe(true);
-    // Children inherit the objective and are confirmed by the person who split.
+    // Both inherit the objective; only the Open slice has a confirmed final status.
     for (const child of [addressedId, openId].map((id) => state.gaps.find((g) => g.id === id)!)) {
       expect(child.objective_id).toBe(before.objective_id);
-      expect(child.validated_by).toMatchObject({ name: ACTOR.name, function: "heor" });
-      expect(child.validated_at).toBeTruthy();
     }
+    expect(state.gaps.find(g => g.id === openId)).toMatchObject({ validated_by: { name: ACTOR.name, function: "heor" } });
+    expect(state.gaps.find(g => g.id === openId)!.validated_at).toBeTruthy();
+    expect(state.gaps.find(g => g.id === addressedId)).toMatchObject({ status: "validated_partial", human_validated: false, validated_by: null, validated_at: null });
     // The version remembers what the retired gap held and where it went.
     const version = state.gap_versions.find((row) => row.live_gap_id === openId && row.retired_gap_id === gapId)!;
     expect(version.snapshot).toMatchObject({ settings: before.settings, objective_id: before.objective_id });
@@ -162,10 +166,11 @@ describe("KAN-97 split and rewrite carry the gap's record", () => {
     expect(await findGapOrphans()).toEqual([]);
   });
 
-  it("a rewrite as Addressed closes pending ideas and drops the priority, leaving no orphans", async () => {
+  it("an intended Addressed rewrite stays provisional and preserves carry/close behavior without orphans", async () => {
     const { gapId, tacticId } = await makePartialGap();
     await decorate(gapId, tacticId);
     const liveId = await rewritePartialGap({
+      expected_resolution: gapResolutionVersion(await loadState(), gapId), note: "Separate the covered and remaining evidence scope",
       gap_id: gapId, name: "Covered by the chart review", status: "validated_addressed", tactic_id: tacticId, ...who,
     });
     const [idea] = await db().select().from(kernel.ideationProposals).where(eq(kernel.ideationProposals.id, `IDEA-${gapId}`));
@@ -173,6 +178,8 @@ describe("KAN-97 split and rewrite carry the gap's record", () => {
     expect(idea!.decision_rationale).toMatch(/Superseded/);
     expect(await db().select().from(kernel.priorityPlacements).where(eq(kernel.priorityPlacements.gap_id, gapId))).toHaveLength(0);
     const state = await loadState();
+    expect(state.gaps.find(g => g.id === liveId)).toMatchObject({ status: "validated_partial", computed_status: "validated_partial", human_validated: false, validated_by: null });
+    expect(state.coverages.find(c => c.gap_id === liveId)).toMatchObject({ overall: "full", overall_lock: { locked: false }, confirmed_requirement_basis: null });
     expect(state.gap_suggestions.filter((row) => row.status === "pending").every((row) => row.gap_id === liveId)).toBe(true);
     expect(await findGapOrphans()).toEqual([]);
   });
@@ -188,7 +195,7 @@ describe("KAN-97 confirmation", () => {
     expect(gap.validated_by).toMatchObject({ name: ACTOR.name, function: "heor" });
     expect(gap.validation_rationale).toBe("Both sources agree");
     const confirmedAt = gap.validated_at;
-    await modifyGap({ gap_id: gapId, domain: "unmet_need", rationale: "Better fit", ...who });
+    await modifyGap({ gap_id: gapId, expected_gap: gap, domain: "unmet_need", rationale: "Better fit", ...who });
     gap = (await loadState()).gaps.find((g) => g.id === gapId)!;
     expect(gap.validated_at).toBe(confirmedAt);
 
@@ -238,8 +245,8 @@ describe("KAN-97 S2 provenance and split suggestions", () => {
     expect(need.source_quote).toBe(longQuote);
     expect(need).toMatchObject({ run_id: "kan97-s2", candidate_row_id: "gc-1", block_id: "blk-1" });
 
-    await setGapSettings({ gap_id: gapId, settings: ["2L"], ...who });
-    await setGapMetadata({ gap_id: gapId, metadata: { stakeholders: ["Payers"], geography: "EU5" }, ...who, rationale: "From the interview" });
+    await setGapSettings({ gap_id: gapId, expected_settings: (await loadState()).gaps.find(gap => gap.id === gapId)!.settings, settings: ["2L"], rationale: "Correct the setting", ...who });
+    await setGapMetadata({ gap_id: gapId, expected_metadata: (await loadState()).gaps.find(gap => gap.id === gapId)!.metadata, metadata: { stakeholders: ["Payers"], geography: "EU5" }, ...who, rationale: "From the interview" });
     const overlap = await commitExtractedRecords({
       source_id: SOURCE, title: "KAN-97 interview", stakeholder_function: "heor", ...who, needs: [], gaps: [], tactics: [],
       overlaps: [{
@@ -265,20 +272,20 @@ describe("KAN-97 settings, metadata and objective edits", () => {
   it("each change is an edit record with before and after; the objective can be changed", async () => {
     await resetDemoSetup();
     const gapId = await createGap({ name: "Burden", statement: "Burden of illness is unknown.", domain: "disease_burden", ...who });
-    await setGapSettings({ gap_id: gapId, settings: ["1L", "Perioperative"], rationale: "Both settings", ...who });
-    await setGapMetadata({ gap_id: gapId, metadata: { notes: "Ask the payer advisors" }, ...who });
+    await setGapSettings({ gap_id: gapId, expected_settings: (await loadState()).gaps.find(gap => gap.id === gapId)!.settings, settings: ["1L", "Perioperative"], rationale: "Both settings", ...who });
+    await setGapMetadata({ gap_id: gapId, expected_metadata: (await loadState()).gaps.find(gap => gap.id === gapId)!.metadata, metadata: { notes: "Ask the payer advisors" }, rationale: "Record payer follow-up", ...who });
     const edits = await listEdits({ entity_id: gapId });
     expect(edits.find((row) => row.field === "settings")).toMatchObject({ before: null, after: "1L, Perioperative", rationale: "Both settings" });
-    expect(edits.find((row) => row.field === "metadata.notes")).toMatchObject({ before: null, after: "Ask the payer advisors", rationale: null });
+    expect(edits.find((row) => row.field === "metadata.notes")).toMatchObject({ before: null, after: "Ask the payer advisors", rationale: "Record payer follow-up" });
 
     const state = await loadState();
     const other = state.objectives.find((o) => o.id !== state.gaps.find((g) => g.id === gapId)!.objective_id);
     if (other) {
-      await setGapObjective({ gap_id: gapId, objective_id: other.id, rationale: "Serves the HTA decision", ...who });
+      await setGapObjective({ gap_id: gapId, expected_gap: state.gaps.find(gap => gap.id === gapId), expected_objective_id: state.gaps.find(gap => gap.id === gapId)!.objective_id, objective_id: other.id, rationale: "Serves the HTA decision", ...who });
       expect((await loadState()).gaps.find((g) => g.id === gapId)!.objective_id).toBe(other.id);
       expect((await listEdits({ entity_id: gapId })).find((row) => row.field === "objective")).toMatchObject({ rationale: "Serves the HTA decision" });
     }
-    await expect(setGapObjective({ gap_id: gapId, objective_id: "OBJ-NOPE", ...who })).rejects.toThrow(/objectives/);
+    await expect(setGapObjective({ gap_id: gapId, expected_objective_id: "", objective_id: "OBJ-NOPE", ...who })).rejects.toThrow(/objectives/);
   });
 
   it("history is scoped to after the workspace's last reset", async () => {

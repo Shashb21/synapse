@@ -2,16 +2,14 @@
 
 import { Fragment, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { CoverageBadge, GapBadge, NeedsReviewFlag, TacticBadge } from "@/components/iegp-badges";
-import { InventoryReadiness } from "@/components/inventory-readiness";
+import { NewSourceNote } from "@/components/gap-suggestions";
+import { GapBadge } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
 import { GapFormFields } from "@/components/gap-form-fields";
-import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
-import { SplitGapDialog } from "@/components/split-gap-dialog";
-import { GapSettingsEditor, SettingChips } from "@/components/gap-settings-editor";
-import { GapDetailsEditor } from "@/components/gap-metadata";
+import { SettingChips } from "@/components/gap-settings-editor";
 import { compareGapNumbers, gapNumberLabel } from "@/lib/iegp/gap-number";
-import { GapSuggestions, NewSourceNote, NewSourcePill } from "@/components/gap-suggestions";
+import { GapSuggestions, NewSourcePill } from "@/components/gap-suggestions";
+import { InventoryReadiness } from "@/components/inventory-readiness";
 import type { GapSuggestionCard } from "@/lib/iegp/gap-suggestion-cards";
 
 const STATUS_BAND: Record<string, string> = {
@@ -22,9 +20,7 @@ const STATUS_BAND: Record<string, string> = {
 import { customTypesInUse } from "@/lib/iegp/custom-tactic-type";
 import {
   GAPS_TACTIC_HELPER,
-  MapExistingTactic,
   RecordMissedFields,
-  RecordMissedTactic,
 } from "@/components/gap-tactic-actions";
 import {
   DOMAIN_LABELS,
@@ -35,7 +31,6 @@ import {
   reviewGapFilterCounts,
   reviewGapTasks,
   sortReviewGapCards,
-  type PlanTactic,
   type ReviewGapCard,
   type ReviewGapFilter,
   type TacticLibraryItem,
@@ -44,6 +39,8 @@ import { Button } from "@/components/ui/button";
 import { AddTacticsButton } from "@/components/plan-cards";
 import { cn } from "@/lib/utils";
 import { useAiEnabled } from "@/components/platform/ai-status";
+import { GapRecordLink } from "@/components/gap-panel";
+
 const FILTER_CHIPS: { id: ReviewGapFilter; label: string }[] = [
   { id: "all", label: "All evidence statuses" },
   { id: "partial", label: "Partially Addressed" },
@@ -70,6 +67,7 @@ function CreateAddressedGap({ tactics }: { tactics: TacticLibraryItem[] }) {
     <LockForm
       label="Add addressed gap"
       action="create_addressed_gap"
+      note={{ label: "Reason (required)", required: true }}
       confirmLabel="Add addressed gap"
       size="lg"
       description="A gap an existing study already answers. Name the study below."
@@ -95,165 +93,42 @@ function CreateAddressedGap({ tactics }: { tactics: TacticLibraryItem[] }) {
   );
 }
 
-function SupportingEvidence({ card }: { card: ReviewGapCard }) {
-  return (
-    <section className="mt-4 min-w-0 break-words" aria-label="Sources and supporting statements">
-      <h3 className="text-[12px] font-medium">Sources and supporting statements</h3>
-      <p className="mt-1 text-[12px] text-muted-foreground">The sourced statements this gap stands for, extracted from documents or interviews. Several statements can join one gap; every linked source is listed below.</p>
-      {card.needs.length === 0 ? (
-        <p className="mt-2 text-[12px] text-muted-foreground">No source yet. This gap was added on Gaps, not from ingest.</p>
-      ) : (
-        <ul className="mt-2 grid gap-2">
-          {card.needs.map((need) => (
-            <li key={need.id} className="border border-border bg-card/40 p-3 text-[13px]">
-              <p className="text-[11px] text-muted-foreground">{need.source_title || "Unknown source"}{need.role ? ` · ${need.role}` : ""}</p>
-              <p className="mt-1">{need.statement}</p>
-            </li>
-          ))}
-        </ul>
-      )}
-      <Link href={`/gaps/${card.gap_id}`} className="mt-2 inline-block text-[12px] underline focus-visible:outline-2 focus-visible:outline-ring">Open full gap and evidence record</Link>
-    </section>
-  );
-}
-
-function MappedTacticRow({ tactic }: { tactic: PlanTactic }) {
-  return (
-    <li className="flex flex-wrap items-center gap-1.5">
-      <Link
-        href={`/tactics/${tactic.id}`}
-        className="text-[12px] text-foreground no-underline hover:underline"
-      >
-        {tactic.name}
-      </Link>
-      <TacticBadge status={tactic.status} />
-      {tactic.overall ? <CoverageBadge overall={tactic.overall} /> : null}
-      <NeedsReviewFlag needsReview={tactic.needs_review} />
-    </li>
-  );
-}
-
-/** Full detail for the selected gap — the same actions the flat list used to render per row. */
-function GapDetailPane({
-  card,
-  availableTactics,
-  settingOptions,
-  inline = false,
-  focusTask,
-}: {
+/** Focus the outstanding inventory review without duplicating the shared gap record. */
+function InventoryReviewTasks({ card, focusTask }: {
   card: ReviewGapCard;
-  availableTactics: TacticLibraryItem[];
-  settingOptions: string[];
-  /** Opened inside its table row: the row already shows the id and title. */
-  inline?: boolean;
-  focusTask?: { label: string; sequence: number } | null;
+  focusTask: { label: string; sequence: number };
 }) {
   const paneRef = useRef<HTMLElement>(null);
   useLayoutEffect(() => {
-    if (!focusTask) return;
     const target = Array.from(paneRef.current?.querySelectorAll<HTMLElement>("[data-review-task]") ?? [])
-      .find((element) => element.dataset.reviewTask === focusTask.label);
+      .find(element => element.dataset.reviewTask === focusTask.label);
     (target?.querySelector<HTMLElement>("button, a") ?? target)?.focus();
   }, [focusTask]);
   const tasks = reviewGapTasks(card);
   const isPartial = card.gap_status === "validated_partial";
-  return (
-    <article ref={paneRef} data-gap-id={card.gap_id} className="rounded-md border border-border bg-card p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className={cn("font-mono text-[11px] text-muted-foreground", inline && "sr-only")}>{gapNumberLabel(card.number)}</p>
-      </div>
-      <h2 className={cn("mt-1 text-[16px] font-medium leading-6 text-foreground", inline && "sr-only")}>{card.gap_name}</h2>
-      <div className={cn("flex flex-wrap items-center gap-2", inline ? "-mt-4" : "mt-2")}>
-        {isPartial ? (
-          <GapBadge status={card.gap_status} />
-        ) : (
-          <GapStatusOverride
-            gapId={card.gap_id}
-            status={card.gap_status}
-            computedStatus={card.computed_status}
-            override={card.status_override}
-          />
-        )}
-        <span className="text-[11px] text-muted-foreground">{DOMAIN_LABELS[card.domain]}</span>
-        <NeedsReviewFlag needsReview={card.needs_review} />
-        {card.parent_gap_id ? (
-          <span className="text-[11px] text-muted-foreground">From split / rewrite</span>
-        ) : null}
-        {card.history_count > 0 ? (
-          <span className="text-[11px] text-muted-foreground">
-            {card.history_count} version{card.history_count === 1 ? "" : "s"}
-          </span>
-        ) : null}
-      </div>
-      <GapStatusDisagreement computedStatus={card.computed_status} override={card.status_override} />
-      <p className="mt-3 text-[13px] leading-5 text-muted-foreground">{card.statement}</p>
-      <SupportingEvidence card={card} />
-      {card.related.length > 0 ? (
-        <p className="mt-2 text-[12px] text-muted-foreground">
-          Related:{" "}
-          {card.related.map((row, index) => (
-            <span key={row.gap_id}>
-              {index > 0 ? ", " : null}
-              <Link href={`/gaps/${row.gap_id}`} className="text-foreground underline-offset-2 hover:underline">
-                {gapNumberLabel(row.number)} {row.name}
-              </Link>
-            </span>
-          ))}
-        </p>
-      ) : null}
+  return <section ref={paneRef} aria-label="Outstanding gap review">
       <div className="mt-4" data-review-task="Review tactic mappings" tabIndex={-1}>
         <p className="text-[12px] text-muted-foreground">Review tactic mappings: check this gap’s coverage and confirm or edit each flagged mapping.</p>
         {tasks.includes("Review tactic mappings") ? <Link href={`/gaps/${card.gap_id}#mapped-tactics`} className="text-[12px] text-foreground underline">Review coverage on gap page</Link> : null}
-        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Tactics</p>
-        <ul className="mt-1 grid gap-1.5">
-          {card.tactics.length === 0 ? (
-            <li className="text-[12px] text-muted-foreground">No tactics mapped</li>
-          ) : (
-            card.tactics.map((tactic) => <MappedTacticRow key={tactic.expansion_id ?? tactic.id} tactic={tactic} />)
-          )}
-        </ul>
       </div>
       {tasks.length > 1 ? <p className="mt-3 text-[12px] text-muted-foreground">Additional tasks ({tasks.length - 1}): {tasks.slice(1).join(" · ")}</p> : null}
       {card.new_source ? <div data-review-task="Review new source"><NewSourceNote gapId={card.gap_id} newSource={card.new_source} /></div> : null}
       {/* Hero action first: Resolve (Partial) or Confirm (everything else still unconfirmed) stand apart from the secondary actions below. */}
       <div className="mt-4 flex flex-wrap items-center gap-2" data-review-task={isPartial ? "Resolve partial gap" : "Confirm status"}>
         {isPartial ? (
-          <SplitGapDialog
-            gapId={card.gap_id}
-            gapName={card.gap_name}
-            residualName={card.residual?.statement || card.gap_name}
-            tactics={card.tactics}
-          />
+          <Link href={`/gaps/${card.gap_id}#gap-coverage-actions`} className="underline">Resolve — split or rewrite</Link>
         ) : !card.human_validated ? (
           <LockForm
             label="Confirm status"
             action="validate_gap"
             extra={{ gap_id: card.gap_id }}
-            note={{ label: "Note (optional)" }}
+            note={{ label: "Reason (required)", required: true }}
             confirmLabel={`Confirm ${GAP_STATUS_LABELS[card.gap_status]}`}
             variant="default"
           />
         ) : null}
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <MapExistingTactic
-          gapId={card.gap_id}
-          availableTactics={availableTactics}
-          mappedTacticIds={card.tactics.map((tactic) => tactic.id)}
-        />
-        <RecordMissedTactic gapId={card.gap_id} />
-      </div>
-      <details className="mt-4">
-        <summary className="cursor-pointer text-[12px] font-medium focus-visible:outline-2 focus-visible:outline-ring">Edit gap details</summary>
-        <div className="mt-3">
-          <GapSettingsEditor key={card.gap_id} gapId={card.gap_id} settings={card.settings} options={settingOptions} />
-        </div>
-        <div className="mt-4">
-          <GapDetailsEditor key={card.gap_id} gapId={card.gap_id} metadata={card.metadata} />
-        </div>
-      </details>
-    </article>
-  );
+  </section>;
 }
 
 export type GapPriority = { band: "high" | "medium" | "low" | "defer"; validated: boolean };
@@ -324,8 +199,7 @@ const selectClass =
 
 /**
  * Evidence Inventory (KAN-8, the owner's Figma design): a Jira-style list of every
- * gap. Search and filters narrow it, column headers sort it, and a row expands in
- * place to the gap's tactics and actions (confirm, override, split, map a tactic).
+ * gap. Search and filters narrow it, column headers sort it, and each gap opens in the shared detail panel.
  */
 export function GapsWorkbench({
   cards,
@@ -426,10 +300,7 @@ export function GapsWorkbench({
       return (va < vb ? -1 : va > vb ? 1 : 0) * dir;
     });
   }, [cards, filter, attention, query, domain, setting, priority, sort, priorities]);
-  // One row open at a time; the first visible gap starts open so its actions are in reach.
-  // Every row starts collapsed (owner feedback, KAN-56).
   const [openId, setOpenId] = useState<string | null>(null);
-  const expandedId = openId;
   const [focusTask, setFocusTask] = useState<{ label: string; sequence: number } | null>(null);
   const extraFilters = [query, domain, setting, priority].filter(Boolean).length;
 
@@ -557,15 +428,15 @@ export function GapsWorkbench({
                   </tr>
                 ) : null}
                 {visible.map((card) => {
-                  const open = card.gap_id === expandedId;
                   const tasks = reviewGapTasks(card);
+                  const open = openId === card.gap_id;
                   return (
                     <Fragment key={card.gap_id}>
-                      <tr
+                    <tr
                         data-gap-id={card.gap_id}
                         className={cn(
                           "border-b border-border/70 transition-colors",
-                          open ? "bg-accent/50" : "hover:bg-muted/50",
+                          "hover:bg-muted/50",
                         )}
                       >
                         {/* Every row carries its status colour (KAN-56): open, partial or addressed. */}
@@ -576,19 +447,17 @@ export function GapsWorkbench({
                           {gapNumberLabel(card.number)}
                         </td>
                         <td className="px-3 py-2 align-top">
-                          <button
-                            type="button"
-                            aria-expanded={open}
+                          <GapRecordLink
+                            gapId={card.gap_id}
                             data-testid="gap-row-toggle"
-                            onClick={() => { setFocusTask(null); setOpenId(open ? null : card.gap_id); }}
                             className="flex w-full items-start gap-1.5 text-left focus-visible:outline-2 focus-visible:outline-ring"
                           >
-                            <span aria-hidden className="mt-0.5 text-[10px] text-muted-foreground">{open ? "▾" : "▸"}</span>
+                            <span aria-hidden className="mt-0.5 text-[10px] text-muted-foreground">▸</span>
                             <span className="min-w-0">
                               <span className="block font-medium leading-snug text-foreground">{card.gap_name}</span>
                               {card.new_source ? <NewSourcePill /> : null}
                             </span>
-                          </button>
+                          </GapRecordLink>
                           {suggestions.some((suggestion) => suggestion.gap_id === card.gap_id) ? (
                             <button type="button" className="mt-1 text-[11px] text-primary underline focus-visible:outline-2 focus-visible:outline-ring" onClick={() => {
                               const panel = document.getElementById("source-suggestions") as HTMLDetailsElement | null;
@@ -630,19 +499,9 @@ export function GapsWorkbench({
                           {card.needs_review ? <span className="ml-1 text-amber-700 dark:text-amber-300">· review</span> : null}
                         </td>
                       </tr>
-                      {open ? (
-                        <tr className="border-b border-border">
-                          <td colSpan={9} className="bg-muted/30 px-3 py-3">
-                            <GapDetailPane
-                              card={card}
-                              availableTactics={availableTactics}
-                              settingOptions={settingOptions}
-                              inline
-                              focusTask={focusTask}
-                            />
-                          </td>
-                        </tr>
-                      ) : null}
+                      {open && focusTask ? <tr><td colSpan={9} className="bg-muted/30 px-3 py-3">
+                        <InventoryReviewTasks card={card} focusTask={focusTask} />
+                      </td></tr> : null}
                     </Fragment>
                   );
                 })}

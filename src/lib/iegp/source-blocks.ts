@@ -1,9 +1,9 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { boolean, doublePrecision, pgTable, text } from "drizzle-orm/pg-core";
-import { db, ensureCurrentSchemaTables } from "./db";
+import { db, ensureCurrentSchemaTables, withWorkspaceTransaction } from "./db";
 import * as t from "./schema";
 import { ACTOR_FUNCTIONS, SOURCE_TYPES, type ActorFunction, type SourceType } from "./enums";
-import { appendAudit, persistSourceAndBlocks } from "./store";
+import { appendAudit, persistSourceAndBlocks, loadState, lockAssessmentOwners, invalidateRelationshipAssessments } from "./store";
 import type { IegpState } from "./types";
 import { recordEdit } from "@/modules/kernel/edit-records";
 import { newId, nowIso } from "@/modules/kernel/ids";
@@ -281,7 +281,54 @@ function toBlock(view: SourceBlockView): BlockRow {
   return { id: view.id, source_id: view.source_id, heading: view.heading, text: view.text, location: view.location };
 }
 
-export async function editSourceBlock(args: {
+/** Keep source edits, provenance logs and affected assessments in the same transaction. */
+function assessmentSourceEdit<A extends { source_id?: string; block_id?: string; actor?: Actor }, R>(
+  edit: (args: A) => Promise<R>,
+  preserveSupportingText = false,
+): (args: A) => Promise<R> {
+  return async (args: A) => {
+    await ensureSourceBlocksSchema();
+    return withWorkspaceTransaction(async () => {
+      const sourceId = args.source_id ?? (args.block_id
+        ? (await db().select().from(t.sourceBlocks).where(eq(t.sourceBlocks.id, args.block_id)))[0]?.source_id
+        : undefined);
+      if (!sourceId) throw new Error("Source block not found.");
+      await db().execute(sql`select id from sources where id = ${sourceId} for update`);
+      const assessmentGapIds = await lockAssessmentOwners({ source_ids: [sourceId] });
+      const before = await loadState();
+      const result = await edit(args);
+      // Resolve citations against the actual post-edit reading order. A retained
+      // legacy passage may span newly split blocks, but must still occur verbatim
+      // (apart from whitespace); changed or missing support drops the retention.
+      const blocks = await listSourceBlocks(sourceId);
+      const sourceText = squashText(blocks.map(block => block.text).join(" "));
+      for (const need of before.needs.filter(need => need.source_id === sourceId)) {
+        const quote = squashText(need.source_quote ?? "");
+        const retained = need.source_basis_text ?? (preserveSupportingText && !quote
+          ? before.blocks.find(block => block.id === need.block_id)?.text ?? null : null);
+        const support = quote || (retained && sourceText.includes(squashText(retained)) ? squashText(retained) : "");
+        let blockId = need.block_id ?? null;
+        if (support) {
+          const start = sourceText.indexOf(support);
+          let offset = 0;
+          blockId = blocks.find(block => {
+            const end = offset + squashText(block.text).length;
+            const containsStart = start >= offset && start < end;
+            offset = end + 1;
+            return containsStart;
+          })?.id ?? null;
+        } else if (!blocks.some(block => block.id === blockId)) blockId = null;
+        await db().update(t.needs).set({ block_id: blockId,
+          source_basis_text: !quote && support ? retained : null }).where(eq(t.needs.id, need.id));
+      }
+      await invalidateRelationshipAssessments({ before, gap_ids: assessmentGapIds, reason: "Supporting source passage changed.",
+        actor_name: args.actor?.name ?? "Source parser", actor_function: args.actor?.function ?? "evidence_lead" });
+      return result;
+    });
+  };
+}
+
+export const editSourceBlock = assessmentSourceEdit(async function editSourceBlock(args: {
   block_id: string;
   text?: string;
   heading?: string;
@@ -319,9 +366,9 @@ export async function editSourceBlock(args: {
     });
   }
   return { ...toBlock(block), ...patch };
-}
+});
 
-export async function addSourceBlock(args: {
+export const addSourceBlock = assessmentSourceEdit(async function addSourceBlock(args: {
   source_id: string;
   /** Place after this block; `null` = first; omitted = last. */
   after_block_id?: string | null;
@@ -364,9 +411,9 @@ export async function addSourceBlock(args: {
     detail: args.detail ?? `Added block ${row.id} to ${args.source_id}`,
   });
   return row;
-}
+});
 
-export async function deleteSourceBlock(args: { block_id: string; rationale: string; actor: Actor }) {
+export const deleteSourceBlock = assessmentSourceEdit(async function deleteSourceBlock(args: { block_id: string; rationale: string; actor: Actor }) {
   const rationale = requireEditRationale(args.rationale);
   const { block, blocks } = await requireBlock(args.block_id);
   await guardQuotes(block.source_id, blocks, blocks.filter((b) => b.id !== block.id).map((b) => b.text));
@@ -384,9 +431,9 @@ export async function deleteSourceBlock(args: { block_id: string; rationale: str
     detail: `Deleted block ${block.id}`,
   });
   return { deleted: block.id };
-}
+});
 
-export async function splitSourceBlock(args: {
+export const splitSourceBlock = assessmentSourceEdit(async function splitSourceBlock(args: {
   block_id: string;
   offset?: number;
   at_text?: string;
@@ -418,9 +465,9 @@ export async function splitSourceBlock(args: {
     detail: `Split ${block.id} into ${block.id} + ${secondRow.id}`,
   });
   return { first_id: block.id, second_id: secondRow.id };
-}
+}, true);
 
-export async function mergeSourceBlocks(args: { block_id: string; rationale: string; actor: Actor }) {
+export const mergeSourceBlocks = assessmentSourceEdit(async function mergeSourceBlocks(args: { block_id: string; rationale: string; actor: Actor }) {
   const rationale = requireEditRationale(args.rationale);
   const { block, blocks } = await requireBlock(args.block_id);
   const next = blocks[blocks.findIndex((b) => b.id === block.id) + 1];
@@ -441,7 +488,7 @@ export async function mergeSourceBlocks(args: { block_id: string; rationale: str
     detail: `Merged ${next.id} into ${block.id}`,
   });
   return { block_id: block.id, absorbed_id: next.id, text: merged };
-}
+}, true);
 
 /* ------------------------------------------------------------------------- */
 /* Dropped noise units                                                         */
@@ -701,7 +748,7 @@ export type ReparseResult = {
  * other model block is replaced. New model blocks whose text a kept block, a
  * human edit's original, or a human deletion already covers are skipped.
  */
-export async function reparseSourceBlocks(args: {
+export const reparseSourceBlocks = assessmentSourceEdit(async function reparseSourceBlocks(args: {
   source_id: string;
   sections: { heading: string; text: string; location: string }[];
 }): Promise<ReparseResult> {
@@ -709,6 +756,7 @@ export async function reparseSourceBlocks(args: {
   const current = await listSourceBlocks(args.source_id);
   const metas = await metasFor(args.source_id);
   const quotes = await quotesFor(args.source_id);
+  const citedReviews = (await loadState()).source_reviews?.filter(review => review.source_id === args.source_id) ?? [];
   const kept: SourceBlockView[] = [];
   const replaced: string[] = [];
   let kept_human = 0;
@@ -717,7 +765,7 @@ export async function reparseSourceBlocks(args: {
     if (block.human) {
       kept.push(block);
       kept_human += 1;
-    } else if (quotes.some((q) => containsQuote(block.text, q.quote))) {
+    } else if (quotes.some((q) => containsQuote(block.text, q.quote)) || citedReviews.some(review => review.block_id === block.id)) {
       kept.push(block);
       kept_cited += 1;
     } else replaced.push(block.id);
@@ -763,4 +811,4 @@ export async function reparseSourceBlocks(args: {
     kept_cited,
     skipped_duplicates,
   };
-}
+});

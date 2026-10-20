@@ -42,6 +42,7 @@ export type SetupObjective = {
   owner: string;
   key_decision: string;
   decision_date: string;
+  evidence_needed_by?: string;
 };
 export type SetupCompetitor = { name: string; pressure: PressureLevel; note: string };
 export type SetupMilestone = { name: string; date: string };
@@ -192,7 +193,8 @@ export function parsePlanningContext(raw: unknown): PlanningContext {
       strategic_importance: importanceOf(item.strategic_importance),
       owner: str(item.owner, 120),
       key_decision: str(item.key_decision, 300),
-      decision_date: str(item.decision_date, 10),
+      decision_date: str(item.decision_date, 80),
+      evidence_needed_by: str(item.evidence_needed_by, 80),
     }))
     .filter((item) => item.name || item.key_decision || item.id);
 
@@ -263,6 +265,17 @@ function validDate(value: string): boolean {
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
+/** Valid but unusual dates warn; they never change priority or block saving. */
+export function objectiveDateWarnings(objective: { evidence_needed_by?: string | null; decision_date?: string | null }, today = new Date().toISOString().slice(0, 10)): string[] {
+  const deadline = objective.evidence_needed_by;
+  if (!deadline || !validDate(deadline)) return [];
+  return [
+    ...(deadline < today ? ["Evidence deadline passed"] : []),
+    ...(objective.decision_date && validDate(objective.decision_date) && deadline > objective.decision_date
+      ? ["Evidence deadline follows the decision date. You can save this valid date with a reason."] : []),
+  ];
+}
+
 /**
  * What is missing or malformed. `required` issues block finishing the wizard;
  * a draft (saved on each Continue) is only refused for malformed values.
@@ -294,6 +307,7 @@ export function setupIssues(ctx: PlanningContext, opts: { required?: boolean } =
   need("objectives", "objectives", ctx.objectives.length > 0, "Add at least one strategic objective.");
   ctx.objectives.forEach((objective, index) => {
     if (required && !objective.name) issues.push({ section: "objectives", field: `objectives.${index}.name`, message: `Objective ${index + 1} needs a name.` });
+    date("objectives", `objectives.${index}.evidence_needed_by`, objective.evidence_needed_by ?? "", `Objective ${index + 1} evidence deadline`);
     date("objectives", `objectives.${index}.decision_date`, objective.decision_date, `Objective ${index + 1} decision date`);
     if (required && objective.decision_date && !objective.key_decision) {
       issues.push({
@@ -360,6 +374,7 @@ export function setupContextFromState(state: IegpState, opts: { fresh?: boolean 
       owner: objective.owner,
       key_decision: objective.key_decision,
       decision_date: objective.decision_date,
+      evidence_needed_by: objective.evidence_needed_by ?? "",
     }));
     if (!next.lifecycle_stage) next.lifecycle_stage = normalizeLifecycle(state.objectives[0]?.lifecycle_stage);
   }
@@ -408,6 +423,7 @@ export function prioritizationContextFromState(state: IegpState) {
         strategic_importance: item.strategic_importance,
         key_decision: item.key_decision || undefined,
         decision_date: item.decision_date || undefined,
+        evidence_needed_by: item.evidence_needed_by || undefined,
       })),
     ),
     competitors: orUndefined(planning.competitors.map((item) => `${item.name} (${item.pressure} pressure)${item.note ? `: ${item.note}` : ""}`)),

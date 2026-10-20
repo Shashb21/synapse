@@ -1,4 +1,5 @@
 /** Recoverable ingestion: each request commits at most one stage and its checkpoint. */
+import { compareParsedSources } from "@/lib/ingest/compare-source";
 import "@/modules";
 import { createHash, randomBytes } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
@@ -115,7 +116,8 @@ export async function advanceIngest(args: IngestArgs): Promise<IngestProgress> {
   if (!/^[a-f0-9]{64}$/.test(job_id)) throw new ApiGuardError(400, "invalid_request", "Invalid ingestion reference.");
   await ensurePlatformSchema([INGESTION_JOBS_DDL]);
   const schema = await currentSchemaName();
-  return withWorkspaceTransaction(async () => {
+  let comparisonSources: string[] = [];
+  const progress = await withWorkspaceTransaction(async () => {
     // A transaction lock is released even if a worker dies. No expiring lease can
     // let a slow model call overlap with a retry. Scope includes the workspace.
     const locked = await db().execute(sql`
@@ -169,6 +171,7 @@ export async function advanceIngest(args: IngestArgs): Promise<IngestProgress> {
         if (!documents.length) throw new Error("Parsing produced no documents. Try again.");
         state.document_ids = documents.map((doc) => doc.id);
         state.result.source_ids = documents.map((doc) => doc.source_id);
+        comparisonSources = state.result.source_ids;
       } else if (stage === "S2") {
         const gaps = await run<{ committed_gap_ids: string[] }>({ document_ids: state.document_ids });
         state.result.gap_ids = gaps.output.committed_gap_ids;
@@ -197,6 +200,9 @@ export async function advanceIngest(args: IngestArgs): Promise<IngestProgress> {
       total: state.stages.length,
     };
   });
+  // Comparison failure cannot roll back a successfully committed parse checkpoint.
+  await compareParsedSources(comparisonSources, args.actor);
+  return progress;
 }
 
 /** Compatibility entry point for callers that need the complete pipeline result. */

@@ -22,7 +22,7 @@ test.describe("KAN-118 inventory readiness", () => {
     await expect(strip).toContainText("Inventory review: 1 gaps needing attention");
     await expect(strip).toContainText("1 of 2 Open gaps with validated priority · Tactics open");
     await page.goto("/?place=plan");
-    await expect(page.getByText("1 of 2 Open gaps with validated priority across all settings")).toBeVisible();
+    await expect(page.getByText("1 of 2 Open gaps with priority confirmed across all settings").first()).toBeVisible();
     await expect(page.getByText("Tactics is unlocked. You can keep adjusting priorities here.")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Waiting on Gaps" })).toHaveCount(0);
     await page.goto("/?place=tactics");

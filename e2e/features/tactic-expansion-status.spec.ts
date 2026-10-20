@@ -1,9 +1,45 @@
 /** Browser-only expansion fixture: source proposal acceptance is verified separately in Vitest. */
-import { expect, test } from "@playwright/test";
+import { expect, test, type APIRequestContext } from "@playwright/test";
 import postgres from "postgres";
 import { COVERAGE_DIMENSIONS } from "../../src/lib/iegp/enums";
+import type { GapRecord } from "../../src/lib/iegp/gap-record";
 import { freshWorkspace } from "../support/session";
-import { iegpAction, resetWorkspace } from "../support/synapse";
+import { coverageOpeningTokens, iegpAction, resetWorkspace } from "../support/synapse";
+
+/** Prepare this synthetic positive coverage through the ordinary requirement review actions. */
+async function reviewPositiveFixture(request: APIRequestContext, gapId: string, coverageId: string) {
+  const readGap = async (): Promise<GapRecord> => {
+    const response = await request.get(`/api/gaps/${gapId}`);
+    expect(response.ok(), await response.text()).toBe(true);
+    return response.json() as Promise<GapRecord>;
+  };
+  let record = await readGap();
+  await iegpAction(request, {
+    action: "review_requirement_basis", gap_id: gapId,
+    expected_version: record.requirement_review.version,
+    requirements: JSON.stringify(Object.fromEntries(COVERAGE_DIMENSIONS.map(dimension => {
+      const requirement = record.requirement_review.basis.dimensions[dimension];
+      return [dimension, {
+        applicability: requirement.requirement.trim() ? "required" : "not_applicable",
+        requirement: requirement.requirement,
+        rationale: "Synthetic expansion fixture: sourced requirements are required; unspecified dimensions are outside this fixture's decision",
+        resolution: requirement.conflicts.length ? "Fixture reviewer requires the combined sourced requirements" : "",
+      }];
+    }))),
+    rationale: "Explicit requirement review for the positive expansion fixture",
+  });
+  record = await readGap();
+  for (const dimension of COVERAGE_DIMENSIONS) {
+    if (record.requirement_review.basis.dimensions[dimension].applicability !== "required") continue;
+    const current = (await readGap()).coverages.find(coverage => coverage.id === coverageId)!;
+    await iegpAction(request, {
+      action: "lock_dimension", coverage_id: coverageId, dimension, value: "yes",
+      ...await coverageOpeningTokens(request, current.tactic_id, current.id),
+      rationale: "Synthetic positive fixture: the added design satisfies this sourced requirement",
+    });
+  }
+  return readGap();
+}
 
 let tacticId = "";
 const workspace = freshWorkspace({ name: "Expansion details", seed: async request => {
@@ -13,7 +49,7 @@ const workspace = freshWorkspace({ name: "Expansion details", seed: async reques
     evidence_question: "Original parent question", status: "ongoing", rationale: "Browser fixture"});
 }});
 
-test("shows separate expansion scope, validates rationale and records human status history", async ({page}) => {
+test("shows separate expansion scope, validates rationale and records human status history", async ({page, request}) => {
   test.setTimeout(90_000);
   page.setDefaultTimeout(10_000);
   const pg = postgres(process.env.DATABASE_URL!);
@@ -43,6 +79,7 @@ test("shows separate expansion scope, validates rationale and records human stat
         expansion_id: id, dimensions: pg.json(dimensions), overall: "unassessed", overall_rationale: "Browser fixture",
         overall_lock: pg.json(unlocked), stale: false, needs_review: false})}`;
     }
+    await reviewPositiveFixture(request, gap!.id as string, "COV-EXP-BROWSER-ONE");
     await page.goto(`/tactics/${tacticId}`);
     const section = page.getByRole("region", {name: "Tactic expansions"});
     await expect(section.getByRole("heading", {name: "Community expansion", exact: true})).toBeVisible();
@@ -131,7 +168,23 @@ test("split selects a counting child independently and gap details agree before 
     const inherited = await pg`select expansion_id, tactic_id, overall from ${pg(`${schema}.coverages`)} where gap_id=${closed!.id}`;
     expect(inherited).toEqual([{expansion_id: "EXP-SPLIT-COUNTING", tactic_id: parent!.id, overall: "full"}]);
     await page.goto(`/gaps/${closed!.id}`);
+    await expect(page.getByText("Engine computed Partially Addressed", {exact: true})).toBeVisible();
+    await expect(page.getByText("Requirement basis: needs human review.", {exact: true})).toBeVisible();
+    const [inheritedCoverage] = await pg`select id from ${pg(`${schema}.coverages`)} where gap_id=${closed!.id}`;
+    const reviewed = await reviewPositiveFixture(request, closed!.id as string, inheritedCoverage!.id as string);
+    const coverage = reviewed.coverages.find(row => row.id === inheritedCoverage!.id)!;
+    await iegpAction(request, {
+      action: "lock_overall", coverage_id: coverage.id, overall: "full",
+      ...await coverageOpeningTokens(request, coverage.tactic_id, coverage.id), expected_basis_version: reviewed.requirement_review.version,
+      rationale: "Explicit Full review after all required positive-fixture dimensions are satisfied",
+    });
+    await page.reload();
     await expect(page.getByText("Engine computed Addressed", {exact: true})).toBeVisible();
+    // Record the human decision after checking the engine result so cancellation can challenge it.
+    await iegpAction(request, {
+      action: "lock_gap", gap_id: closed!.id as string, status: "validated_addressed",
+      note: "Human confirms the reviewed expansion closes this synthetic addressed slice",
+    });
     const [child] = await pg`select version from ${pg(`${schema}.tactic_expansions`)} where id='EXP-SPLIT-COUNTING'`;
     const cancel = await request.post("/api/plan", {data: {action: "set_expansion_status", expansion_id: "EXP-SPLIT-COUNTING", status: "cancelled", expected_version: child!.version, rationale: "Added analysis cancelled"}});
     expect(cancel.ok(), await cancel.text()).toBe(true);

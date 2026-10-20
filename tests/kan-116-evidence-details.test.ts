@@ -22,6 +22,8 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { GapsWorkbench } from "@/components/gaps-workbench";
 import type { ReviewGapCard } from "@/lib/iegp/engine";
+import { buildSeed } from "@/lib/iegp/seed";
+import { getRequirementBasisReview } from "@/lib/iegp/requirement-basis";
 import { GapSettingsEditor } from "@/components/gap-settings-editor";
 
 /** KAN-116: evidence precedes tactics and actions; failed settings saves retain input. */
@@ -40,6 +42,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.unstubAllGlobals();
 });
 
 const card = (overrides: Partial<ReviewGapCard> = {}): ReviewGapCard => ({
@@ -67,18 +70,30 @@ const card = (overrides: Partial<ReviewGapCard> = {}): ReviewGapCard => ({
 });
 
 
-it("shows evidence before tactics and actions, with edits collapsed and a full record link", () => {
+async function openEvidence(needs: { statement: string; title: string; role: string }[] = []) {
+  const seed = buildSeed();
+  const gap = { ...seed.gaps[0]!, id: "GAP-001" };
+  const record = {
+    gap, objective: null, requirement_review: getRequirementBasisReview(seed, seed.gaps[0]!.id),
+    confirmation: { confirmed: false, by: null, at: null, rationale: null },
+    coverage_status: { computed: "validated_open", shown: "validated_open", needs_review: false },
+    parent: null, origin: null, children: [], related: [],
+    needs: needs.map((entry, index) => ({ need: { id: `need-${index}`, statement: entry.statement }, source: { id: `source-${index}`, title: entry.title }, role: entry.role })),
+    coverages: [], priority: null, ideas: [], timeline: [], breakout_groups: [], pending_suggestions: [], history: [],
+  };
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => record }));
   act(() => root.render(createElement(GapsWorkbench, { cards: [card()], availableTactics: [], readyForPrioritize: false })));
-  expect(container.querySelector("article")).toBeNull();
-  act(() => container.querySelector<HTMLButtonElement>('[data-testid="gap-row-toggle"]')!.click());
-  const pane = container.querySelector("article")!;
+  await act(async () => container.querySelector<HTMLAnchorElement>('[data-testid="gap-row-toggle"]')!.click());
+  return document.querySelector('[data-testid="gap-panel"]')!;
+}
+
+it("opens the shared evidence record before tactics, with collapsed history and full record access", async () => {
+  const pane = await openEvidence();
   const text = pane.textContent!;
-  expect(text).toContain("Sources and supporting statements");
-  expect(text.indexOf("Sources and supporting statements")).toBeLessThan(text.indexOf("Review tactic mappings"));
-  expect(text.indexOf("Review tactic mappings")).toBeLessThan(text.indexOf("Edit gap details"));
+  expect(text.indexOf("Constituent needs")).toBeLessThan(text.indexOf("Linked tactics"));
+  expect(text).toContain("No constituent needs yet.");
   expect(pane.querySelector("details")!.open).toBe(false);
-  expect(Array.from(pane.querySelectorAll("a")).find(a => a.textContent === "Open full gap and evidence record")?.getAttribute("href")).toBe("/gaps/GAP-001");
-  expect(text).toContain("No source yet");
+  expect(Array.from(pane.querySelectorAll("a")).find(a => a.textContent === "Edit gap and mappings")?.getAttribute("href")).toBe("/gaps/GAP-001");
 });
 
 it("announces failed settings saves, retains entered values, and offers retry", async () => {
@@ -91,6 +106,12 @@ it("announces failed settings saves, retains entered values, and offers retry", 
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
   await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  const reason = container.querySelector("textarea")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(reason, "Reflect the intended treatment setting");
+    reason.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => Array.from(container.querySelectorAll("button")).find(button => button.textContent === "Save settings")!.click());
   const error = container.querySelector('[role="alert"]');
   expect(error?.textContent).toContain("Settings failed");
   expect(input.getAttribute("aria-describedby")).toBe(error?.id);
@@ -99,10 +120,10 @@ it("announces failed settings saves, retains entered values, and offers retry", 
   vi.unstubAllGlobals();
 });
 
-it("renders source titles, scientific statements and roles directly in the compact evidence view", () => {
-  act(() => root.render(createElement(GapsWorkbench, { cards: [card({ needs: [{ id: "need-1", statement: "Comparative evidence is missing.", role: "supporting", source_title: "Clinical interview" }] })], availableTactics: [], readyForPrioritize: false })));
-  act(() => container.querySelector<HTMLButtonElement>('[data-testid="gap-row-toggle"]')!.click());
-  const evidence = container.querySelector('section[aria-label="Sources and supporting statements"]')!;
-  expect(evidence.textContent).toContain("Clinical interview · supporting");
+it("renders source titles, scientific statements and roles in the shared evidence record", async () => {
+  const pane = await openEvidence([{ statement: "Comparative evidence is missing.", title: "Clinical interview", role: "supporting" }]);
+  const evidence = pane.querySelector('section[aria-label="Constituent needs"]')!;
+  expect(evidence.textContent).toContain("Clinical interview");
+  expect(evidence.textContent).toContain("supporting");
   expect(evidence.textContent).toContain("Comparative evidence is missing.");
 });

@@ -12,6 +12,7 @@ export const IEGP_ACTION_CAPABILITY: Record<string, Capability> = {
   load_demo: "reset_workspace",
   ingest: "upload",
   ingest_demo: "upload",
+  retry_source_comparison: "validate",
   create_tactic: "ideate",
   record_missed_tactic: "ideate",
   promote_tactic_candidate: "ideate",
@@ -24,6 +25,9 @@ export const IEGP_ACTION_CAPABILITY: Record<string, Capability> = {
   // residuals, setup and breakout groups.
   ...Object.fromEntries(
     [
+      "link_source_support",
+      "create_source_discrepancy",
+      "resolve_source_discrepancy",
       "lock_need",
       "create_need",
       "edit_need",
@@ -40,6 +44,7 @@ export const IEGP_ACTION_CAPABILITY: Record<string, Capability> = {
       "restore_gap",
       "restore_need",
       "restore_mapping",
+      "review_requirement_basis",
       "lock_dimension",
       "lock_overall",
       "confirm_coverage_review",

@@ -1,3 +1,4 @@
+import { priorityDecision } from "./support/priority-decision";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/headers", () => ({
@@ -64,7 +65,7 @@ describe("unlock_tactics", () => {
   });
 
   it("still refuses when only some Open gaps are validated (the footer's count)", async () => {
-    await validatePlacement({ gap_id: openIds[0]!, band: "high", rationale: "Blocks the HTA dossier", actor: ACTOR });
+    await validatePlacement({ ...await priorityDecision(openIds[0]!, "Blocks the HTA dossier"), gap_id: openIds[0]!, band: "high", rationale: "Blocks the HTA dossier", actor: ACTOR });
     expect(await prioritizationProgress(await loadState())).toEqual({ open: 2, validated: 1 });
     const { status, json } = await post({ action: "unlock_tactics" });
     expect(status).toBe(400);
@@ -73,7 +74,7 @@ describe("unlock_tactics", () => {
   });
 
   it("opens Tactics once every Open gap has a validated band", async () => {
-    await validatePlacement({ gap_id: openIds[1]!, band: "low", rationale: "Nice to have this cycle", actor: ACTOR });
+    await validatePlacement({ ...await priorityDecision(openIds[1]!, "Nice to have this cycle"), gap_id: openIds[1]!, band: "low", rationale: "Nice to have this cycle", actor: ACTOR });
     const { status } = await post({ action: "unlock_tactics" });
     expect(status).toBe(200);
     const state = await loadState();

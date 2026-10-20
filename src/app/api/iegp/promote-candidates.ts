@@ -136,6 +136,7 @@ export async function promoteTacticCandidate(args: {
     status: args.status || row.status,
     data_source: source?.title ?? row.source_id,
     source_quote: row.source_quote,
+    rationale,
     gap_id: args.gap_id || undefined,
     actor_name: args.actor_name,
     actor_function: args.actor_function,

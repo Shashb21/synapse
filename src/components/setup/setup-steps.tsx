@@ -7,6 +7,7 @@ import {
   PRESSURE_LEVELS,
   SUGGESTED_SETTINGS,
   lifecycleLabel,
+  objectiveDateWarnings,
   type PlanningContext,
   type PressureLevel,
   type SetupCompetitor,
@@ -188,7 +189,7 @@ export function ObjectivesStep({ form, set, errors }: StepProps) {
     <Section
       id="objectives"
       title="Strategic objectives & key decisions"
-      intro="Each objective's key decision and date become the decision dates the timeline plans against. The first objective is the plan's primary one."
+      intro="Each objective shares its decision and dates with its linked gaps. Evidence may be needed earlier: for example, papers due 10 June for a meeting on 30 June. The first objective is the plan's primary one."
     >
       <ListField<SetupObjective>
         label="Objectives"
@@ -196,7 +197,7 @@ export function ObjectivesStep({ form, set, errors }: StepProps) {
         required
         items={form.objectives}
         onChange={(items) => set("objectives", items)}
-        blank={() => ({ id: "", name: "", description: "", strategic_importance: 3, owner: "", key_decision: "", decision_date: "" })}
+        blank={() => ({ id: "", name: "", description: "", strategic_importance: 3, owner: "", key_decision: "", decision_date: "", evidence_needed_by: "" })}
         addLabel="Add objective"
         error={errors.objectives ?? errors.key_decision}
         renderItem={(item, update, index) => (
@@ -217,6 +218,17 @@ export function ObjectivesStep({ form, set, errors }: StepProps) {
               onChange={(v) => update({ description: v })}
               placeholder="What evidence this objective needs and why"
             />
+            <TextField
+              label="Evidence needed by"
+              type="date"
+              value={item.evidence_needed_by ?? ""}
+              onChange={(v) => update({ evidence_needed_by: v })}
+              error={errors[`objectives.${index}.evidence_needed_by`]}
+              hint="Optional shared evidence deadline. Leave blank if unknown."
+            />
+            {objectiveDateWarnings(item).map(warning => (
+              <p key={warning} role="status" className="text-[12px] text-amber-700 dark:text-amber-300 md:col-span-2">{warning}</p>
+            ))}
             <ChoiceField
               label="Strategic importance (1–5)"
               value={item.strategic_importance}
@@ -454,7 +466,7 @@ export function SetupSummary({
             <Row
               key={`${o.id}-${i}`}
               label={`${i + 1}. Importance ${o.strategic_importance}`}
-              value={`${o.name}${o.key_decision ? ` — ${o.key_decision}` : ""}${o.decision_date ? ` by ${o.decision_date}` : ""}`}
+              value={`${o.name}${o.key_decision ? ` — ${o.key_decision}` : ""}${o.decision_date ? ` · Decision date: ${o.decision_date}` : " · Decision date: Unknown"} · Evidence needed by: ${o.evidence_needed_by || "Unknown"}`}
             />
           ))
         ) : (

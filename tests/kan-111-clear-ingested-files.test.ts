@@ -145,7 +145,7 @@ describe("KAN-111 selective clear", () => {
     const who = { actor_name: actor.name, actor_function: actor.function };
     const manualGap = await createGap({ statement: "Keep my statement", ...who });
     const manualTactic = await recordMissedTactic({ name: "Keep my study", type: "registry", status: "planned", evidence_question: "Manual question", source_quote: file.text, data_source: file.title, ...who });
-    await assignTacticToGap({ gap_id: manualGap, tactic_id: manualTactic, ...who });
+    await assignTacticToGap({ note: "The study informs this gap assessment", gap_id: manualGap, tactic_id: manualTactic, ...who });
     await db().execute(sql`update gaps set parent_gap_id = ${removedGap}, origin_gap_id = ${removedGap}, related_gap_ids = ${JSON.stringify([removedGap, manualGap])}::jsonb where id = ${manualGap}`);
     // A duplicate extraction can attach additional source evidence to manual work.
     const need = state.needs[0];
@@ -177,7 +177,7 @@ describe("KAN-111 selective clear", () => {
     const who = { actor_name: actor.name, actor_function: actor.function };
     const gap = await createGap({ statement: "Manual evidence question", ...who });
     const tactic = await recordMissedTactic({ name: "Manual study", type: "registry", status: "planned", evidence_question: "Manual question", ...who });
-    await assignTacticToGap({ gap_id: gap, tactic_id: tactic, ...who });
+    await assignTacticToGap({ note: "The study informs this gap assessment", gap_id: gap, tactic_id: tactic, ...who });
     await db().execute(sql`insert into mapping_candidates (id, run_id, gap_id, tactic_id, score, confidence, rationale, verdict, proposer, created_at)
       values ('retained-endpoints', 'fixture-run', ${gap}, ${tactic}, 75, 80, '{"reason":"Source-derived proposal"}', 'accept', 'fixture', 'fixture')`);
     const before = (await loadState()).coverages.filter(c => c.gap_id === gap && c.tactic_id === tactic);
@@ -204,6 +204,9 @@ describe("KAN-111 selective clear", () => {
   it.each(["S0", "S1", "S2", "S3", "S4"] as const)("refuses standalone %s while clear's workspace lock is held", async (stage) => isolated(async (pg, schema) => {
     await ingest();
     const before = await loadState();
+    // Ingestion may already own S1 comparison errors; identify this request's run.
+    const previousRuns = await db().execute(sql`select id from module_runs where stage = ${stage}`);
+    const previousRunIds = new Set(previousRuns.map(run => run.id));
     await pg.begin(async tx => {
       await tx`select pg_advisory_xact_lock(hashtextextended(${`ingest:${schema}`}, 0))`;
       const response = await modulePost(new Request("http://localhost/api/modules", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ stage, input: {} }) }));
@@ -211,8 +214,9 @@ describe("KAN-111 selective clear", () => {
       expect(await response.json()).toMatchObject({ code: "ingest_busy" });
     });
     expect(await loadState()).toEqual(before);
-    const failures = await db().execute(sql`select status, error from module_runs where stage = ${stage} and status = 'error'`);
-    expect(failures).toEqual([{ status: "error", error: expect.stringContaining("still running") }]);
+    const runs = await db().execute(sql`select id, stage, status, error from module_runs where stage = ${stage}`);
+    const deniedRuns = runs.filter(run => !previousRunIds.has(run.id));
+    expect(deniedRuns).toEqual([{ id: expect.any(String), stage, status: "error", error: expect.stringContaining("still running") }]);
   }));
   it("rolls back standalone stage writes and preserves the failed run record", async () => isolated(async () => {
     await ingest();

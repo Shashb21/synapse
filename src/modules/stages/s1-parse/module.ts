@@ -1,3 +1,4 @@
+import { queueSourceComparison } from "@/lib/ingest/compare-source";
 import { desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
@@ -234,6 +235,7 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
           duration_ms: Date.now() - began,
         });
         await markFileParsed({ id: file_id, source_id, note: `${blocks.length} block(s)` });
+        await queueSourceComparison(source_id);
         documents.push({ id, file_id, source_id, parser: parsed.parser, blocks: blocks.length, quality });
         ctx.run.note(`parsed:${file_id}`, quality, `${blocks.length} block(s) → ${source_id}`);
       } catch (error) {

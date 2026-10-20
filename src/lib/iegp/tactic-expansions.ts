@@ -1,3 +1,4 @@
+import { withRelationshipChange } from "./relationship-change";
 /** Canonical child-scope lifecycle. Source owners validate proposals before composing acceptance. */
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
@@ -95,7 +96,7 @@ export type AcceptExpansionArgs = {
  * Pass the source owner's transaction after locking and validating its pending proposal.
  * Exact retries return the original child; changed retries are refused.
  */
-export async function acceptTacticExpansion(args: AcceptExpansionArgs, transaction?: ExpansionTransaction): Promise<TacticExpansion> {
+async function acceptTacticExpansionChange(args: AcceptExpansionArgs, transaction?: ExpansionTransaction): Promise<TacticExpansion> {
   const rationale = requireRationale(args.rationale);
   validateActor(args.actor);
   if (!args.proposal_id?.trim()) throw new Error("An expansion proposal origin is required.");
@@ -156,6 +157,7 @@ export async function setExpansionStatus(args: {
     if (!row) throw new Error("Expansion not found in this workspace.");
     const child = row as TacticExpansion;
     if (child.version !== args.expected_version) throw new Error("Expansion changed; refresh the stale version.");
+    if (child.status === args.status) return child;
     for (const gapId of [...child.gap_ids].sort()) await tx.select().from(t.gaps).where(eq(t.gaps.id, gapId)).for("update");
     const at = nowIso(), version = newId("EXV");
     const updated: TacticExpansion = {...child, status: args.status, updated_at: at, version,
@@ -168,4 +170,8 @@ export async function setExpansionStatus(args: {
     for (const gapId of child.gap_ids) await syncComputedGapStatuses(gapId, undefined, tx);
     return updated;
   });
+}
+
+export function acceptTacticExpansion(args: AcceptExpansionArgs, transaction?: ExpansionTransaction): Promise<TacticExpansion> {
+  return withRelationshipChange({ actor_name: args.actor.name, actor_function: args.actor.function, rationale: args.rationale }, () => acceptTacticExpansionChange(args, transaction));
 }

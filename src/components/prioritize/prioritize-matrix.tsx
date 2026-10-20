@@ -1,13 +1,12 @@
 "use client";
 
-import Link from "next/link";
+import type { JudgementReference } from "@/lib/iegp/judgement-references";
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Loader2 } from "lucide-react";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { usePageRefresh } from "@/components/platform/use-page-refresh";
-import { SettingChips } from "@/components/gap-settings-editor";
-import { placementGapError, scoreError } from "@/components/prioritize/score-input";
-import { BandChip, BAND_LABELS, BAND_TOKENS, BANDS, QUADRANT_NAMES, type Band } from "@/components/matrix/bands";
+import { priorityNextAction, type PriorityObjective } from "@/components/prioritize/priority-context";
+import { BAND_LABELS, BAND_TOKENS, BANDS, QUADRANT_NAMES, type Band } from "@/components/matrix/bands";
 import { cn } from "@/lib/utils";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import {
@@ -18,13 +17,18 @@ import {
   unfavourableLabel,
   type PriorityAxis,
 } from "@/modules/stages/s8-prioritization/axis-math";
+import { GapPanel } from "@/components/gap-panel";
 import { postJson } from "@/lib/post-json";
 import { isPresenting } from "@/lib/room/presenting";
 
 export type PrioritizeGap = {
   gap_id: string;
+  run_id?: string | null;
+  version?: string | null;
+  context_version?: string | null;
   gap_name: string;
   statement: string;
+  objective?: PriorityObjective | null;
   domain_label: string;
   settings: string[];
   tactic_count: number;
@@ -32,8 +36,12 @@ export type PrioritizeGap = {
   axis_scores: Record<string, number> | null;
   band: Band | null;
   validated: boolean;
+  needs_review?: boolean;
+  review_reason?: string | null;
   suggested_band: Band | null;
   suggested_rationale: string | null;
+  suggested_references?: JudgementReference[];
+  support_status?: "supported" | "unsupported";
   /** Axis ids a person set; a model re-run keeps their scores. */
   human_axes?: string[];
   /** The band is a person's; a model re-run keeps it. */
@@ -306,167 +314,6 @@ function QuadrantBackdrop() {
   );
 }
 
-function GapDetail({
-  gap,
-  xAxis,
-  yAxis,
-  identity,
-  mayPrioritize,
-}: {
-  gap: PrioritizeGap;
-  xAxis: PriorityAxis;
-  yAxis: PriorityAxis;
-  identity: ActionIdentity;
-  mayPrioritize: boolean;
-}) {
-  const ai = useAiEnabled("prioritization");
-  const point = pointOf(gap, xAxis, yAxis);
-  const band = gap.band ?? gap.suggested_band;
-  const quadrant = point ? bandAt(point, xAxis, yAxis) : null;
-  return (
-    <article className="grid gap-3 border border-border bg-background p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        {band ? <BandChip band={band} validated={gap.validated} /> : null}
-        <Link href={`/gaps/${gap.gap_id}`} className="text-[11px] text-muted-foreground no-underline hover:underline">
-          Gap dossier ↗
-        </Link>
-      </div>
-      <h3 className="text-[14px] font-medium leading-5 text-foreground">{gap.gap_name}</h3>
-      <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-        <span>{gap.domain_label}</span>
-        <span>·</span>
-        <span>
-          {gap.tactic_count} tactic{gap.tactic_count === 1 ? "" : "s"}
-        </span>
-        <SettingChips settings={gap.settings} />
-      </div>
-      <p className="text-[12px] leading-5 text-muted-foreground">{gap.statement}</p>
-      {point && gap.axis_scores ? (
-        <dl className="grid grid-cols-2 gap-2 text-[11px]">
-          {[yAxis, xAxis].map((axis) => (
-            <div key={axis.id} className="grid gap-0.5">
-              <dt className="text-muted-foreground">{axis.label}</dt>
-              <dd className="text-foreground">
-                {gap.axis_scores?.[axis.id]} / 100
-                {gap.human_axes?.includes(axis.id) ? <span className="text-muted-foreground"> · set by hand</span> : null}
-                <span className="text-muted-foreground">
-                  {" "}
-                  · {(gap.axis_scores?.[axis.id] ?? 0) >= 50 ? axis.high_label : axis.low_label}
-                </span>
-              </dd>
-            </div>
-          ))}
-        </dl>
-      ) : null}
-      {gap.suggested_band && gap.suggested_rationale ? (
-        <p className="text-[11px] leading-4 text-muted-foreground">
-          <span className="text-foreground">Model suggested {BAND_LABELS[gap.suggested_band]}.</span>{" "}
-          {gap.suggested_rationale}
-        </p>
-      ) : null}
-      {quadrant && band && quadrant !== band ? (
-        <p className="text-[11px] leading-4 text-amber-700 dark:text-amber-300">
-          Its band ({BAND_LABELS[band]}) differs from the quadrant it sits in here ({BAND_LABELS[quadrant]}). Drag
-          it, or edit its scores or band, to match.
-        </p>
-      ) : null}
-      {gap.validated ? (
-        <p className="text-[11px] leading-4" style={{ color: band ? BAND_TOKENS[band] : undefined }}>
-          Validated {band ? BAND_LABELS[band] : ""} by {gap.actor_name ?? "unknown"}
-          {gap.at ? ` · ${gap.at.slice(0, 10)}` : ""}
-          {gap.rationale ? ` — ${gap.rationale}` : ""}
-        </p>
-      ) : (
-        <p className="text-[11px] text-muted-foreground">
-          Not validated. Drag the gap to the right quadrant or edit its scores, then validate it.
-        </p>
-      )}
-      {mayPrioritize ? (
-        <ActionDialog
-          endpoint="/api/plan"
-          payload={{ action: "set_placement", gap_id: gap.gap_id, x_axis: xAxis.id, y_axis: yAxis.id }}
-          fields={[
-            {
-              name: "y_score",
-              label: `${yAxis.label} score (0–100)`,
-              defaultValue:
-                typeof gap.axis_scores?.[yAxis.id] === "number" ? String(gap.axis_scores[yAxis.id]) : "",
-              placeholder: "0–100",
-              hint: `0 = ${yAxis.low_label}, 100 = ${yAxis.high_label}. Leave empty to keep it unscored.`,
-              validate: (value) => scoreError(yAxis.label, value),
-            },
-            {
-              name: "x_score",
-              label: `${xAxis.label} score (0–100)`,
-              defaultValue:
-                typeof gap.axis_scores?.[xAxis.id] === "number" ? String(gap.axis_scores[xAxis.id]) : "",
-              placeholder: "0–100",
-              hint: `0 = ${xAxis.low_label}, 100 = ${xAxis.high_label}. Leave empty to keep it unscored.`,
-              validate: (value) => scoreError(xAxis.label, value),
-            },
-            {
-              name: "band",
-              label: "Band",
-              type: "select",
-              defaultValue: "",
-              options: [
-                { value: "", label: point ? "The quadrant the scores fall in" : "The quadrant (needs both scores)" },
-                ...BANDS.map((value) => ({ value, label: BAND_LABELS[value] })),
-              ],
-              // Customers aren't told about AI when it is off (KAN-53).
-              hint: ai
-                ? "A band you set here is yours: a later model run keeps it and only updates its own suggestion."
-                : "A band you set here is kept until you change it.",
-            },
-            {
-              name: "validate",
-              label: "Validate the band now",
-              type: "select",
-              defaultValue: "no",
-              options: [
-                { value: "no", label: "No — keep it as a draft" },
-                { value: "yes", label: "Yes — lock it as validated" },
-              ],
-            },
-          ]}
-          validateForm={(values) =>
-            placementGapError({
-              x: { label: xAxis.label, typed: values.x_score ?? "", saved: gap.axis_scores?.[xAxis.id] },
-              y: { label: yAxis.label, typed: values.y_score ?? "", saved: gap.axis_scores?.[yAxis.id] },
-              band: values.band ?? "",
-            })
-          }
-          label={point ? "Edit scores" : "Type scores"}
-          title={`${point ? "Edit the placement of" : "Place"} ${gap.gap_name}`}
-          description={
-            ai
-              ? "Type the exact axis scores and, if you want, the band. No model run is needed; what you set is kept across re-runs."
-              : "Type the exact axis scores and, if you want, the band."
-          }
-          confirmLabel="Save placement"
-          requireRationale
-          identity={identity}
-          variant="outline"
-          size="sm"
-        />
-      ) : null}
-      {band && mayPrioritize ? (
-        <ActionDialog
-          endpoint="/api/plan"
-          payload={{ action: "validate_band", gap_id: gap.gap_id, band }}
-          label={gap.validated ? `Re-validate ${BAND_LABELS[band]}` : `Validate ${BAND_LABELS[band]}`}
-          title={`Validate ${BAND_LABELS[band]} for ${gap.gap_name}`}
-          description="Locks this priority band for the gap in every setting. To change the band, drag the gap to another quadrant first."
-          confirmLabel={`Validate ${BAND_LABELS[band]}`}
-          requireRationale
-          identity={identity}
-          variant={gap.validated ? "outline" : "default"}
-          size="sm"
-        />
-      ) : null}
-    </article>
-  );
-}
 
 /**
  * The Prioritize matrix. Gaps sit where their two axis scores put them; drag
@@ -481,6 +328,7 @@ export function PrioritizeMatrix({
   yAxis,
   identity,
   mayPrioritize,
+  tacticsUnlocked = false,
 }: {
   scope: string;
   gaps: PrioritizeGap[];
@@ -489,10 +337,12 @@ export function PrioritizeMatrix({
   yAxis: PriorityAxis;
   identity: ActionIdentity;
   mayPrioritize: boolean;
+  tacticsUnlocked?: boolean;
 }) {
   const { refresh } = usePageRefresh();
   const ai = useAiEnabled("prioritization");
   const plotRef = useRef<HTMLDivElement>(null);
+  const matrixRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
     gapId: string;
     startX: number;
@@ -501,14 +351,12 @@ export function PrioritizeMatrix({
     /** Dragged in from the "Not placed yet" list: a drop outside the matrix places nothing. */
     fromList: boolean;
   } | null>(null);
-  // One debounce per gap: nudging a second gap never drops the first one's save (KAN-18).
-  const nudges = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; point: Point }>());
-  const commitRef = useRef<(gapId: string, point: Point) => Promise<void>>(async () => undefined);
-  const bodyRef = useRef<(gapId: string, point: Point) => Record<string, unknown>>(() => ({}));
+  const [pendingMove, setPendingMove] = useState<{ gapId: string; point: Point; version: string | null; contextVersion: string | null } | null>(null);
   const autoPlaced = useRef(false);
+  const suppressGapClick = useRef(false);
+  const gapTriggerRef = useRef<HTMLElement | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [positions, setPositions] = useState<Record<string, Point>>({});
-  const [bands, setBands] = useState<Record<string, { band: Band; validated: boolean }>>({});
   const [busy, setBusy] = useState<string | null>(null);
   // An error is announced as an alert; a summary (re-suggest finished) is quiet text.
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
@@ -519,7 +367,6 @@ export function PrioritizeMatrix({
   if (seenGaps !== gaps) {
     setSeenGaps(gaps);
     setPositions({});
-    setBands({});
   }
 
   // A gap dropped on the matrix leaves this list at once, not after the refresh.
@@ -550,13 +397,10 @@ export function PrioritizeMatrix({
 
   const view = gaps.map((gap) => {
     const point = positions[gap.gap_id] ?? pointOf(gap, xAxis, yAxis);
-    const local = bands[gap.gap_id];
-    const band = local?.band ?? gap.band ?? gap.suggested_band;
-    return { gap, point, band, validated: local ? local.validated : gap.validated };
+    const band = gap.band ?? gap.suggested_band;
+    return { gap, point, band, validated: gap.validated };
   });
   const placed = view.filter((row) => row.point);
-  const selected = gaps.find((gap) => gap.gap_id === selectedId) ?? null;
-  const selectedView = view.find((row) => row.gap.gap_id === selectedId);
   const validatedCount = view.filter((row) => row.validated).length;
   // The design's priority chips: each counts its gaps and highlights them on the canvas.
   const [highlight, setHighlight] = useState<Band | null>(null);
@@ -573,71 +417,18 @@ export function PrioritizeMatrix({
     };
   }
 
-  function placementBody(gapId: string, point: Point) {
-    return {
-      action: "move_placement",
-      gap_id: gapId,
-      x_axis: xAxis.id,
-      y_axis: yAxis.id,
-      x: Math.round(point.x),
-      y: Math.round(point.y),
-      actor_name: identity.actor_name,
-      actor_function: identity.actor_function,
-    };
-  }
-
-  async function commit(gapId: string, point: Point) {
-    setMessage(null);
-    const res = await postJson("/api/plan", placementBody(gapId, point));
-    const json = res.json as {
-      error?: string;
-      placement?: { band: Band; validated: boolean };
-    };
-    if (!res.ok || !json.placement) {
-      showError(json.error ?? "Could not move the gap.");
-      setPositions((current) => {
-        const next = { ...current };
-        delete next[gapId];
-        return next;
-      });
+  function requestMove(gapId: string, point: Point) {
+    const gap = gaps.find((candidate) => candidate.gap_id === gapId);
+    if (!gap) return;
+    const rounded = { x: Math.round(point.x), y: Math.round(point.y) };
+    const saved = pointOf(gap, xAxis, yAxis);
+    if (saved && Math.round(saved.x) === rounded.x && Math.round(saved.y) === rounded.y) {
+      dropPosition(gapId);
       return;
     }
-    setBands((current) => ({ ...current, [gapId]: json.placement! }));
-    refresh();
+    // Preview only. Nothing is sent on cancellation, navigation or pagehide.
+    setPendingMove({ gapId, point: rounded, version: gap.version ?? null, contextVersion: gap.context_version ?? null });
   }
-
-  useEffect(() => {
-    commitRef.current = commit;
-    bodyRef.current = placementBody;
-  });
-
-  // Leaving the page saves any nudge still waiting on its debounce: on unmount (moving within
-  // the app) and on pagehide (reload, closing the tab, typing another address), where only a
-  // keepalive request survives the page going away.
-  useEffect(() => {
-    const waiting = nudges.current;
-    const flushOnUnload = () => {
-      for (const [gapId, { timer, point }] of waiting) {
-        clearTimeout(timer);
-        void fetch("/api/plan", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(bodyRef.current(gapId, point)),
-          keepalive: true,
-        }).catch(() => undefined);
-      }
-      waiting.clear();
-    };
-    window.addEventListener("pagehide", flushOnUnload);
-    return () => {
-      window.removeEventListener("pagehide", flushOnUnload);
-      for (const [gapId, { timer, point }] of waiting) {
-        clearTimeout(timer);
-        void commitRef.current(gapId, point);
-      }
-      waiting.clear();
-    };
-  }, []);
 
   function onPointerDown(event: PointerEvent<HTMLButtonElement>, gapId: string) {
     if (!mayPrioritize || event.button !== 0) return;
@@ -706,17 +497,16 @@ export function PrioritizeMatrix({
     dragRef.current = null;
     if (!drag) return;
     if (!drag.moved) {
-      setSelectedId(drag.gapId);
       return;
     }
+    suppressGapClick.current = true;
     // Dropped back outside the matrix: nothing is placed and nothing is selected.
     if (drag.fromList && !overPlot(event)) {
       dropPosition(drag.gapId);
       return;
     }
-    setSelectedId(drag.gapId);
     const point = pointFromEvent(event);
-    if (point) void commit(drag.gapId, point);
+    if (point) requestMove(drag.gapId, point);
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLButtonElement>, gapId: string, point: Point) {
@@ -735,15 +525,8 @@ export function PrioritizeMatrix({
       x: Math.max(0, Math.min(100, point.x + move.x)),
       y: Math.max(0, Math.min(100, point.y + move.y)),
     };
-    setSelectedId(gapId);
     setPositions((current) => ({ ...current, [gapId]: next }));
-    const pending = nudges.current.get(gapId);
-    if (pending) clearTimeout(pending.timer);
-    const timer = setTimeout(() => {
-      nudges.current.delete(gapId);
-      void commit(gapId, next);
-    }, 450);
-    nudges.current.set(gapId, { timer, point: next });
+    requestMove(gapId, next);
   }
 
   async function resuggest() {
@@ -793,7 +576,7 @@ export function PrioritizeMatrix({
   }
 
   return (
-    <div className="grid gap-4">
+    <div ref={matrixRef} className="grid gap-4">
       <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Highlight a priority">
         {BANDS.map((b) => {
           const on = highlight === b;
@@ -854,7 +637,7 @@ export function PrioritizeMatrix({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {busy ? (
-            <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <span role="status" className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
               <Loader2 className="size-3 animate-spin" aria-hidden />
               {busy}
             </span>
@@ -880,6 +663,32 @@ export function PrioritizeMatrix({
         <p className="text-[12px] text-muted-foreground">{message.text}</p>
       ) : null}
 
+      {pendingMove ? (
+        <ActionDialog protectUnsavedChanges
+          key={pendingMove.gapId}
+          endpoint="/api/plan"
+          payload={{ action: "move_placement", gap_id: pendingMove.gapId,
+            x_axis: xAxis.id, y_axis: yAxis.id, x: pendingMove.point.x, y: pendingMove.point.y,
+            expected_version: pendingMove.version, expected_context_version: pendingMove.contextVersion }}
+          open
+          onOpenChange={(open) => {
+            if (!open) {
+              dropPosition(pendingMove.gapId);
+              setPendingMove(null);
+              requestAnimationFrame(() => matrixRef.current?.querySelector<HTMLButtonElement>(`button[data-gap-id="${pendingMove.gapId}"]`)?.focus());
+            }
+          }}
+          trigger={null}
+          label="Save matrix move"
+          title={`Review matrix move for ${gaps.find((gap) => gap.gap_id === pendingMove.gapId)?.gap_name ?? pendingMove.gapId}`}
+          description={`${xAxis.label}: ${scoreFromFavourability(xAxis, pendingMove.point.x)}; ${yAxis.label}: ${scoreFromFavourability(yAxis, pendingMove.point.y)}. Proposed band: ${BAND_LABELS[bandAt(pendingMove.point, xAxis, yAxis)]}. Give a reason to save this move. Closing cancels it.`}
+          confirmLabel="Save matrix move"
+          rationaleFieldName="reason"
+          rationaleLabel="Reason for change (required)"
+          identity={identity}
+        />
+      ) : null}
+
       {/* The matrix and its side panel share one screen (KAN-56): the matrix shrinks to the
           window height, so a gap in "Not placed yet" can be dragged on without scrolling. */}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,auto)_minmax(280px,1fr)] lg:items-start">
@@ -903,14 +712,15 @@ export function PrioritizeMatrix({
                 return (
                   <button
                     key={gap.gap_id}
+                    data-gap-id={gap.gap_id}
                     type="button"
                     onPointerDown={(event) => onPointerDown(event, gap.gap_id)}
                     onPointerMove={onPointerMove}
                     onPointerUp={onPointerUp}
-                    onPointerCancel={() => (dragRef.current = null)}
+                    onPointerCancel={() => { dragRef.current = null; dropPosition(gap.gap_id); }}
                     onKeyDown={(event) => onKeyDown(event, gap.gap_id, point!)}
-                    onClick={() => setSelectedId(gap.gap_id)}
-                    aria-label={`${gap.gap_name}: ${band ? BAND_LABELS[band] : "unplaced"}${validated ? ", validated" : ", not validated"}. Arrow keys move it.`}
+                    onClick={(event) => { if (suppressGapClick.current) { suppressGapClick.current = false; return; } gapTriggerRef.current = event.currentTarget; setSelectedId(gap.gap_id); }}
+                    aria-label={`${gap.gap_name}: ${band ? BAND_LABELS[band] : "unplaced"}${validated ? ", priority confirmed" : ", priority not confirmed"}. Arrow keys move it.`}
                     aria-pressed={isSelected}
                     className={cn(
                       "absolute flex max-w-[42%] -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full border bg-card/95 px-2 py-0.5 text-[11px] leading-4 text-foreground shadow-sm transition-opacity",
@@ -952,24 +762,15 @@ export function PrioritizeMatrix({
           </div>
           <p className="pl-7 text-[11px] leading-4 text-muted-foreground">
             Drag a gap to change its priority, or select it and use the arrow keys (Shift for bigger
-            steps). A dashed edge means the band is not validated yet.
+            steps). Every saved move needs a reason. A dashed edge means the priority is not confirmed yet.
           </p>
         </div>
 
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 lg:sticky lg:top-5">
-          {selected && selectedView ? (
-            <GapDetail
-              gap={{ ...selected, band: selectedView.band, validated: selectedView.validated }}
-              xAxis={xAxis}
-              yAxis={yAxis}
-              identity={identity}
-              mayPrioritize={mayPrioritize}
-            />
-          ) : (
-            <p className="border border-dashed border-border p-4 text-[12px] text-muted-foreground">
-              Select a gap on the matrix to see why it sits there and validate its band.
-            </p>
-          )}
+          <GapPanel gapId={selectedId} onClose={() => setSelectedId(null)}
+            returnFocusRef={gapTriggerRef}
+            refreshVersion={JSON.stringify([gaps.find(gap => gap.gap_id === selectedId)?.version, gaps.find(gap => gap.gap_id === selectedId)?.context_version, tacticsUnlocked])}
+            priorityEditor={{ xAxis, yAxis, identity, mayPrioritize }} />
           <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">
             {unplaced.length > 0 && !busy ? (
               <section aria-label="Gaps not placed yet">
@@ -987,8 +788,9 @@ export function PrioritizeMatrix({
                       <button
                         type="button"
                         data-testid="unplaced-gap"
+                        data-gap-id={gap.gap_id}
                         onPointerDown={(event) => onListPointerDown(event, gap.gap_id)}
-                        onClick={() => setSelectedId(gap.gap_id)}
+                        onClick={(event) => { if (suppressGapClick.current) { suppressGapClick.current = false; return; } gapTriggerRef.current = event.currentTarget; setSelectedId(gap.gap_id); }}
                         aria-label={`${gap.gap_name}: not placed. Drag onto the matrix, or select to type its scores.`}
                         className={cn(
                           "flex w-full touch-none select-none items-center gap-1.5 rounded px-1.5 py-1 text-left text-[12px] hover:bg-muted",
@@ -999,9 +801,14 @@ export function PrioritizeMatrix({
                         <span aria-hidden className="text-muted-foreground">
                           ⠿
                         </span>
-                        <span className="min-w-0 flex-1 truncate text-foreground">{gap.gap_name}</span>
-                        <span className="shrink-0 text-[10px] text-muted-foreground">
-                          {gap.band ? `${BAND_LABELS[gap.band]}${gap.validated ? " · validated" : ""}` : "Unplaced"}
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-foreground">{gap.gap_name}</span>
+                          <span className="block text-[11px] text-muted-foreground">
+                            {gap.band ? BAND_LABELS[gap.band] : "No band yet"} · Evidence needed by: {gap.objective?.evidence_needed_by || "Unknown"}
+                          </span>
+                          <span className="block text-[11px] text-muted-foreground">
+                            {priorityNextAction({ band: gap.band ?? gap.suggested_band, validated: gap.validated, needs_review: gap.needs_review, tacticsUnlocked })}
+                          </span>
                         </span>
                       </button>
                     </li>
@@ -1026,15 +833,20 @@ export function PrioritizeMatrix({
                         <li key={gap.gap_id}>
                           <button
                             type="button"
-                            onClick={() => setSelectedId(gap.gap_id)}
+                            onClick={(event) => { if (suppressGapClick.current) { suppressGapClick.current = false; return; } gapTriggerRef.current = event.currentTarget; setSelectedId(gap.gap_id); }}
                             className={cn(
                               "flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[12px] hover:bg-muted",
                               gap.gap_id === selectedId && "bg-muted",
                             )}
                           >
-                            <span className="min-w-0 flex-1 truncate text-foreground">{gap.gap_name}</span>
-                            <span className="shrink-0 text-[10px] text-muted-foreground">
-                              {validated ? "Validated" : "Draft"}
+                            <span className="min-w-0 flex-1">
+                              <span className="block break-words text-foreground">{gap.gap_name}</span>
+                              <span className="block text-[11px] text-muted-foreground">
+                                {BAND_LABELS[band]} · Evidence needed by: {gap.objective?.evidence_needed_by || "Unknown"}
+                              </span>
+                              <span className="block text-[11px] text-muted-foreground">
+                                {priorityNextAction({ band, validated, needs_review: gap.needs_review, tacticsUnlocked })}
+                              </span>
                             </span>
                           </button>
                         </li>

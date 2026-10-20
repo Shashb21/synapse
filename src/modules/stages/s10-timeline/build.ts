@@ -178,6 +178,8 @@ export type PendingActivity = ActivityDetails & {
 };
 
 export type TimelineModel = {
+  /** Current tactic edit tokens supplied by the live loader, outside saved schedules. */
+  tactic_versions?: Record<string, string>;
   activities: TimelineActivity[];
   window: { start: string; end: string; months: number };
   lanes: { id: TimelineBand; label: string; count: number }[];
