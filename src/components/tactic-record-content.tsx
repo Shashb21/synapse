@@ -2,6 +2,9 @@
 
 import { useImperativeHandle, useState, type RefObject } from "react";
 import Link from "next/link";
+import { SourceClaimReviewContent } from "./source-claim-review-content";
+import { RelationshipFit } from "./relationship-fit";
+import { RequirementBasisReview } from "./requirement-basis-review";
 import { CoverageBadge, LockMeta, TacticBadge } from "@/components/iegp-badges";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { EntityHistory } from "@/components/entity-history";
@@ -47,6 +50,7 @@ export function TacticRecordContent({ record, identity = { signed_in: true, acto
         <Item k="Budget" v={tactic.budget ?? "—"} />
       </dl>
       {record.source_references.length ? <section aria-label="Tactic source references" className="my-6 space-y-2"><h2 className="text-base font-semibold">Source references</h2>{record.source_references.map(ref => <blockquote key={ref.id} className="text-sm break-words">“{ref.quote}” · <Link href={`/sources/${encodeURIComponent(ref.source_id)}`}>{ref.title}</Link></blockquote>)}</section> : null}
+      <SourceClaimReviewContent onRefresh={onRefresh} data={record.source_review} identity={identity} canReview={record.permissions.coverage} />
       <section aria-label="Gaps this tactic is mapped to"><h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Gaps this tactic is mapped to</h2>
       <div className="mb-6 grid gap-2">
         {maps.length === 0 ? (
@@ -55,10 +59,13 @@ export function TacticRecordContent({ record, identity = { signed_in: true, acto
           maps.map((c) => {
             const gap = c.gap;
             return (
-              <Link key={c.id} href={`/gaps/${c.gap_id}`} className="flex justify-between border border-border bg-card p-3 no-underline rounded-lg">
+              <div key={c.id}><Link href={`/gaps/${c.gap_id}`} className="flex justify-between border border-border bg-card p-3 no-underline rounded-lg">
                 <span>{gap?.name}{c.expansion_id ? ` · ${expansions.find(e => e.id === c.expansion_id)?.scope.name ?? "Expansion"}` : ""}</span>
                 <CoverageBadge overall={c.overall} />
               </Link>
+              {c.fit ? <RelationshipFit fit={c.fit} tacticName={tactic.name} /> : null}
+              {record.permissions.coverage ? <RequirementBasisReview onRefresh={onRefresh} gapId={c.gap_id} review={c.requirement_review} /> : null}
+              </div>
             );
           })
         )}
@@ -90,7 +97,7 @@ export function TacticRecordContent({ record, identity = { signed_in: true, acto
           {record.coverages.filter(c => c.expansion_id === child.id && c.tactic_id === child.tactic_id && child.gap_ids.includes(c.gap_id)).map(coverage => <div key={coverage.id} className="mb-3 text-[13px]">
             <p className="mb-2">Coverage for {coverage.gap?.name ?? coverage.gap_id}</p>
             <div className="mb-2 flex flex-wrap items-center gap-2"><CoverageBadge overall={coverage.overall} /><LockMeta lock={coverage.overall_lock} /></div>
-            {record.permissions.coverage ? <ActionDialog onSuccess={onRefresh} protectUnsavedChanges endpoint="/api/iegp" payload={{action: "lock_overall", coverage_id: coverage.id, expected_relationship: coverage.relationship_version}}
+            {record.permissions.coverage ? <ActionDialog onSuccess={onRefresh} protectUnsavedChanges endpoint="/api/iegp" payload={{action: "lock_overall", coverage_id: coverage.id, expected_relationship: coverage.relationship_version, expected_version: coverage.review_version, expected_basis_version: coverage.requirement_review.version}}
               identity={identity} label="Review expansion coverage" title={`Review expansion coverage: ${child.scope.name}`}
               description="Validate the added scope's coverage for this gap. Proposed and cancelled expansions still do not count."
               confirmLabel="Validate coverage" fields={[{name: "overall", label: "Overall", type: "select", required: true,
@@ -99,7 +106,7 @@ export function TacticRecordContent({ record, identity = { signed_in: true, acto
             <details className="mt-2"><summary>Coverage dimensions</summary>
               <dl className="mt-2 grid gap-2 sm:grid-cols-2">{COVERAGE_DIMENSIONS.map(dimension => <div key={dimension}>
                 <dt>{DIMENSION_LABELS[dimension]}</dt><dd className="mb-1">{coverage.dimensions[dimension].value}</dd>
-                {record.permissions.coverage ? <ActionDialog onSuccess={onRefresh} protectUnsavedChanges endpoint="/api/iegp" payload={{action: "lock_dimension", coverage_id: coverage.id, expected_relationship: coverage.relationship_version, dimension}}
+                {record.permissions.coverage ? <ActionDialog onSuccess={onRefresh} protectUnsavedChanges endpoint="/api/iegp" payload={{action: "lock_dimension", coverage_id: coverage.id, expected_relationship: coverage.relationship_version, expected_version: coverage.review_version, dimension}}
                   identity={identity} label={`Review ${DIMENSION_LABELS[dimension]}`} title={`Review ${DIMENSION_LABELS[dimension]}: ${child.scope.name}`}
                   confirmLabel="Validate dimension" fields={[{name: "value", label: "Assessment", type: "select", defaultValue: coverage.dimensions[dimension].value,
                     options: DIMENSION_VALUES.map(value => ({value, label: value}))}]} /> : null}

@@ -1,5 +1,6 @@
 "use client";
 
+import { RelationshipFit } from "@/components/relationship-fit";
 import Link from "next/link";
 import { GapRecordLink } from "@/components/gap-panel";
 import { useMemo, useRef, useState } from "react";
@@ -83,6 +84,7 @@ function LinkedTacticRow({ tactic, onEdit }: { tactic: PlanTactic; onEdit?: () =
           {body}
         </Link>
       )}
+      {tactic.fit ? <RelationshipFit fit={tactic.fit} tacticName={tactic.name} /> : null}
     </li>
   );
 }
@@ -166,7 +168,7 @@ function GapIdeationCard({
               <GapRecordLink gapId={card.gap_id} className="text-[11px] text-muted-foreground no-underline hover:underline">
                 Open gap ↗
               </GapRecordLink>
-              <AssignTacticButton gapId={card.gap_id} tactics={assignable} expectedRelationships={JSON.stringify(card.relationship_versions ?? {})} />
+              <AssignTacticButton gapId={card.gap_id} tactics={assignable} previews={card.fit_previews} expectedRelationships={JSON.stringify(card.relationship_versions ?? {})} />
               <CustomTacticButton gapId={card.gap_id} gapName={card.gap_name} inUse={customTypesInUse(library)} />
             </div>
           </div>

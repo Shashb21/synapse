@@ -1,3 +1,5 @@
+import { assessmentBasis, coverageReviewVersion, fullConfirmationIssues, getRequirementBasisReview, reviewedRequirementDimensions, type RequirementReviewInput } from "./requirement-basis";
+import type { RequirementBasis } from "./types";
 import { requireGapResolutionSnapshot, relationshipReason, withRelationshipChange } from "./relationship-change";
 import type { suppliedJudgementRecords, JudgementReference } from "./judgement-references";
 import { tacticEditVersion } from "./tactic-edit-version";
@@ -248,6 +250,8 @@ export async function readState(d: Pick<ReturnType<typeof db>, "select"> = db())
     breakout_group_gaps,
     gap_suggestions,
     expansions,
+    source_comparisons,
+    source_reviews,
   ] = await Promise.all([
     d.select().from(t.assets),
     d.select().from(t.objectives),
@@ -269,6 +273,8 @@ export async function readState(d: Pick<ReturnType<typeof db>, "select"> = db())
     d.select().from(t.breakoutGroupGaps),
     d.select().from(t.gapSuggestions),
     d.select().from(t.tacticExpansions),
+    d.select().from(t.sourceComparisons),
+    d.select().from(t.sourceReviews),
   ]);
   const asset = assetRows[0];
   // loadState fills an empty schema; callers holding a transaction always have an asset.
@@ -281,6 +287,8 @@ export async function readState(d: Pick<ReturnType<typeof db>, "select"> = db())
       setup_complete: Boolean(asset.setup_complete),
       planning_context: asset.planning_context ?? {},
     },
+    source_comparisons: source_comparisons.map(row => row.record),
+    source_reviews: source_reviews.map(row => row.record),
     objectives,
     sources: sources.map((s) => ({
       ...s,
@@ -297,6 +305,7 @@ export async function readState(d: Pick<ReturnType<typeof db>, "select"> = db())
       run_id: n.run_id ?? null,
       candidate_row_id: n.candidate_row_id ?? null,
       block_id: n.block_id ?? null,
+      source_basis_text: n.source_basis_text ?? null,
     })),
     gaps: gaps.map((g) => ({
       ...g,
@@ -410,6 +419,8 @@ export async function persistState(state: IegpState) {
     const d = db();
     await d.insert(t.assets).values(state.asset);
     if (state.objectives.length) await d.insert(t.objectives).values(state.objectives);
+    if (state.source_comparisons?.length) await d.insert(t.sourceComparisons).values(state.source_comparisons.map(record => ({ source_id: record.source_id, version: record.version, record })));
+    if (state.source_reviews?.length) await d.insert(t.sourceReviews).values(state.source_reviews.map(record => ({ id: record.id, version: record.version, record })));
     if (state.sources.length) {
       await d.insert(t.sources).values(state.sources);
     }
@@ -835,7 +846,7 @@ export function makeLock(
   };
 }
 
-export async function lockNeed(args: {
+export const lockNeed = atomic(async function lockNeed(args: {
   need_id: string;
   status: "accepted" | "rejected";
   gap_id?: string;
@@ -843,6 +854,7 @@ export async function lockNeed(args: {
   actor_function: ActorFunction;
   note?: string;
 }) {
+  const assessmentGapIds = await lockAssessmentOwners({ need_ids: [args.need_id], gap_ids: args.gap_id ? [args.gap_id] : [] });
   const state = await loadState();
   const need = state.needs.find((n) => n.id === args.need_id);
   if (!need) throw new Error("Need not found");
@@ -879,7 +891,8 @@ export async function lockNeed(args: {
       actor: { name: args.actor_name, function: args.actor_function },
     });
   }
-}
+  await invalidateRelationshipAssessments({ before: state, gap_ids: assessmentGapIds, reason: `Supporting need acceptance or membership changed.`, actor_name: args.actor_name, actor_function: args.actor_function });
+});
 
 type FieldChange = { field: string; before: string | null; after: string | null };
 
@@ -928,7 +941,7 @@ function diffFields(
  * Human edit of a need's wording or its source quote. The need is locked to the
  * editor; no stage rewrites an existing need, so the edit survives every re-run.
  */
-export async function editNeed(args: {
+export const editNeed = atomic(async function editNeed(args: {
   need_id: string;
   statement?: string;
   source_quote?: string;
@@ -937,6 +950,7 @@ export async function editNeed(args: {
   actor_function: ActorFunction;
 }) {
   const rationale = requireRationale(args.rationale);
+  const assessmentGapIds = await lockAssessmentOwners({ need_ids: [args.need_id] });
   const state = await loadState();
   const need = state.needs.find((n) => n.id === args.need_id);
   if (!need) throw new Error("Need not found");
@@ -944,12 +958,16 @@ export async function editNeed(args: {
   if (statement !== undefined && !statement) throw new Error("Need statement is required.");
   const quote = args.source_quote === undefined ? undefined : args.source_quote.trim();
   const changes = diffFields(need, { statement, source_quote: quote });
+  const citationChanged = quote !== undefined && quote !== need.source_quote;
+  const citedBlock = citationChanged && quote ? state.blocks.find(block =>
+    block.source_id === need.source_id && block.text.replace(/\s+/g, " ").includes(quote.replace(/\s+/g, " "))) : undefined;
   if (changes.length === 0) throw new Error("Nothing changed.");
   await db()
     .update(t.needs)
     .set({
       ...(statement !== undefined ? { statement } : {}),
       ...(quote !== undefined ? { source_quote: quote } : {}),
+      ...(citationChanged ? { source_basis_text: null, block_id: citedBlock?.id ?? null } : {}),
       lock: makeLock(args.actor_name, args.actor_function, rationale),
     })
     .where(eq(t.needs.id, args.need_id));
@@ -970,14 +988,15 @@ export async function editNeed(args: {
     actor_name: args.actor_name,
     actor_function: args.actor_function,
   });
-}
+  await invalidateRelationshipAssessments({ before: state, gap_ids: assessmentGapIds, reason: `Supporting need changed: ${changes.map(c => c.field).join(", ")}.`, actor_name: args.actor_name, actor_function: args.actor_function });
+});
 
 /**
  * A need a person records by hand onto a gap (e.g. from a meeting no source file
  * covers). It is accepted and locked to them, with the plan-entry source unless
  * they name an ingested one.
  */
-export async function createNeed(args: {
+export const createNeed = atomic(async function createNeed(args: {
   gap_id: string;
   statement: string;
   source_quote?: string;
@@ -989,6 +1008,7 @@ export async function createNeed(args: {
   const rationale = requireRationale(args.rationale);
   const statement = args.statement.trim();
   if (!statement) throw new Error("Need statement is required.");
+  const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [args.gap_id] });
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
   if (!gap || gap.retired) throw new Error("Gap not found");
@@ -1024,8 +1044,9 @@ export async function createNeed(args: {
     rationale,
     actor: { name: args.actor_name, function: args.actor_function },
   });
+  await invalidateRelationshipAssessments({ before: state, gap_ids: assessmentGapIds, reason: `Supporting need added to this gap.`, actor_name: args.actor_name, actor_function: args.actor_function });
   return created.id;
-}
+});
 
 /** Removes one need → gap link; the old gap's primary passes to its next need. */
 async function dropNeedLink(state: IegpState, need_id: string, gap_id: string) {
@@ -1049,7 +1070,7 @@ async function dropNeedLink(state: IegpState, need_id: string, gap_id: string) {
   }
 }
 
-export async function unlinkNeedFromGap(args: {
+export const unlinkNeedFromGap = atomic(async function unlinkNeedFromGap(args: {
   need_id: string;
   gap_id: string;
   rationale: string;
@@ -1057,6 +1078,7 @@ export async function unlinkNeedFromGap(args: {
   actor_function: ActorFunction;
 }) {
   const rationale = requireRationale(args.rationale);
+  const assessmentGapIds = await lockAssessmentOwners({ need_ids: [args.need_id], gap_ids: [args.gap_id] });
   const state = await loadState();
   const need = state.needs.find((n) => n.id === args.need_id);
   if (!need) throw new Error("Need not found");
@@ -1084,7 +1106,8 @@ export async function unlinkNeedFromGap(args: {
     rationale,
     actor: { name: args.actor_name, function: args.actor_function },
   });
-}
+  await invalidateRelationshipAssessments({ before: state, gap_ids: assessmentGapIds, reason: `Supporting need unlinked from this gap.`, actor_name: args.actor_name, actor_function: args.actor_function });
+});
 
 /**
  * Moves a need from one gap onto another, or onto a new gap made from the need.
@@ -1092,7 +1115,7 @@ export async function unlinkNeedFromGap(args: {
  * wrong gap, or merged two different questions. Later S2 runs only add needs;
  * they never re-link an existing one, so the move survives every re-run.
  */
-export async function moveNeedToGap(args: {
+export const moveNeedToGap = atomic(async function moveNeedToGap(args: {
   need_id: string;
   from_gap_id: string;
   /** Leave empty and set `new_gap` to split the need out as its own gap. */
@@ -1104,6 +1127,7 @@ export async function moveNeedToGap(args: {
   actor_function: ActorFunction;
 }): Promise<string> {
   const rationale = requireRationale(args.rationale);
+  const assessmentGapIds = await lockAssessmentOwners({ need_ids: [args.need_id], gap_ids: [args.from_gap_id, ...(args.to_gap_id ? [args.to_gap_id] : [])] });
   const state = await loadState();
   const need = state.needs.find((n) => n.id === args.need_id);
   if (!need) throw new Error("Need not found");
@@ -1153,8 +1177,9 @@ export async function moveNeedToGap(args: {
     rationale,
     actor: { name: args.actor_name, function: args.actor_function },
   });
+  await invalidateRelationshipAssessments({ before: state, gap_ids: assessmentGapIds, reason: `Supporting need moved; requirement ownership changed.`, actor_name: args.actor_name, actor_function: args.actor_function });
   return targetId;
-}
+});
 
 function childParents(state: IegpState): Set<string> {
   return new Set(
@@ -1492,7 +1517,7 @@ export async function parkGap(args: {
   await appendAudit(args.actor_name, args.actor_function, "gap", args.gap_id, "park", reason);
 }
 
-export async function setGapSettings(args: {
+export const setGapSettings = atomic(async function setGapSettings(args: {
   gap_id: string;
   settings: string[];
   expected_settings?: unknown;
@@ -1505,7 +1530,7 @@ export async function setGapSettings(args: {
   return withWorkspaceTransaction(async () => {
     // Join Setup's gap membership lock before taking a row lock.
     await db().execute(sql`LOCK TABLE gaps IN ROW EXCLUSIVE MODE`);
-    await db().execute(sql`SELECT id FROM gaps WHERE id = ${args.gap_id} FOR UPDATE`);
+    const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [args.gap_id] });
     const state = await readState();
     const gap = state.gaps.find((g) => g.id === args.gap_id);
     if (!gap) throw new Error("Gap not found");
@@ -1536,12 +1561,13 @@ export async function setGapSettings(args: {
       "set_settings",
       settings.length ? settings.join(", ") : "No setting",
     );
+    await invalidateRelationshipAssessments({ before: state, gap_ids: assessmentGapIds, reason: "Gap settings changed.", actor_name: args.actor_name, actor_function: args.actor_function });
     return settings;
   });
-}
+});
 
 /** The design's gap metadata (KAN-49), edited by a person and kept on the audit trail. */
-export async function setGapMetadata(args: {
+export const setGapMetadata = atomic(async function setGapMetadata(args: {
   gap_id: string;
   metadata: unknown;
   expected_metadata?: unknown;
@@ -1554,7 +1580,7 @@ export async function setGapMetadata(args: {
   return withWorkspaceTransaction(async () => {
     // Join Setup's gap membership lock before taking a row lock.
     await db().execute(sql`LOCK TABLE gaps IN ROW EXCLUSIVE MODE`);
-    await db().execute(sql`SELECT id FROM gaps WHERE id = ${args.gap_id} FOR UPDATE`);
+    const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [args.gap_id] });
     const state = await readState();
     const gap = state.gaps.find((g) => g.id === args.gap_id);
     if (!gap) throw new Error("Gap not found");
@@ -1601,15 +1627,16 @@ export async function setGapMetadata(args: {
       "set_metadata",
       summary.length ? summary.join(" · ") : "Metadata cleared",
     );
+    await invalidateRelationshipAssessments({ before: state, gap_ids: assessmentGapIds, reason: "Gap metadata changed.", actor_name: args.actor_name, actor_function: args.actor_function });
     return metadata;
   });
-}
+});
 
 /**
  * Links a gap to one of the plan's objectives (KAN-97): the decision its evidence
  * serves. An edit record keeps the old and new objective and why.
  */
-export async function setGapObjective(args: {
+export const setGapObjective = atomic(async function setGapObjective(args: {
   gap_id: string;
   objective_id: string;
   /** Assignment reviewed when this edit was opened, including empty/unlinked. */
@@ -1623,7 +1650,7 @@ export async function setGapObjective(args: {
   await ensureSchema();
   return withWorkspaceTransaction(async () => {
     await lockObjectiveContext();
-    await db().execute(sql`SELECT id FROM gaps WHERE id = ${args.gap_id} FOR UPDATE`);
+    const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [args.gap_id] });
     const state = await readState();
     const gap = state.gaps.find((g) => g.id === args.gap_id);
     if (!gap) throw new Error("Gap not found");
@@ -1655,9 +1682,10 @@ export async function setGapObjective(args: {
     await appendAudit(args.actor_name, args.actor_function, "gap", gap.id, "set_objective", objective.id);
     const { requirePriorityContextReview } = await import("@/modules/stages/s8-prioritization/module");
     await requirePriorityContextReview({ gap_id: gap.id, reason, actor: { name: args.actor_name, function: args.actor_function }, event_id: edit.id });
+    await invalidateRelationshipAssessments({ before: state, gap_ids: assessmentGapIds, reason: "Gap objective changed.", actor_name: args.actor_name, actor_function: args.actor_function });
     return objective.id;
   });
-}
+});
 
 export async function unparkGap(args: {
   gap_id: string;
@@ -1700,14 +1728,145 @@ export async function classifyMappedGap(args: {
   });
 }
 
+/**
+ * Serialize canonical edits with assessment review: parent tactic, sorted gaps, then coverage rows.
+ * Source owners hold their source row before calling; membership edits lock both affected gaps.
+ * Return the sorted gap owners for the matching invalidation call.
+ */
+export async function lockAssessmentOwners(scope: { gap_ids?: string[]; tactic_ids?: string[]; need_ids?: string[]; source_ids?: string[] }): Promise<string[]> {
+  if (!inWorkspaceTransaction()) throw new Error("Assessment owner locks require a workspace transaction.");
+  for (const id of [...new Set(scope.tactic_ids ?? [])].sort()) await db().execute(sql`select id from tactics where id = ${id} for update`);
+  const sourceNeedIds = scope.source_ids?.length
+    ? (await loadState()).needs.filter(n => scope.source_ids?.includes(n.source_id)).map(n => n.id) : [];
+  for (const id of [...new Set([...(scope.need_ids ?? []), ...sourceNeedIds])].sort()) await db().execute(sql`select id from needs where id = ${id} for update`);
+  const state = await loadState();
+  const needIds = new Set([...(scope.need_ids ?? []), ...state.needs.filter(n => scope.source_ids?.includes(n.source_id)).map(n => n.id)]);
+  const gaps = new Set([...(scope.gap_ids ?? []), ...state.need_gap_links.filter(l => needIds.has(l.need_id)).map(l => l.gap_id),
+    ...state.coverages.filter(c => scope.tactic_ids?.includes(c.tactic_id)).map(c => c.gap_id)]);
+  const gapIds = [...gaps].sort();
+  for (const id of gapIds) await db().execute(sql`select id from gaps where id = ${id} for update`);
+  return gapIds;
+}
+
+/**
+ * Mark only relationships whose accepted semantic basis changed. Call in the mutation's
+ * transaction, after locking owners and writing canonical fields, with its pre-edit state
+ * and the gap IDs returned by lockAssessmentOwners. Never scan unrelated owners.
+ * Task 5 uses this same operation after applying an accepted source discrepancy.
+ * Replays against the same current basis do not duplicate invalidation/audit history.
+ */
+export async function invalidateRelationshipAssessments(args: {
+  before: IegpState; gap_ids: readonly string[]; reason: string; actor_name: string; actor_function: ActorFunction;
+}): Promise<string[]> {
+  if (!inWorkspaceTransaction()) throw new Error("Assessment invalidation requires the mutation's workspace transaction and owner locks.");
+  const state = await loadState();
+  const ownedGaps = new Set(args.gap_ids);
+  const affected: string[] = [];
+  const candidates = state.coverages.filter(row => ownedGaps.has(row.gap_id)).sort((a,b) => a.id.localeCompare(b.id));
+  for (const candidate of candidates) {
+    const previous = args.before.coverages.find(c => c.id === candidate.id);
+    if (!previous) continue;
+    const current = assessmentBasis(state, candidate);
+    const prior = assessmentBasis(args.before, previous);
+    if (JSON.stringify(current) === JSON.stringify(prior)) continue;
+    // Read after obtaining the coverage lock so a waiting edit cannot overwrite
+    // confirmation history written by the reviewer that previously held it.
+    const [locked] = await db().select().from(t.coverages).where(eq(t.coverages.id, candidate.id)).for("update");
+    if (!locked) continue;
+    const row = { ...locked,
+      overall: locked.overall as IegpState["coverages"][0]["overall"],
+      dimensions: locked.dimensions as IegpState["coverages"][0]["dimensions"],
+      overall_lock: asLock(locked.overall_lock),
+    };
+    const history = row.assessment_history ?? [];
+    const latest = history.at(-1);
+    if (latest?.action === "invalidate" && latest.basis.requirements === current.requirements && latest.basis.design === current.design) continue;
+    if (!row.stale && row.overall !== "unassessed" && row.assessed_basis?.requirements === current.requirements && row.assessed_basis.design === current.design) continue;
+    const stale = row.stale || row.overall !== "unassessed" || Object.values(row.dimensions).some(dimension => dimension.lock.locked);
+    const reason = args.reason;
+    await db().update(t.coverages).set({ stale,
+      stale_reasons: stale ? [...new Set([...(row.stale_reasons ?? []), reason])] : row.stale_reasons,
+      review_version: newId("coverage"),
+      assessment_history: [...history, { action: "invalidate", at: now(), reason, basis: current,
+        overall: row.overall, overall_lock: row.overall_lock, overall_rationale: row.overall_rationale,
+        dimensions: row.dimensions, confirmed_requirement_basis: row.confirmed_requirement_basis ?? null }],
+    }).where(eq(t.coverages.id, row.id));
+    await appendAudit(args.actor_name, args.actor_function, "coverage", row.id, "invalidate_assessment", reason);
+    affected.push(row.gap_id);
+  }
+  // Apply the engine result immediately, including after a previously human-validated status.
+  for (const gapId of [...new Set(affected)]) await syncComputedGapStatuses(gapId, { human: true });
+  return [...new Set(affected)];
+}
+
+/** Reviews the whole sourced basis once, preserving earlier decisions and original disagreements. */
+export async function reviewRequirementBasis(args: {
+  gap_id: string;
+  expected_version: string;
+  dimensions: RequirementReviewInput;
+  rationale: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+  origin?: RequirementBasis["origin"];
+  confirm?: boolean;
+}): Promise<RequirementBasis> {
+  if (!inWorkspaceTransaction()) return withWorkspaceTransaction(() => reviewRequirementBasis(args));
+  const rationale = requireRationale(args.rationale);
+  const origin = args.origin ?? "human";
+  const confirm = args.confirm !== false;
+  if (confirm && origin !== "human") throw new Error("Only a human coverage reviewer can confirm requirements.");
+  await db().execute(sql`select id from gaps where id = ${args.gap_id} for update`);
+  const state = await loadState();
+  const review = getRequirementBasisReview(state, args.gap_id);
+  if (!args.expected_version || args.expected_version !== review.version) throw new Error("Requirement basis changed; refresh before reviewing.");
+  const dimensions = reviewedRequirementDimensions(state, args.gap_id, args.dimensions);
+  const previous = state.gaps.find(g => g.id === args.gap_id)!.requirement_basis;
+  const history = previous ? [...previous.history, (({ history: _history, ...entry }) => entry)(previous)] : [];
+  const basis: RequirementBasis = {
+    version: newId("requirements"), source_version: review.basis.source_version,
+    origin, dimensions, rationale, history,
+    confirmation: confirm ? makeLock(args.actor_name, args.actor_function, rationale) : unlocked(),
+  };
+  await db().update(t.gaps).set({ requirement_basis: basis }).where(eq(t.gaps.id, args.gap_id));
+  await invalidateRelationshipAssessments({ before: state, gap_ids: [args.gap_id], reason: "Reviewed requirement basis changed.", actor_name: args.actor_name, actor_function: args.actor_function });
+  await appendAudit(args.actor_name, args.actor_function, "gap", args.gap_id, "review_requirement_basis", `${confirm ? "Confirmed" : "Proposed"}: ${rationale}`);
+  return basis;
+}
+
+/** Rejects stale forms before any field is written. Row locks serialize competing reviewers. */
+async function reviewedCoverage(coverage_id: string, expected_version?: string) {
+  const initial = (await loadState()).coverages.find(c => c.id === coverage_id);
+  if (!initial) throw new Error("Coverage not found");
+  // Serialize sibling warnings with other reviews and design edits before any gap/coverage lock.
+  await db().execute(sql`select id from tactics where id = ${initial.tactic_id} for update`);
+  await db().execute(sql`select id from gaps where id = ${initial.gap_id} for update`);
+  await db().execute(sql`select id from coverages where id = ${coverage_id} for update`);
+  const state = await loadState();
+  const row = state.coverages.find(c => c.id === coverage_id);
+  if (!row) throw new Error("Coverage not found");
+  if (expected_version !== undefined && coverageReviewVersion(row) !== expected_version) throw new Error("Coverage changed; refresh before reviewing.");
+  return { state, row };
+}
+
+/** Full needs an explicit human basis and Yes for every required dimension. */
+function requireSupportedFull(state: IegpState, gap_id: string, dimensions: IegpState["coverages"][0]["dimensions"], expected_basis_version?: string) {
+  const review = getRequirementBasisReview(state, gap_id);
+  if (expected_basis_version !== undefined && expected_basis_version !== review.version) throw new Error("Requirement basis changed; refresh before confirming coverage.");
+  const issues = fullConfirmationIssues(review.basis, { dimensions });
+  if (issues.length) throw new Error(issues.join(" "));
+  return review.basis;
+}
+
 async function lockCoverageDimensionChange(args: {
   coverage_id: string;
+  expected_version?: string;
   dimension: keyof IegpState["coverages"][0]["dimensions"];
   value: IegpState["coverages"][0]["dimensions"][typeof args.dimension]["value"];
   rationale: string;
   actor_name: string;
   actor_function: ActorFunction;
-}) {
+}): Promise<void> {
+  if (!inWorkspaceTransaction()) return withWorkspaceTransaction(() => lockCoverageDimension(args));
   if (!(COVERAGE_DIMENSIONS as readonly string[]).includes(args.dimension)) {
     throw new Error(`Unknown coverage dimension "${String(args.dimension)}".`);
   }
@@ -1715,9 +1874,7 @@ async function lockCoverageDimensionChange(args: {
     throw new Error(`Choose a dimension value (${DIMENSION_VALUES.join(", ")}).`);
   }
   const rationale = requireRationale(args.rationale);
-  const state = await loadState();
-  const row = state.coverages.find((c) => c.id === args.coverage_id);
-  if (!row) throw new Error("Coverage not found");
+  const { row } = await reviewedCoverage(args.coverage_id, args.expected_version);
   const before = row.dimensions[args.dimension]?.value;
   if (before === args.value && row.dimensions[args.dimension].lock.locked && !row.needs_review && !row.stale) return;
   const dimensions = {
@@ -1730,7 +1887,7 @@ async function lockCoverageDimensionChange(args: {
   };
   await db()
     .update(t.coverages)
-    .set({ dimensions, stale: false, needs_review: false })
+    .set({ dimensions, review_version: newId("coverage") })
     .where(eq(t.coverages.id, args.coverage_id));
   await flagSiblingCoveragesForReview(row.tactic_id, row.gap_id, row.expansion_id);
   await syncComputedGapStatuses(row.gap_id, { human: true });
@@ -1738,27 +1895,37 @@ async function lockCoverageDimensionChange(args: {
 
 async function lockCoverageOverallChange(args: {
   coverage_id: string;
+  expected_version?: string;
+  expected_basis_version?: string;
   overall: IegpState["coverages"][0]["overall"];
   rationale: string;
   actor_name: string;
   actor_function: ActorFunction;
-}) {
+}): Promise<void> {
+  if (!inWorkspaceTransaction()) return withWorkspaceTransaction(() => lockCoverageOverall(args));
   if (!(ASSESSED_COVERAGE as readonly string[]).includes(args.overall)) {
     throw new Error(`Choose a coverage verdict (${ASSESSED_COVERAGE.join(", ")}).`);
   }
   const rationale = requireRationale(args.rationale);
+  const { row } = await reviewedCoverage(args.coverage_id, args.expected_version);
   const state = await loadState();
-  const row = state.coverages.find((c) => c.id === args.coverage_id);
-  if (!row) throw new Error("Coverage not found");
+  if (args.expected_basis_version !== undefined && args.expected_basis_version !== getRequirementBasisReview(state, row.gap_id).version) throw new Error("Requirement basis changed; refresh before reviewing coverage.");
+  const basis = args.overall === "full" ? requireSupportedFull(state, row.gap_id, row.dimensions, args.expected_basis_version) : null;
   if (row.overall === args.overall && row.overall_lock.locked && !row.needs_review && !row.stale) return;
   await db()
     .update(t.coverages)
     .set({
       overall: args.overall,
+      assessment_origin: "human",
       overall_rationale: rationale,
       overall_lock: makeLock(args.actor_name, args.actor_function, rationale),
-      stale: false,
-      needs_review: false,
+      confirmed_requirement_basis: basis,
+      assessed_basis: assessmentBasis(state, row), stale: false, stale_reasons: [],
+      assessment_history: [...(row.assessment_history ?? []), { action: "reassess", at: now(),
+        reason: rationale, basis: row.assessed_basis ?? assessmentBasis(state, row),
+        overall: row.overall, overall_lock: row.overall_lock, overall_rationale: row.overall_rationale,
+        dimensions: row.dimensions, confirmed_requirement_basis: row.confirmed_requirement_basis ?? null }],
+      review_version: newId("coverage"),
     })
     .where(eq(t.coverages.id, args.coverage_id));
   await flagSiblingCoveragesForReview(row.tactic_id, row.gap_id, row.expansion_id);
@@ -2154,6 +2321,30 @@ export function humanRejectedPairs(state: IegpState): Set<string> {
 }
 
 /**
+ * Serialize an explicit library request and read its durable successful outcome.
+ * The caller must remain in the same authorized workspace transaction through save.
+ * A request ID is bound to normalized input and the authenticated principal.
+ */
+export async function beginLibraryLinkRequest(requestId: string, payload: string): Promise<string | null> {
+  if (!inWorkspaceTransaction()) throw new Error("Library linking requires a workspace transaction.");
+  if (!/^[a-zA-Z0-9_-]{16,100}$/.test(requestId)) throw new Error("A valid library request ID is required.");
+  // Advisory transaction locks coordinate identical requests even before a receipt exists.
+  // The workspace name prevents unrelated workspaces from contending on the same request ID.
+  const scope = `${await currentSchemaName()}:library-link:${requestId}`;
+  await db().execute(sql`select pg_advisory_xact_lock(hashtextextended(${scope}, 0))`);
+  const [receipt] = await db().select().from(t.libraryLinkRequests).where(eq(t.libraryLinkRequests.request_id, requestId));
+  if (!receipt) return null;
+  if (receipt.payload !== payload) throw new Error("This request ID already belongs to a different library decision. Reopen the chooser and try again.");
+  return receipt.coverage_id;
+}
+
+/** Save a successful request only after its relationship and audit decisions have succeeded. */
+export async function completeLibraryLinkRequest(requestId: string, payload: string, coverageId: string): Promise<void> {
+  if (!inWorkspaceTransaction()) throw new Error("Library linking requires a workspace transaction.");
+  await db().insert(t.libraryLinkRequests).values({ request_id: requestId, payload, coverage_id: coverageId });
+}
+
+/**
  * Writes one gap ↔ tactic coverage row. `coverage` and `dimensions` carry the
  * verdict of whoever decided the mapping (the S4 model, or a human). Without a
  * verdict the row is "unassessed" with every dimension "unknown" — nothing is
@@ -2166,6 +2357,11 @@ export function humanRejectedPairs(state: IegpState): Set<string> {
  */
 async function assignTacticToGapChange(args: {
   gap_id: string;
+  expected_basis_version?: string;
+  expected_design_version?: string;
+  /** Explicit preview-based library assessments require both displayed basis tokens. Other callers retain their existing contract. */
+  require_preview_basis?: boolean;
+  confirm_coverage?: boolean;
   tactic_id: string;
   expansion_id?: string | null;
   actor_name: string;
@@ -2174,13 +2370,19 @@ async function assignTacticToGapChange(args: {
   coverage?: OverallCoverage | null;
   dimensions?: Partial<Record<CoverageDimension, DimensionValue>> | null;
   human?: boolean;
-  /** Human only: the given verdict and dimensions are the person's and are locked. */
+  /** Human only: confirms the overall verdict; dimension confirmations remain separate. */
   lock_coverage?: boolean;
+  /** Set by the owning model/workflow, never accepted from a customer request body. */
+  assessment_origin?: IegpState["coverages"][0]["assessment_origin"];
   references?: JudgementReference[];
   model?: boolean;
   supplied_records?: ReturnType<typeof suppliedJudgementRecords>;
   expected_tactic_version?: string;
 }): Promise<string> {
+  if (!inWorkspaceTransaction()) return withWorkspaceTransaction(() => assignTacticToGap(args));
+  // Match canonical tactic edits: lock the shared design before discovering/locking its gap.
+  await db().execute(sql`select id from tactics where id = ${args.tactic_id} for update`);
+  await db().execute(sql`select id from gaps where id = ${args.gap_id} for update`);
   const overall = coverageVerdict(args.coverage) ?? "unassessed";
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
@@ -2209,19 +2411,29 @@ async function assignTacticToGapChange(args: {
   if (existing && !(args.expansion_id && existing.overall === "unassessed" && !existing.overall_lock.locked && Object.values(existing.dimensions).every((d) => !d.lock.locked))) {
     throw new Error("That tactic is already assigned to this gap.");
   }
-  const givenDimensions = Object.keys(args.dimensions ?? {}) as CoverageDimension[];
-  const lockVerdict =
-    Boolean(args.human && args.lock_coverage) && (overall !== "unassessed" || givenDimensions.length > 0);
-  const rationale = requireRationale(args.note);
-  const dimensions = coverageDimensions(args.dimensions, args.note ?? "");
-  if (lockVerdict) {
-    for (const dim of givenDimensions) {
-      dimensions[dim] = { ...dimensions[dim], lock: makeLock(args.actor_name, args.actor_function, rationale) };
+  if (args.require_preview_basis) {
+    if (!args.expected_basis_version || args.expected_basis_version !== getRequirementBasisReview(state, args.gap_id).version) {
+      throw new Error("Requirement basis changed; refresh the preview before assessing and linking.");
+    }
+    if (!args.expected_design_version || args.expected_design_version !== assessmentBasis(state, args).design) {
+      throw new Error("Tactic design changed; refresh the preview before assessing and linking.");
     }
   }
+  const givenDimensions = Object.keys(args.dimensions ?? {}) as CoverageDimension[];
+  const lockVerdict =
+    Boolean(args.human && args.lock_coverage && args.confirm_coverage !== false) && (overall !== "unassessed" || givenDimensions.length > 0);
+  const rationale = requireRationale(args.note);
+  const dimensions = coverageDimensions(args.dimensions, args.note ?? "");
+  // Overall confirmation never silently confirms individual dimensions.
+  const confirmedBasis = lockVerdict && overall === "full"
+    ? requireSupportedFull(state, args.gap_id, dimensions, args.expected_basis_version) : null;
   const coverageId = existing?.id ?? (await allocateId("COV", state.coverages.map((c) => c.id)));
   const row = {
     id: coverageId,
+    assessment_origin: overall === "unassessed" ? null : args.human ? "human" : args.assessment_origin ?? null,
+    confirmed_requirement_basis: confirmedBasis,
+    assessed_basis: assessmentBasis(state, { gap_id: args.gap_id, tactic_id: args.tactic_id, expansion_id: args.expansion_id }),
+    review_version: newId("coverage"),
     gap_id: args.gap_id,
     tactic_id: args.tactic_id,
     expansion_id: args.expansion_id ?? null,
@@ -2426,16 +2638,23 @@ async function saveMappingTableRowChange(args: {
   actor_name: string;
   actor_function: ActorFunction;
   rationale: string;
-}) {
+}): Promise<{ decision_event_id: string; parent_tactic_ids: string[] }> {
+  if (!inWorkspaceTransaction()) return withWorkspaceTransaction(() => saveMappingTableRow(args));
   const mapping_status = requireMappingRowStatus(args.mapping_status);
   const rationale = requireRationale(args.rationale);
+  const uniqueIds = [...new Set(args.tactic_ids.map((id) => id.trim()).filter(Boolean))];
+  const previous = await loadState();
+  // Reserve every existing parent before any removal or assignment can lock the gap.
+  await lockAssessmentOwners({
+    tactic_ids: [...uniqueIds, ...previous.coverages.filter(c => !c.expansion_id && c.gap_id === args.gap_id).map(c => c.tactic_id)],
+    gap_ids: [args.gap_id],
+  });
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
   if (!gap) throw new Error("Gap not found");
   if (!gapEligibleForMapping(gap.status)) {
     throw new Error("Only live gaps eligible for mapping can be edited here.");
   }
-  const uniqueIds = [...new Set(args.tactic_ids.map((id) => id.trim()).filter(Boolean))];
   if (mapping_status !== "open" && uniqueIds.length === 0) {
     throw new Error("Addressed or partially addressed rows need at least one tactic.");
   }
@@ -2906,7 +3125,7 @@ export async function createGap(args: {
  * the gap is locked to the editor. No stage rewrites an existing gap's text: S2
  * re-runs only add needs onto a gap they judge a duplicate.
  */
-export async function modifyGap(args: {
+export const modifyGap = atomic(async function modifyGap(args: {
   gap_id: string;
   /** Snapshot captured when the editor opened; required at the save boundary. */
   expected_gap?: unknown;
@@ -2922,7 +3141,7 @@ export async function modifyGap(args: {
   await ensureSchema();
   return withWorkspaceTransaction(async () => {
     await lockObjectiveContext();
-    await db().execute(sql`SELECT id FROM gaps WHERE id = ${args.gap_id} FOR UPDATE`);
+    const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [args.gap_id] });
     const state = await readState();
     const gap = state.gaps.find((g) => g.id === args.gap_id);
     if (!gap) throw new Error("Gap not found");
@@ -2965,9 +3184,10 @@ export async function modifyGap(args: {
         await requirePriorityContextReview({ gap_id: gap.id, reason: rationale, actor: { name: args.actor_name, function: args.actor_function }, event_id: edit.id });
       }
     }
+    await invalidateRelationshipAssessments({ before: state, gap_ids: assessmentGapIds, reason: "Gap design changed.", actor_name: args.actor_name, actor_function: args.actor_function });
     return changes;
   });
-}
+});
 
 export async function lockTactic(args: {
   tactic_id: string;
@@ -3139,6 +3359,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
   /** Validated gaps a new source joined; they now show "New source added". */
   flagged_gap_ids: string[];
 }> {
+  const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [...args.gaps.flatMap(g => g.duplicate_of ? [g.duplicate_of] : []), ...args.needs.flatMap(n => n.gap_id ? [n.gap_id] : [])] });
   const state = await loadState();
   const sourceId = args.source_id;
   // Linked to the first objective once setup has named one; a blank plan has none yet.
@@ -3375,6 +3596,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
     "ingest",
     `Committed ${args.title}; ${createdNeedIds.length} need(s), ${createdGapIds.length} new gap(s), ${mergedGapIds.length} joined as duplicates, ${Object.keys(suggestionIdByRow).length} overlap(s) to review, ${createdTacticIds.length} tactic(s), ${skippedTacticIds.length} duplicate tactic(s) skipped.`,
   );
+  await invalidateRelationshipAssessments({ before: state, gap_ids: assessmentGapIds, reason: "Accepted extracted supporting requirements changed.", ...args });
   await syncComputedGapStatuses();
   return {
     need_ids: createdNeedIds,
@@ -3462,7 +3684,10 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
   args: SuggestionDecision & { name?: string; statement?: string },
 ): Promise<{ gap_id: string }> {
   const rationale = requireRationale(args.rationale);
+  const pending = await pendingSuggestion(args.suggestion_id);
+  const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [pending.gap.id] });
   const { suggestion, gap } = await pendingSuggestion(args.suggestion_id);
+  const before = await loadState();
   const name = (args.name ?? suggestion.merged_name).trim();
   const statement = (args.statement ?? suggestion.merged_statement).trim();
   if (!name) throw new Error("Give the merged gap a name.");
@@ -3518,8 +3743,6 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
       provenance: { run_id: suggestion.run_id, candidate_row_id: index === 0 ? suggestion.candidate_row_id : null },
     });
   }
-  // Mappings were judged against the old wording.
-  await db().update(t.coverages).set({ needs_review: true }).where(eq(t.coverages.gap_id, gap.id));
   await closeSuggestion(suggestion.id, "merged", { ...args, rationale });
   await appendAudit(args.actor_name, args.actor_function, "gap", gap.id, "merge_suggestion", rationale);
   await recordEdit({
@@ -3535,6 +3758,7 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
     signal_kind: "user_accepted_proposal",
   });
   await syncComputedGapStatuses(gap.id);
+  await invalidateRelationshipAssessments({ before, gap_ids: assessmentGapIds, reason: "Accepted gap merge changed supporting requirements.", ...args });
   return { gap_id: gap.id };
 });
 
@@ -3547,7 +3771,10 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
   args: SuggestionDecision & { name?: string; statement?: string },
 ): Promise<{ gap_id: string; new_gap_id: string }> {
   const rationale = requireRationale(args.rationale);
+  const pending = await pendingSuggestion(args.suggestion_id);
+  const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [pending.gap.id] });
   const { suggestion, gap } = await pendingSuggestion(args.suggestion_id);
+  const before = await loadState();
   const name = (args.name ?? suggestion.split_name).trim();
   const statement = (args.statement ?? suggestion.split_statement).trim();
   if (!name) throw new Error("Give the new gap a name.");
@@ -3604,6 +3831,7 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
     actor: { name: args.actor_name, function: args.actor_function },
     signal_kind: "user_accepted_proposal",
   });
+  await invalidateRelationshipAssessments({ before, gap_ids: assessmentGapIds, reason: "Accepted gap split changed supporting requirements.", ...args });
   return { gap_id: gap.id, new_gap_id: newGapId };
 });
 
@@ -3733,7 +3961,7 @@ const TACTIC_DATE_FIELDS = new Set<TacticEditField>(["start_date", "evidence_ava
  * tactic is locked to the editor. No stage rewrites an existing tactic (S3 skips
  * a repeat as `duplicate_of`), so human values, dates included, survive re-runs.
  */
-export async function modifyTactic(args: {
+export const modifyTactic = atomic(async function modifyTactic(args: {
   tactic_id: string;
   expected_tactic?: unknown;
   status?: string;
@@ -3751,7 +3979,7 @@ export async function modifyTactic(args: {
   const rationale = requireRationale(args.rationale ?? args.note);
   await loadState();
   return withWorkspaceTransaction(async () => {
-    await db().execute(sql`SELECT id FROM tactics WHERE id = ${args.tactic_id} FOR UPDATE`);
+    const assessmentGapIds = await lockAssessmentOwners({ tactic_ids: [args.tactic_id] });
     const state = await readState();
     const tactic = state.tactics.find((x) => x.id === args.tactic_id);
     if (!tactic) throw new Error("Tactic not found");
@@ -3840,9 +4068,10 @@ export async function modifyTactic(args: {
       const gapIds = new Set(state.coverages.filter(c => c.tactic_id === tactic.id).map(c => c.gap_id));
       for (const gapId of gapIds) await syncComputedGapStatuses(gapId);
     }
+    await invalidateRelationshipAssessments({ before: state, gap_ids: assessmentGapIds, reason: `Tactic design changed: ${changes.filter(c => !["name", "owner", "function", "budget", "custom_type"].includes(c.field)).map(c => c.field).join(", ")}.`, actor_name: args.actor_name, actor_function: args.actor_function });
     return changes;
   });
-}
+});
 
 /**
  * Saves the setup wizard's IEGP context for the current workspace. The asset
@@ -3851,7 +4080,7 @@ export async function modifyTactic(args: {
  * only refuses malformed values; `mark_complete` needs every required field.
  * Once setup is complete, later edits keep it complete.
  */
-export async function saveProductSetup(args: {
+export const saveProductSetup = atomic(async function saveProductSetup(args: {
   context: PlanningContext;
   actor_name: string;
   actor_function: ActorFunction;
@@ -3870,6 +4099,7 @@ export async function saveProductSetup(args: {
     await db().execute(sql`SELECT id FROM assets ORDER BY id FOR UPDATE`);
     await lockObjectiveContext();
     const state = await readState();
+    const assessmentGapIds = await lockAssessmentOwners({ gap_ids: state.gaps.map(gap => gap.id) });
     const ctx = parsePlanningContext(args.context);
     const previous = parsePlanningContext(state.asset.planning_context);
     if (ctx.saved_at !== previous.saved_at) {
@@ -3893,9 +4123,10 @@ export async function saveProductSetup(args: {
     await appendAudit(args.actor_name, args.actor_function, "plan", state.asset.id,
       args.mark_complete ? "complete_setup" : "save_setup",
       args.mark_complete ? "Setup wizard complete: IEGP context saved." : "Saved IEGP context from the setup wizard.");
+    await invalidateRelationshipAssessments({ before: state, gap_ids: assessmentGapIds, reason: "Planning context changed.", actor_name: args.actor_name, actor_function: args.actor_function });
     return saved;
   });
-}
+});
 
 /** Context mutations lock objectives before gaps; priority decisions lock gaps.
  * Reassignment must use this order so Setup sees its final linked-gap set.
@@ -4238,13 +4469,12 @@ async function retireGap(gap_id: string, transaction?: StoreTransaction) {
     .where(eq(t.gaps.id, gap_id));
 }
 
-async function insertClosingCoverage(args: {
+/** Save an intended closing relationship provisionally until its new scope is reviewed. */
+async function insertProvisionalClosingCoverage(args: {
   gap_id: string;
   tactic_id: string;
   expansion_id?: string | null;
   source?: IegpState["coverages"][0];
-  actor_name: string;
-  actor_function: ActorFunction;
   note: string;
 }, transaction?: StoreTransaction) {
   const state = transaction ? await readState(transaction) : await loadState();
@@ -4256,8 +4486,10 @@ async function insertClosingCoverage(args: {
       .update(t.coverages)
       .set({
         overall: "full",
+        assessment_origin: "workflow",
         overall_rationale: args.note,
-        overall_lock: makeLock(args.actor_name, args.actor_function, args.note),
+        overall_lock: unlocked(),
+        confirmed_requirement_basis: null,
         stale: false,
         needs_review: false,
       })
@@ -4273,8 +4505,10 @@ async function insertClosingCoverage(args: {
     expansion_id: args.expansion_id ?? null,
     dimensions: args.source?.dimensions ?? emptyDimensions(),
     overall: "full",
+    assessment_origin: "workflow",
     overall_rationale: args.note,
-    overall_lock: makeLock(args.actor_name, args.actor_function, args.note),
+    overall_lock: unlocked(),
+    confirmed_requirement_basis: null,
     stale: false,
     needs_review: false,
   });
@@ -4460,8 +4694,8 @@ async function splitPartialGapChange(args: {
     await ensureGapHasConstituentNeed(openId, transaction);
     for (const selected of addressedScopes) {
       await inheritSplitScope(selected, parent.id, addressedId, args, transaction);
-      await insertClosingCoverage({gap_id: addressedId, tactic_id: selected.tactic_id, expansion_id: selected.expansion_id, source: selected.source,
-        actor_name: args.actor_name, actor_function: args.actor_function, note: requireRationale(args.note)}, transaction);
+      await insertProvisionalClosingCoverage({gap_id: addressedId, tactic_id: selected.tactic_id, expansion_id: selected.expansion_id, source: selected.source,
+        note: "Split: proposed Full for this slice; requirement review pending."}, transaction);
     }
     for (const selected of leftoverScopes) {
       await inheritSplitScope(selected, parent.id, openId, args, transaction);
@@ -4471,16 +4705,6 @@ async function splitPartialGapChange(args: {
         overall_lock: unlocked(), stale: false, needs_review: false});
     }
     await syncComputedGapStatuses(addressedId, undefined, transaction);
-    await transaction
-      .update(t.gaps)
-      .set({
-        status: "validated_addressed",
-        computed_status: "validated_addressed",
-        human_validated: true,
-        lock: makeLock(args.actor_name, args.actor_function, "Split addressed slice."),
-        ...(await confirmationBy(args.actor_name, args.actor_function, args.note || `Split from ${parent.id}: addressed slice.`)),
-      })
-      .where(eq(t.gaps.id, addressedId));
     await transaction
       .update(t.gaps)
       .set({
@@ -4591,28 +4815,28 @@ async function rewritePartialGapChange(args: {
     if (args.status === "validated_addressed") {
       for (const selected of scopes) {
         await inheritSplitScope(selected, original.id, liveId, args, transaction);
-        await insertClosingCoverage({
+        await insertProvisionalClosingCoverage({
           gap_id: liveId,
           tactic_id: selected.tactic_id,
           expansion_id: selected.expansion_id,
           source: selected.source,
-          actor_name: args.actor_name,
-          actor_function: args.actor_function,
-          note: requireRationale(args.note),
+          note: "Rewrite: proposed Full for this scope; requirement review pending.",
         }, transaction);
       }
     }
     await syncComputedGapStatuses(liveId, undefined, transaction);
-    await transaction
-      .update(t.gaps)
-      .set({
-        status: args.status,
-        computed_status: args.status,
-        human_validated: true,
-        lock: makeLock(args.actor_name, args.actor_function, args.note),
-        ...(await confirmationBy(args.actor_name, args.actor_function, args.note || `Rewritten from ${original.id}.`)),
-      })
-      .where(eq(t.gaps.id, liveId));
+    if (args.status === "validated_open") {
+      await transaction
+        .update(t.gaps)
+        .set({
+          status: args.status,
+          computed_status: args.status,
+          human_validated: true,
+          lock: makeLock(args.actor_name, args.actor_function, args.note),
+          ...(await confirmationBy(args.actor_name, args.actor_function, args.note || `Rewritten from ${original.id}.`)),
+        })
+        .where(eq(t.gaps.id, liveId));
+    }
     const carried = await carryRetiredGapLinks(transaction, {
       from: original,
       targets: { open: args.status === "validated_open" ? liveId : null, all: [liveId] },
@@ -4701,23 +4925,12 @@ async function createAddressedGapChange(args: {
     actor_function: args.actor_function,
     note: args.note,
   });
-  await insertClosingCoverage({
+  await insertProvisionalClosingCoverage({
     gap_id: id,
     tactic_id: tacticId,
-    actor_name: args.actor_name,
-    actor_function: args.actor_function,
-    note: requireRationale(args.note),
+    note: "Created with proposed Full coverage; requirement review pending.",
   });
-  await db()
-    .update(t.gaps)
-    .set({
-      status: "validated_addressed",
-      computed_status: "validated_addressed",
-      human_validated: true,
-      lock: makeLock(args.actor_name, args.actor_function, args.note),
-      ...(await confirmationBy(args.actor_name, args.actor_function, args.note || "Created as Addressed with its accompanying tactic.")),
-    })
-    .where(eq(t.gaps.id, id));
+  await syncComputedGapStatuses(id);
   return id;
 }
 

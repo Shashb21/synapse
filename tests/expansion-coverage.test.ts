@@ -1,12 +1,28 @@
 import { describe, expect, it } from "vitest";
 import { buildSeed } from "@/lib/iegp/seed";
 import { computeGapStatus, countingCoverages, mappedTactics } from "@/lib/iegp/engine";
-import type { TacticExpansion } from "@/lib/iegp/types";
+import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
+import type { RequirementBasis, TacticExpansion } from "@/lib/iegp/types";
 
 function scenario(status: string = "proposed") {
   const state = buildSeed();
   const tactic = { ...state.tactics[0]!, status: "ongoing" as const };
+  const dimensions = {} as RequirementBasis["dimensions"];
+  for (const dim of COVERAGE_DIMENSIONS) {
+    dimensions[dim] = {
+      applicability: dim === "population" ? "required" : "not_applicable",
+      requirement: dim === "population" ? "Community patients" : "",
+      rationale: "This scoped safety question requires population fit only", sources: [], conflicts: [], resolution: "",
+    };
+  }
+  const basis: RequirementBasis = {
+    version: "reviewed-population", source_version: "fixture", origin: "human", dimensions, history: [],
+    rationale: "Reviewed this expansion's population-only question",
+    confirmation: { locked: true, actor_name: "Reviewer", actor_function: "heor", locked_at: "2026-10-16T00:00:00Z", note: "Requirements reviewed" },
+  };
   const coverage = { ...state.coverages[0]!, tactic_id: tactic.id, expansion_id: "EXP-1", overall: "full" as const,
+    confirmed_requirement_basis: basis,
+    dimensions: { ...state.coverages[0]!.dimensions, population: { ...state.coverages[0]!.dimensions.population, value: "yes" as const } },
     overall_lock: { ...state.coverages[0]!.overall_lock, locked: false } };
   const expansion = { id: "EXP-1", tactic_id: tactic.id, gap_ids: [coverage.gap_id], status } as TacticExpansion;
   return { tactic, coverage, expansion };

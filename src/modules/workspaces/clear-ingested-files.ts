@@ -102,7 +102,7 @@ export async function clearIngestedFiles(): Promise<void> {
     // All current source material, including human-edited blocks, is in scope.
     // Machine mapping proposals are current candidate state even when both
     // endpoints survive; committed manual coverage rows remain above.
-    for (const table of ["gap_suggestions", "tactic_suggestions", "tactic_source_references", "mapping_candidates", "gap_candidates", "tactic_candidates", "source_block_meta", "source_dropped_units", "source_stakeholder_meta", "source_blocks", "parsed_documents", "source_files", "sources", "ingestion_jobs"]) {
+    for (const table of ["source_comparisons", "gap_suggestions", "tactic_suggestions", "tactic_source_references", "mapping_candidates", "gap_candidates", "tactic_candidates", "source_block_meta", "source_dropped_units", "source_stakeholder_meta", "source_blocks", "parsed_documents", "source_files", "sources", "ingestion_jobs"]) {
       await db().execute(sql.raw(`delete from ${table}`));
     }
     await syncComputedGapStatuses();

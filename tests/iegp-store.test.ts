@@ -417,8 +417,9 @@ describe("IEGP postgres store", () => {
     expect(state.residual_gap_suggestions).toHaveLength(0);
     expect(state.residuals.filter((r) => r.gap_id === gapId)).toHaveLength(0);
     expect(await listResidualGapDrafts()).toHaveLength(0);
-    await lockCoverageOverall({ coverage_id: row.id, overall: "full", rationale: "Closes it.", actor_name: "A. Rao", actor_function: "heor" });
-    expect((await loadState()).gaps.find((g) => g.id === gapId)?.status).toBe("validated_addressed");
+    // A contradictory model proposal cannot be upgraded without a reviewed requirement basis.
+    await expect(lockCoverageOverall({ coverage_id: row.id, overall: "full", rationale: "Closes it.", actor_name: "A. Rao", actor_function: "heor" })).rejects.toThrow(/requirement basis/i);
+    expect((await loadState()).gaps.find((g) => g.id === gapId)?.status).toBe("validated_partial");
     await expect(
       lockCoverageOverall({ coverage_id: row.id, overall: "unassessed", rationale: "x", actor_name: "A. Rao", actor_function: "heor" }),
     ).rejects.toThrow(/coverage verdict/i);

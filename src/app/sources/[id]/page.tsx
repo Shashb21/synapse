@@ -1,3 +1,7 @@
+import { SourceComparisonStatus } from "@/components/source-comparison-status";
+import { listSourceComparisons } from "@/lib/ingest/compare-source";
+import { SourceClaimReview } from "@/components/source-claim-review";
+import { can } from "@/modules/auth/roles";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell, PageIntro } from "@/components/app-shell";
@@ -44,6 +48,7 @@ export default async function SourceBlocksPage({ params }: { params: Promise<{ i
   };
   const functionOptions = ACTOR_FUNCTIONS.map((fn) => ({ value: fn, label: FUNCTION_LABELS[fn] }));
   const humanCount = blocks.filter((b) => b.human).length;
+  const comparison = (await listSourceComparisons()).find(row => row.source_id === id);
 
   return (
     <AppShell active="sources">
@@ -55,6 +60,8 @@ export default async function SourceBlocksPage({ params }: { params: Promise<{ i
           All sources
         </Link>
       </PageIntro>
+      <SourceComparisonStatus comparison={comparison} sourceId={id} mayRetry={can(identityContext.role, "validate")} />
+      <SourceClaimReview state={state} identity={identity} canReview={can(identityContext.role, "validate")} sourceId={id} />
 
       <section className="mb-4 border border-border bg-card p-3 rounded-lg" aria-labelledby="stakeholder">
         <h2 id="stakeholder" className="text-[12px] font-semibold text-foreground">

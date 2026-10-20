@@ -1,5 +1,6 @@
+import { compareParsedSources } from "@/lib/ingest/compare-source";
 import { sql } from "drizzle-orm";
-import { currentSchemaName, withWorkspaceTransaction } from "@/lib/iegp/db";
+import { currentSchemaName, inWorkspaceTransaction, withWorkspaceTransaction } from "@/lib/iegp/db";
 import { ApiGuardError } from "@/modules/auth/api-guard";
 import { scopedWorkspaceId } from "@/modules/workspaces/context";
 import { activeRevisionPointer, getPromptRevision } from "./prompt-revisions";
@@ -253,17 +254,25 @@ export async function runStage<O = unknown>(args: {
     };
   };
 
+  const ownsParseCommit = args.stage === "S1" && !inWorkspaceTransaction();
+  const isDryRun = Boolean(args.input && typeof args.input === "object" && "dry_run" in args.input && args.input.dry_run === true);
   try {
     if (["S0", "S1", "S2", "S3", "S4"].includes(args.stage)) {
       // Freeze facts and every live ingestion write share clear's lock. The
       // pipeline already owns this lock: transaction locks are reentrant on
       // that connection, and nesting here creates a savepoint, not a new owner.
       const schema = await currentSchemaName();
-      return await withWorkspaceTransaction(async () => {
+      const result = await withWorkspaceTransaction(async () => {
         const locked = await db().execute(sql`select pg_try_advisory_xact_lock(hashtextextended(${`ingest:${schema}`}, 0)) as locked`);
         if (!locked[0]?.locked) throw new ApiGuardError(409, "ingest_busy", "An ingestion step or clear is still running. Wait for it to finish, then retry.");
         return execute();
       });
+      // S1 owns this commit only for direct runs; the pipeline owns its outer commit.
+      if (ownsParseCommit && !isDryRun) {
+        const output = result.output as { documents?: { source_id: string }[] };
+        await compareParsedSources((output.documents ?? []).map(doc => doc.source_id), args.actor);
+      }
+      return result;
     }
     return await execute();
   } catch (error) {

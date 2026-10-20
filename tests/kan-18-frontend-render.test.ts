@@ -20,13 +20,17 @@ vi.mock("next/navigation", () => ({
 
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { sourceClaimReviewData, sourceReviewTargetVersion } from "@/lib/iegp/source-review";
+import { SourceClaimReviewContent } from "@/components/source-claim-review-content";
 import { SuggestionReferences } from "@/components/prioritize/suggestion-references";
 import { AiStatusProvider } from "@/components/platform/ai-status";
 import { LockForm } from "@/components/lock-form";
+import { GapPanel } from "@/components/gap-panel";
 import { GapsWorkbench } from "@/components/gaps-workbench";
 import { PrioritizeMatrix, type PrioritizeGap } from "@/components/prioritize/prioritize-matrix";
 import { GapCoverageContext, GapRecordSections } from "@/components/gap-record-sections";
 import type { GapRecord } from "@/lib/iegp/gap-record";
+import { getRequirementBasisReview } from "@/lib/iegp/requirement-basis";
 import { buildSeed } from "@/lib/iegp/seed";
 import { EvidenceDecisionContext } from "@/components/prioritize/priority-context";
 import { EntityHistory } from "@/components/entity-history";
@@ -192,6 +196,7 @@ const gap = (id: string, x: number, y: number): PrioritizeGap => ({
 function panelRecord(gap: PrioritizeGap, tacticsUnlocked = false): GapRecord {
   const seed = buildSeed();
   return {
+    requirement_review: getRequirementBasisReview(seed, seed.gaps[0]!.id),
     gap: { ...seed.gaps[0]!, id: gap.gap_id, name: gap.gap_name, statement: gap.statement },
     objective: gap.objective ? { ...seed.objectives[0]!, ...gap.objective } : null,
     coverage_status: { computed: "validated_open", shown: "validated_open", needs_review: false },
@@ -380,6 +385,7 @@ it("withholds newer references when inspecting an earlier displayed suggestion",
 describe("the full gap record priority", () => {
   const seed = buildSeed();
   const record = (priority: GapRecord["priority"]): GapRecord => ({
+    requirement_review: getRequirementBasisReview(seed, seed.gaps[0]!.id),
     gap: seed.gaps[0]!, objective: seed.objectives[0]!,
     coverage_status: { computed: "validated_open", shown: "validated_open", needs_review: false },
     confirmation: { confirmed: false, by: null, at: null, rationale: null },
@@ -529,4 +535,80 @@ describe("Room audience", () => {
     expect(frame.className).toContain("pointer-events-none");
     expect(frame.tabIndex).toBe(-1);
   });
+});
+
+
+it("renders populated source review data with scoped rows, correction tokens and stale-citation blocking", () => {
+  const state = buildSeed();
+  const coverage = state.coverages[0]!;
+  const block = state.blocks[0]!;
+  const source = state.sources.find(row => row.id === block.source_id)!;
+  const current = {
+    id: "REVIEW-current", version: "opening-review", kind: "discrepancy" as const, origin: "human" as const,
+    source_id: source.id, block_id: block.id, passage: block.text,
+    source_title: source.title, source_location: block.location,
+    gap_id: coverage.gap_id, tactic_id: coverage.tactic_id, coverage_id: coverage.id,
+    rationale: "Current citation requires explicit review", status: "pending" as const,
+    created_at: "2026-10-17T00:00:00Z", created_by: { name: "Cited reviewer", function: "medical_affairs" as const }, history: [],
+  };
+  state.source_reviews = [current, { ...current, id: "REVIEW-stale", passage: "A passage replaced in the retained source", rationale: "Stale citation remains on record" }, { ...current, id: "REVIEW-foreign", gap_id: "GAP-OUTSIDE", rationale: "Out-of-scope private finding" }];
+  const data = sourceClaimReviewData(state, { gapId: coverage.gap_id, tacticId: coverage.tactic_id });
+  expect(data.rows.map(row => row.id)).toEqual(["REVIEW-current", "REVIEW-stale"]);
+  expect(data.rows.map(row => row.current)).toEqual([true, false]);
+  expect(data.relationships[0]!.label).toContain(state.tactics.find(row => row.id === coverage.tactic_id)!.name);
+  expect(data.rows[0]!.corrections.find(row => row.target === "tactic")!.version).toBe(sourceReviewTargetVersion(state, current, "tactic"));
+  expect(data.blocks.find(row => row.id === block.id)!.label).toContain(source.title);
+  act(() => root.render(createElement(SourceClaimReviewContent, { data, identity: { signed_in: true, actor_name: "Reader", actor_function: "medical_affairs" }, canReview: true })));
+  expect(container.textContent).toContain("Pending source discrepancy");
+  expect(container.textContent).toContain(current.passage);
+  expect(container.textContent).toContain("Acceptance is blocked");
+  expect(container.textContent).not.toContain("Out-of-scope private finding");
+  const cards = container.querySelectorAll('[data-testid="source-review"]');
+  expect(cards[0]!.textContent).toContain("Review tactic correction");
+  expect(cards[1]!.textContent).not.toContain("Review tactic correction");
+  expect(cards[1]!.textContent).toContain("Dismiss discrepancy");
+});
+
+
+it.each(["requirement", "source"])("reloads gap panel data and write tokens after a successful %s review", async kind => {
+  const state = buildSeed();
+  const coverage = state.coverages[0]!;
+  const block = state.blocks[0]!;
+  const source = state.sources.find(row => row.id === block.source_id)!;
+  state.source_reviews = [{
+    id: "panel-review", version: "source-opening", kind: "discrepancy", origin: "human",
+    source_id: source.id, block_id: block.id, passage: block.text,
+    source_title: source.title, source_location: block.location,
+    gap_id: coverage.gap_id, tactic_id: coverage.tactic_id, coverage_id: coverage.id,
+    rationale: "A retained discrepancy for panel review", status: "pending",
+    created_at: "2026-10-17T00:00:00Z", created_by: { name: "Panel reviewer", function: "medical_affairs" }, history: [],
+  }];
+  const initial = { ...panelRecord(gap(coverage.gap_id, 0, 0)), permissions: { coverage: true },
+    source_review: sourceClaimReviewData(state, { gapId: coverage.gap_id }) };
+  const updated = { ...initial, requirement_review: { ...initial.requirement_review, version: "requirement-after-save" },
+    source_review: { ...initial.source_review, rows: initial.source_review.rows.map(row => ({ ...row, status: "dismissed" as const, version: "source-after-save" })) } };
+  let reads = 0;
+  const submitted: Record<string, unknown>[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, options?: RequestInit) => {
+    if (options?.method === "POST") {
+      submitted.push(JSON.parse(String(options.body)));
+      return submitted.length === 1 ? Response.json({ ok: true }) : Response.json({ error: "Keep this proof dialog open" }, { status: 400 });
+    }
+    reads += 1;
+    return Response.json(reads === 1 ? initial : updated);
+  }));
+  await act(async () => root.render(createElement(GapPanel, { gapId: coverage.gap_id, onClose: () => {}, returnFocusRef: { current: null } })));
+  expect(reads).toBe(1);
+  await act(async () => byText(kind === "source" ? "Dismiss discrepancy" : "Review requirement basis").click());
+  const form = document.querySelector('[role="dialog"] form') as HTMLFormElement;
+  (form.elements.namedItem("rationale") as HTMLTextAreaElement).value = "Explicitly reviewed the current source and requirements";
+  await act(async () => form.requestSubmit());
+  expect(submitted[0]).toMatchObject(kind === "source" ? { review_id: "panel-review", expected_version: "source-opening" } : { expected_version: initial.requirement_review.version });
+  expect(reads).toBe(2);
+  expect(document.body.textContent).toContain("Source discrepancy dismissed");
+  await act(async () => byText("Review requirement basis").click());
+  const next = document.querySelector('[role="dialog"] form') as HTMLFormElement;
+  (next.elements.namedItem("rationale") as HTMLTextAreaElement).value = "The next review uses the reloaded token";
+  await act(async () => next.requestSubmit());
+  expect(submitted[1]).toMatchObject({ expected_version: "requirement-after-save" });
 });

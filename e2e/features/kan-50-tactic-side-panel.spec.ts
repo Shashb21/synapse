@@ -564,10 +564,10 @@ test.describe("tactic side panel", () => {
     await card.getByRole("button", { name: "Assign from library", exact: true }).click();
     const assign = page.getByRole("dialog", { name: "Assign from library", exact: true });
     await assign.getByRole("combobox").selectOption(String(created.id));
-    await assign.getByRole("button", { name: "Assign", exact: true }).click();
-    await expect(assign.getByRole("alert")).toContainText("Reason");
-    await assign.getByRole("textbox", { name: "Reason (required)", exact: true }).fill("Review the existing cohort against this distinct evidence need");
-    await assign.getByRole("button", { name: "Assign", exact: true }).click();
+    await assign.getByRole("button", { name: "Link as unassessed", exact: true }).click();
+    await expect(assign.getByRole("alert")).toContainText("Enter a rationale of at least three characters.");
+    await assign.getByRole("textbox", { name: "Rationale (required)", exact: true }).fill("Review the existing cohort against this distinct evidence need");
+    await assign.getByRole("button", { name: "Link as unassessed", exact: true }).click();
     await expect(assign).toBeHidden();
     const gap = await (await request.get(`/api/gaps/${libraryGapId}`)).json();
     const tactic = await (await request.get(`/api/tactics/${created.id}`)).json();

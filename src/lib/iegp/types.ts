@@ -96,6 +96,8 @@ export type EvidenceNeed = {
   timing: string;
   source_id: string;
   source_quote: string;
+  /** Original cited text retained when an unquoted block is split or merged. */
+  source_basis_text?: string | null;
   /** Null until a model or a human scores it. */
   confidence: number | null;
   status: NeedStatus;
@@ -117,7 +119,40 @@ export type GapStatusOverride = {
   stale: boolean;
 };
 
+/** A requirement keeps the original linked evidence and the human's applicability decision. */
+export type RequirementSource = {
+  kind: "gap" | "need";
+  gap_id: string;
+  need_id?: string;
+  source_id?: string;
+  block_id?: string | null;
+  quote: string;
+  value: string;
+};
+
+export type RequirementDimension = {
+  applicability: "required" | "not_applicable" | "undetermined";
+  requirement: string;
+  rationale: string;
+  sources: RequirementSource[];
+  /** Distinct sourced values remain visible even after a human resolves the disagreement. */
+  conflicts: string[];
+  resolution: string;
+};
+
+/** A whole-basis review; individual requirement fields need no separate approval. */
+export type RequirementBasis = {
+  version: string;
+  source_version: string;
+  origin: "human" | "ai" | "extraction";
+  dimensions: Record<CoverageDimension, RequirementDimension>;
+  confirmation: Lock;
+  rationale: string;
+  history: Omit<RequirementBasis, "history">[];
+};
+
 export type EvidenceGap = {
+  requirement_basis?: RequirementBasis | null;
   id: string;
   name: string;
   statement: string;
@@ -373,7 +408,28 @@ export type TacticExpansion = {
   actor: Actor;
 };
 
+/** Previous judgements remain available after invalidation and explicit reassessment. */
+export type AssessmentHistoryEntry = {
+  action: "invalidate" | "reassess";
+  at: string;
+  reason: string;
+  basis: { requirements: string; design: string };
+  overall: OverallCoverage;
+  overall_lock: Lock;
+  overall_rationale: string;
+  dimensions: Record<CoverageDimension, DimensionAssessment>;
+  confirmed_requirement_basis: RequirementBasis | null;
+};
+
 export type GapTacticCoverage = {
+  assessed_basis?: { requirements: string; design: string } | null;
+  stale_reasons?: string[];
+  assessment_history?: AssessmentHistoryEntry[];
+  /** Author of the current overall judgement, not the reviewer or relationship creator. Null for unrecorded history. */
+  assessment_origin?: "human" | "ai" | "workflow" | null;
+  /** Exact reviewed basis supporting an explicit overall confirmation; absent on historical rows. */
+  confirmed_requirement_basis?: RequirementBasis | null;
+  review_version?: string | null;
   id: string;
   /** Null/absent means original parent scope; otherwise this assessment is child-only. */
   expansion_id?: string | null;
@@ -383,7 +439,7 @@ export type GapTacticCoverage = {
   overall: OverallCoverage;
   overall_rationale: string;
   overall_lock: Lock;
-  /** Unused. Coverage is not marked outdated. Kept on the row for schema compatibility. */
+  /** The relationship’s own requirement/design basis changed after its judgement. */
   stale: boolean;
   /** Sibling coverage flagged after a dimension/overall change on another live gap for the same tactic. Values are not copied. */
   needs_review: boolean;
@@ -440,7 +496,20 @@ export type ResidualGapSuggestionRecord = {
   lock: Lock;
 };
 
+/** Saved citation and review decision, independent of coverage freshness and verdicts. */
+export type SourceReview = {
+  id: string; version: string; kind: "support" | "discrepancy"; origin: "human" | "ai";
+  source_id: string; block_id: string; passage: string; source_title: string; source_location: string;
+  gap_id: string | null; tactic_id: string | null; coverage_id: string | null;
+  rationale: string; status: "linked" | "pending" | "dismissed" | "accepted";
+  created_at: string; created_by: { name: string; function: ActorFunction };
+  history: { decision: "dismiss" | "accept"; rationale: string; at: string; actor: { name: string; function: ActorFunction };
+    correction?: { target: "gap" | "tactic"; field: string; before: string; value: string } }[];
+};
+
 export type IegpState = {
+  source_comparisons?: import("../ingest/comparison-types").SourceComparison[];
+  source_reviews?: SourceReview[];
   asset: Asset;
   objectives: StrategicObjective[];
   sources: SourceDocument[];

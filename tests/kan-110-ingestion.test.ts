@@ -53,12 +53,15 @@ describe("KAN-110 ingestion checkpoints", () => {
     expect(next).toMatchObject({ job_id: first.job_id, completed: 2, stage: "S2" });
     expect(await listParsedDocuments()).toHaveLength(1);
     while (!next.done) next = await advanceIngest({ actor, role: args.role, job_id: first.job_id });
-    const runs = await db().execute(sql`select stage from module_runs order by stage`);
+    // Comparison has its own observable provider run; pipeline stages still execute once.
+    const runs = await db().execute(sql`select stage from module_runs where module_id <> 'incoming-source-comparison' order by stage`);
+    const allRuns = await db().execute(sql`select id, module_id from module_runs order by id`);
+    expect(allRuns.filter(row => row.module_id === "incoming-source-comparison")).toHaveLength(1);
     expect(runs.map((row) => row.stage)).toEqual(["S0", "S1", "S2", "S3", "S4"]);
     expect((await completedIngestSourceIds()).size).toBe(1);
     expect(await advanceIngest({ ...args, files: [...args.files] })).toEqual(next);
     expect(await advanceIngest({ ...args, files: [{ ...file, title: "Renamed", filename: "renamed.txt" }] })).toEqual(next);
-    expect(await db().execute(sql`select stage from module_runs`)).toHaveLength(5);
+    expect(await db().execute(sql`select id, module_id from module_runs order by id`)).toEqual(allRuns);
     const invalidDuplicate = await post({ ...file, source_type: "invalid" });
     expect(invalidDuplicate.status).toBe(400);
     expect(JSON.stringify((await db().select().from(ingestionJobs))[0])).not.toContain(file.text);

@@ -1,3 +1,6 @@
+import { sql } from "drizzle-orm";
+import { lockRelationships } from "@/lib/iegp/relationship-change";
+import { withWorkspaceTransaction } from "@/lib/iegp/db";
 import { tacticEditVersion } from "@/lib/iegp/tactic-edit-version";
 import { judgementReferenceSchema, suppliedJudgementRecordSchema, suppliedJudgementRecords } from "@/lib/iegp/judgement-references";
 import { desc } from "drizzle-orm";
@@ -9,7 +12,7 @@ import { PROPOSER_CRITIC_EXCHANGES, runAgenticCycle, type Critique } from "@/mod
 import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import { NoRouteError } from "@/modules/llm/provider";
 import type { ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
-import { assignTacticToGap, humanAcceptedExpansionScope, humanRejectedPairs, loadState } from "@/lib/iegp/store";
+import { assignTacticToGap, humanAcceptedExpansionScope, humanRejectedPairs, loadState, lockAssessmentOwners } from "@/lib/iegp/store";
 import { gapEligibleForMapping, tacticEligibleForMapping } from "@/lib/iegp/engine";
 import { COVERAGE_DIMENSIONS, DIMENSION_VALUES, OVERALL_COVERAGE } from "@/lib/iegp/enums";
 import { MAPPING_SCORE_FLOOR, scoreGapTacticMapping } from "@/lib/iegp/mapping";
@@ -724,37 +727,58 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
 
     const committed: { gap_id: string; tactic_ids: string[] }[] = [];
     if (!ctx.replay?.evaluation && !input.dry_run) {
-      for (const row of outcome.accepted) {
-        const joined: string[] = [];
-        for (const mapping of row.mappings.filter(bearsOnGap)) {
-          if (shared.blocked.has(pairKey(row.gap_id, mapping.tactic_id))) continue;
-          try {
-            await assignTacticToGap({
-              gap_id: row.gap_id,
-              tactic_id: mapping.parent_tactic_id ?? mapping.tactic_id,
-              expansion_id: mapping.expansion_id,
-              actor_name: ctx.actor.name,
-              actor_function: ctx.actor.function,
-              note: `S4 mapping table · ${row.mapping_status} · ${mapping.coverage} · ${mapping.rationale}`,
-              // The model's verdict is the coverage; the store no longer invents one.
-              coverage: mapping.coverage,
-              dimensions: mapping.dimensions,
-              references: mapping.references,
-              model: true,
-              supplied_records: suppliedJudgementRecords(shared.state, [row.gap_id]),
-              expected_tactic_version: tacticEditVersion(shared.state.tactics.find(tactic => tactic.id === (mapping.parent_tactic_id ?? mapping.tactic_id))!),
-            });
-            joined.push(mapping.tactic_id);
-          } catch (error) {
-            ctx.run.note("commit:skipped", {
-              gap_id: row.gap_id,
-              tactic_id: mapping.tactic_id,
-              reason: error instanceof Error ? error.message : String(error),
-            });
+      await withWorkspaceTransaction(async () => {
+        const assignments = outcome.accepted.flatMap(row => row.mappings.filter(bearsOnGap)
+          .filter(mapping => !shared.blocked.has(pairKey(row.gap_id, mapping.tactic_id)))
+          .map(mapping => ({ gap_id: row.gap_id, tactic_id: mapping.parent_tactic_id ?? mapping.tactic_id })));
+        // A batch must own all parent designs before its first gap/coverage write.
+        await lockRelationships();
+        // Match Setup before taking tactic/objective rows.
+        await db().execute(sql`LOCK TABLE gaps IN ROW EXCLUSIVE MODE`);
+        for (const id of [...new Set(assignments.map(item => item.tactic_id))].sort()) {
+          await db().execute(sql`SELECT id FROM tactics WHERE id = ${id} FOR UPDATE`);
+        }
+        const supplied = suppliedJudgementRecords(shared.state, assignments.map(item => item.gap_id));
+        for (const kind of ["objective", "source"] as const) {
+          const table = kind === "objective" ? "objectives" : "sources";
+          for (const id of [...new Set(supplied.filter(record => record.entity_type === kind).map(record => record.entity_id))].sort()) {
+            await db().execute(sql`SELECT id FROM ${sql.raw(table)} WHERE id = ${id} FOR UPDATE`);
           }
         }
-        if (joined.length > 0) committed.push({ gap_id: row.gap_id, tactic_ids: joined });
-      }
+        await lockAssessmentOwners({ tactic_ids: assignments.map(item => item.tactic_id), gap_ids: assignments.map(item => item.gap_id) });
+        for (const row of outcome.accepted) {
+          const joined: string[] = [];
+          for (const mapping of row.mappings.filter(bearsOnGap)) {
+            if (shared.blocked.has(pairKey(row.gap_id, mapping.tactic_id))) continue;
+            try {
+              await assignTacticToGap({
+                gap_id: row.gap_id,
+                tactic_id: mapping.parent_tactic_id ?? mapping.tactic_id,
+                expansion_id: mapping.expansion_id,
+                actor_name: ctx.actor.name,
+                actor_function: ctx.actor.function,
+                note: `S4 mapping table · ${row.mapping_status} · ${mapping.coverage} · ${mapping.rationale}`,
+                // The model's verdict is the coverage; the store no longer invents one.
+                coverage: mapping.coverage,
+                assessment_origin: "ai",
+                dimensions: mapping.dimensions,
+                references: mapping.references,
+                model: true,
+                supplied_records: suppliedJudgementRecords(shared.state, [row.gap_id]),
+                expected_tactic_version: tacticEditVersion(shared.state.tactics.find(tactic => tactic.id === (mapping.parent_tactic_id ?? mapping.tactic_id))!),
+              });
+              joined.push(mapping.tactic_id);
+            } catch (error) {
+              ctx.run.note("commit:skipped", {
+                gap_id: row.gap_id,
+                tactic_id: mapping.tactic_id,
+                reason: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+          if (joined.length > 0) committed.push({ gap_id: row.gap_id, tactic_ids: joined });
+        }
+      });
     }
 
     const toOut = (item: (typeof outcome.judged)[number]): MappingTableRow => ({

@@ -20,6 +20,8 @@ export async function withRelationshipChange<T>(args: ChangeActor, change: () =>
     await lockRelationships();
     const { loadState } = await import("./store");
     if (args.model && args.supplied_records) {
+      // Match Setup: own gap membership before any objective or tactic row.
+      await db().execute(sql`LOCK TABLE gaps IN ROW EXCLUSIVE MODE`);
       // Hold the supplied scientific records through the comparison and save.
       if (args.tactic_id) await db().select({ id: tables.tactics.id }).from(tables.tactics).where(eq(tables.tactics.id, args.tactic_id)).for("update");
       for (const [kind, table] of [["objective", tables.objectives], ["source", tables.sources], ["gap", tables.gaps]] as const) {

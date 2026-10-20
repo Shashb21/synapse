@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
+import postgres from "postgres";
 
 /** Where the signed-in, workspace-selected browser state for the suite is saved. */
 export const STORAGE_STATE = "e2e/.auth/user.json";
@@ -84,6 +85,7 @@ export type FreshWorkspace = {
  *
  *   const ws = freshWorkspace({ name: "S5", seed: seedMapped });
  *
+ * afterAll deletes only this fixture's workspace and schema, including after a failed test.
  * beforeAll creates the workspace (a new schema; creating also selects it) and
  * runs `seed` in it. beforeEach selects it again for the test's own `request`
  * and for the browser `context`: every test starts from the suite's saved
@@ -104,6 +106,31 @@ export function freshWorkspace(
   test.beforeEach(async ({ request, context }) => {
     await selectWorkspace(request, workspace!.id);
     await selectWorkspace(context.request, workspace!.id);
+  });
+  test.afterAll(async ({}, testInfo) => {
+    if (!workspace) return; // Creation can fail before this fixture owns anything.
+    // Use the server's already-resolved test URL, never the shell's developer DB.
+    const databaseUrl = testInfo.config.webServer?.env?.DATABASE_URL;
+    if (!databaseUrl || new URL(databaseUrl).pathname === "/synapse") {
+      throw new Error("freshWorkspace cleanup requires the isolated Playwright test database.");
+    }
+    const owned = workspace;
+    if (!/^w[0-9a-f]{12}$/.test(owned.id)) throw new Error("Unexpected fixture workspace id; refusing cleanup.");
+    const database = postgres(databaseUrl, { max: 1, onnotice: () => {} });
+    try {
+      await database.begin(async transaction => {
+        const [record] = await transaction<{ schema_name: string; name: string; created_by: string }[]>`
+          SELECT schema_name, name, created_by FROM public.workspaces WHERE id = ${owned.id} FOR UPDATE`;
+        if (!record || record.name !== owned.name || record.created_by !== E2E_USER.email || record.schema_name !== `ws_${owned.id}`) {
+          throw new Error("Fixture workspace ownership changed; refusing cleanup.");
+        }
+        await transaction`DELETE FROM public.workspace_members WHERE workspace_id = ${owned.id}`;
+        await transaction`DELETE FROM public.workspaces WHERE id = ${owned.id}`;
+        await transaction`DROP SCHEMA ${transaction(record.schema_name)} CASCADE`;
+      });
+    } finally {
+      await database.end();
+    }
   });
   return {
     get id() {

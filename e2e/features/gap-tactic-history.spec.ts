@@ -21,11 +21,12 @@ test("reason-required links share history across both records, preserve reused c
     await page.goto(`/gaps/${gaps[index]}`);
     await page.getByRole("button", { name: "Map tactic with coverage", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Map tactic with coverage", exact: true });
+    await dialog.getByRole("button", { name: "Assess and link", exact: true }).click();
     await dialog.getByLabel("Overall coverage").selectOption(coverage);
-    await dialog.getByRole("button", { name: "Map and record coverage", exact: true }).click();
-    await expect(dialog.getByRole("alert")).toContainText("Rationale");
+    await dialog.getByRole("button", { name: "Assess and link", exact: true }).click();
+    await expect(dialog.getByRole("alert")).toContainText("Enter a rationale of at least three characters.");
     await dialog.getByLabel("Rationale (required)").fill(`Registry supports gap ${index + 1} at ${coverage} coverage`);
-    await dialog.getByRole("button", { name: "Map and record coverage", exact: true }).click();
+    await dialog.getByRole("button", { name: "Assess and link", exact: true }).click();
     await expect(dialog).not.toBeVisible();
     await expect(page.getByTestId("entity-history")).toContainText(`Registry supports gap ${index + 1} at ${coverage} coverage`);
   }
@@ -72,7 +73,7 @@ test("coverage failure and stale rejection preserve the entered judgement and re
   await expect(editor.getByLabel("Your rationale (required)")).toHaveValue("Retain this registry review reason on failure");
   const record = await (await request.get(`/api/tactics/${tacticId}`)).json();
   const coverage = record.coverages.find((row: { gap_id: string }) => row.gap_id === gaps[1]);
-  await iegpAction(request, { action: "lock_overall", coverage_id: coverage.id, expected_relationship: coverage.relationship_version, overall: "not_relevant", rationale: "Concurrent reviewer corrected the coverage" });
+  await iegpAction(request, { action: "lock_overall", coverage_id: coverage.id, expected_relationship: coverage.relationship_version, expected_version: coverage.review_version, overall: "not_relevant", rationale: "Concurrent reviewer corrected the coverage" });
   await editor.getByRole("button", { name: "Change overall coverage", exact: true }).click();
   await expect(editor.getByRole("alert")).toContainText("Relationship changed");
   await expect(editor.getByRole("combobox", { name: "Overall", exact: true })).toHaveValue("full");

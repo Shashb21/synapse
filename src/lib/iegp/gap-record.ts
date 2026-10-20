@@ -1,3 +1,5 @@
+import { sourceClaimReviewData, type SourceClaimReviewData } from "./source-review";
+import { getRequirementBasisReview } from "./requirement-basis";
 import { ideationProposalReadback, type IdeationProposalRecord } from "@/modules/stages/s9-ideation/module";
 import { gapResolutionVersion } from "./relationship-version";
 import { readPlacementSnapshot } from "@/modules/stages/s8-prioritization/module";
@@ -9,9 +11,10 @@ import { gapCandidates } from "@/modules/stages/s2-gap-extract/schema";
 import { loadState } from "./store";
 import { gapVersionsFor, lastResetAt } from "./gap-history";
 import { entityHistory, type HistoryEntry } from "./entity-history";
+import { isLiveGap, relationshipFit, type RelationshipFitModel } from "./engine";
 import { loadAxes } from "@/modules/stages/s8-prioritization/axes";
 import type { PriorityAxis } from "@/modules/stages/s8-prioritization/axis-math";
-import { computeGapStatus, displayedGapStatus, isLiveGap } from "./engine";
+import { computeGapStatus, displayedGapStatus } from "./engine";
 import type { GapStatus, MappedGapStatus } from "./enums";
 import type { IegpState } from "./types";
 
@@ -25,8 +28,11 @@ type Gap = IegpState["gaps"][0];
  * history. The gap page reads it, and GET /api/gaps/[id] exports it.
  */
 export type GapRecord = {
+  permissions?: { coverage: boolean };
+  source_review?: SourceClaimReviewData;
   resolution_version?: string;
   gap: Gap;
+  requirement_review: ReturnType<typeof getRequirementBasisReview>;
   objective: IegpState["objectives"][0] | null;
   coverage_status: { computed: MappedGapStatus; shown: GapStatus; needs_review: boolean };
   confirmation: {
@@ -49,6 +55,8 @@ export type GapRecord = {
   /** S2 candidate rows that became or joined this gap. */
   candidates: (typeof gapCandidates.$inferSelect)[];
   coverages: (IegpState["coverages"][0] & {
+    fit: RelationshipFitModel | null;
+    requirement_review: ReturnType<typeof getRequirementBasisReview>;
     tactic: Pick<IegpState["tactics"][0], "id" | "name" | "type" | "status"> | null;
     expansion: Pick<IegpState["expansions"][0], "id" | "status" | "scope"> | null;
   })[];
@@ -104,8 +112,10 @@ export async function gapRecord(gapId: string, preloaded?: IegpState): Promise<G
     { since: lastResetAt(state) },
   );
   return {
+    source_review: sourceClaimReviewData(state, { gapId: gap.id }),
     resolution_version: gapResolutionVersion(state, gap.id),
     gap,
+    requirement_review: getRequirementBasisReview(state, gap.id),
     priority_axes: axes.axes,
     tactics_unlocked: state.asset.tactics_unlocked,
     open: !gap.retired && !gap.parked_at && shown === "validated_open",
@@ -140,6 +150,9 @@ export async function gapRecord(gapId: string, preloaded?: IegpState): Promise<G
       const expansion = c.expansion_id ? state.expansions.find((e) => e.id === c.expansion_id) : undefined;
       return {
         ...c,
+        fit: tactic && (!c.expansion_id || (expansion && expansion.tactic_id === tactic.id && expansion.gap_ids.includes(gap.id)))
+          ? relationshipFit(state, gap.id, tactic.id, c.expansion_id) : null,
+        requirement_review: getRequirementBasisReview(state, gap.id, c),
         tactic: tactic ? { id: tactic.id, name: tactic.name, type: tactic.type, status: tactic.status } : null,
         expansion: expansion ? { id: expansion.id, status: expansion.status, scope: expansion.scope } : null,
       };

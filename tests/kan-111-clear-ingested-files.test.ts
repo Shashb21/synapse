@@ -204,6 +204,9 @@ describe("KAN-111 selective clear", () => {
   it.each(["S0", "S1", "S2", "S3", "S4"] as const)("refuses standalone %s while clear's workspace lock is held", async (stage) => isolated(async (pg, schema) => {
     await ingest();
     const before = await loadState();
+    // Ingestion may already own S1 comparison errors; identify this request's run.
+    const previousRuns = await db().execute(sql`select id from module_runs where stage = ${stage}`);
+    const previousRunIds = new Set(previousRuns.map(run => run.id));
     await pg.begin(async tx => {
       await tx`select pg_advisory_xact_lock(hashtextextended(${`ingest:${schema}`}, 0))`;
       const response = await modulePost(new Request("http://localhost/api/modules", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ stage, input: {} }) }));
@@ -211,8 +214,9 @@ describe("KAN-111 selective clear", () => {
       expect(await response.json()).toMatchObject({ code: "ingest_busy" });
     });
     expect(await loadState()).toEqual(before);
-    const failures = await db().execute(sql`select status, error from module_runs where stage = ${stage} and status = 'error'`);
-    expect(failures).toEqual([{ status: "error", error: expect.stringContaining("still running") }]);
+    const runs = await db().execute(sql`select id, stage, status, error from module_runs where stage = ${stage}`);
+    const deniedRuns = runs.filter(run => !previousRunIds.has(run.id));
+    expect(deniedRuns).toEqual([{ id: expect.any(String), stage, status: "error", error: expect.stringContaining("still running") }]);
   }));
   it("rolls back standalone stage writes and preserves the failed run record", async () => isolated(async () => {
     await ingest();
