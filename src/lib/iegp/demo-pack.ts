@@ -1,3 +1,4 @@
+import { CLIENT_DEMO_PACK } from "@/lib/demo/client-pack";
 import type { ActorFunction, SourceType } from "./enums";
 
 export type DemoSourceFile = {
@@ -113,5 +114,6 @@ A publication of the VEL-301 primary manuscript is planned as a dissemination ta
 ];
 
 export function demoSourceById(id: string): DemoSourceFile | undefined {
-  return DEMO_PACK.find((file) => file.id === id);
+  // The client demo's documents (KAN-138) ingest the same way.
+  return DEMO_PACK.find((file) => file.id === id) ?? CLIENT_DEMO_PACK.find((file) => file.id === id);
 }

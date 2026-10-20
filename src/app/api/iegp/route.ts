@@ -409,7 +409,12 @@ async function handleAction(request: Request): Promise<Response> {
       case "load_demo":
         // Replaces everything with the Velmara demo and flags the workspace as demo.
         // scope "setup" loads only the demo's asset and objectives (the stage tests' start).
-        await replaceContents(identity.workspace?.id ?? null, body.scope === "setup" ? "demo_setup" : "demo", identity.actor);
+        // A client-demo workspace (KAN-138) always restarts at the walkthrough's start: setup done, no sources.
+        await replaceContents(
+          identity.workspace?.id ?? null,
+          identity.workspace?.demo_mode ? "client_demo" : body.scope === "setup" ? "demo_setup" : "demo",
+          identity.actor,
+        );
         break;
       case "lock_need":
         await lockNeed({

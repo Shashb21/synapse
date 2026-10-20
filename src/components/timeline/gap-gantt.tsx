@@ -562,7 +562,7 @@ export function GapGantt({
                 <line x1={0} y1={row.y} x2={width} y2={row.y} stroke={palette.grid} strokeWidth={0.75} />
                 <circle cx={11} cy={row.y + 11} r={3.5} fill={tone} />
                 <text x={20} y={row.y + 14} fill={palette.foreground} fontSize={11.5} fontWeight={600}>
-                  {truncate(group.gap_name, canCreate && editable ? 30 : 42)}
+                  {truncate(group.gap_name, canCreate && editable ? 38 : 42)}
                 </text>
                 <text x={20} y={row.y + 26} fill={palette.primary} fontSize={9.5}>
                   {`${gapNumberLabel(group.number)} · ${activityCount} tactic${activityCount === 1 ? "" : "s"}`}
@@ -865,8 +865,8 @@ export function GapGantt({
             return (
               <div key={row.key} data-testid={`gap-actions-${group.gap_id}`}>
                 {canCreate ? (
-                  <div className="pointer-events-auto absolute" style={{ top: row.y + 4, left: LABEL_W - 96 }}>
-                    <CreateActivityDialog identity={identity} gap={group} />
+                  <div className="pointer-events-auto absolute" style={{ top: row.y + 4, left: LABEL_W - 30 }}>
+                    <CreateActivityDialog identity={identity} gap={group} icon />
                   </div>
                 ) : null}
                 {!group.start ? (

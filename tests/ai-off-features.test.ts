@@ -191,6 +191,14 @@ describe("AI actions on the plan routes with AI off", () => {
     expect(typed.json.code).toBe("ai_off");
     expect((await listRuns({ limit: 500 })).length).toBe(before);
   });
+
+  it("rejects an unknown demo ID with 400 and opens no run", async () => {
+    const before = (await listRuns({ limit: 500 })).length;
+    const demo = await iegp({ action: "ingest_demo", demo_id: "any" });
+    expect(demo.status).toBe(400);
+    expect(demo.json.code).toBe("invalid_request");
+    expect((await listRuns({ limit: 500 })).length).toBe(before);
+  });
 });
 
 describe("a whole plan by hand with AI off", () => {

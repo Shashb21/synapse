@@ -1,0 +1,80 @@
+FICTIONAL DEMONSTRATION DOCUMENT. Velmara (velmaratinib) and NX-441 are invented products. No real patients, studies, organisations or people are described.
+
+VELMARA (velmaratinib) — FIELD MEDICAL INSIGHTS REPORT
+Q3 2026 (July to September)
+Prepared by: Medical Science Liaison (MSL) team, US and EU5
+Source: 184 documented scientific exchanges with healthcare professionals (HCPs)
+Status: Internal. Insights are aggregated and anonymised; no individual HCP is identified.
+
+1. OVERVIEW
+
+Interactions by setting: 58 percent academic centres, 42 percent community practices.
+Interactions by role: 71 percent medical oncologists, 9 percent neuro-oncologists, 8 percent radiation oncologists, 7 percent oncology nurses and nurse practitioners, 5 percent pharmacists.
+Interactions by region: 52 percent US, 48 percent EU5.
+
+The five most frequent insight themes this quarter are below, with the share of interactions in which each theme came up.
+
+2. THEME 1 — BRAIN METASTASES AND INTRACRANIAL DURABILITY (raised in 46 percent of interactions)
+
+HCPs consistently asked about intracranial efficacy after osimertinib progression. The most common follow-up question was about durability: "How long does the intracranial response last?"
+
+Representative insights:
+- "Response rate in the brain is not enough; I need to know it holds." (academic medical oncologist, US)
+- "Half my patients at progression have new or growing brain lesions. If Velmara delays radiotherapy, that matters a lot." (radiation oncologist, EU5)
+
+Insight: there is limited evidence on CNS response and duration of response in brain metastases after osimertinib. HCPs know the VEL-301 CNS sub-study is small.
+
+3. THEME 2 — SEQUENCING AFTER OSIMERTINIB (raised in 38 percent)
+
+HCPs are unsure how to sequence Velmara, NX-441 and chemotherapy. Community oncologists in particular asked for real-world experience rather than trial data.
+
+Representative insights:
+- "I need to see what my peers are doing after osimertinib and how patients do." (community medical oncologist, US)
+- "Is there a reason to use NX-441 before Velmara, or the other way round?" (academic medical oncologist, EU5)
+
+Insight: real-world treatment sequencing after osimertinib failure, including Velmara versus NX-441, is an unanswered question.
+
+4. THEME 3 — OLDER AND FRAIL PATIENTS (raised in 33 percent)
+
+Representative insights:
+- "The trial patients are younger and fitter than mine. What happens in my 78-year-old with heart disease?" (community medical oncologist, US)
+- "Families carry a lot of the burden with oral drugs: monitoring, transport, side effects at home. Nobody measures that." (oncology nurse, EU5)
+- "Show me quality of life in patients like the ones I treat, not only EORTC in a trial." (academic medical oncologist, EU5)
+
+Insights:
+- Comparative effectiveness in elderly patients versus the standard of care they would otherwise receive is not established.
+- There is insufficient evidence on caregiver burden and on PROs in frail patients.
+
+5. THEME 4 — SAFETY MONITORING IN ROUTINE CARE (raised in 27 percent)
+
+Representative insights:
+- "We do not do routine ECGs in our satellite clinics. I need a practical monitoring plan." (community medical oncologist, US)
+- "How quickly does ILD come on, and what should a community practice do about it?" (pharmacist, US)
+
+Insight: HCPs want characterisation of ILD and QT incidence in routine care, including monitoring outside academic centres.
+
+6. THEME 5 — ACCESS AND COST (raised in 19 percent, mostly US)
+
+Representative insights:
+- "Our pathway committee will want persistence data before they put it ahead of NX-441." (community practice pharmacist, US)
+- "Payers are already asking about IRA pricing for the class." (US IDN oncology lead)
+- "Recurrence is expensive: repeat scans, biopsies, admissions. Is anyone measuring that?" (academic medical oncologist, US)
+
+Insights:
+- Six-month discontinuation and persistence in US routine care are expected by pathway committees.
+- HCPs and IDNs perceive a high but unquantified burden of recurrence (emergency department use, hospitalisations, outpatient visits).
+
+7. LOWER-FREQUENCY THEMES
+
+- Long-term overall survival (raised in 12 percent): HCPs accept that OS will be immature at first read-out but want a plan for longer follow-up.
+- Congress presence (raised in 4 percent, mostly by internal stakeholders): requests for more symposia. Field medical regards this as a communication topic, not an evidence gap.
+
+8. RECOMMENDATIONS FROM FIELD MEDICAL
+
+1. Prioritise evidence on intracranial durability after osimertinib.
+2. Generate real-world sequencing evidence after osimertinib, including Velmara versus NX-441.
+3. Address the elderly comparative question and PROs and caregiver burden in frail patients.
+4. Provide practical ILD and QT monitoring guidance and real-world safety data from community settings.
+5. Support HEOR with insights on persistence and on the burden of recurrence.
+
+END OF DOCUMENT

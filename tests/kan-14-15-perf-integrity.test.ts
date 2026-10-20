@@ -156,6 +156,8 @@ describe("KAN-15 integrity", () => {
       const third = await gap("Gap made after a reset.");
       expect([first, second]).not.toContain(third);
       expect(Number(third.slice(4))).toBeGreaterThan(Number(second.slice(4)));
+      // The id moves on, but the new plan's gaps are numbered from 001 again (KAN-149).
+      expect((await loadState()).gaps.find((g) => g.id === third)!.number).toBe(1);
     });
   });
 

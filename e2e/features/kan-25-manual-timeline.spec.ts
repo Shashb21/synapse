@@ -93,7 +93,7 @@ test.describe("KAN-25 manual timeline", () => {
 
   test("creates an activity under the gap from the timeline", async ({ page, request }) => {
     await openTimeline(page);
-    await page.getByTestId(`gap-actions-${gapId}`).getByRole("button", { name: "Add activity" }).click();
+    await page.getByTestId(`gap-actions-${gapId}`).getByRole("button", { name: /^add an activity under/i }).click();
     const dialog = page.getByRole("dialog");
     await dialog.getByLabel("Activity name").fill(NEW_ACTIVITY);
     await dialog.getByLabel("Type").selectOption("registry");
@@ -139,7 +139,7 @@ test.describe("KAN-25 manual timeline", () => {
   test("adds an unscheduled activity, dates it, adds a dependency that breaks, and sees the warning", async ({ page, request }) => {
     // A second activity with no dates: it shows under the gap as "Unscheduled".
     await openTimeline(page);
-    await page.getByTestId(`gap-actions-${gapId}`).getByRole("button", { name: "Add activity" }).click();
+    await page.getByTestId(`gap-actions-${gapId}`).getByRole("button", { name: /^add an activity under/i }).click();
     await page.getByRole("dialog").getByLabel("Activity name").fill(SECOND_ACTIVITY);
     await page.getByRole("dialog").getByLabel("Type").selectOption("publication");
     await saveDialog(page, "Publication follows the registry", /^add activity$/i);

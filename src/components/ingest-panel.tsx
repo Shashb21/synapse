@@ -9,6 +9,8 @@ import {
   FUNCTION_LABELS,
 } from "@/lib/iegp/enums";
 import { DEMO_PACK } from "@/lib/iegp/demo-pack";
+import { CLIENT_DEMO_PACK } from "@/lib/demo/client-pack";
+import { isDemoModeWorkspace } from "@/lib/demo/mode";
 import type { SourceDocument } from "@/lib/iegp/types";
 
 /**
@@ -27,6 +29,9 @@ export async function IngestPanel({
 }) {
   const completed = await completedIngestSourceIds();
   const comparisons = await listSourceComparisons();
+  // Client demo mode (KAN-138): the full client documents, replayed from the recording.
+  const clientDemo = demoFiles && (await isDemoModeWorkspace());
+  const pack = clientDemo ? CLIENT_DEMO_PACK : DEMO_PACK;
   const ingestedTitles = new Set(sources.filter((source) => completed.has(source.id)).map((source) => source.title));
   const savedTitles = new Set(sources.map((source) => source.title));
 
@@ -37,13 +42,24 @@ export async function IngestPanel({
         <h2 id="demo-pack" className="text-[13px] font-semibold text-foreground">
           Demo source files
         </h2>
-        <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-          Nothing is ingested until you do it. Ingesting a file reads it, pulls out its evidence gaps
-          and tactics and maps them, using the connected AI model. If no model is connected it stops
-          and says so.
-        </p>
+        {clientDemo ? (
+          <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
+            Client demo: ingest each document to read it, pull out its evidence gaps and tactics, and map
+            them. The AI steps replay a recorded run, so no model is called and the results are the same
+            every time.{" "}
+            <a href="/api/demo/files" download className="text-foreground underline-offset-2 hover:underline">
+              Download all seven (ZIP)
+            </a>
+          </p>
+        ) : (
+          <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
+            Nothing is ingested until you do it. Ingesting a file reads it, pulls out its evidence gaps
+            and tactics and maps them, using the connected AI model. If no model is connected it stops
+            and says so.
+          </p>
+        )}
         <div className="grid gap-3">
-          {DEMO_PACK.map((file) => {
+          {pack.map((file) => {
             const ingested = ingestedTitles.has(file.title);
             return (
               <article key={file.id} className="border border-border bg-card p-4 rounded-lg">
@@ -64,7 +80,7 @@ export async function IngestPanel({
                 )}
                 <div className="mt-3 flex flex-wrap gap-2">
                   <a
-                    href={`/demo-sources/${file.filename}`}
+                    href={clientDemo ? `/api/demo/files?file=${encodeURIComponent(file.filename)}` : `/demo-sources/${file.filename}`}
                     download={file.filename}
                     className="inline-flex h-8 items-center rounded-lg border border-input px-2.5 text-[13px] text-foreground no-underline"
                   >

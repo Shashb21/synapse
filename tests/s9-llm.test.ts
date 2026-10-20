@@ -49,7 +49,14 @@ function context(script: Script, connected = true): { ctx: ModuleContext; calls:
     complete: async ({ purpose, user }) => {
       const call = { purpose, body: JSON.parse(user) as Record<string, unknown> };
       calls.push(call);
-      return script(call);
+      const reply = await script(call);
+      // A model answers the gaps it was asked about: the proposer asks one gap at a time (KAN-148).
+      if (purpose === "ideation-proposer" && reply && Array.isArray((reply as { tactics?: unknown }).tactics)) {
+        const asked = new Set(gapsOf(call).map((gap) => gap.id));
+        const tactics = (reply as { tactics: { gap_id?: string }[] }).tactics;
+        return { ...reply, tactics: tactics.filter((row) => !row.gap_id || asked.has(row.gap_id)) };
+      }
+      return reply;
     },
   };
   return { ctx, calls };
@@ -244,7 +251,7 @@ describe("S9 on the model path", () => {
       "B1",
       "B2",
     ]);
-    const revision = calls.filter((call) => call.purpose === "ideation-proposer")[1]!;
+    const revision = calls.find((call) => call.purpose === "ideation-proposer" && gapsOf(call).some((gap) => gap.revise?.length))!;
     expect(gapsOf(revision).map((gap) => gap.id)).toEqual([a]);
     expect(gapsOf(revision)[0]!.revise![0]!.objection).toBe("comparator should be physician's choice");
 
@@ -371,22 +378,24 @@ describe("S9 on the model path", () => {
 
   it("asks again for a gap whose tactic has an invalid type or no duration", async () => {
     const [a, b] = ids as [string, string];
-    let firstProposal = true;
+    let firstForB = true;
     const { ctx, calls } = context((call) => {
       if (call.purpose === "ideation-critic") return keepAll(call);
       if (call.purpose === "ideation-judge") return judgeFirst(call, 1);
-      if (firstProposal) {
-        firstProposal = false;
+      // One gap per proposer call (KAN-148): A is fine; B's first answer is broken.
+      if (gapsOf(call).some((gap) => gap.id === a)) return { tactics: [tactic(a, "A1")] };
+      if (firstForB) {
+        firstForB = false;
         const broken = tactic(b, "B broken", { type: "moonshot" }) as Record<string, unknown>;
         delete broken.duration_months;
-        return { tactics: [tactic(a, "A1"), broken] };
+        return { tactics: [broken] };
       }
       return { tactics: gapsOf(call).map((gap) => tactic(gap.id, "B fixed", { duration_months: 7, readout_lag_months: 2 })) };
     });
 
     const { output } = await ideationModule.run(input(1), ctx);
 
-    const retry = calls.filter((call) => call.purpose === "ideation-proposer")[1]!;
+    const retry = calls.find((call) => call.purpose === "ideation-proposer" && gapsOf(call).some((gap) => gap.problems?.length))!;
     expect(gapsOf(retry).map((gap) => gap.id)).toEqual([b]);
     const problems = gapsOf(retry)[0]!.problems!.join(" ");
     expect(problems).toMatch(/moonshot/);

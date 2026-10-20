@@ -117,6 +117,14 @@ function GapPanelRecord({ gapId, priorityEditor, refreshVersion }: { gapId: stri
     {loading ? <p role="status">{record ? "Refreshing gap details…" : "Loading gap details…"}</p> : null}
     {record ? <>
       <h2 className="font-medium">{gapNumberLabel(record.gap.number)} · {record.gap.name}</h2>
+      <section aria-label="Constituent needs">
+        <h2 className="font-medium">Constituent needs</h2>
+        {record.needs.length ? <ul className="grid gap-2">{record.needs.map(({ need, source, role }) => <li key={need.id}>
+          <p>{need.statement}</p>
+          {source ? <Link href={`/sources/${encodeURIComponent(source.id)}`}>{source.title}</Link> : <p>Source not recorded</p>}
+          <p className="text-[11px] text-muted-foreground">{role}</p>
+        </li>)}</ul> : <p>No constituent needs yet.</p>}
+      </section>
       <GapCoverageContext record={record} />
       {record.permissions?.coverage ? <RequirementBasisReview onRefresh={() => setAttempt(value => value + 1)} gapId={gapId} review={record.requirement_review} /> : null}
       {record.source_review ? <SourceClaimReviewContent onRefresh={() => setAttempt(value => value + 1)} data={record.source_review} identity={{ signed_in: true, actor_name: "", actor_function: "medical_affairs" }} canReview={record.permissions?.coverage ?? false} /> : null}
@@ -131,13 +139,6 @@ function GapPanelRecord({ gapId, priorityEditor, refreshVersion }: { gapId: stri
           <TacticRecordLink tacticId={coverage.tactic_id}>{coverage.tactic?.name || coverage.tactic_id}</TacticRecordLink> · {coverage.tactic?.status ?? "Tactic unavailable"} · {coverage.overall}
           {coverage.fit ? <RelationshipFit fit={coverage.fit} tacticName={coverage.tactic?.name ?? coverage.tactic_id} /> : null}
         </li>)}</ul> : <p>No tactics mapped.</p>}
-      </section>
-      <section aria-label="Constituent needs">
-        <h2 className="font-medium">Constituent needs</h2>
-        {record.needs.length ? <ul className="grid gap-2">{record.needs.map(({ need, source }) => <li key={need.id}>
-          <p>{need.statement}</p>
-          {source ? <Link href={`/sources/${encodeURIComponent(source.id)}`}>{source.title}</Link> : <p>Source not recorded</p>}
-        </li>)}</ul> : <p>No constituent needs yet.</p>}
       </section>
       <details aria-label="History" className="border-t border-border pt-3">
         <summary className="cursor-pointer font-medium">History</summary>

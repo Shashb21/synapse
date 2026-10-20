@@ -13,6 +13,8 @@ export type PickerWorkspace = {
   created_by: string;
   created_at: string;
   demo: boolean;
+  /** Client demo mode (KAN-138): AI steps replay the recorded run. */
+  demo_mode?: boolean;
   member_count: number;
 };
 
@@ -32,6 +34,28 @@ export function AdminWorkspacePicker({
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  async function setDemoMode(workspace: PickerWorkspace, enabled: boolean) {
+    if (
+      enabled &&
+      !window.confirm(
+        `Turn on client demo mode for ${workspace.name}? Its contents are replaced with the demo starting point (setup done, no sources), and every AI step replays the recorded demo run instead of calling a model.`,
+      )
+    )
+      return;
+    setBusy(`demo:${workspace.id}`);
+    setError(null);
+    try {
+      const res = await postJson("/api/admin/workspace/demo-mode", { workspace_id: workspace.id, enabled });
+      const json = res.json as { error?: string };
+      if (!res.ok) throw new Error(json.error ?? `Could not change demo mode (HTTP ${res.status}).`);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not change demo mode.");
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function choose(id: string) {
     setBusy(id);
@@ -67,6 +91,7 @@ export function AdminWorkspacePicker({
               <th className="px-3 py-2 text-left font-normal">Id</th>
               <th className="px-3 py-2 text-left font-normal">Created by</th>
               <th className="px-3 py-2 text-right font-normal">Members</th>
+              <th className="px-3 py-2 text-left font-normal">Client demo mode</th>
               <th className="px-3 py-2 text-right font-normal" aria-label="Choose" />
             </tr>
           </thead>
@@ -86,6 +111,20 @@ export function AdminWorkspacePicker({
                   <td className="px-3 py-2 font-mono text-[12px] text-muted-foreground">{workspace.id}</td>
                   <td className="px-3 py-2 text-muted-foreground">{workspace.created_by}</td>
                   <td className="px-3 py-2 text-right">{workspace.member_count}</td>
+                  <td className="px-3 py-2">
+                    <label className="inline-flex items-center gap-1.5 text-[12px]">
+                      <input
+                        type="checkbox"
+                        data-testid={`demo-mode-${workspace.id}`}
+                        aria-label={`Client demo mode for ${workspace.name}`}
+                        checked={workspace.demo_mode === true}
+                        disabled={busy !== null}
+                        onChange={(event) => void setDemoMode(workspace, event.target.checked)}
+                      />
+                      {busy === `demo:${workspace.id}` ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : null}
+                      {workspace.demo_mode ? "On" : "Off"}
+                    </label>
+                  </td>
                   <td className="px-3 py-2 text-right">
                     {current ? (
                       <span className="inline-flex items-center gap-1 text-[12px] text-[var(--known-foreground)]">

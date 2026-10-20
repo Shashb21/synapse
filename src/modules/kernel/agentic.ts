@@ -4,6 +4,7 @@ import { canPrompt } from "./routing";
 import { NoRouteError } from "@/modules/llm/provider";
 import { isTestStub } from "./llm";
 import { similarExamples, learningExclusions, workedExamplesAsPrompt, type DecisionKind } from "./decision-examples";
+import { isDemoModeWorkspace } from "@/lib/demo/mode";
 
 /**
  * Locked shape of every agentic stage: propose → critique → revise, three times,
@@ -120,6 +121,12 @@ async function workedExamplesFor(ctx: ModuleContext, stage: StageId, learning: L
     const examples = ctx.replay.examples ?? [];
     ctx.run.note("learning:worked-examples", { used: examples.map(e => ({ id: e.id, scope: e.scope, kind: e.kind })) });
     return workedExamplesAsPrompt(examples);
+  }
+  // A client-demo workspace (KAN-138) never shows other plans' decisions: its prompts stay
+  // the recorded ones, and no other workspace's lessons can end up in the recording.
+  if (await isDemoModeWorkspace(ctx.workspace_id)) {
+    ctx.run.note("learning:worked-examples", { used: [], reason: "client demo mode" });
+    return "";
   }
   if (!learning || !learning.text.trim()) {
     await saveReplaySnapshot(ctx, stage, []);

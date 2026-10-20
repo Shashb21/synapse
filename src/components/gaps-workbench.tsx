@@ -1,12 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useLayoutEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { NewSourceNote } from "@/components/gap-suggestions";
 import { GapBadge } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
 import { GapFormFields } from "@/components/gap-form-fields";
 import { SettingChips } from "@/components/gap-settings-editor";
-import { gapNumberLabel } from "@/lib/iegp/gap-number";
+import { compareGapNumbers, gapNumberLabel } from "@/lib/iegp/gap-number";
 import { GapSuggestions, NewSourcePill } from "@/components/gap-suggestions";
+import { InventoryReadiness } from "@/components/inventory-readiness";
 import type { GapSuggestionCard } from "@/lib/iegp/gap-suggestion-cards";
 
 const STATUS_BAND: Record<string, string> = {
@@ -26,6 +29,7 @@ import {
 import {
   filterReviewGapCards,
   reviewGapFilterCounts,
+  reviewGapTasks,
   sortReviewGapCards,
   type ReviewGapCard,
   type ReviewGapFilter,
@@ -38,11 +42,10 @@ import { useAiEnabled } from "@/components/platform/ai-status";
 import { GapRecordLink } from "@/components/gap-panel";
 
 const FILTER_CHIPS: { id: ReviewGapFilter; label: string }[] = [
-  { id: "all", label: "All" },
-  { id: "partial", label: "Partial" },
+  { id: "all", label: "All evidence statuses" },
+  { id: "partial", label: "Partially Addressed" },
   { id: "open", label: "Open" },
   { id: "addressed", label: "Addressed" },
-  { id: "needs_validation", label: "Unconfirmed" },
 ];
 
 function CreateOpenGap() {
@@ -88,6 +91,44 @@ function CreateAddressedGap({ tactics }: { tactics: TacticLibraryItem[] }) {
       <RecordMissedFields prefix />
     </LockForm>
   );
+}
+
+/** Focus the outstanding inventory review without duplicating the shared gap record. */
+function InventoryReviewTasks({ card, focusTask }: {
+  card: ReviewGapCard;
+  focusTask: { label: string; sequence: number };
+}) {
+  const paneRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const target = Array.from(paneRef.current?.querySelectorAll<HTMLElement>("[data-review-task]") ?? [])
+      .find(element => element.dataset.reviewTask === focusTask.label);
+    (target?.querySelector<HTMLElement>("button, a") ?? target)?.focus();
+  }, [focusTask]);
+  const tasks = reviewGapTasks(card);
+  const isPartial = card.gap_status === "validated_partial";
+  return <section ref={paneRef} aria-label="Outstanding gap review">
+      <div className="mt-4" data-review-task="Review tactic mappings" tabIndex={-1}>
+        <p className="text-[12px] text-muted-foreground">Review tactic mappings: check this gap’s coverage and confirm or edit each flagged mapping.</p>
+        {tasks.includes("Review tactic mappings") ? <Link href={`/gaps/${card.gap_id}#mapped-tactics`} className="text-[12px] text-foreground underline">Review coverage on gap page</Link> : null}
+      </div>
+      {tasks.length > 1 ? <p className="mt-3 text-[12px] text-muted-foreground">Additional tasks ({tasks.length - 1}): {tasks.slice(1).join(" · ")}</p> : null}
+      {card.new_source ? <div data-review-task="Review new source"><NewSourceNote gapId={card.gap_id} newSource={card.new_source} /></div> : null}
+      {/* Hero action first: Resolve (Partial) or Confirm (everything else still unconfirmed) stand apart from the secondary actions below. */}
+      <div className="mt-4 flex flex-wrap items-center gap-2" data-review-task={isPartial ? "Resolve partial gap" : "Confirm status"}>
+        {isPartial ? (
+          <Link href={`/gaps/${card.gap_id}#gap-coverage-actions`} className="underline">Resolve — split or rewrite</Link>
+        ) : !card.human_validated ? (
+          <LockForm
+            label="Confirm status"
+            action="validate_gap"
+            extra={{ gap_id: card.gap_id }}
+            note={{ label: "Reason (required)", required: true }}
+            confirmLabel={`Confirm ${GAP_STATUS_LABELS[card.gap_status]}`}
+            variant="default"
+          />
+        ) : null}
+      </div>
+  </section>;
 }
 
 export type GapPriority = { band: "high" | "medium" | "low" | "defer"; validated: boolean };
@@ -165,6 +206,7 @@ export function GapsWorkbench({
   availableTactics,
   readyForPrioritize,
   initialFilter,
+  initialAttention = false,
   settingOptions = [],
   priorities = {},
   suggestions = [],
@@ -173,27 +215,38 @@ export function GapsWorkbench({
   availableTactics: TacticLibraryItem[];
   readyForPrioritize: boolean;
   initialFilter?: ReviewGapFilter;
+  initialAttention?: boolean;
   settingOptions?: string[];
   /** Each gap's band on the Prioritization Matrix, when it has one. */
   priorities?: Record<string, GapPriority>;
   /** Overlaps waiting on a person: merge, split or reject (KAN-75). */
   suggestions?: GapSuggestionCard[];
 }) {
-  const [filter, setFilterState] = useState<ReviewGapFilter>(initialFilter ?? "all");
+  const [filter, setFilterState] = useState<ReviewGapFilter>(initialFilter === "needs_attention" ? "all" : initialFilter ?? "all");
+  const [attention, setAttention] = useState(initialAttention || initialFilter === "needs_attention");
+  const [seenAttention, setSeenAttention] = useState(initialAttention);
+  if (seenAttention !== initialAttention) {
+    setSeenAttention(initialAttention);
+    setAttention(initialAttention);
+  }
   // A link to another `gap_filter` (the readiness strip) keeps this component mounted:
   // follow the URL when it changes (KAN-18).
   const [seenFilter, setSeenFilter] = useState(initialFilter);
   if (seenFilter !== initialFilter) {
     setSeenFilter(initialFilter);
-    setFilterState(initialFilter ?? "all");
+    setFilterState(initialFilter === "needs_attention" ? "all" : initialFilter ?? "all");
+    setAttention(initialAttention || initialFilter === "needs_attention");
   }
   // A chip writes its filter into the URL, so a reload or a shared link keeps it.
-  const setFilter = (next: ReviewGapFilter) => {
+  const setFilter = (next: ReviewGapFilter, nextAttention = attention) => {
+    setAttention(nextAttention);
     setFilterState(next);
     try {
       const url = new URL(window.location.href);
       if (next === "all") url.searchParams.delete("gap_filter");
       else url.searchParams.set("gap_filter", next);
+      if (nextAttention) url.searchParams.set("gap_attention", "needs_attention");
+      else url.searchParams.delete("gap_attention");
       window.history.replaceState(window.history.state, "", url);
     } catch {
       // No URL to update (tests, sandboxed frames): the chip still filters.
@@ -213,7 +266,7 @@ export function GapsWorkbench({
   );
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const rows = sortReviewGapCards(filterReviewGapCards(cards, filter)).filter((card) => {
+    const rows = sortReviewGapCards(filterReviewGapCards(attention ? filterReviewGapCards(cards, "needs_attention") : cards, filter)).filter((card) => {
       if (q && ![card.gap_id, gapNumberLabel(card.number), card.gap_name, card.statement, DOMAIN_LABELS[card.domain]].some((v) => v.toLowerCase().includes(q))) {
         return false;
       }
@@ -224,10 +277,10 @@ export function GapsWorkbench({
       return true;
     });
     if (!sort) return rows;
+    if (sort.key === "id") return [...rows].sort((a, b) => compareGapNumbers(a, b, sort.dir));
+    const sortKey = sort.key;
     const value = (card: ReviewGapCard): string | number => {
-      switch (sort.key) {
-        case "id":
-          return card.gap_id;
+      switch (sortKey) {
         case "name":
           return card.gap_name.toLowerCase();
         case "domain":
@@ -246,10 +299,18 @@ export function GapsWorkbench({
       const vb = value(b);
       return (va < vb ? -1 : va > vb ? 1 : 0) * dir;
     });
-  }, [cards, filter, query, domain, setting, priority, sort, priorities]);
-  const partials = counts.partial;
-  const unvalidated = counts.needs_validation;
+  }, [cards, filter, attention, query, domain, setting, priority, sort, priorities]);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [focusTask, setFocusTask] = useState<{ label: string; sequence: number } | null>(null);
   const extraFilters = [query, domain, setting, priority].filter(Boolean).length;
+
+  function resetFilters() {
+    setFilter("all", false);
+    setQuery("");
+    setDomain("");
+    setSetting("");
+    setPriority("");
+  }
 
   function onSort(key: SortKey) {
     setSort((current) => (current?.key === key ? { key, dir: current.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
@@ -257,12 +318,7 @@ export function GapsWorkbench({
 
   return (
     <div className="grid gap-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <CreateOpenGap />
-        <CreateAddressedGap tactics={availableTactics} />
-        <AddTacticsButton variant="outline" inUse={customTypesInUse(availableTactics)} />
-      </div>
-      <p className="-mt-2 text-[11px] text-muted-foreground">{GAPS_TACTIC_HELPER}</p>
+      {suggestions.length === 0 ? <p className="text-[11px] text-muted-foreground">Pending source suggestions: 0</p> : null}
       <GapSuggestions suggestions={suggestions} />
       {cards.length === 0 ? (
         <p className="rounded-lg border border-dashed border-border bg-card px-4 py-6 text-center text-[12px] text-muted-foreground">
@@ -322,10 +378,16 @@ export function GapsWorkbench({
                 </Button>
               ) : null}
               <span className="ml-auto text-[11px] text-muted-foreground" aria-live="polite">
-                {visible.length} of {cards.length}
+                Showing {visible.length} of {cards.length} gaps · counts below cover all gaps
               </span>
             </div>
-            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter gaps">
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Review state">
+              <Button type="button" size="sm" variant={!attention ? "default" : "outline"} aria-pressed={!attention} onClick={() => setFilter(filter, false)}>All gaps ({counts.all})</Button>
+              <Button type="button" size="sm" variant={attention ? "default" : "outline"} aria-pressed={attention} onClick={() => setFilter(filter, !attention)}>Needs attention ({counts.needs_attention})</Button>
+              <Button type="button" size="sm" variant="ghost" onClick={resetFilters}>Reset filters</Button>
+            </div>
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Evidence status">
+              {filter === "needs_validation" ? <span className="text-[11px]">Legacy filter: unconfirmed or partial</span> : null}
               {FILTER_CHIPS.map((chip) => (
                 <Button
                   key={chip.id}
@@ -347,7 +409,9 @@ export function GapsWorkbench({
                   <SortHeader label="ID" column="id" sort={sort} onSort={onSort} className="w-[132px]" />
                   <SortHeader label="Gap" column="name" sort={sort} onSort={onSort} />
                   <SortHeader label="Domain" column="domain" sort={sort} onSort={onSort} className="w-[150px]" />
-                  <SortHeader label="Status" column="status" sort={sort} onSort={onSort} className="w-[160px]" />
+                  <SortHeader label="Evidence status" column="status" sort={sort} onSort={onSort} className="w-[160px]" />
+                  <th scope="col" className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Review state</th>
+                  <th scope="col" className="px-3 py-2 text-left text-[11px] text-muted-foreground">Next action</th>
                   <SortHeader label="Priority" column="priority" sort={sort} onSort={onSort} className="w-[110px]" />
                   <th scope="col" className="w-[130px] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                     Setting
@@ -358,15 +422,17 @@ export function GapsWorkbench({
               <tbody>
                 {visible.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-[12px] text-muted-foreground">
+                    <td colSpan={9} className="px-4 py-8 text-center text-[12px] text-muted-foreground">
                       No gaps match these filters.
                     </td>
                   </tr>
                 ) : null}
                 {visible.map((card) => {
-                  const unconfirmed = !card.human_validated || card.gap_status === "validated_partial";
+                  const tasks = reviewGapTasks(card);
+                  const open = openId === card.gap_id;
                   return (
-                    <tr key={card.gap_id}
+                    <Fragment key={card.gap_id}>
+                    <tr
                         data-gap-id={card.gap_id}
                         className={cn(
                           "border-b border-border/70 transition-colors",
@@ -384,23 +450,43 @@ export function GapsWorkbench({
                           <GapRecordLink
                             gapId={card.gap_id}
                             data-testid="gap-row-toggle"
-                            className="flex w-full items-start gap-1.5 text-left"
+                            className="flex w-full items-start gap-1.5 text-left focus-visible:outline-2 focus-visible:outline-ring"
                           >
                             <span aria-hidden className="mt-0.5 text-[10px] text-muted-foreground">▸</span>
                             <span className="min-w-0">
                               <span className="block font-medium leading-snug text-foreground">{card.gap_name}</span>
-                              {unconfirmed ? (
-                                <span className="text-[10.5px] text-amber-700 dark:text-amber-300">
-                                  {card.gap_status === "validated_partial" ? "Split or rewrite" : "Unconfirmed"}
-                                </span>
-                              ) : null}
                               {card.new_source ? <NewSourcePill /> : null}
                             </span>
                           </GapRecordLink>
+                          {suggestions.some((suggestion) => suggestion.gap_id === card.gap_id) ? (
+                            <button type="button" className="mt-1 text-[11px] text-primary underline focus-visible:outline-2 focus-visible:outline-ring" onClick={() => {
+                              const panel = document.getElementById("source-suggestions") as HTMLDetailsElement | null;
+                              const suggestion = suggestions.find((item) => item.gap_id === card.gap_id);
+                              if (panel && suggestion) {
+                                panel.open = true;
+                                document.getElementById(`source-suggestion-${suggestion.id}`)?.focus();
+                              }
+                            }}>Source suggestions ({suggestions.filter((suggestion) => suggestion.gap_id === card.gap_id).length})</button>
+                          ) : null}
                         </td>
                         <td className="px-3 py-2 align-top text-[11px] text-muted-foreground">{DOMAIN_LABELS[card.domain]}</td>
                         <td className="px-3 py-2 align-top">
                           <GapBadge status={card.gap_status} />
+                        </td>
+                        <td className="px-3 py-2 align-top text-[11px]">
+                          <span className="block">{card.human_validated ? "Assessment confirmed" : "Assessment unconfirmed"}</span>
+                          {tasks.length ? <span className="text-amber-700 dark:text-amber-300">{tasks.join(" · ")}</span> : <span className="text-muted-foreground">No outstanding review</span>}
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <div data-next-action>
+                            {tasks[0] ? <>
+                              <Button type="button" size="sm" variant="outline" aria-expanded={open} onClick={() => {
+                                setOpenId(card.gap_id);
+                                setFocusTask((previous) => ({ label: tasks[0], sequence: (previous?.sequence ?? 0) + 1 }));
+                              }}>{tasks[0]}</Button>
+                              {tasks.length > 1 ? <span className="mt-1 block text-[11px] text-muted-foreground">+{tasks.length - 1} additional tasks</span> : null}
+                            </> : <span className="text-[11px] text-muted-foreground">No outstanding review</span>}
+                          </div>
                         </td>
                         <td className="px-3 py-2 align-top">
                           <PriorityChip priority={priorities[card.gap_id]} />
@@ -413,7 +499,10 @@ export function GapsWorkbench({
                           {card.needs_review ? <span className="ml-1 text-amber-700 dark:text-amber-300">· review</span> : null}
                         </td>
                       </tr>
-
+                      {open && focusTask ? <tr><td colSpan={9} className="bg-muted/30 px-3 py-3">
+                        <InventoryReviewTasks card={card} focusTask={focusTask} />
+                      </td></tr> : null}
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -421,12 +510,19 @@ export function GapsWorkbench({
           </div>
         </>
       )}
+      <div className="flex flex-wrap items-center gap-2">
+        <CreateOpenGap />
+        <CreateAddressedGap tactics={availableTactics} />
+        <AddTacticsButton variant="outline" inUse={customTypesInUse(availableTactics)} />
+      </div>
+      <p className="-mt-2 text-[11px] text-muted-foreground">{GAPS_TACTIC_HELPER}</p>
+      <InventoryReadiness cards={cards} readyForPrioritize={readyForPrioritize} />
       <div className="rounded-lg border border-border bg-card p-4">
         {readyForPrioritize ? (
           <>
             <h2 className="text-[13px] font-semibold">Continue to prioritize</h2>
             <p className="mt-1 mb-3 text-[12px] text-muted-foreground">
-              Every live gap is confirmed. Open gaps go to the Prioritization Matrix, then Tactic Ideation.
+              Every live gap has a confirmed status assessment. Check outstanding review work above. Open gaps go to the Prioritization Matrix, then Tactic Ideation.
             </p>
             <LockForm
               label="Continue to prioritize"
@@ -446,10 +542,9 @@ export function GapsWorkbench({
           </>
         ) : (
           <>
-            <h2 className="text-[13px] font-semibold">Not ready for Prioritize yet</h2>
+            <h2 className="text-[13px] font-semibold">Review outstanding gap assessments</h2>
             <p className="mt-1 text-[12px] text-muted-foreground">
-              {unvalidated} gap{unvalidated === 1 ? "" : "s"} still unconfirmed
-              {partials ? ` · ${partials} partial must be split or rewritten` : ""}. You can open the
+              You can open the
               Prioritization Matrix now, but it only has the gaps already validated as Open.
             </p>
           </>

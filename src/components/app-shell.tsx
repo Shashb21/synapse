@@ -50,6 +50,7 @@ export async function AppShell({
       gapsCount: counts.gaps,
       unvalidatedCount: counts.unvalidated,
       partialCount: filterCounts.partial,
+      inventoryAttentionCount: filterCounts.needs_attention,
       gapsUnlocked: gates.gapsUnlocked,
       planUnlocked: gates.planUnlocked,
       tacticsUnlocked: gates.tacticsUnlocked,

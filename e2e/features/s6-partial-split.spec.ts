@@ -48,7 +48,7 @@ test.describe("S6 partial gap split", () => {
     await expect(panel.getByRole("button", { name: /^confirm status$/i })).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(panel).toBeHidden();
-    await expect(page.getByRole("button", { name: /^partial \(/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^partially addressed \(/i })).toBeVisible();
   });
 
   test("proposes the addressed slice and the open leftover through three exchanges", async ({ request }) => {

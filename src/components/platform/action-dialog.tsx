@@ -70,6 +70,7 @@ export function ActionDialog({
   size = "sm",
   className,
   trigger,
+  triggerContent,
   validateForm,
   protectUnsavedChanges = false,
   onSuccess,
@@ -94,6 +95,8 @@ export function ActionDialog({
   size?: "sm" | "default" | "icon-sm";
   className?: string;
   trigger?: React.ReactElement | null;
+  /** Shown on the trigger instead of `label` (e.g. an icon); `title` then names the button. */
+  triggerContent?: React.ReactNode;
   /** A check across fields (by name, as typed) once each field passes its own; message or null. */
   validateForm?: (values: Record<string, string>) => string | null;
 }) {
@@ -185,9 +188,10 @@ export function ActionDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       {trigger !== null ? <DialogTrigger
         render={trigger ?? <Button size={size} variant={variant} className={className} />}
-        aria-label={triggerName(label, title)}
+        aria-label={triggerContent ? (title ?? label) : triggerName(label, title)}
+        title={triggerContent ? (title ?? label) : undefined}
       >
-        {label}
+        {triggerContent ?? label}
       </DialogTrigger> : null}
       <DialogContent className="z-[60] sm:max-w-md">
         <form

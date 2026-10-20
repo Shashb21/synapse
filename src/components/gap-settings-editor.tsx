@@ -40,6 +40,7 @@ export function GapSettingsEditor({
 }) {
   const router = useRouter();
   const listId = useId();
+  const errorId = useId();
   const [tags, setTags] = useState(settings);
   const [savedTags, setSavedTags] = useState(settings);
   const [reason, setReason] = useState("");
@@ -86,7 +87,7 @@ export function GapSettingsEditor({
   return (
     <div className="grid gap-1.5">
       <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Settings</p>
-      <div className="flex flex-wrap items-center gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5" aria-busy={pending}>
         {tags.map((tag) => (
           <span
             key={tag}
@@ -123,6 +124,8 @@ export function GapSettingsEditor({
             onBlur={() => add(draft)}
             placeholder={tags.length ? "Add setting" : "Tag a setting, e.g. 1L"}
             aria-label="Add a treatment setting"
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? errorId : undefined}
             className="h-7 w-40 rounded-md border border-input bg-transparent px-2 text-[12px] text-foreground"
           />
           <datalist id={listId}>
@@ -144,7 +147,11 @@ export function GapSettingsEditor({
           </div>
         </div>
       ) : null}
-      {error ? <p role="alert" className="text-[11px] text-destructive">{error}</p> : null}
+      {pending ? <p role="status" className="text-[11px] text-muted-foreground">Saving settings…</p> : null}
+      {error ? <>
+        <p id={errorId} role="alert" className="text-[11px] text-destructive">{error} Changes have not been saved.</p>
+        <button type="button" disabled={pending} onClick={() => void save()} className="justify-self-start text-[12px] underline focus-visible:outline-2 focus-visible:outline-ring">Retry saving settings</button>
+      </> : null}
     </div>
   );
 }

@@ -16,7 +16,7 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(detail).toContain("SplitGapDialog");
     expect(src).toContain("card.gap_id");
     expect(detail).toContain("Confirm status");
-    expect(src).toContain("Unconfirmed");
+    expect(src).toContain("Assessment unconfirmed");
     expect(panel).toContain("No tactics mapped");
     // Inventory opens the common record; the responsible full-record editors stay reachable.
     expect(src).toContain("GapRecordLink");

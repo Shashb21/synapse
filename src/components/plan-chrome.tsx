@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { BrandMark } from "@/components/brand-mark";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import {
   ChartGantt,
   ClipboardList,
@@ -26,6 +26,7 @@ import { useAiEnabled } from "@/components/platform/ai-status";
 import type { PlanPlace } from "@/lib/iegp/engine";
 import { RestartWalkthroughButton } from "@/components/walkthrough";
 import { WorkspaceTag } from "@/components/workspaces/workspace-tag";
+import { DemoResetBar } from "@/components/workspaces/demo-reset-bar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import type { WorkspaceTagModel } from "@/components/workspaces/model";
 
@@ -52,6 +53,8 @@ export type PlanNavModel = {
   gapsCount: number;
   unvalidatedCount: number;
   partialCount: number;
+  /** Distinct live gaps with outstanding human review; omitted if unavailable. */
+  inventoryAttentionCount?: number;
   gapsUnlocked: boolean;
   planUnlocked: boolean;
   tacticsUnlocked: boolean;
@@ -68,7 +71,7 @@ export type PlanNavModel = {
  */
 export function readinessText(nav: PlanNavModel): string {
   const progress = nav.prioritized;
-  const counted = progress && progress.open > 0 ? `${progress.validated} of ${progress.open} validated` : null;
+  const counted = progress && progress.open > 0 ? `${progress.validated} of ${progress.open} Open gaps with validated priority` : null;
   // Past Prioritize: a gap added or reopened since shows in the counts, not as a step back.
   if (nav.tacticsUnlocked) return counted ? `${counted} · Tactics open` : "Tactics open";
   if (!nav.readyForPrioritize) return "Not ready for Prioritize";
@@ -426,6 +429,11 @@ export function PlanChrome({
           <p className="text-[13px] font-medium text-foreground">{current}</p>
         </header>
         )}
+        {workspace?.current.demo && !present ? (
+          <Suspense fallback={null}>
+            <DemoResetBar workspace={workspace.current} />
+          </Suspense>
+        ) : null}
         {showReadiness && !present ? <ReadinessStrip nav={nav} /> : null}
         <main className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-4 sm:px-6">{children}</main>
       </div>
@@ -435,11 +443,11 @@ export function PlanChrome({
 
 /**
  * Always-visible strip so the facilitator can answer "can we start the workshop?"
- * in a glance. Partial/Unconfirmed link straight into Gaps with the matching
+ * in a glance. Partial and Unconfirmed or partial link into Gaps with the matching
  * filter chip selected. See docs/consultant-ux-spec.md §5.
  */
 function ReadinessStrip({ nav }: { nav: PlanNavModel }) {
-  const blocked = nav.partialCount > 0 || nav.unvalidatedCount > 0;
+  const blocked = (nav.inventoryAttentionCount ?? 0) > 0 || nav.partialCount > 0 || nav.unvalidatedCount > 0;
   return (
     <div
       data-app-chrome
@@ -450,6 +458,11 @@ function ReadinessStrip({ nav }: { nav: PlanNavModel }) {
       role="status"
       aria-label="Prep readiness"
     >
+      <Link href="/?place=gaps&gap_filter=needs_attention" className="text-inherit no-underline hover:underline">
+        {nav.inventoryAttentionCount === undefined
+          ? "Inventory review: unavailable"
+          : `Inventory review: ${nav.inventoryAttentionCount} gaps needing attention`}
+      </Link>
       <Link href="/?place=gaps" className="text-inherit no-underline hover:underline">
         Gaps {nav.gapsCount}
       </Link>
@@ -460,7 +473,7 @@ function ReadinessStrip({ nav }: { nav: PlanNavModel }) {
         href="/?place=gaps&gap_filter=needs_validation"
         className="text-inherit no-underline hover:underline"
       >
-        Unconfirmed {nav.unvalidatedCount}
+        Unconfirmed or partial {nav.unvalidatedCount}
       </Link>
       <span className="font-medium">
         {readinessText(nav)}

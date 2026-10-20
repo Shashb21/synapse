@@ -33,6 +33,36 @@ export const expansionScopeSchema = z.object({
   if (dates) ctx.addIssue({code: "custom", message: dates});
 });
 
+/**
+ * A model's expansion scope, tidied before the strict schema (KAN-148): models
+ * write the yes/no fields as "true" or "Yes — …" and dates as "2027-06" or
+ * "Q2 2027". A clear leading yes/no becomes a boolean, a month becomes its first
+ * day, any other date blank, so one loose field no longer throws away a whole
+ * design. Prose or a blank yes/no stays invalid. People's input keeps the strict schema.
+ */
+export function modelExpansionScope(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const scope: Record<string, unknown> = { ...(raw as Record<string, unknown>) };
+  for (const key of ["post_hoc", "prospective_enrolment", "protocol_amendment"]) {
+    const value = scope[key];
+    if (typeof value === "string") {
+      // Only a clear leading answer counts ("Yes — …", "No."); prose or blank stays invalid.
+      const word = value.trim().toLowerCase().match(/^(true|false|yes|no)\b/)?.[1];
+      if (word === "true" || word === "yes") scope[key] = true;
+      else if (word === "false" || word === "no") scope[key] = false;
+    }
+  }
+  for (const key of ["start_date", "evidence_available"]) {
+    const value = scope[key];
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) scope[key] = trimmed;
+    else if (/^\d{4}-\d{2}$/.test(trimmed)) scope[key] = `${trimmed}-01`;
+    else scope[key] = null;
+  }
+  return scope;
+}
+
 function canonical(value: unknown): unknown {
     if (Array.isArray(value)) return value.map(canonical);
     if (value && typeof value === "object") return Object.fromEntries(

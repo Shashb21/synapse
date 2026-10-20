@@ -1,0 +1,97 @@
+FICTIONAL DEMONSTRATION DOCUMENT. Velmara (velmaratinib) and NX-441 are invented products. No real patients, studies, organisations or people are described.
+
+VELMARA (velmaratinib) — GLOBAL MEDICAL ADVISORY BOARD REPORT
+Thoracic oncology: second-line EGFR-mutant NSCLC after osimertinib
+Meeting held: 9 September 2026 (hybrid, half day)
+Prepared by: Global Medical Affairs, Thoracic Oncology
+Status: Internal. Advisers' views are their own and do not represent their institutions.
+
+1. ADVISERS AND OBJECTIVES
+
+Eight external advisers took part: five thoracic medical oncologists (two US academic, one US community practice, two EU), one neuro-oncologist, one radiation oncologist and one oncology nurse specialist with a focus on older patients. Each adviser was contracted at fair market value. A medical affairs moderator ran the meeting; commercial colleagues did not attend.
+
+Objectives:
+1. Test the clinical relevance of the VEL-301 programme for practising clinicians.
+2. Understand unmet needs in patients progressing on osimertinib, with focus on brain metastases, older and frail patients, and sequencing.
+3. Gather views on safety monitoring (interstitial lung disease and QT prolongation) outside academic centres.
+4. Get feedback on the draft 2027 scientific communication plan.
+
+2. KEY TAKEAWAYS
+
+1. Intracranial outcomes are the clinical question that matters most. Advisers want intracranial response rate and, crucially, the duration of intracranial response in patients with measurable brain metastases. The planned CNS sub-study of VEL-301 is welcome, but its size worries them.
+
+2. Sequencing after osimertinib is genuinely uncertain in practice. Advisers described three competing pathways: Velmara, NX-441 or platinum-based chemotherapy. There is no real-world evidence on which sequence patients actually receive, or on outcomes by sequence.
+
+3. Older and frail patients are under-represented in trials and over-represented in clinics. The community oncologist estimated that more than 40 percent of his EGFR-mutant patients at progression are over 70. The nurse specialist highlighted the absence of quality-of-life and caregiver data in frail patients.
+
+4. Safety monitoring in the community is a practical barrier. Advisers asked for clear guidance and real-world data on ILD and QT incidence and management outside academic centres, where routine ECG and high-resolution CT follow-up are less consistent.
+
+5. Long-term overall survival will be asked about. Advisers accept that OS will be immature at the primary PFS analysis, but expect peers to ask about it.
+
+3. DISCUSSION SUMMARY BY SESSION
+
+3.1 Session 1 — VEL-301 programme review
+
+The moderator presented the design of VEL-301: a randomised, open-label Phase III trial of velmaratinib versus osimertinib re-challenge or investigator's choice, in patients with EGFR-mutant advanced NSCLC progressing after first-line therapy. Primary endpoint: progression-free survival by blinded independent central review. Key secondary endpoints: overall survival, objective response rate, intracranial objective response rate in patients with measurable brain metastases at baseline (CNS sub-study), and patient-reported outcomes (EORTC QLQ-C30 and LC13).
+
+Adviser comments:
+- US academic oncologist: "The PFS comparison is the regulatory question and the design is reasonable. The clinical question I get asked every week is about the brain."
+- EU oncologist: "Make sure the CNS sub-study reports duration of intracranial response, not only the response rate. A short response in the brain is not a win."
+- Neuro-oncologist: "The sub-study will be small. You need a plan for more CNS evidence, possibly real-world, because brain metastases at progression are very common in this population."
+- Radiation oncologist: "Report how many patients needed radiotherapy for new brain lesions on each arm. That is a burden outcome that matters for patients and for cost."
+
+3.2 Session 2 — Unmet needs after osimertinib
+
+Advisers mapped the typical patient journey at progression on osimertinib. Key points:
+- Re-biopsy or liquid biopsy is done in most academic centres but less consistently in the community.
+- Brain metastases at progression were estimated at 30 to 40 percent of patients.
+- Choice between Velmara, NX-441 and chemotherapy will depend on CNS disease, performance status, comorbidities and access.
+
+"We have no idea what the real-world sequence looks like, because these agents are new. Someone needs to track what patients actually get after osimertinib, and how they do." (US community oncologist)
+
+"For the older patient with comorbidities, I would want to know if Velmara is better than what I would otherwise give them, which is often single-agent chemotherapy or best supportive care. The trial does not tell me that." (EU oncologist)
+
+3.3 Session 3 — Older and frail patients
+
+The nurse specialist described the practical burden on caregivers: transport to visits, monitoring for side effects at home, and managing oral therapy adherence. She noted the absence of any caregiver burden data for EGFR TKIs.
+
+Advisers agreed:
+- Trial QoL data (EORTC) come from a mixed-age, fitter population and should not be extrapolated to frail patients.
+- Patient-reported outcomes in routine care, including in frail patients, would be valuable for clinicians and HTA.
+- A simple patient and caregiver survey could be a fast first step.
+
+3.4 Session 4 — Safety monitoring outside academic centres
+
+ILD: advisers asked for clear real-world incidence rates and time to onset, plus guidance for community practices without easy access to pulmonology.
+QT prolongation: the community oncologist said baseline and on-treatment ECG monitoring is "patchy" in practice. Advisers suggested a real-world safety study that specifically includes community sites.
+
+"Characterising ILD and QT in routine care, including monitoring outside academic centres, would directly change how comfortable community oncologists are prescribing." (US community oncologist)
+
+3.5 Session 5 — 2027 scientific communication plan
+
+Advisers reviewed the draft plan (primary VEL-301 manuscript, CNS sub-study, congress abstracts at major thoracic and oncology meetings). Feedback:
+- Prioritise the primary manuscript and CNS sub-study over a broad congress presence.
+- "More congress booths will not close any evidence gap. Better data will." (EU oncologist)
+- Consider an encore of the CNS data at a neuro-oncology meeting.
+
+4. RECOMMENDED EVIDENCE PRIORITIES (MEDICAL AFFAIRS SYNTHESIS)
+
+From the advisory board, Medical Affairs proposes these evidence priorities for the evidence-planning workshop:
+
+1. Intracranial response and duration of response in patients with brain metastases. Ensure the VEL-301 CNS sub-study reports duration, and plan supplementary CNS evidence (for example real-world).
+2. Real-world treatment sequencing after osimertinib failure, including Velmara versus NX-441 and chemotherapy.
+3. Comparative effectiveness in older patients against regional standard of care, distinct from the VEL-301 elderly subgroup.
+4. QoL and PROs in routine care, including frail patients; caregiver burden.
+5. ILD and QT incidence and management in routine care, including community sites.
+6. Long-term overall survival follow-up beyond the primary PFS analysis.
+
+Not an evidence gap: "bigger congress presence in 2027" was raised by one internal attendee, but advisers saw it as a dissemination question rather than missing evidence.
+
+5. ACTIONS
+
+- Medical Affairs to confirm with Clinical Development whether CNS duration of response is a pre-specified analysis in VEL-301.
+- HEOR and Medical to scope a real-world sequencing study after osimertinib.
+- Medical to draft a patient and caregiver survey proposal for frail and older patients.
+- Safety and Medical to scope a real-world ILD and QT study including community sites.
+
+END OF DOCUMENT
