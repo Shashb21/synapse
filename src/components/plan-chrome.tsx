@@ -444,7 +444,7 @@ export function PlanChrome({
 /**
  * Always-visible strip so the facilitator can answer "can we start the workshop?"
  * in a glance. Partial and Unconfirmed or partial link into Gaps with the matching
- * filter chip selected. See docs/consultant-ux-spec.md §5.
+ * filter chip selected. See specs/consultant-ux-spec.md §5.
  */
 function ReadinessStrip({ nav }: { nav: PlanNavModel }) {
   const blocked = (nav.inventoryAttentionCount ?? 0) > 0 || nav.partialCount > 0 || nav.unvalidatedCount > 0;

@@ -10,5 +10,7 @@ The pack under [`sdlc/`](sdlc/) holds the live [requirements (v2)](sdlc/01-requi
 
 - **[Deploy checklist](deploy-checklist.md)** — Vercel + Postgres operator list (env, smoke, workspace hygiene)
 - **[Deploy on Vercel](deployment-vercel.md)** — project, Postgres, provider keys, SSO redirect
-- **[Consultant UX spec](consultant-ux-spec.md)** — nav IA, readiness strip, Gaps workbench, Prep \| Room, phased delivery
+- **[Consultant UX spec](../specs/consultant-ux-spec.md)** — nav IA, readiness strip, Gaps workbench, Prep \| Room, phased delivery
 - **[Presentation view and breakout groups](presentation-and-breakouts.md)** — Room presenter view over the real pages, multi-window breakout facilitation (both switched off in the app for now)
+
+- **[Specifications and planning archive](../specs/README.md)** — feature specs, design reviews, decisions, plans, and Jira ticket breakdowns.

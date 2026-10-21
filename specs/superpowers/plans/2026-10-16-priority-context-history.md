@@ -8,7 +8,7 @@
 
 **Tech Stack:** Next.js 16.3.8, TypeScript, React 19, Drizzle/Postgres, Vitest, Playwright.
 
-**Spec:** docs/design/kan-120-spec.md and docs/design/kan-124-spec.md. These approved specs outrank implementation choices in this plan.
+**Spec:** specs/design/kan-120-spec.md and specs/design/kan-124-spec.md. These approved specs outrank implementation choices in this plan.
 
 ## Global Constraints
 

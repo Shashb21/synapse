@@ -1,0 +1,60 @@
+{
+  "specification": "KAN-140",
+  "source": "KAN-121",
+  "tickets": [
+    {
+      "number": 1,
+      "key": "KAN-141",
+      "title": "Confirm relationship coverage against a human-reviewed requirement basis",
+      "file": "specs/design/kan-121-tickets/01-human-reviewed-requirements.md",
+      "blockedBy": []
+    },
+    {
+      "number": 2,
+      "key": "KAN-142",
+      "title": "Show design fit, coverage and unanswered requirements for each tactic",
+      "file": "specs/design/kan-121-tickets/02-relationship-fit-view.md",
+      "blockedBy": [
+        "KAN-141"
+      ]
+    },
+    {
+      "number": 3,
+      "key": "KAN-143",
+      "title": "Preview and link a library tactic with or without assessment",
+      "file": "specs/design/kan-121-tickets/03-library-preview-link.md",
+      "blockedBy": [
+        "KAN-141",
+        "KAN-142"
+      ]
+    },
+    {
+      "number": 4,
+      "key": "KAN-144",
+      "title": "Require reassessment after substantive requirement or tactic changes",
+      "file": "specs/design/kan-121-tickets/04-assessment-freshness.md",
+      "blockedBy": [
+        "KAN-141"
+      ]
+    },
+    {
+      "number": 5,
+      "key": "KAN-145",
+      "title": "Link sources and review cited discrepancies without AI",
+      "file": "specs/design/kan-121-tickets/05-manual-source-review.md",
+      "blockedBy": [
+        "KAN-144"
+      ]
+    },
+    {
+      "number": 6,
+      "key": "KAN-146",
+      "title": "Compare every newly parsed document and expose reliable outcomes",
+      "file": "specs/design/kan-121-tickets/06-incoming-document-checks.md",
+      "blockedBy": [
+        "KAN-145"
+      ]
+    }
+  ],
+  "verification": "Read back all seven created issues: labels, sections, source/spec references, and six native blocking edges confirmed. Source KAN-121 updated timestamp and links unchanged."
+}
