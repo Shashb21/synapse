@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, Next.js 16.3.5, React, PostgreSQL, Drizzle, Zod, Vitest, Playwright.
 
-**Spec:** `docs/superpowers/specs/2026-10-07-kan77-kan76-learning-expansions-design.md` (approved by the user).
+**Spec:** `specs/superpowers/specs/2026-10-07-kan77-kan76-learning-expansions-design.md` (approved by the user).
 
 ## Global Constraints
 

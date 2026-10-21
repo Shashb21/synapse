@@ -1,9 +1,9 @@
 # Synapse IEGP — Consultant UX specification
 
-**Status:** Proposed design (largely superseded by the KAN-8 redesign). The app today: the sidebar places are Plan context, Upload, Evidence Inventory, Prioritization Matrix, Tactic Ideation and Gantt Timeline; Room (the presenter view) is switched off (`ROOM_ENABLED = false`, KAN-52). Read the current behaviour in [`iegp-model.md`](iegp-model.md) and [`modules.md`](modules.md).
+**Status:** Proposed design (largely superseded by the KAN-8 redesign). The app today: the sidebar places are Plan context, Upload, Evidence Inventory, Prioritization Matrix, Tactic Ideation and Gantt Timeline; Room (the presenter view) is switched off (`ROOM_ENABLED = false`, KAN-52). Read the current behaviour in [`iegp-model.md`](../docs/iegp-model.md) and [`modules.md`](../docs/modules.md).
 **Audience:** Consultants preparing an Integrated Evidence Generation Plan before a workshop, and facilitating during the workshop
 **Out of scope for this phase:** Full workshop presentation / deck mode (stub only)
-**Related:** [`iegp-model.md`](iegp-model.md), [`problem-and-solution.md`](problem-and-solution.md), [`accuracy-reference-ux.md`](accuracy-reference-ux.md), existing workshop stage at `/accuracy/workshop`
+**Related:** [`iegp-model.md`](../docs/iegp-model.md), [`problem-and-solution.md`](../docs/problem-and-solution.md), [`accuracy-reference-ux.md`](../docs/accuracy-reference-ux.md), existing workshop stage at `/accuracy/workshop`
 
 ## 1. Purpose
 
@@ -316,7 +316,7 @@ Priority High / Medium / Low must use a separate scale (e.g. neutral weight, typ
 | Tactics polish | `tactics-place.tsx` (and related) |
 | Upload readiness | `ingest-panel.tsx` (or equivalent), home upload pane |
 | Prep | Room stub | `plan-chrome.tsx` + link to `/accuracy/workshop` (or workspace workshop route) |
-| Spec doc | `docs/consultant-ux-spec.md` + docs index / README table |
+| Spec doc | `specs/consultant-ux-spec.md` + docs index / README table |
 
 Preserve LockForm name+function, coverage dimension menus, and API actions; this is a UI/IA pass, not an engine rewrite.
 
@@ -349,7 +349,7 @@ Room behaviour now
 - Keyboard: ← → change boards, Esc clear selection (already in workshop stage)
 - Presentation lens: read-only chapters, no edit, Gantt finale
 
-> **Implementation note (added after Phase A shipped):** `/accuracy/workshop` is a separate subsystem — its own tenant/workspace model and its own `accuracy_*` claims/snapshot schema, structurally unrelated to the IEGP `gaps`/`tactics` tables this spec's screens are built on. The Phase A stub above (a deep-link toggle) is exactly right and ships as specified — it costs nothing and the picker's existing empty state is honest. But it is **not** a foundation to build the real, gap-native Presentation view or Breakout Groups on top of; see [`presentation-and-breakouts.md`](presentation-and-breakouts.md) for why that work is a new, IEGP-native surface instead.
+> **Implementation note (added after Phase A shipped):** `/accuracy/workshop` is a separate subsystem — its own tenant/workspace model and its own `accuracy_*` claims/snapshot schema, structurally unrelated to the IEGP `gaps`/`tactics` tables this spec's screens are built on. The Phase A stub above (a deep-link toggle) is exactly right and ships as specified — it costs nothing and the picker's existing empty state is honest. But it is **not** a foundation to build the real, gap-native Presentation view or Breakout Groups on top of; see [`presentation-and-breakouts.md`](../docs/presentation-and-breakouts.md) for why that work is a new, IEGP-native surface instead.
 
 ## 11. Accessibility and room constraints
 
@@ -362,7 +362,7 @@ Room behaviour now
 ## 12. Phased delivery
 
 **Phase A — Spec + structural UI (this implementation)**
-- Add `docs/consultant-ux-spec.md` and link from docs README / main README docs table.
+- Add `specs/consultant-ux-spec.md` and link from docs README / main README docs table.
 - Consultant nav + Lab disclosure + readiness strip.
 - Gaps split workbench with Resolve / Confirm heroes and triage sort.
 - Status language pass across Gaps, Prioritize, Tactics badges.
@@ -379,7 +379,7 @@ Room behaviour now
 - Read-only chaptered walkthrough: context → gaps → tactics → Gantt.
 - No parallel data store; projection of validated plan only.
 
-> **Status:** Phase C, plus a new Breakout Groups capability the user asked for alongside it, are specified in [`presentation-and-breakouts.md`](presentation-and-breakouts.md).
+> **Status:** Phase C, plus a new Breakout Groups capability the user asked for alongside it, are specified in [`presentation-and-breakouts.md`](../docs/presentation-and-breakouts.md).
 
 ## 13. Success criteria
 

@@ -5,7 +5,7 @@
 **Goal:** Build and execute the isolated, human-reviewed extraction benchmark without modifying deployment.
 **Architecture:** A filesystem-only benchmark package at src/accuracy/eval/benchmark consumes explicit frozen inputs and route snapshots. Reuse pure extraction prompts, provider transports, agentic cycle and provenance/completeness utilities; do not import database-backed run/store/routing wrappers into the isolated path. A small CLI loads explicit JSON configuration and emits private artifacts. Existing deployed configuration must be supplied as an exported snapshot; never infer it from defaults.
 **Tech Stack:** TypeScript, Zod, Vitest, Node filesystem and existing provider HTTP transports.
-**Spec:** docs/superpowers/specs/2026-10-13-kan100-extraction-benchmark-spec.md
+**Spec:** specs/superpowers/specs/2026-10-13-kan100-extraction-benchmark-spec.md
 
 ## Global Constraints
 - Two BeOne decks stay separate; evidence needs and existing tactics are independent stages.

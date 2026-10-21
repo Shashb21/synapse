@@ -1,6 +1,6 @@
 # KAN-100: all 40 parent stories, software and empirical evidence
 
-This mapping covers the numbered stories in `docs/superpowers/specs/2026-10-13-kan100-extraction-benchmark-spec.md`. Paths below are relative to `src/accuracy/eval/benchmark/` and `tests/`. Every automated check uses synthetic inputs; passing it establishes implemented behavior, not live model performance. **No real scored run or final authenticated semantic/audit judgment exists. Parent empirical completion remains open.** Private local preparation lives at `data/runtime/benchmark/kan106-local-reference/` and must never be published.
+This mapping covers the numbered stories in `specs/superpowers/specs/2026-10-13-kan100-extraction-benchmark-spec.md`. Paths below are relative to `src/accuracy/eval/benchmark/` and `tests/`. Every automated check uses synthetic inputs; passing it establishes implemented behavior, not live model performance. **No real scored run or final authenticated semantic/audit judgment exists. Parent empirical completion remains open.** Private local preparation lives at `data/runtime/benchmark/kan106-local-reference/` and must never be published.
 
 | Story | Concrete implemented artifact / behavior check | Unfulfilled empirical evidence |
 | --- | --- | --- |

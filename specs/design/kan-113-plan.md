@@ -1,6 +1,6 @@
 # Evidence Inventory implementation — KAN-113
 
-Spec: docs/design/evidence-inventory-review.md
+Spec: specs/design/evidence-inventory-review.md
 
 ## Global Constraints
 Preserve current visual identity, scientific definitions, permissions, required reasons, human confirmation, audit behavior and downstream eligibility. No new viewer, bulk approval, automatic confirmation or unrelated refactor. Work only in /private/tmp/synapse-kan-113. Each task must use test-first behavior checks and record exact verification commands/results. Read relevant installed Next.js docs before changing Next code. Native Vitest and Playwright tests apply to this TypeScript project.

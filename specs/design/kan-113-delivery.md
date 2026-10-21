@@ -13,7 +13,7 @@ Base: `f669ffb`; implementation through `eb402c4`. No merge or publication yet.
 - KAN-118: Separate inventory readiness and priority progress, preserving previously available downstream work. Persistent strip accurately says “Unconfirmed or partial”.
 - KAN-119: Sort by displayed numeric gap number, missing numbers last and deterministic ID tie-breaking.
 
-Scientific definitions, authorization, required reasons, human confirmation, audit behavior and downstream eligibility were retained. See the approved [spec](evidence-inventory-review.md), [plan](kan-113-plan.md) and [glossary](../../GLOSSARY.md).
+Scientific definitions, authorization, required reasons, human confirmation, audit behavior and downstream eligibility were retained. See the approved [spec](evidence-inventory-review.md), [plan](kan-113-plan.md) and [glossary](../GLOSSARY.md).
 
 ## Review evidence
 

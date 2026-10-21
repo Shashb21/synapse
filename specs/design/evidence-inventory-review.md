@@ -1,6 +1,6 @@
 # Evidence Inventory review
 
-Status: approved design implemented on branch `kan-113-evidence-inventory`, tracked in [KAN-113](https://synapse21.atlassian.net/browse/KAN-113). Verification and review evidence is recorded in `docs/design/kan-113-delivery.md`.
+Status: approved design implemented on branch `kan-113-evidence-inventory`, tracked in [KAN-113](https://synapse21.atlassian.net/browse/KAN-113). Verification and review evidence is recorded in `specs/design/kan-113-delivery.md`.
 
 ## Goal
 
