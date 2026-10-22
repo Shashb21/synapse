@@ -2381,6 +2381,8 @@ async function assignTacticToGapChange(args: {
   lock_coverage?: boolean;
   /** Set by the owning model/workflow, never accepted from a customer request body. */
   assessment_origin?: IegpState["coverages"][0]["assessment_origin"];
+  /** Internal S4 run identity. Existing rows keep their original ownership. */
+  creation_run_id?: string;
   references?: JudgementReference[];
   model?: boolean;
   supplied_records?: ReturnType<typeof suppliedJudgementRecords>;
@@ -2437,6 +2439,9 @@ async function assignTacticToGapChange(args: {
   const coverageId = existing?.id ?? (await allocateId("COV", state.coverages.map((c) => c.id)));
   const row = {
     id: coverageId,
+    creation_run_id: existing?.creation_run_id ?? (existing ? null : args.creation_run_id ?? null),
+    human_adopted: Boolean(existing?.human_adopted || args.human),
+    ownership_review_reason: args.human ? null : existing?.ownership_review_reason ?? null,
     assessment_origin: overall === "unassessed" ? null : args.human ? "human" : args.assessment_origin ?? null,
     confirmed_requirement_basis: confirmedBasis,
     assessed_basis: assessmentBasis(state, { gap_id: args.gap_id, tactic_id: args.tactic_id, expansion_id: args.expansion_id }),
@@ -2649,7 +2654,7 @@ async function saveMappingTableRowChange(args: {
   if (!inWorkspaceTransaction()) return withWorkspaceTransaction(() => saveMappingTableRow(args));
   const mapping_status = requireMappingRowStatus(args.mapping_status);
   const rationale = requireRationale(args.rationale);
-  const uniqueIds = [...new Set(args.tactic_ids.map((id) => id.trim()).filter(Boolean))];
+  const uniqueIds = args.tactic_ids;
   const previous = await loadState();
   // Reserve every existing parent before any removal or assignment can lock the gap.
   await lockAssessmentOwners({
@@ -4493,6 +4498,7 @@ async function insertProvisionalClosingCoverage(args: {
       .update(t.coverages)
       .set({
         overall: "full",
+        human_adopted: true,
         assessment_origin: "workflow",
         overall_rationale: args.note,
         overall_lock: unlocked(),
@@ -4512,6 +4518,7 @@ async function insertProvisionalClosingCoverage(args: {
     expansion_id: args.expansion_id ?? null,
     dimensions: args.source?.dimensions ?? emptyDimensions(),
     overall: "full",
+    human_adopted: true,
     assessment_origin: "workflow",
     overall_rationale: args.note,
     overall_lock: unlocked(),
@@ -4708,7 +4715,7 @@ async function splitPartialGapChange(args: {
       await inheritSplitScope(selected, parent.id, openId, args, transaction);
       await transaction.insert(t.coverages).values({id: newId("COV"), gap_id: openId, tactic_id: selected.tactic_id,
         expansion_id: selected.expansion_id, dimensions: selected.source?.dimensions ?? emptyDimensions(),
-        overall: "unassessed", overall_rationale: "Split: scope mapped to the open leftover; overall not assessed.",
+        human_adopted: true, overall: "unassessed", overall_rationale: "Split: scope mapped to the open leftover; overall not assessed.",
         overall_lock: unlocked(), stale: false, needs_review: false});
     }
     await syncComputedGapStatuses(addressedId, undefined, transaction);
@@ -5135,19 +5142,19 @@ export function unassignTacticFromGap(args: Parameters<typeof unassignTacticFrom
 }
 
 export function lockCoverageDimension(args: Parameters<typeof lockCoverageDimensionChange>[0]) {
-  return withRelationshipChange(args, () => lockCoverageDimensionChange(args));
+  return withRelationshipChange({ ...args, adoption: { coverage_id: args.coverage_id } }, () => lockCoverageDimensionChange(args));
 }
 
 export function lockCoverageOverall(args: Parameters<typeof lockCoverageOverallChange>[0]) {
-  return withRelationshipChange(args, () => lockCoverageOverallChange(args));
+  return withRelationshipChange({ ...args, adoption: { coverage_id: args.coverage_id } }, () => lockCoverageOverallChange(args));
 }
 
 export function confirmCoverageReview(args: Parameters<typeof confirmCoverageReviewChange>[0]) {
-  return withRelationshipChange(args, () => confirmCoverageReviewChange(args));
+  return withRelationshipChange({ ...args, adoption: { coverage_id: args.coverage_id } }, () => confirmCoverageReviewChange(args));
 }
 
 export function acceptMapping(args: Parameters<typeof acceptMappingChange>[0]) {
-  return withRelationshipChange(args, () => {
+  return withRelationshipChange({ ...args, adoption: { gap_id: args.gap_id, tactic_ids: [args.tactic_id] } }, () => {
     if (args.model && (!args.supplied_records?.length || !args.expected_tactic_version)) {
       throw new Error("Model judgement context is unavailable. Regenerate it or make a manual judgement with a reason.");
     }
@@ -5160,7 +5167,8 @@ export function rejectMapping(args: Parameters<typeof rejectMappingChange>[0]) {
 }
 
 export function saveMappingTableRow(args: Parameters<typeof saveMappingTableRowChange>[0]) {
-  return withRelationshipChange(args, () => saveMappingTableRowChange(args));
+  const normalized = { ...args, tactic_ids: [...new Set(args.tactic_ids.map(id => id.trim()).filter(Boolean))] };
+  return withRelationshipChange({ ...normalized, adoption: { gap_id: normalized.gap_id, tactic_ids: normalized.tactic_ids } }, () => saveMappingTableRowChange(normalized));
 }
 
 export function createProposedTactic(args: Parameters<typeof createProposedTacticChange>[0]) {

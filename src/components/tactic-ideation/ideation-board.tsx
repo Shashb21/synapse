@@ -16,9 +16,10 @@ import { TacticEditPanel, type TacticEditModel } from "@/components/tactic-ideat
 import type { OpenGapCard, PlanTactic, TacticLibraryItem } from "@/lib/iegp/engine";
 import type { RetainedTacticGap } from "@/components/tactic-ideation/data";
 import { BAND_LABELS } from "@/components/matrix/bands";
-import { DOMAIN_LABELS, GAP_STATUS_LABELS } from "@/lib/iegp/enums";
+import { DOMAIN_LABELS, GAP_STATUS_LABELS, OVERALL_COVERAGE_LABELS } from "@/lib/iegp/enums";
 import { tacticColor, tacticTypeLabel } from "@/lib/iegp/tactic-type-colors";
 import { customTypesInUse, type CustomTacticType } from "@/lib/iegp/custom-tactic-type";
+import { filterPlanningGaps, planningLabel, summarizePlanning } from "@/components/tactic-ideation/planning";
 import { cn } from "@/lib/utils";
 
 type Coverage = "" | "unlinked" | "linked";
@@ -64,7 +65,7 @@ function LinkedTacticRow({ tactic, onEdit }: { tactic: PlanTactic; onEdit?: () =
         <span className="font-mono text-[10px]" style={{ color: tacticColor(tactic) }}>
           {tactic.id}
         </span>
-        <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{tactic.name}</span>
+        <span className="min-w-0 basis-full break-words text-sm font-semibold leading-snug sm:basis-0 sm:flex-1">{tactic.name}</span>
         <TypeChip tactic={tactic} />
         <StatusChip status={tactic.status} />
         <span className="text-[10px] text-muted-foreground" aria-hidden>
@@ -84,6 +85,20 @@ function LinkedTacticRow({ tactic, onEdit }: { tactic: PlanTactic; onEdit?: () =
           {body}
         </Link>
       )}
+      <div className="mt-1 grid gap-1 px-3 text-[11px] leading-5 text-muted-foreground" data-testid="linked-planning-facts">
+        <p>{planningLabel([tactic])} · Lifecycle: <span className="capitalize">{tactic.status}</span></p>
+        <p>Coverage: {tactic.overall ? OVERALL_COVERAGE_LABELS[tactic.overall] : "Unassessed"}
+          {tactic.overall && tactic.overall !== "unassessed" && !tactic.fit?.confirmation.locked ? " · Provisional" : ""}
+          {" · "}Human confirmation: {tactic.fit?.confirmation.locked ? `Confirmed by ${tactic.fit.confirmation.actor_name || "an unrecorded reviewer"}` : "Not confirmed"}
+          {tactic.stale || tactic.fit?.stale ? " · Outdated — explicit reassessment required" : ""}
+          {tactic.needs_review || tactic.fit?.needs_review ? " · Review needed" : ""}
+          {tactic.fit?.source_changed ? " · Requirement sources changed" : ""}
+        </p>
+        {tactic.fit ? <p>Remaining need: {tactic.fit.dimensions.filter(row => row.unanswered).length} unanswered requirement(s) for this tactic.
+          {tactic.fit.dimensions.some(row => row.fit === "unknown") ? " Unknown information remains; inspect fit details below." : " Inspect fit details below."}
+        </p> : null}
+        <p>Evidence availability: {tactic.fit?.contribution.evidence_available ? `Recorded date ${tactic.fit.contribution.evidence_available}` : "Not documented"}. Delivery of evidence has not been verified by this view.</p>
+      </div>
       {tactic.fit ? <RelationshipFit fit={tactic.fit} tacticName={tactic.name} /> : null}
     </li>
   );
@@ -115,10 +130,7 @@ function GapIdeationCard({
   const bodyId = `ideation-${card.gap_id}`;
   return (
     <article
-      className={cn(
-        "overflow-hidden rounded-lg border border-l-[3px] border-border bg-card",
-        linked.length > 0 ? "border-l-emerald-500" : "border-l-rose-500",
-      )}
+      className="overflow-hidden rounded-lg border border-border bg-card"
       data-testid="ideation-gap"
       data-gap-id={card.gap_id}
     >
@@ -128,7 +140,7 @@ function GapIdeationCard({
         aria-expanded={expanded}
         aria-controls={bodyId}
         onClick={onToggle}
-        className="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring"
+        className="flex w-full flex-wrap items-start gap-2 px-4 py-3 text-left hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring"
       >
         <span className="text-[11px] text-muted-foreground" aria-hidden>
           {expanded ? "▾" : "▸"}
@@ -136,13 +148,10 @@ function GapIdeationCard({
         <span className="shrink-0 font-mono text-[11px] font-medium text-primary" title={card.gap_id}>
           {gapNumberLabel(card.number)}
         </span>
-        <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">{card.gap_name}</span>
-        <span className="flex shrink-0 flex-wrap items-center gap-1.5">
-          {linked.length > 0 ? (
-            <span className="rounded-full bg-primary/10 px-2 py-px text-[10px] font-medium text-indigo-800 dark:text-indigo-300">
-              {linked.length} tactic{linked.length === 1 ? "" : "s"}
-            </span>
-          ) : null}
+        <span className="min-w-0 basis-full break-words text-sm font-semibold leading-snug sm:basis-0 sm:flex-1 text-foreground">{card.gap_name}</span>
+        <span className="flex max-w-full flex-wrap items-center gap-1.5">
+          <span className="rounded-sm bg-muted px-2 py-px text-[11px] text-foreground">{planningLabel(linked)}</span>
+          <span className="text-[11px] text-muted-foreground">Coverage status: {GAP_STATUS_LABELS[card.gap_status]}</span>
           {suggestions.length > 0 ? (
             <span className="rounded-full bg-muted px-2 py-px text-[10px] font-medium text-muted-foreground">
               {suggestions.length} option{suggestions.length === 1 ? "" : "s"}
@@ -185,7 +194,7 @@ function GapIdeationCard({
               <ul className="grid gap-1.5">
                 {linked.map((tactic) => (
                   <LinkedTacticRow
-                    key={tactic.expansion_id ?? tactic.id}
+                    key={`${tactic.id}::${tactic.expansion_id ?? "parent"}`}
                     tactic={tactic}
                     onEdit={!tactic.expansion_id && onEditTactic ? () => void onEditTactic(tactic.id) : undefined}
                   />
@@ -306,7 +315,7 @@ function LibraryPanel({ items, onEdit }: { items: TacticLibraryItem[]; onEdit?: 
                   <span className="font-mono text-[10px]" style={{ color: tacticColor(item) }}>
                     {item.id}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">{item.name}</span>
+                  <span className="min-w-0 basis-full break-words text-sm font-semibold leading-snug sm:basis-0 sm:flex-1 text-foreground">{item.name}</span>
                   <TypeChip tactic={item} />
                   {item.gaps.length === 0 ? (
                     <span className="rounded-sm bg-orange-50 px-1.5 py-px text-[10px] text-orange-800 dark:bg-orange-950/40 dark:text-orange-300">
@@ -391,26 +400,10 @@ export function IdeationBoard({
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
   const domains = useMemo(() => [...new Set([...gaps, ...retainedGaps].map(gap => gap.domain))].sort(), [gaps, retainedGaps]);
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return gaps.filter((gap) => {
-      if (q && !gap.gap_name.toLowerCase().includes(q) && !gap.gap_id.toLowerCase().includes(q) && !gapNumberLabel(gap.number).includes(q)) return false;
-      if (domain && gap.domain !== domain) return false;
-      if (coverage === "linked" && gap.tactics.length === 0) return false;
-      if (coverage === "unlinked" && gap.tactics.length > 0) return false;
-      return true;
-    });
-  }, [gaps, query, domain, coverage]);
-  const existing = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return retainedGaps.filter(gap => {
-      if (q && !gap.gap_name.toLowerCase().includes(q) && !gap.gap_id.toLowerCase().includes(q) && !gapNumberLabel(gap.number).includes(q)) return false;
-      if (domain && gap.domain !== domain) return false;
-      if (coverage === "linked" && gap.tactic_count === 0) return false;
-      if (coverage === "unlinked" && gap.tactic_count > 0) return false;
-      return true;
-    });
-  }, [retainedGaps, query, domain, coverage]);
+  const filtered = useMemo(() => filterPlanningGaps(gaps, { query, domain, links: coverage }), [gaps, query, domain, coverage]);
+  const existing = useMemo(() => filterPlanningGaps(retainedGaps, { query, domain, links: coverage }), [retainedGaps, query, domain, coverage]);
+  const currentSummary = summarizePlanning(filtered);
+  const retainedSummary = summarizePlanning(existing);
   const options = (gapId: string) => proposals.filter(proposal => proposal.gap_id === gapId);
   const toggle = (gapId: string) =>
     setExpanded((prev) => {
@@ -420,46 +413,30 @@ export function IdeationBoard({
       return next;
     });
   const filtering = Boolean(query || domain || coverage);
-  const withoutTactics = gaps.filter((gap) => gap.tactics.length === 0).length;
 
   return (
     <div className="grid gap-2" data-testid="tactic-ideation">
       {/* What this section is for, and how far along it is (owner feedback, KAN-56). */}
       <section aria-label="How Tactic Ideation works" className="grid gap-2 rounded-lg border border-border bg-card p-3" data-testid="ideation-guide">
-        <div className="flex flex-wrap items-center gap-3">
-          <p className="text-[12px] font-semibold text-foreground">
-            {gaps.length - withoutTactics} of {gaps.length} high-priority gap{gaps.length === 1 ? " has" : "s have"} a tactic
-          </p>
-          <div className="h-1.5 min-w-32 flex-1 overflow-hidden rounded-full bg-muted" aria-hidden>
-            <div
-              className="h-full bg-emerald-500 transition-all"
-              style={{ width: `${gaps.length ? ((gaps.length - withoutTactics) / gaps.length) * 100 : 0}%` }}
-            />
-          </div>
-          {withoutTactics > 0 ? (
-            <button
-              type="button"
-              onClick={() => setCoverage("unlinked")}
-              className="rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300"
-            >
-              Show the {withoutTactics} without a tactic
-            </button>
-          ) : null}
-        </div>
+        <p className="text-[12px] font-semibold text-foreground" data-testid="current-planning-summary">
+          Current eligible gaps: {currentSummary.total} shown · No candidate linked: {currentSummary.unlinked} · Candidate linked: {currentSummary.linked} · Tactic planned: {currentSummary.planned}
+        </p>
         <ol className="grid gap-1 text-[11px] leading-4 text-muted-foreground sm:grid-cols-3">
           <li>
             <span className="font-semibold text-foreground">1. Open a gap.</span> These are the gaps you validated as High
-            priority on the matrix — the ones this plan must close.
+            priority on the Prioritization Matrix.
           </li>
           <li>
             <span className="font-semibold text-foreground">2. Give it a tactic.</span> Assign one from the library
             {ai ? ", write a custom tactic, or accept a suggestion." : " or write a custom tactic."}
           </li>
           <li>
-            <span className="font-semibold text-foreground">3. Plan it.</span> A proposed tactic is an idea; set it to planned
-            or ongoing and it counts toward closing the gap and lands on the timeline.
+            <span className="font-semibold text-foreground">3. Plan and assess.</span> Planning alone does not make a gap Addressed. Supported,
+            human-confirmed Full coverage can count while planned; unassessed planned work leaves the gap Partially Addressed.
+            Publication tactics with evidence already available can count even when proposed. Schedule work on the Gantt Timeline.
           </li>
         </ol>
+        <p className="text-[11px] leading-4 text-muted-foreground">Planning counts describe saved links and lifecycle, separately from coverage assessment. Planned, ongoing and completed work is labelled Tactic planned; a cancelled link remains Candidate linked. A link or lifecycle does not verify delivery of evidence. Counts follow the search and filters below.</p>
       </section>
       <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5">
         <input
@@ -486,8 +463,8 @@ export function IdeationBoard({
           className={FIELD}
         >
           <option value="">All gaps</option>
-          <option value="unlinked">No tactics yet</option>
-          <option value="linked">Has tactics</option>
+          <option value="unlinked">No candidate linked</option>
+          <option value="linked">Has linked candidates or planned tactics</option>
         </select>
         {filtering ? (
           <button
@@ -540,10 +517,15 @@ export function IdeationBoard({
       <section aria-label="Existing options and planned work" className="grid gap-2 rounded-lg border border-border bg-card p-3">
         <h2 className="text-[13px] font-semibold">Existing options and planned work</h2>
         <p className="text-[12px] text-muted-foreground">Prior work remains here when a gap leaves current High/Open eligibility. Open a gap to inspect its options, linked tactics and decision history. Search and filters above also apply here.</p>
+        <p className="text-[12px] font-medium" data-testid="retained-planning-summary">Retained work: {retainedSummary.total} shown · No candidate linked: {retainedSummary.unlinked} · Candidate linked: {retainedSummary.linked} · Tactic planned: {retainedSummary.planned}</p>
         {existing.length ? <ul className="grid gap-2">{existing.map(gap => <li key={gap.gap_id} className="rounded-md border border-border p-3 text-[12px]">
           <GapRecordLink gapId={gap.gap_id} className="font-medium underline">{gapNumberLabel(gap.number)} · {gap.gap_name}</GapRecordLink>
-          <p className="mt-1 text-muted-foreground">{GAP_STATUS_LABELS[gap.gap_status]} · {gap.band ? BAND_LABELS[gap.band] : "Priority unset"} · {gap.needs_review ? "Needs priority review" : gap.priority_confirmed ? "Priority confirmed" : "Priority not confirmed"}</p>
+          <p className="mt-1 text-muted-foreground">{GAP_STATUS_LABELS[gap.gap_status]} · {gap.band ? BAND_LABELS[gap.band] : "Priority unset"} · {gap.needs_review ? "Needs priority review" : gap.priority_confirmed ? "Priority validated" : "Priority not validated"}</p>
+          <p className="mt-1">{planningLabel(gap.tactics)}</p>
           <p className="text-muted-foreground">{gap.option_count} option{gap.option_count === 1 ? "" : "s"} · {gap.tactic_count} linked tactic{gap.tactic_count === 1 ? "" : "s"}</p>
+          {gap.tactics.length ? <ul className="mt-2 grid gap-2" aria-label={`Linked tactics for ${gap.gap_name}`}>
+            {gap.tactics.map(tactic => <LinkedTacticRow key={`${tactic.id}::${tactic.expansion_id ?? "parent"}`} tactic={tactic} onEdit={!tactic.expansion_id && canEdit ? () => void openEditor(tactic.id) : undefined} />)}
+          </ul> : null}
         </li>)}</ul> : <p className="text-[12px] text-muted-foreground">{retainedGaps.length ? "No existing work matches the current filters." : "No prior work outside current eligible ideation yet. Existing options are shown with their eligible gap above."}</p>}
       </section>
       <LibraryPanel items={library} onEdit={canEdit ? (id) => void openEditor(id) : undefined} />

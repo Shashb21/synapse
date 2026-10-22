@@ -761,6 +761,7 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
                 // The model's verdict is the coverage; the store no longer invents one.
                 coverage: mapping.coverage,
                 assessment_origin: "ai",
+                creation_run_id: ctx.run.id,
                 dimensions: mapping.dimensions,
                 references: mapping.references,
                 model: true,

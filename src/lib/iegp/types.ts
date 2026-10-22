@@ -422,6 +422,11 @@ export type AssessmentHistoryEntry = {
 };
 
 export type GapTacticCoverage = {
+  /** Creation ownership is recorded only by the inserting workflow, never inferred. */
+  creation_run_id?: string | null;
+  /** Durable retention of the exact relationship explicitly saved or reviewed by a person. */
+  human_adopted?: boolean;
+  ownership_review_reason?: string | null;
   assessed_basis?: { requirements: string; design: string } | null;
   stale_reasons?: string[];
   assessment_history?: AssessmentHistoryEntry[];

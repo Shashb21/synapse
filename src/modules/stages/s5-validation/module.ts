@@ -161,6 +161,7 @@ export const validationModule: SynapseModule<ValidationInput, ValidationOutput> 
         await assignTacticToGap({
           gap_id: input.gap_id,
           tactic_id: input.tactic_id,
+          human: true,
           actor_name: ctx.actor.name,
           actor_function: ctx.actor.function,
           note: input.rationale,
