@@ -48,7 +48,7 @@ test.describe("Tactic Ideation place", () => {
     );
     await expect(toggles).toHaveCount(1);
     if (low) await expect(board.locator(`[data-gap-id="${low.gap_id}"]`)).toHaveCount(0);
-    await expect(board.getByTestId("ideation-guide")).toContainText("0 of 1");
+    await expect(board.getByTestId("ideation-guide")).toContainText("Current eligible gaps: 1 shown · No candidate linked: 1 · Candidate linked: 0 · Tactic planned: 0");
     await expect(board.getByText(/other open gaps? (is|are) medium, low or not validated yet/i)).toHaveCount(0);
     await expect(page.getByText(/other open gaps? (is|are) medium, low or not validated yet/i)).toBeVisible();
   });
@@ -198,6 +198,10 @@ test.describe("Retained tactic discovery (KAN-137)", () => {
     const existing = page.getByRole("region", { name: "Existing options and planned work", exact: true });
     await expect(existing).toContainText("Retained comparison evidence");
     await expect(existing).toContainText("Partially Addressed");
+    await expect(existing).toContainText("Tactic planned");
+    await expect(existing).toContainText("Lifecycle: planned");
+    await expect(existing).toContainText("Coverage: Not yet assessed");
+    await expect(existing).toContainText("Evidence availability:");
     const trigger = existing.getByRole("link", { name: /Retained comparison evidence/ });
     await trigger.focus();
     await page.keyboard.press("Enter");
@@ -233,6 +237,12 @@ test.describe("Retained tactic discovery (KAN-137)", () => {
     await page.keyboard.press("Escape");
     await expect(trigger).toBeFocused();
     await existing.screenshot({ path: testInfo.outputPath("retained-partial-work.png") });
+    await page.screenshot({ path: testInfo.outputPath("kan123-desktop-planning.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(existing.getByTestId("linked-planning-facts").first()).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath("kan123-mobile-planning.png"), fullPage: true });
+    await page.setViewportSize({ width: 1280, height: 720 });
 
     // Priority editing serves Open gaps. Reopen through the existing relationship editor first.
     const initialLink = planned.coverages.find((row: { gap_id: string }) => row.gap_id === gapId);
@@ -291,6 +301,9 @@ test.describe("Retained tactic discovery (KAN-137)", () => {
     });
     await page.goto("/?place=tactics");
     await expect(existing).toContainText("Addressed");
+    await expect(existing).toContainText("Coverage: Full");
+    await expect(existing).toContainText("Human confirmation: Confirmed by");
+    await expect(existing).toContainText("Lifecycle: planned");
     await expect(existing).toContainText("Second decision using the cohort");
     await expect(page.getByRole("button", { name: /Tactic Library/ })).toBeVisible();
     await trigger.click();

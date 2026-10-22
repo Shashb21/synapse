@@ -1,7 +1,8 @@
+/** Read current ideation eligibility and retained mapped work without changing assessments. */
 import { tacticEditVersion } from "@/lib/iegp/tactic-edit-version";
 import type { ActionIdentity } from "@/components/platform/action-dialog";
 import type { ProposalCardModel } from "@/components/ideation/proposal-card";
-import { displayedGapStatus, type OpenGapCard } from "@/lib/iegp/engine";
+import { displayedGapStatus, mappedTactics, type OpenGapCard, type PlanTactic } from "@/lib/iegp/engine";
 import { loadState } from "@/lib/iegp/store";
 import type { TacticEditModel } from "@/components/tactic-ideation/tactic-panel";
 import { can } from "@/modules/auth/roles";
@@ -19,6 +20,7 @@ export type RetainedTacticGap = {
   band: OpenGapCard["band"];
   needs_review: boolean;
   priority_confirmed: boolean;
+  tactics: PlanTactic[];
   tactic_count: number;
   option_count: number;
 };
@@ -36,6 +38,7 @@ export type TacticIdeationData = {
   tactics: Record<string, TacticEditModel>;
 };
 
+/** Load current eligibility and retained relationship facts from their existing sources. */
 export async function loadTacticIdeation(openGaps: OpenGapCard[]): Promise<TacticIdeationData> {
   const [placements, proposals, session, state] = await Promise.all([
     listPlacements(),
@@ -58,13 +61,14 @@ export async function loadTacticIdeation(openGaps: OpenGapCard[]): Promise<Tacti
   const retainedGaps = state.gaps.flatMap(gap => {
     if (eligibleIds.has(gap.id)) return [];
     const option_count = proposals.filter(proposal => proposal.gap_id === gap.id).length;
-    const tactic_count = state.coverages.filter(coverage => coverage.gap_id === gap.id).length;
+    const tactics = mappedTactics(state, gap.id);
+    const tactic_count = tactics.length;
     if (!option_count && !tactic_count) return [];
     const priority = byGap.get(gap.id);
     return [{ gap_id: gap.id, gap_name: gap.name, number: gap.number, domain: gap.domain,
       gap_status: displayedGapStatus(gap), band: priority?.band ?? null,
       needs_review: priority?.needs_review ?? false, priority_confirmed: priority?.validated ?? false,
-      tactic_count, option_count }];
+      tactics, tactic_count, option_count }];
   });
   return {
     highGaps,

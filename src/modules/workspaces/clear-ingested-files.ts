@@ -2,7 +2,9 @@
 import { sql } from "drizzle-orm";
 import { currentSchemaName, withWorkspaceTransaction } from "@/lib/iegp/db";
 import { db } from "@/modules/kernel/db";
+import { lockRelationships } from "@/lib/iegp/relationship-change";
 import { syncComputedGapStatuses } from "@/lib/iegp/store";
+import { DEFAULT_WORKSPACE_ID, scopedWorkspaceId } from "@/modules/workspaces/context";
 import { ApiGuardError } from "@/modules/auth/api-guard";
 
 /**
@@ -15,9 +17,11 @@ import { ApiGuardError } from "@/modules/auth/api-guard";
  */
 export async function clearIngestedFiles(): Promise<void> {
   const schema = await currentSchemaName();
+  const workspaceId = await scopedWorkspaceId() ?? DEFAULT_WORKSPACE_ID;
   await withWorkspaceTransaction(async () => {
     const locked = await db().execute(sql`select pg_try_advisory_xact_lock(hashtextextended(${`ingest:${schema}`}, 0)) as locked`);
     if (!locked[0]?.locked) throw new ApiGuardError(409, "ingest_busy", "An ingestion step is still running. Wait for it to finish, then retry clearing files.");
+    await lockRelationships();
     // Temporary sets live only in this transaction and schema. Missing/truncated
     // historical outputs contribute no IDs, so uncertain legacy work is preserved.
     await db().execute(sql`create temporary table clear_gap_ids on commit drop as
@@ -36,7 +40,19 @@ export async function clearIngestedFiles(): Promise<void> {
       select id from tactic_expansions where tactic_id in (select id from clear_tactic_ids)
       or (jsonb_array_length(gap_ids) > 0 and not exists (select 1 from jsonb_array_elements_text(gap_ids) g(id) where g.id not in (select id from clear_gap_ids)))`);
     await db().execute(sql`create temporary table clear_coverage_ids on commit drop as
-      select id from coverages where gap_id in (select id from clear_gap_ids) or tactic_id in (select id from clear_tactic_ids) or expansion_id in (select id from clear_expansion_ids)`);
+      select id from coverages where gap_id in (select id from clear_gap_ids) or tactic_id in (select id from clear_tactic_ids) or expansion_id in (select id from clear_expansion_ids)
+      or (creation_run_id is not null and exists (select 1 from module_runs r where r.id = coverages.creation_run_id and r.stage = 'S4' and r.status = 'ok' and r.workspace_id = ${workspaceId})
+        and not human_adopted and not coalesce((overall_lock->>'locked')::boolean, false)
+        and not exists (select 1 from jsonb_each(dimensions) d where d.value->'lock'->>'locked' = 'true')
+        and not exists (select 1 from jsonb_array_elements(assessment_history) h
+          where h->'overall_lock'->>'locked' = 'true' or exists
+            (select 1 from jsonb_each(coalesce(h->'dimensions', '{}'::jsonb)) d where d.value->'lock'->>'locked' = 'true')))`);
+    // Legacy ownership stays unknown. Surface the reason without changing the
+    // scientific verdict or pretending that a changed source made it stale.
+    await db().execute(sql`update coverages set needs_review = true,
+      ownership_review_reason = 'Relationship ownership could not be established after sources were cleared. Review this retained mapping.'
+      where id not in (select id from clear_coverage_ids) and not human_adopted
+      and not exists (select 1 from module_runs r where r.id = coverages.creation_run_id and r.stage = 'S4' and r.status = 'ok' and r.workspace_id = ${workspaceId})`);
     await db().execute(sql`create temporary table clear_timeline_ids on commit drop as
       select id from timeline_activities where tactic_id in (select id from clear_tactic_ids)
       or (jsonb_array_length(gap_ids) > 0 and not exists (select 1 from jsonb_array_elements_text(gap_ids) g(id) where g.id not in (select id from clear_gap_ids)))`);

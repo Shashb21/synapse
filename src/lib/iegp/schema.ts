@@ -239,6 +239,9 @@ export const tacticExpansions = pgTable("tactic_expansions", {
 });
 
 export const coverages = pgTable("coverages", {
+  creation_run_id: text("creation_run_id"),
+  human_adopted: boolean("human_adopted").notNull().default(false),
+  ownership_review_reason: text("ownership_review_reason"),
   assessment_origin: text("assessment_origin").$type<"human" | "ai" | "workflow">(),
   assessed_basis: jsonb("assessed_basis").$type<{ requirements: string; design: string }>(),
   stale_reasons: jsonb("stale_reasons").$type<string[]>().notNull().default([]),

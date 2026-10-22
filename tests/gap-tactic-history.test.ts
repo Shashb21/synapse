@@ -209,7 +209,9 @@ it("S5 reuses the relationship event and reports no new event for a no-op accept
   const accepted = await gate("accept_mapping");
   expect(accepted.status).toBe(200);
   const before = (await scoped(() => tacticRecord(tacticId)))!.history;
-  expect(before.find(entry => entry.id === accepted.body.output.edit_id)).toMatchObject({ entity_type: "gap_tactic", entity_id: `${id}::${tacticId}` });
+  // Mapping is already an explicit human acceptance; accepting it again is a no-op.
+  expect(accepted.body.output.edit_id).toBe("");
+  expect(before).toEqual(mapped);
   const noop = await gate("accept_mapping");
   expect(noop.status).toBe(200);
   expect(noop.body.output.edit_id).toBe("");
