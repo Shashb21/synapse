@@ -70,6 +70,9 @@ test.describe("gaps then prioritize then tactics", () => {
       page.getByText(/Review evidence status, confirm evidence assessments, and resolve Partial gaps before prioritization/i),
     ).toBeVisible();
     await expect(page.getByRole("button", { name: /^all gaps \(/i })).toBeVisible();
+    // Leave the hover-open navigation before using the nearby filter control.
+    await page.mouse.move(900, 400);
+    await page.locator("[data-inventory-filters] > summary").click();
     await expect(page.getByRole("button", { name: /^partially addressed \(/i })).toBeVisible();
     await expect(page.getByTestId("evidence-inventory").getByText(/economic burden|comparative effectiveness/i).first()).toBeVisible();
     // Rows start collapsed (KAN-56); opening one shows its actions.

@@ -58,6 +58,7 @@ test.describe("S2 evidence gap extraction", () => {
 
     await page.goto("/?place=gaps");
     await expect(page.getByRole("heading", { name: /^evidence inventory$/i })).toBeVisible();
+    await page.locator("[data-inventory-filters] > summary").click();
     await expect(page.getByRole("button", { name: /^all evidence statuses \(/i })).toBeVisible();
     const panel = await openInventoryRow(page);
     await expect(panel.getByRole("region", { name: "Constituent needs", exact: true }).getByRole("listitem").first()).toBeVisible();

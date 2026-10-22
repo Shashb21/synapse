@@ -154,7 +154,7 @@ test.describe("KAN-25 manual timeline", () => {
     await page.getByTestId(`item-actions-${unscheduled!.key}`).getByRole("button", { name: "Set dates" }).click();
     let dialog = page.getByRole("dialog");
     await dialog.getByLabel("Start").fill("2027-01-01");
-    await dialog.getByLabel("End", { exact: true }).fill("2027-08-31");
+    await dialog.getByLabel("End (required)", { exact: true }).fill("2027-08-31");
     await saveDialog(page, "Dates from the study team", /save dates/i);
 
     // Open the successor and make it wait on the new activity, which ends later than it starts.

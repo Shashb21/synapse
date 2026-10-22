@@ -47,7 +47,7 @@ test("schedules nested children, changes only child status, preserves scope and 
     await expect.soft(page.locator(`[data-activity-id="ACT-${tacticId}"]`).first()).toContainText("Parent context");
     await page.getByRole("button", {name: "Add activity", exact: true}).first().click();
     const chooser = page.getByRole("dialog");
-    await expect(chooser.getByRole("combobox", {name: "Tactic", exact: true})).toContainText("Locked parent study");
+    await expect(chooser.getByRole("combobox", {name: "Tactic (required)", exact: true})).toContainText("Locked parent study");
     await page.keyboard.press("Escape");
     const first = page.locator('[data-activity-id="ACT-EXP-EXP-BROWSER-ONE"]').first();
     await expect(first).toHaveAttribute("data-parent-activity-id", `ACT-${tacticId}`);
@@ -75,9 +75,9 @@ test("schedules nested children, changes only child status, preserves scope and 
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await page.screenshot({path: ".superpowers/sdd/2026-10-07-kan77-kan76-learning-expansions/task-7-fix1-family.png", fullPage: true});
     await page.getByRole("button", {name: "Add activity", exact: true}).first().click();
-    await chooser.getByRole("combobox", {name: "Tactic", exact: true}).selectOption(`ACT-${tacticId}`);
-    await chooser.getByLabel("Start", {exact: true}).fill("2026-10-08");
-    await chooser.getByLabel("End", {exact: true}).fill("2027-01-01");
+    await chooser.getByRole("combobox", {name: "Tactic (required)", exact: true}).selectOption(`ACT-${tacticId}`);
+    await chooser.getByLabel("Start (required)", {exact: true}).fill("2026-10-08");
+    await chooser.getByLabel("End (required)", {exact: true}).fill("2027-01-01");
     await chooser.getByLabel("Rationale (required)").fill("Schedule the original parent independently");
     await chooser.getByRole("button", {name: "Save dates", exact: true}).click();
     await expect(chooser).toHaveCount(0);

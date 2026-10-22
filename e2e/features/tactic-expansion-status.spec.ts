@@ -88,7 +88,7 @@ test("shows separate expansion scope, validates rationale and records human stat
     const community = section.locator(":scope > div").filter({has: page.getByRole("heading", {name: "Community expansion", exact: true})});
     await community.getByRole("button", {name: "Review expansion coverage"}).click();
     const coverageDialog = page.getByRole("dialog");
-    await coverageDialog.getByRole("combobox", {name: "Overall", exact: true}).selectOption("full");
+    await coverageDialog.getByRole("combobox", {name: "Overall (required)", exact: true}).selectOption("full");
     await coverageDialog.getByLabel("Rationale (required)").fill("Child question fully covered by added analysis");
     await coverageDialog.getByRole("button", {name: "Validate coverage", exact: true}).click();
     await expect(coverageDialog).toBeHidden({timeout: 30_000});

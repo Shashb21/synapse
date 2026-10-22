@@ -32,7 +32,7 @@ test("audits direct gap edits, retains failed input and previous judgement, and 
   await page.getByRole("button", { name: /^Edit GAP-/ }).click();
   const dialog = page.getByRole("dialog").filter({ hasNot: page.getByRole("heading", { name: "Gap details", exact: true }) });
   await expect(dialog).toContainText("Changing Evidence needed requires priority review again");
-  await dialog.getByLabel("Name", { exact: true }).fill("Clearer comparative evidence name");
+  await dialog.getByLabel("Name (required)", { exact: true }).fill("Clearer comparative evidence name");
   await dialog.getByLabel("Rationale (required)").fill("Clarify the display name only");
   await dialog.getByRole("button", { name: "Save edit", exact: true }).click();
   await expect(dialog).not.toBeVisible();
@@ -62,17 +62,17 @@ test("audits direct gap edits, retains failed input and previous judgement, and 
 
   // Cancelling leaves the saved evidence statement and confirmation unchanged.
   await page.getByRole("button", { name: /^Edit GAP-/ }).click();
-  await dialog.getByRole("textbox", { name: "Evidence needed", exact: true }).fill("Discarded statement draft");
+  await dialog.getByRole("textbox", { name: "Evidence needed (required)", exact: true }).fill("Discarded statement draft");
   await page.keyboard.press("Escape");
   await expect(dialog).not.toBeVisible();
   await expect(page.getByText("Discarded statement draft", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: /^Edit GAP-/ }).click();
-  await dialog.getByRole("textbox", { name: "Evidence needed", exact: true }).fill("Missing long-term comparative survival evidence");
+  await dialog.getByRole("textbox", { name: "Evidence needed (required)", exact: true }).fill("Missing long-term comparative survival evidence");
   await dialog.getByLabel("Rationale (required)").fill("The committee needs longer follow-up evidence");
   await page.route("**/api/iegp", route => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "Save failed; retry evidence edit" }) }), { times: 1 });
   await dialog.getByRole("button", { name: "Save edit", exact: true }).click();
   await expect(dialog.getByRole("alert")).toContainText("Save failed");
-  await expect(dialog.getByRole("textbox", { name: "Evidence needed", exact: true })).toHaveValue("Missing long-term comparative survival evidence");
+  await expect(dialog.getByRole("textbox", { name: "Evidence needed (required)", exact: true })).toHaveValue("Missing long-term comparative survival evidence");
   await expect(dialog.getByLabel("Rationale (required)")).toHaveValue("The committee needs longer follow-up evidence");
   await dialog.getByRole("button", { name: "Save edit", exact: true }).click();
   await expect(dialog).not.toBeVisible();
@@ -99,7 +99,7 @@ test("audits direct gap edits, retains failed input and previous judgement, and 
   await page.goto(`/gaps/${visibleGap}`);
   await page.getByRole("button", { name: "Change objective", exact: true }).click();
   await expect(dialog).toContainText("Open gaps need priority review again");
-  await dialog.getByRole("combobox", { name: "Objective", exact: true }).selectOption({ index: 1 });
+  await dialog.getByRole("combobox", { name: "Objective (required)", exact: true }).selectOption({ index: 1 });
   await dialog.getByLabel("Reason for objective change (required)").fill("Evidence now serves safety monitoring");
   await dialog.getByRole("button", { name: "Save objective", exact: true }).click();
   await expect(dialog).not.toBeVisible();

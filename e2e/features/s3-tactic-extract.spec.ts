@@ -119,7 +119,7 @@ test.describe("S3 overlap source review", () => {
       await expect(expand.locator("p").filter({hasText: /^Added subgroup question$/})).toBeVisible();
       await expand.getByRole("button", {name: "Edit expansion scope"}).click();
       let dialog = page.getByRole("dialog");
-      await dialog.getByRole("textbox", {name: "Name", exact: true}).fill("Human-reviewed subgroup");
+      await dialog.getByRole("textbox", {name: "Name (required)", exact: true}).fill("Human-reviewed subgroup");
       await dialog.getByRole("combobox", {name: "Gap to cover"}).selectOption(gap!.id as string);
       await dialog.getByLabel("Rationale (required)").fill("Scope checked against source and selected gap");
       await dialog.getByRole("button", {name: "Save review edits", exact: true}).click();

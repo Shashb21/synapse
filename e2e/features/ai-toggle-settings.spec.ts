@@ -74,7 +74,7 @@ test("turning ideation off hides only ideation's AI; other sections keep theirs"
   // Prioritization is still on: its model placement is still offered.
   await page.goto("/?place=plan&setting=all");
   await expect(page.getByRole("heading", { name: /^prioritization matrix$/i })).toBeVisible();
-  await expect(page.getByText(/land on the matrix as a first draft/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Re-suggest unvalidated", exact: true })).toBeVisible();
 
   await control(request, { action: "set_ai_section", section: "ideation", enabled: true });
   await page.goto("/ideation");
@@ -84,7 +84,9 @@ test("turning ideation off hides only ideation's AI; other sections keep theirs"
 test("the master switch turns every section off", async ({ page, request }) => {
   await control(request, { action: "set_ai_enabled", enabled: false, rationale: "e2e" });
   await page.goto("/?place=plan&setting=all");
-  await expect(page.getByText(/place each Open gap by hand/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Prioritization Matrix", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Re-suggest unvalidated", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Section assistance comparison: High, priority validated. Arrow keys move it.", exact: true })).toBeVisible();
   await page.goto("/ideation");
   await expect(page.getByRole("button", { name: /generate (more )?ideas/i })).toHaveCount(0);
   await control(request, { action: "set_ai_enabled", enabled: true, rationale: "e2e" });

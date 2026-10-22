@@ -29,7 +29,7 @@ test.describe("Dialogs fit the viewport", () => {
     expect(box!.y + box!.height).toBeLessThanOrEqual(720);
     await expect(dialog.getByRole("heading").first()).toBeInViewport();
 
-    await dialog.getByLabel("Name", { exact: true }).fill("Viewport check idea");
+    await dialog.getByLabel("Name (required)", { exact: true }).fill("Viewport check idea");
     await dialog.getByLabel("Type").selectOption("slr");
     await dialog.getByLabel("Evidence question").fill("Does the dialog fit the screen?");
     await dialog.getByPlaceholder("Why this decision, in one line").fill("A person can reach the submit button");

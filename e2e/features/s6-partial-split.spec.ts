@@ -48,6 +48,7 @@ test.describe("S6 partial gap split", () => {
     await expect(panel.getByRole("button", { name: /^confirm evidence assessment$/i })).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(panel).toBeHidden();
+    await page.locator("[data-inventory-filters] > summary").click();
     await expect(page.getByRole("button", { name: /^partially addressed \(/i })).toBeVisible();
   });
 

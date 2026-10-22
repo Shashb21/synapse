@@ -55,7 +55,8 @@ test.describe.serial("IEGP setup wizard", () => {
     await page.getByLabel(/Therapeutic area/).fill("Immunology");
     await page.getByRole("button", { name: /add indication/i }).click();
     await page.getByLabel("Indication 1", { exact: true }).fill("Moderate-to-severe psoriasis");
-    await page.getByRole("radio", { name: "Growth" }).click();
+    await page.getByRole("radio", { name: "Growth" }).focus();
+    await page.keyboard.press("Space");
     const markets = page.getByLabel(/Markets in scope/);
     await markets.fill("US");
     await markets.press("Enter");
@@ -75,14 +76,16 @@ test.describe.serial("IEGP setup wizard", () => {
     // Objectives & key decisions
     await page.getByRole("button", { name: /add objective/i }).click();
     await page.getByLabel(/^Objective 1/).fill("Win HTA in EU5");
-    await page.getByRole("radio", { name: "5", exact: true }).click();
+    await page.getByRole("radio", { name: "5", exact: true }).focus();
+    await page.keyboard.press("Space");
     await page.getByLabel(/Key decision/).fill("EU5 HTA filing");
     await page.getByLabel(/Decision date/).fill("2028-03-01");
     await page.getByLabel("Reason for objective changes").fill("Record the initial HTA objective");
     await continueTo(page, "setup-step-landscape");
 
     // Evidence landscape
-    await page.getByRole("radio", { name: "High" }).first().click();
+    await page.getByRole("radio", { name: "High" }).first().focus();
+    await page.keyboard.press("Space");
     await page.getByRole("button", { name: /add competitor/i }).click();
     await page.getByLabel(/^Competitor 1/).fill("JAK class");
     await page.getByLabel(/Standard of care/).fill("Biologics after topical failure");
@@ -132,7 +135,7 @@ test.describe.serial("IEGP setup wizard", () => {
     await page.goto("/?place=gaps");
     const tour = page.getByTestId("walkthrough");
     await expect(tour).toBeVisible();
-    await tour.getByRole("button", { name: /next: tactics/i }).click();
+    await tour.getByRole("button", { name: "Next: Tactic Ideation", exact: true }).click();
     await expect(page).toHaveURL(/place=tactics/);
     await expect(tour).toContainText(/2 of [0-9]/);
 

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { freshWorkspace } from "../support/session";
 import { iegpAction } from "../support/synapse";
 
@@ -6,14 +6,14 @@ import { iegpAction } from "../support/synapse";
 test.describe("KAN-157 authenticated workflow", () => {
   freshWorkspace({ name: "KAN-157 workflow" });
 
-  async function capture(page: Page, name: string) {
+  async function capture(page: Page, name: string, testInfo: TestInfo) {
     await page.waitForLoadState("networkidle");
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    await page.screenshot({ path: `/private/tmp/kan157-${name}.png`, fullPage: true });
-    if (name === "inventory-390") await page.screenshot({path: "/private/tmp/kan157-next-action-390.png"});
+    await page.screenshot({ path: testInfo.outputPath(`kan157-${name}.png`), fullPage: true });
+    if (name === "inventory-390") await page.screenshot({path: testInfo.outputPath("kan157-next-action-390.png")});
   }
 
-  test("native setup choices and upload expose keyboard focus", async ({page, request}) => {
+  test("native setup choices and upload expose keyboard focus", async ({page, request}, testInfo) => {
     await iegpAction(request, {action: "reset"});
     await page.setViewportSize({width: 390, height: 844});
     await page.goto("/setup");
@@ -33,11 +33,11 @@ test.describe("KAN-157 authenticated workflow", () => {
     await expect(file).toBeFocused();
     const label = page.locator("label").filter({hasText: "Choose file"});
     expect(await label.evaluate(element => getComputedStyle(element).boxShadow)).not.toBe("none");
-    await page.screenshot({path: "/private/tmp/kan157-upload-focus-390.png", fullPage: true});
+    await page.screenshot({path: testInfo.outputPath("kan157-upload-focus-390.png"), fullPage: true});
   });
 
   for (const width of [390, 1280]) {
-    test(`empty and blocked stages remain readable at ${width}px`, async ({ page, request }) => {
+    test(`empty and blocked stages remain readable at ${width}px`, async ({ page, request }, testInfo) => {
       await iegpAction(request, { action: "reset" });
       await page.setViewportSize({ width, height: 844 });
       for (const [name, url] of [
@@ -49,7 +49,7 @@ test.describe("KAN-157 authenticated workflow", () => {
       ]) {
         await page.goto(url!);
         await expect(page.getByRole("main")).toBeVisible();
-        await capture(page, `${name}-${width}`);
+        await capture(page, `${name}-${width}`, testInfo);
       }
       if (width === 390) {
         const menu = page.getByRole("button", { name: "Open places" });
@@ -61,7 +61,7 @@ test.describe("KAN-157 authenticated workflow", () => {
       }
     });
 
-    test(`populated stages and readiness handoff at ${width}px`, async ({ page, request }) => {
+    test(`populated stages and readiness handoff at ${width}px`, async ({ page, request }, testInfo) => {
       await iegpAction(request, { action: "load_demo" });
       await page.setViewportSize({ width, height: 844 });
       for (const [name, url] of [
@@ -73,7 +73,7 @@ test.describe("KAN-157 authenticated workflow", () => {
       ]) {
         await page.goto(url!);
         await expect(page.getByRole("region", { name: "Prep readiness" })).toBeVisible();
-        await capture(page, `${name}-${width}`);
+        await capture(page, `${name}-${width}`, testInfo);
         if (name === "timeline") {
           const checklist = page.getByTestId("final-save-checklist");
           await expect(checklist).not.toHaveAttribute("open", "");
