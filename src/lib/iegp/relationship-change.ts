@@ -10,12 +10,31 @@ import type { ActorFunction } from "./enums";
 import type { IegpState } from "./types";
 
 const active = new AsyncLocalStorage<ChangeActor>();
-type ChangeActor = { actor_name: string; actor_function: ActorFunction; rationale?: string; note?: string; references?: JudgementReference[]; model?: boolean; supplied_records?: ReturnType<typeof suppliedJudgementRecords>; expected_tactic_version?: string; tactic_id?: string };
+type ChangeActor = { adoption?: { coverage_id: string } | { gap_id: string; tactic_ids: string[] }; actor_name: string; actor_function: ActorFunction; rationale?: string; note?: string; references?: JudgementReference[]; model?: boolean; supplied_records?: ReturnType<typeof suppliedJudgementRecords>; expected_tactic_version?: string; tactic_id?: string };
+
+/** Retain only explicit human targets inside the owning relationship transaction. */
+async function adoptRelationships(target: ChangeActor["adoption"]): Promise<void> {
+  if (!target) return;
+  const { loadState } = await import("./store");
+  const state = await loadState();
+  for (const row of state.coverages) {
+    const selected = "coverage_id" in target ? row.id === target.coverage_id :
+      row.gap_id === target.gap_id && !row.expansion_id && target.tactic_ids.includes(row.tactic_id);
+    if (selected && (!row.human_adopted || row.ownership_review_reason)) {
+      await db().update(tables.coverages).set({ human_adopted: true, ownership_review_reason: null }).where(eq(tables.coverages.id, row.id));
+    }
+  }
+}
 
 /** All relationship owners join this transaction. Serialises set edits and sibling review
  * transitions too; no second audit store or duplicate event for nested owner calls. */
 export async function withRelationshipChange<T>(args: ChangeActor, change: () => Promise<T>, onRecorded?: (id: string) => void): Promise<T> {
-  if (active.getStore()) return change();
+  if (active.getStore()) {
+    const result = await change();
+    // Nested public actions share history, but still own their exact human targets.
+    await adoptRelationships(args.adoption);
+    return result;
+  }
   return withWorkspaceTransaction(async () => {
     await lockRelationships();
     const { loadState } = await import("./store");
@@ -39,6 +58,9 @@ export async function withRelationshipChange<T>(args: ChangeActor, change: () =>
       }
     }
     const result = await active.run(args, change);
+    // Explicit user-action targets exclude automated writes and sibling invalidation.
+    // Apply even on a no-op confirmation/save: the human still chose to retain it.
+    await adoptRelationships(args.adoption);
     const after = await loadState();
     const pairs = new Map<string, [string, string]>();
     for (const state of [before, after]) {

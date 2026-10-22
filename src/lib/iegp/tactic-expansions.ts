@@ -132,7 +132,7 @@ async function acceptTacticExpansionChange(args: AcceptExpansionArgs, transactio
     await tx.insert(t.tacticExpansions).values(child);
     await tx.insert(t.coverages).values({id: newId("COV"), tactic_id: args.tactic_id, gap_id: args.gap_id,
       expansion_id: child.id, dimensions: emptyDimensions(), overall: "unassessed", overall_rationale: rationale,
-      overall_lock: unlocked(), stale: false, needs_review: false});
+      overall_lock: unlocked(), human_adopted: true, stale: false, needs_review: false});
     // The explicit acceptance history is the permission for this child scope only.
     // Preserve the parent's mapping decision and every sibling's rejection memory.
     await appendAudit(args.actor.name, args.actor.function, "tactic_expansion", child.id, "accept", `${args.proposal_id}: ${rationale}`, tx);

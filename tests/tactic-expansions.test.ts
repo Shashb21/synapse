@@ -166,8 +166,8 @@ describe("canonical expansion acceptance", () => {
     const addressed = after.coverages.filter(c => c.gap_id === result.addressedId);
     expect(after.gaps.find(g => g.id === result.addressedId)).toMatchObject({ status: "validated_partial", computed_status: "validated_partial", human_validated: false });
     expect(addressed).toHaveLength(1);
-    expect(addressed[0]).toMatchObject({tactic_id: args.tactic_id, expansion_id: child.id, overall: "full", overall_lock: {locked: false}, confirmed_requirement_basis: null, dimensions: source.dimensions});
-    expect(after.coverages.find(c => c.gap_id === result.openId)).toMatchObject({tactic_id: args.tactic_id, expansion_id: sibling.id, overall: "unassessed"});
+    expect(addressed[0]).toMatchObject({tactic_id: args.tactic_id, expansion_id: child.id, human_adopted: true, overall: "full", overall_lock: {locked: false}, confirmed_requirement_basis: null, dimensions: source.dimensions});
+    expect(after.coverages.find(c => c.gap_id === result.openId)).toMatchObject({tactic_id: args.tactic_id, expansion_id: sibling.id, human_adopted: true, overall: "unassessed"});
     const inherited = after.expansions.find(e => e.id === child.id)!;
     expect(inherited.gap_ids).toContain(result.addressedId);
     expect(inherited.version).not.toBe(planned.version);
@@ -208,7 +208,7 @@ describe("canonical expansion acceptance", () => {
     await setExpansionStatus({expansion_id: child.id, status: "planned", rationale: "Child funded", actor, expected_version: child.version});
     const id = await rewritePartialGap({expected_resolution: gapResolutionVersion(await loadState(), args.gap_id), gap_id: args.gap_id, name: "Community addressed", status: "validated_addressed", tactic_ids: [child.id], note: "Reviewed the evidence scope and remaining need", actor_name: actor.name, actor_function: actor.function});
     const after = await loadState();
-    expect(after.coverages.filter(c => c.gap_id === id)).toMatchObject([{expansion_id: child.id, overall: "full", overall_lock: {locked: false}, confirmed_requirement_basis: null}]);
+    expect(after.coverages.filter(c => c.gap_id === id)).toMatchObject([{expansion_id: child.id, human_adopted: true, overall: "full", overall_lock: {locked: false}, confirmed_requirement_basis: null}]);
     expect(after.gaps.find(g => g.id === id)).toMatchObject({ status: "validated_partial", computed_status: "validated_partial" });
     await setExpansionStatus({expansion_id: child.id, status: "cancelled", rationale: "Cancel child", actor, expected_version: after.expansions[0]!.version});
     expect((await loadState()).gaps.find(g => g.id === id)!.computed_status).toBe("validated_open");
