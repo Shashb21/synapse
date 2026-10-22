@@ -16,13 +16,15 @@ test.describe("KAN-118 inventory readiness", () => {
     await page.goto("/?place=gaps");
     const readiness = page.getByRole("region", { name: "Inventory review readiness" });
     await expect(readiness).toContainText("2 live gaps · 1 gaps needing attention");
-    await expect(readiness).toContainText("1 gaps with unconfirmed status");
+    await expect(readiness).toContainText("1 gaps with unconfirmed evidence assessments");
     await expect(readiness).toContainText("Previously unlocked stages remain available for eligible work.");
-    const strip = page.getByRole("status", { name: "Prep readiness" });
+    const strip = page.getByRole("region", { name: "Prep readiness" });
+    await expect(strip.getByRole("link", { name: "Confirm 1 evidence assessment", exact: true })).toBeVisible();
+    await strip.locator("summary").click();
     await expect(strip).toContainText("Inventory review: 1 gaps needing attention");
     await expect(strip).toContainText("1 of 2 Open gaps with validated priority · Tactics open");
     await page.goto("/?place=plan");
-    await expect(page.getByText("1 of 2 Open gaps with priority confirmed across all settings").first()).toBeVisible();
+    await expect(page.getByText("1 of 2 Open gaps with priority validated across all settings").first()).toBeVisible();
     await expect(page.getByText("Tactics is unlocked. You can keep adjusting priorities here.")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Waiting on Gaps" })).toHaveCount(0);
     await page.goto("/?place=tactics");

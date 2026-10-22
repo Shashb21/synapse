@@ -340,10 +340,10 @@ describe("KAN-25 manual timeline, no stage run, AI off", () => {
     expect(editor).toContain("NOT PRIORITIZED");
     // Each gap row's add button is a compact "+" named for its gap.
     expect(editor).toContain("Add an activity under");
-    expect(editor).toContain("Drag a bar to move it");
+    expect(editor).toContain("In the chart, drag a bar to move it");
     const viewer = render(false);
     expect(viewer).toContain("HIGH PRIORITY");
-    for (const control of ["Add activity", "Add an activity under", "Set dates", "Save as final", "Lay out dates", "Drag a bar", "Remove"]) {
+    for (const control of ["Add activity", "Add an activity under", "Set dates", "Save as final", "Lay out dates", "drag a bar", "Remove"]) {
       expect(viewer, control).not.toContain(control);
     }
     expect(viewer).toContain("Read-only");

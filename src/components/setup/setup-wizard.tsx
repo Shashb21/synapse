@@ -172,7 +172,7 @@ export function SetupWizard({
         setForm(json.context);
         setBaseline(json.context);
         setReason("");
-        setSavedAt(json.context.saved_at || new Date().toISOString());
+        setSavedAt(json.context.saved_at || null);
       }
       if (markComplete) setComplete(true);
       return true;
@@ -418,7 +418,7 @@ export function SetupWizard({
               </ul>
               <p className="text-[12px] text-muted-foreground">Previous bands, scores, rationale and history are retained. The server checks all linked gaps again when you save.</p>
             </>
-          ) : <p className="text-[12px] text-muted-foreground">These objective edits will be recorded with your reason. Name and note changes retain priority confirmation.</p>}
+          ) : <p className="text-[12px] text-muted-foreground">These objective edits will be recorded with your reason. Name and note changes retain priority validation.</p>}
           <TextField label="Reason for objective changes" required multiline value={reason} onChange={setReason} hint="Explain why this context is changing. A manual edit does not need a supporting reference." />
           <Button type="button" variant="ghost" className="w-fit" disabled={busy} onClick={() => { setForm(baseline); setReason(""); setError(null); }}>Cancel changes</Button>
         </section>
@@ -430,7 +430,9 @@ export function SetupWizard({
             Back
           </Button>
           <span className="text-[11px] text-muted-foreground" data-testid="setup-saved-at">
-            {savedAt ? `Saved ${new Date(savedAt).toLocaleString()}` : "Not saved yet"}
+            {JSON.stringify(form) !== JSON.stringify(baseline)
+              ? "Unsaved changes"
+              : savedAt ? `Saved ${new Date(savedAt).toLocaleString()}` : complete ? "Saved · time unavailable" : "Not saved yet"}
           </span>
         </div>
         <div className="flex flex-wrap gap-2">

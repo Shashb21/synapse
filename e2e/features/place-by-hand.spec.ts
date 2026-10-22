@@ -70,6 +70,7 @@ test.describe("Place by hand", () => {
     await dialog.getByRole("button", { name: "Save placement" }).click();
     const error = dialog.getByText(`${axisLabel} score must be a number from 0 to 100.`);
     await expect(error).toBeVisible();
+    await expect(panel.getByRole("status").filter({ hasText: "Draft placement saved" })).toHaveCount(0);
     await expect(dialog.getByText(/y_score|x_score/)).toHaveCount(0);
 
     // The server refuses it the same way, naming the axis.
@@ -94,6 +95,7 @@ test.describe("Place by hand", () => {
     await yInput.fill("80");
     await dialog.getByRole("button", { name: "Save placement" }).click();
     await expect(dialog).toBeHidden();
+    await expect(panel.getByRole("status").filter({ hasText: "Draft placement saved." })).toContainText("Draft placement saved. Validate priority when you are ready.");
 
     await page.keyboard.press("Escape");
     // No reload: the gap leaves Not placed yet and shows on the matrix.
@@ -210,6 +212,7 @@ test.describe("Place by hand", () => {
     await page.keyboard.press("Escape");
     await expect(item).toBeVisible();
     await expect(item).toBeFocused();
+    await expect(page.getByRole("status").filter({ hasText: "Matrix placement saved" })).toHaveCount(0);
     await expect(page.locator('[data-slot="dialog-overlay"]')).toHaveCount(0);
     const cancelled = await (await request.get("/api/plan")).json();
     expect(cancelled.placements.find((row: { gap_id: string }) => row.gap_id === String(created.id))).toBeUndefined();
@@ -228,6 +231,7 @@ test.describe("Place by hand", () => {
     const saved = await saveResponse;
     expect(saved.ok(), await saved.text()).toBe(true);
     await expect(decision).toBeHidden({ timeout: 30_000 });
+    await expect(page.getByRole("status")).toContainText("Matrix placement saved as a draft.");
     await expect(item).toHaveCount(0);
     const chip = plot.getByRole("button", { name: /^Drag gap three: High/ });
     await expect(chip).toBeVisible();
@@ -259,6 +263,7 @@ test.describe("Place by hand", () => {
     expect(changedPlacement.version).not.toBe(current.version);
     await dialog.getByRole("button", { name: "Save placement" }).click();
     await expect(dialog.getByRole("alert")).toContainText("review the latest priority");
+    await expect(page.getByRole("status").filter({ hasText: /Draft placement saved|Priority validated/ })).toHaveCount(0);
     await expect(dialog.locator('input[name="x_score"]')).toHaveValue("90");
     await expect(reason).toHaveValue("Updated following manual assessment");
     page.once("dialog", confirmation => confirmation.accept());
@@ -271,10 +276,12 @@ test.describe("Place by hand", () => {
     await reason.fill("Updated following manual assessment");
     await dialog.getByRole("button", { name: "Save placement" }).click();
     await expect(dialog).toBeHidden();
-    await page.getByRole("button", { name: "Review and confirm priority", exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Draft placement saved" })).toBeVisible();
+    await page.getByRole("button", { name: "Validate priority", exact: true }).click();
     await reason.fill("Confirmed after reviewing the manual change");
-    await dialog.getByRole("button", { name: "Confirm priority", exact: true }).click();
+    await dialog.getByRole("button", { name: "Validate priority", exact: true }).click();
     await expect(dialog).toBeHidden();
+    await expect(page.getByRole("status").filter({ hasText: "Priority validated across all settings." })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog", { name: "Gap details", exact: true })).not.toBeVisible();
     const chip = plot.getByRole("button", { name: /^Hand gap one:/ });
@@ -287,9 +294,9 @@ test.describe("Place by hand", () => {
     await expect(dialog).toBeHidden();
     await expect(chip).toBeFocused();
     await chip.click();
-    await page.getByRole("button", { name: "Review or change priority", exact: true }).click();
+    await page.getByRole("button", { name: "Review or change validated priority", exact: true }).click();
     await reason.fill("Team deliberately reconfirmed the same band");
-    await dialog.getByRole("button", { name: "Confirm priority", exact: true }).click();
+    await dialog.getByRole("button", { name: "Validate priority", exact: true }).click();
     await expect(dialog).toBeHidden();
     await page.goto(`/gaps/${gapId}`);
     await page.reload();

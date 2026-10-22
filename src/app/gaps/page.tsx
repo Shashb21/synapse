@@ -13,12 +13,9 @@ export default async function GapsPage() {
   const ai = await aiSectionEnabled("ingestion").catch(() => false);
   return (
     <AppShell active="gaps">
-      <PageIntro kicker="Decision objects" title="Evidence gaps">
-        Gaps are named decision objects. Many candidate needs can join onto one gap.
-        Status is computed Open / Partially Addressed / Addressed from joined tactics and published
-        literature. Click Open or Addressed to override with a reason. Click Partial to split or rewrite.
-        Not sure something is a real gap? Park it from the gap page — parked gaps stay listed here but
-        drop out of Prioritize and Tactics until unparked.
+      <PageIntro kicker="Decision objects" title="Evidence Inventory">
+        Review evidence status and open a gap to confirm its evidence assessment or review mapped tactics.
+        Split or rewrite Partial gaps before prioritization.
       </PageIntro>
       {state.gaps.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">

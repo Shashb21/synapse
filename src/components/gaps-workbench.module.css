@@ -1,0 +1,30 @@
+/* Keep one semantic table and one set of review controls at every width. */
+@media (width < 48rem) {
+  .inventory, .inventory tbody { display: block; width: 100%; }
+  .inventory thead { display: none; }
+  .inventory tr { display: block; padding: 0.75rem 0; }
+  .inventory td { display: block; min-width: 0; overflow-wrap: anywhere; }
+  .inventory td[data-label]::before { content: attr(data-label) ": "; }
+  .inventory tr[data-gap-id] { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .inventory tr[data-gap-id] td:nth-child(1),
+  .inventory tr[data-gap-id] td:nth-child(2),
+  .inventory tr[data-gap-id] td:nth-child(4),
+  .inventory tr[data-gap-id] td:nth-child(5) { grid-column: 1 / -1; }
+  .inventory tr[data-gap-id] td:nth-child(1) { order: 0; border-left-width: 0; }
+  .inventory tr[data-gap-id] td:nth-child(2) { order: 1; }
+  .inventory tr[data-gap-id] td:nth-child(4) { order: 2; }
+  .inventory tr[data-gap-id] td:nth-child(5) { order: 3; }
+  .inventory tr[data-gap-id] td:nth-child(3) { order: 4; }
+  .inventory tr[data-gap-id] td:nth-child(6) { order: 5; }
+  .inventory tr[data-gap-id] td:nth-child(7) { order: 6; }
+  .inventory tr[data-gap-id] td:nth-child(8) { order: 7; }
+}
+
+/* Preserve room for assessment guidance and its actions on desktop; the parent
+   contains horizontal scrolling when all columns cannot fit comfortably. */
+@media (width >= 48rem) {
+  .inventory th:nth-child(5), .inventory td:nth-child(5) {
+    min-width: 18rem;
+    width: 26%;
+  }
+}

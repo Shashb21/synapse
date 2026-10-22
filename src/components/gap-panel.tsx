@@ -116,7 +116,7 @@ function GapPanelRecord({ gapId, priorityEditor, refreshVersion }: { gapId: stri
     {error ? <div><p role="alert">{error}</p>{record ? <p>Showing previously loaded details.</p> : null}<button type="button" className="mt-2 underline" onClick={() => setAttempt(value => value + 1)}>Retry gap details</button></div> : null}
     {loading ? <p role="status">{record ? "Refreshing gap details…" : "Loading gap details…"}</p> : null}
     {record ? <>
-      <h2 className="font-medium">{gapNumberLabel(record.gap.number)} · {record.gap.name}</h2>
+      <h2 className="break-words text-lg font-semibold leading-snug">{gapNumberLabel(record.gap.number)} · {record.gap.name}</h2>
       <section aria-label="Constituent needs">
         <h2 className="font-medium">Constituent needs</h2>
         {record.needs.length ? <ul className="grid gap-2">{record.needs.map(({ need, source, role }) => <li key={need.id}>

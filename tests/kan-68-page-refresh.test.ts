@@ -133,7 +133,8 @@ describe("Evidence Inventory follows the refreshed cards", () => {
   it("updates assessment and next action once the refreshed card is confirmed", () => {
     render(workbench([open]));
     expect(container.querySelector('[data-gap-id="GAP-002"]')?.textContent).toContain("Assessment unconfirmed");
-    expect(container.querySelector('[data-gap-id="GAP-002"] [data-next-action]')?.textContent).toBe("Confirm status");
+    expect(container.querySelector('[data-gap-id="GAP-002"] [data-next-action] button')?.textContent).toBe("Confirm evidence assessment");
+    expect(container.querySelector('[data-gap-id="GAP-002"] [data-next-action]')?.textContent).toContain("The evidence status assessment needs human confirmation.");
     render(workbench([{ ...open, human_validated: true }]));
     expect(container.querySelector('[data-gap-id="GAP-002"]')?.textContent).not.toContain("Assessment unconfirmed");
     expect(container.querySelector('[data-gap-id="GAP-002"]')?.textContent).toContain("Assessment confirmed");
@@ -196,15 +197,15 @@ describe("Prioritization Matrix follows the refreshed placements", () => {
     expect(highCount()).toMatch(/2$/);
   });
 
-  it("shows Priority confirmed once the refreshed placement is confirmed", () => {
+  it("shows Priority validated once the refreshed placement is confirmed", () => {
     const placed = { axis_scores: { impact: 90, urgency: 90 }, band: "high" as const };
     render(matrix([gap("GAP-001", placed)]));
     const highRows = () => container.querySelector('[aria-label="High gaps"]')?.textContent;
-    expect(highRows()).toContain("Review and confirm priority");
-    expect(highRows()).not.toContain("Priority confirmed");
+    expect(highRows()).toContain("Validate priority");
+    expect(highRows()).not.toContain("Priority validated");
     render(matrix([gap("GAP-001", { ...placed, validated: true, actor_name: "A. Rao" })]));
-    expect(highRows()).not.toContain("Review and confirm priority");
-    expect(highRows()).toContain("Priority confirmed");
+    expect(highRows()).not.toContain("Validate priority");
+    expect(highRows()).toContain("Priority validated");
   });
 });
 
@@ -257,8 +258,8 @@ describe("dialogs whose confirm moves on", () => {
 
   it("LockForm without href refreshes in place", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
-    render(createElement(LockForm, { label: "Confirm status", action: "validate_gap", confirmLabel: "Confirm Open" }));
-    const trigger = [...document.querySelectorAll("button")].find((b) => b.textContent === "Confirm status")!;
+    render(createElement(LockForm, { label: "Confirm evidence assessment", action: "validate_gap", confirmLabel: "Confirm Open" }));
+    const trigger = [...document.querySelectorAll("button")].find((b) => b.textContent === "Confirm evidence assessment")!;
     await act(async () => trigger.click());
     const confirm = [...document.querySelectorAll("button")].find((b) => b.textContent === "Confirm Open")!;
     await act(async () => confirm.click());

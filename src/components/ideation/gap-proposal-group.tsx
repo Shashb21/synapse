@@ -73,7 +73,7 @@ export function GapProposalGroupCard({
               }}
             >
               {group.band === "high" ? "High" : group.band === "medium" ? "Medium" : group.band === "low" ? "Low" : "Defer"}
-              {group.needs_priority_review ? " · needs priority review" : group.band_validated ? " · priority confirmed" : " · not confirmed"}
+              {group.needs_priority_review ? " · needs priority review" : group.band_validated ? " · priority validated" : " · priority not validated"}
             </span>
           ) : null}
           <span className="rounded-4xl border border-border px-1.5 py-px text-[10px] text-muted-foreground">
@@ -89,7 +89,7 @@ export function GapProposalGroupCard({
         >
           {group.gap_name}
         </GapRecordLink>}
-        <p className="text-[12px] text-muted-foreground">{group.eligible === false ? `Existing options and planned work${group.evidence_status ? ` · ${group.evidence_status}` : ""}. New AI ideation requires a confirmed High/Open priority. Medium and Low gaps use the manual or library route on the gap.` : "Current High/Open ideation"}</p>
+        <p className="text-[12px] text-muted-foreground">{group.eligible === false ? `Existing options and planned work${group.evidence_status ? ` · ${group.evidence_status}` : ""}. New AI ideation requires a validated High/Open priority. Medium and Low gaps use the manual or library route on the gap.` : "Current High/Open ideation"}</p>
         <p className="max-w-3xl text-[12px] leading-4 text-muted-foreground">{group.statement}</p>
         <p className="text-[11px] text-muted-foreground">
           {plural(group.proposals.length, "proposal")} · {open} awaiting a decision · {accepted} accepted

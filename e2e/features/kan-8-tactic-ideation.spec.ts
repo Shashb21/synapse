@@ -338,7 +338,7 @@ test.describe("Retained tactic discovery (KAN-137)", () => {
     failing = false;
     await panel.getByRole("button", { name: "Retry gap details", exact: true }).click();
     await expect(panel.getByTestId("gap-ideas")).toContainText("Existing review option");
-    await expect(panel.getByTestId("gap-planning-routes")).toContainText("Review changed context and reconfirm");
+    await expect(panel.getByTestId("gap-planning-routes")).toContainText("Review changed context and revalidate priority");
     await expect(panel.getByTestId("gap-priority")).toContainText("Priority applies across all settings");
     const bounds = await panel.boundingBox();
     expect(bounds!.width).toBeCloseTo(390, 2);

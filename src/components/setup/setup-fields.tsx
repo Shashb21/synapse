@@ -105,7 +105,7 @@ export function TextField({
   );
 }
 
-/** A row of mutually exclusive choices, rendered as toggle buttons. */
+/** Mutually exclusive native radios, styled as a row of choices. */
 export function ChoiceField<T extends string | number>({
   label,
   value,
@@ -121,8 +121,9 @@ export function ChoiceField<T extends string | number>({
   required?: boolean;
   error?: string;
 }) {
+  const groupId = useId();
   return (
-    <div role="radiogroup" aria-label={label} className="grid gap-1 text-[11px] text-muted-foreground">
+    <div role="radiogroup" aria-label={label} aria-invalid={error ? true : undefined} className="grid gap-1 text-[11px] text-muted-foreground">
       <span>
         {label}
         {required ? <span className="text-[var(--chart-1)]"> *</span> : null}
@@ -131,25 +132,30 @@ export function ChoiceField<T extends string | number>({
         {options.map((option) => {
           const on = option.id === value;
           return (
-            <button
-              key={String(option.id)}
-              type="button"
-              role="radio"
-              aria-checked={on}
-              onClick={() => onChange(option.id)}
-              className={cn(
-                "rounded-md border px-2.5 py-1 text-[12px] transition-colors",
+            <label key={String(option.id)} className="relative cursor-pointer">
+              <input
+                type="radio"
+                name={groupId}
+                value={String(option.id)}
+                checked={on}
+                onChange={() => onChange(option.id)}
+                required={required}
+                aria-describedby={error ? `${groupId}-error` : undefined}
+                className="peer sr-only"
+              />
+              <span className={cn(
+                "inline-block rounded-md border px-2.5 py-1 text-[12px] transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2",
                 on
                   ? "border-[var(--chart-1)] bg-[var(--chart-1)]/15 text-foreground"
                   : "border-border text-muted-foreground hover:border-[var(--chart-1)]/40 hover:text-foreground",
-              )}
-            >
-              {option.label}
-            </button>
+              )}>
+                {option.label}
+              </span>
+            </label>
           );
         })}
       </div>
-      <FieldError message={error} />
+      <span id={`${groupId}-error`}><FieldError message={error} /></span>
     </div>
   );
 }

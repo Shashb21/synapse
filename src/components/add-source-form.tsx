@@ -132,12 +132,12 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
             id={fileId}
             type="file"
             accept={UPLOAD_ACCEPT}
-            className="sr-only"
+            className="peer sr-only"
             onChange={(event) => void pickFile(event.currentTarget.files?.[0])}
           />
           <label
             htmlFor={fileId}
-            className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-[12px] font-medium text-foreground hover:bg-muted focus-within:ring-2 focus-within:ring-ring"
+            className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-[12px] font-medium text-foreground hover:bg-muted peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2"
           >
             <Upload className="size-3.5" aria-hidden />
             Choose file

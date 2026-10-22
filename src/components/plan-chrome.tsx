@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { BrandMark } from "@/components/brand-mark";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import {
   ChartGantt,
   ClipboardList,
@@ -10,6 +10,8 @@ import {
   ListChecks,
   Hourglass,
   Menu,
+  Pin,
+  PinOff,
   Rocket,
   Upload,
 } from "lucide-react";
@@ -109,8 +111,8 @@ type SecondaryItem = {
  * to /admin), but still valid `active` ids.
  */
 const TOOL_LABELS: Partial<Record<ShellId, string>> = {
-  matrix: "Matrix",
-  ideation: "Ideation",
+  matrix: "Prioritization Matrix",
+  ideation: "Tactic Ideation",
   presentation: "Presentation",
 };
 
@@ -152,7 +154,7 @@ function placesOf(nav: PlanNavModel, ai: boolean): PlaceItem[] {
       href: "/?place=plan",
       label: "Prioritization Matrix",
       sub: "Priority canvas",
-      hint: nav.planUnlocked ? "Place Open gaps and validate their priority" : "Waiting on Evidence Inventory: validate every gap first",
+      hint: nav.planUnlocked ? "Place Open gaps and validate their priority" : "Waiting on Evidence Inventory: confirm evidence assessments first",
       icon: Columns3,
       ready: nav.planUnlocked,
     },
@@ -353,6 +355,27 @@ export function PlanChrome({
 }) {
   const [open, setOpen] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  useEffect(() => {
+    // Read after hydration so server and initial client markup agree. Writes only
+    // happen on user interaction, never on mount (which could erase a saved pin).
+    try {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- restore a browser-only preference after hydration
+      setPinned(localStorage.getItem("synapse-navigation-pinned") === "true");
+    } catch {
+      // Blocked storage leaves the default collapsed rail and a usable toggle.
+    }
+  }, []);
+
+  function togglePinned() {
+    const next = !pinned;
+    setPinned(next);
+    try {
+      localStorage.setItem("synapse-navigation-pinned", String(next));
+    } catch {
+      // The choice still works for this page when storage is unavailable.
+    }
+  }
   // Upload is a place only while the admin has ingestion on (KAN-53).
   const ai = useAiEnabled("ingestion");
   const places = placesOf(nav, ai);
@@ -361,20 +384,17 @@ export function PlanChrome({
     SECONDARY.find((s) => s.id === active)?.label ??
     TOOL_LABELS[active] ??
     "Synapse IEGP";
-  // With AI off Gaps is always open, so the strip waits for the first gap.
-  const showReadiness = nav.gapsCount > 0 || (ai && nav.gapsUnlocked);
 
   return (
     <div className="flex min-h-full bg-background">
       {present ? null : (
-      // The rail keeps its 52px slot in the layout; the panel widens over the
-      // page on hover or keyboard focus, so the content never shifts.
-      <div data-app-chrome className="relative hidden w-[52px] shrink-0 md:block">
+      // Only pinning reserves expanded space; transient reveal overlays the page.
+      <div data-app-chrome data-rail-slot className={cn("relative hidden shrink-0 md:block", pinned ? "w-[220px]" : "w-[52px]")}>
         {/* Opens while the pointer moves over it, or for keyboard focus. Not focus-within: a mouse
             click leaves focus on the link and would keep the rail open over the page. */}
         <aside
           aria-label="Synapse navigation"
-          data-open={railOpen}
+          data-open={pinned || railOpen}
           onPointerMove={(event) => {
             // A pointer that moves over the rail opens it. CSS :hover would also open it for a
             // resting pointer (a headless browser's starts at 0,0), which fires no pointermove,
@@ -395,6 +415,17 @@ export function PlanChrome({
               <span className="text-[9.5px] text-muted-foreground">IEGP Workspace</span>
             </span>
           </Link>
+          <button
+            type="button"
+            aria-label={pinned ? "Unpin navigation" : "Pin navigation"}
+            aria-pressed={pinned}
+            title={pinned ? "Unpin navigation" : "Pin navigation"}
+            onClick={togglePinned}
+            className="mx-[6px] my-1 flex min-h-8 shrink-0 items-center gap-2.5 rounded-md px-[11px] text-[12px] text-sidebar-foreground hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
+          >
+            {pinned ? <PinOff className="size-4 shrink-0" aria-hidden /> : <Pin className="size-4 shrink-0" aria-hidden />}
+            <span className="whitespace-nowrap opacity-0 group-data-[open=true]/rail:opacity-100 group-has-[:focus-visible]/rail:opacity-100">{pinned ? "Unpin navigation" : "Pin navigation"}</span>
+          </button>
           {workspace ? (
             <div className="shrink-0 border-b border-sidebar-border px-[9px] py-2">
               <WorkspaceTag tag={workspace} dense />
@@ -434,50 +465,123 @@ export function PlanChrome({
             <DemoResetBar workspace={workspace.current} />
           </Suspense>
         ) : null}
-        {showReadiness && !present ? <ReadinessStrip nav={nav} /> : null}
+        {!present ? <ReadinessStrip nav={nav} ai={ai} /> : null}
         <main className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-4 sm:px-6">{children}</main>
       </div>
     </div>
   );
 }
 
-/**
- * Always-visible strip so the facilitator can answer "can we start the workshop?"
- * in a glance. Partial and Unconfirmed or partial link into Gaps with the matching
- * filter chip selected. See specs/consultant-ux-spec.md §5.
- */
-function ReadinessStrip({ nav }: { nav: PlanNavModel }) {
-  const blocked = (nav.inventoryAttentionCount ?? 0) > 0 || nav.partialCount > 0 || nav.unvalidatedCount > 0;
+type ReadinessAction = { label: string; href: string; explanation: string };
+
+/** Choose review work first; availability comes from gates, never inferred progress. */
+function nextReadinessAction(nav: PlanNavModel, ai: boolean): ReadinessAction {
+  const inventory = "/?place=gaps";
+  const stillAvailable = nav.tacticsUnlocked ? " Tactics stays available." : "";
+  if (nav.gapsCount === 0 && nav.inventoryAttentionCount === undefined) {
+    return {
+      label: "Check Evidence Inventory",
+      href: inventory,
+      explanation: "Readiness data is unavailable. Check the inventory or reload this page before planning the next step.",
+    };
+  }
+  if (nav.gapsCount === 0) {
+    return {
+      label: ai ? "Upload a source or add a gap" : "Add your first gap",
+      href: ai ? "/?place=upload" : inventory,
+      explanation: "Start an Evidence Inventory to assess what the plan needs.",
+    };
+  }
+  // Partials are already included in unvalidatedCount; never add these counts.
+  if (nav.partialCount > 0) {
+    return {
+      label: `Resolve ${nav.partialCount} partial ${nav.partialCount === 1 ? "gap" : "gaps"}`,
+      href: `${inventory}&gap_filter=partial`,
+      explanation: `Split or rewrite partial gaps so their remaining evidence needs can be prioritized.${stillAvailable}`,
+    };
+  }
+  if (nav.unvalidatedCount > 0) {
+    return {
+      label: `Confirm ${nav.unvalidatedCount} evidence ${nav.unvalidatedCount === 1 ? "assessment" : "assessments"}`,
+      href: `${inventory}&gap_filter=needs_validation`,
+      explanation: `Confirm each evidence assessment to establish which gaps need prioritization.${stillAvailable}`,
+    };
+  }
+  if (nav.inventoryAttentionCount !== undefined && nav.inventoryAttentionCount > 0) {
+    return {
+      label: `Review ${nav.inventoryAttentionCount} ${nav.inventoryAttentionCount === 1 ? "gap" : "gaps"} needing attention`,
+      href: `${inventory}&gap_filter=needs_attention`,
+      explanation: `Review new sources and tactic mappings to keep the evidence assessment current.${stillAvailable}`,
+    };
+  }
+  const unknownReview = nav.inventoryAttentionCount === undefined
+    ? " Inventory review data is unavailable; check for outstanding review work."
+    : "";
+  const progress = nav.prioritized;
+  if (nav.planUnlocked && progress && progress.validated < progress.open) {
+    const remaining = progress.open - progress.validated;
+    return {
+      label: `Validate ${remaining} Open gap ${remaining === 1 ? "priority" : "priorities"}`,
+      href: "/?place=plan",
+      explanation: `Validate the remaining priorities to establish which Open gaps need tactics.${unknownReview}`,
+    };
+  }
+  if (nav.tacticsUnlocked) {
+    return {
+      label: "Continue to Tactic Ideation",
+      href: "/?place=tactics",
+      explanation: `Tactic Ideation is available to plan work for High-priority Open gaps.${unknownReview}`,
+    };
+  }
+  if (nav.planUnlocked) {
+    return {
+      label: "Review Open gap priorities",
+      href: "/?place=plan",
+      explanation: progress
+        ? `No Open gap priorities remain unvalidated. Review the matrix for the next step; Tactic Ideation is not available yet.${unknownReview}`
+        : `Priority progress is unavailable; check the matrix for Open gaps that still need validation.${unknownReview}`,
+    };
+  }
+  return {
+    label: "Review Evidence Inventory",
+    href: inventory,
+    explanation: `Check the gap assessments before continuing; Prioritization Matrix is not available yet.${unknownReview}`,
+  };
+}
+
+/** Present one next action, with existing counts available in a native disclosure. */
+function ReadinessStrip({ nav, ai }: { nav: PlanNavModel; ai: boolean }) {
+  const next = nextReadinessAction(nav, ai);
+  const dataUnavailable = nav.gapsCount === 0 && nav.inventoryAttentionCount === undefined;
+  const linkClass = "text-foreground underline underline-offset-4 hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring";
   return (
-    <div
+    <section
       data-app-chrome
-      className={cn(
-        "flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-4 py-1.5 text-[11px] sm:px-6",
-        blocked ? "bg-amber-500/10 text-amber-700 dark:text-amber-200" : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-200",
-      )}
-      role="status"
+      className="border-b border-border bg-muted/30 px-4 py-3 sm:px-6"
       aria-label="Prep readiness"
     >
-      <Link href="/?place=gaps&gap_filter=needs_attention" className="text-inherit no-underline hover:underline">
-        {nav.inventoryAttentionCount === undefined
-          ? "Inventory review: unavailable"
-          : `Inventory review: ${nav.inventoryAttentionCount} gaps needing attention`}
+      <Link href={next.href} className={cn(linkClass, "inline-block max-w-full break-words text-base font-semibold leading-snug")}>
+        {next.label}
       </Link>
-      <Link href="/?place=gaps" className="text-inherit no-underline hover:underline">
-        Gaps {nav.gapsCount}
-      </Link>
-      <Link href="/?place=gaps&gap_filter=partial" className="text-inherit no-underline hover:underline">
-        Partial {nav.partialCount}
-      </Link>
-      <Link
-        href="/?place=gaps&gap_filter=needs_validation"
-        className="text-inherit no-underline hover:underline"
-      >
-        Unconfirmed or partial {nav.unvalidatedCount}
-      </Link>
-      <span className="font-medium">
-        {readinessText(nav)}
-      </span>
-    </div>
+      <p className="mt-1 max-w-[75ch] text-sm text-muted-foreground">{next.explanation}</p>
+      {dataUnavailable ? null : <details className="mt-2 text-xs">
+        <summary className="w-fit cursor-pointer text-muted-foreground focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
+          Readiness details
+        </summary>
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Link href="/?place=gaps&gap_filter=needs_attention" className={linkClass}>
+            {nav.inventoryAttentionCount === undefined
+              ? "Inventory review: unavailable"
+              : `Inventory review: ${nav.inventoryAttentionCount} gaps needing attention`}
+          </Link>
+          <Link href="/?place=gaps" className={linkClass}>Gaps {nav.gapsCount}</Link>
+          <Link href="/?place=gaps&gap_filter=partial" className={linkClass}>Partial {nav.partialCount}</Link>
+          <Link href="/?place=gaps&gap_filter=needs_validation" className={linkClass}>
+            Unconfirmed or partial {nav.unvalidatedCount}
+          </Link>
+          <span className="font-medium text-foreground">{readinessText(nav)}</span>
+        </div>
+      </details>}
+    </section>
   );
 }

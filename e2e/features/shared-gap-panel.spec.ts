@@ -74,7 +74,7 @@ test("load failure retains the gap and Inventory filters for retry, with full-sc
   expect(bounds!.height).toBeCloseTo(844, 2);
   failing = false;
   await panel.getByRole("button", { name: "Retry gap details" }).click();
-  await expect(panel.getByTestId("gap-priority")).toContainText("Priority confirmed");
+  await expect(panel.getByTestId("gap-priority")).toContainText("Priority validated");
   await panel.screenshot({ path: testInfo.outputPath("gap-panel-narrow.png") });
   await page.keyboard.press("Escape");
   await expect(trigger).toBeFocused();
@@ -122,7 +122,7 @@ test("Tactics gap and library relationship entry points share the panel and reta
   await page.getByRole("button", { name: /Tactic Library/ }).click();
   const relationship = page.getByRole("link", { name: gapId, exact: true }).first();
   await relationship.click();
-  await expect(panel.getByTestId("gap-priority")).toContainText("Priority confirmed");
+  await expect(panel.getByTestId("gap-priority")).toContainText("Priority validated");
   await page.keyboard.press("Escape");
   await expect(relationship).toBeFocused();
   await page.goto("/ideation");
@@ -175,9 +175,9 @@ test("Prioritisation addressed records use shared details after new unresolved I
   await page.goto("/?place=gaps");
   await page.getByTestId("gap-row-toggle").filter({ hasText: "New unresolved inventory evidence" }).click();
   await panel.getByRole("link", { name: "Edit gap and mappings", exact: true }).click();
-  await page.getByRole("button", { name: "Confirm status", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm evidence assessment", exact: true }).click();
   await page.getByRole("dialog").getByRole("textbox", { name: /reason|rationale|note/i }).fill("Reviewed the newly added evidence need against current study coverage");
-  await page.getByRole("dialog").getByRole("button", { name: "Confirm Open", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm evidence assessment", exact: true }).click();
   await expect(page.getByTestId("gap-confirmation")).toContainText("Confirmed by");
 });
 
@@ -230,7 +230,7 @@ test("Partial and unconfirmed panels share coverage context and full-record next
   const open = await iegpAction(request, { action: "create_gap", name: "Unconfirmed coverage panel", statement: "Unreviewed evidence need", domain: "unmet_need" });
   const partial = await iegpAction(request, { action: "create_gap", name: "Partial coverage panel", statement: "Some comparative evidence is missing", domain: "unmet_need" });
   await iegpAction(request, { action: "record_missed_tactic", gap_id: String(partial.id), name: "Existing partial evidence study", rationale: "Record existing work that addresses the studied population", evidence_question: "What evidence is available in the studied population?", type: "chart_review", status: "planned", description: "Existing study addresses part of the population", catch_up_reason: "remembered_while_reviewing" });
-  for (const [id, name, status, next] of [[String(open.id), "Unconfirmed coverage panel", "Open", "Confirm evidence coverage"], [String(partial.id), "Partial coverage panel", "Partially Addressed", "Resolve — split or rewrite"]]) {
+  for (const [id, name, status, next] of [[String(open.id), "Unconfirmed coverage panel", "Open", "Confirm evidence assessment"], [String(partial.id), "Partial coverage panel", "Partially Addressed", "Resolve — split or rewrite"]]) {
     await page.goto("/?place=gaps");
     await page.getByTestId("gap-row-toggle").filter({ hasText: name }).click();
     const panel = page.getByRole("dialog", { name: "Gap details", exact: true });
@@ -241,7 +241,7 @@ test("Partial and unconfirmed panels share coverage context and full-record next
     await expect(page).toHaveURL(new RegExp(`/gaps/${id}(?:#.*)?$`));
     await expect(page.getByTestId("gap-coverage-context")).toContainText(status);
     await expect(page.getByTestId("gap-coverage-context")).toContainText("Not confirmed yet");
-    await expect(page.getByRole("button", { name: next === "Confirm evidence coverage" ? "Confirm status" : "Resolve this Partially Addressed gap by splitting or rewriting", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: next === "Confirm evidence assessment" ? "Confirm evidence assessment" : "Resolve this Partially Addressed gap by splitting or rewriting", exact: true })).toBeVisible();
   }
 });
 

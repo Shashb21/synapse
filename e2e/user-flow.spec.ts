@@ -67,7 +67,7 @@ test.describe("gaps then prioritize then tactics", () => {
     await expect(page.getByRole("button", { name: /accept gap/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /accept tactic/i })).toHaveCount(0);
     await expect(
-      page.getByText(/Every evidence gap with its mapped tactics and computed status/i),
+      page.getByText(/Review evidence status, confirm evidence assessments, and resolve Partial gaps before prioritization/i),
     ).toBeVisible();
     await expect(page.getByRole("button", { name: /^all gaps \(/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /^partially addressed \(/i })).toBeVisible();
@@ -76,7 +76,7 @@ test.describe("gaps then prioritize then tactics", () => {
     await openInventoryRow(page);
     await expect(
       page
-        .getByRole("link", { name: /Confirm evidence coverage|Resolve — split or rewrite|Review evidence coverage and mappings/i })
+        .getByRole("link", { name: /Confirm evidence assessment|Resolve — split or rewrite|Review evidence assessment and mappings/i })
         .first(),
     ).toBeVisible();
   });

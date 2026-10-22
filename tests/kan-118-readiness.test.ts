@@ -32,7 +32,7 @@ it("updates review counts after new unresolved evidence without relocking eligib
   live[1].new_source_at = "2026-10-15T10:00:00Z";
   const html = render();
   expect(html).toContain("2 live gaps · 2 gaps needing attention");
-  expect(html).toContain("1 gaps with unconfirmed status");
+  expect(html).toContain("1 gaps with unconfirmed evidence assessments");
   expect(html).toContain("1 gaps needing tactic mapping review");
   expect(html).toContain("2 gaps needing new source review");
   expect(html).toContain("Review categories can overlap; each gap counts once in gaps needing attention.");

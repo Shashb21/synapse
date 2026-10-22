@@ -74,10 +74,10 @@ test.describe("S8 prioritization matrix", () => {
     await expect(page.getByRole("heading", { name: /^prioritization matrix$/i })).toBeVisible();
     const matrix = page.getByRole("group", { name: /^Prioritization matrix: / });
     await expect(matrix).toBeVisible();
-    await expect(page.getByText(new RegExp(`\\b0 of ${open.length} Open gaps? with priority confirmed`))).toBeVisible();
-    await expect(page.getByText(/A dashed edge means the priority is not confirmed yet/)).toBeVisible();
+    await expect(page.getByText(new RegExp(`\\b0 of ${open.length} Open gaps? with priority validated`))).toBeVisible();
+    await expect(page.getByText(/A dashed edge means the priority is not validated yet/)).toBeVisible();
     // Each gap is a card on the plot, with its suggested band and not yet validated.
-    const cards = matrix.getByRole("button", { name: /: (High|Medium|Low), priority not confirmed\. Arrow keys move it\.$/ });
+    const cards = matrix.getByRole("button", { name: /: (High|Medium|Low), priority not validated\. Arrow keys move it\.$/ });
     await expect(cards).toHaveCount(open.length);
   });
 
@@ -157,8 +157,8 @@ test.describe("S8 prioritization matrix", () => {
 
     await page.goto("/?place=plan&setting=all");
     const matrix = page.getByRole("group", { name: /^Prioritization matrix: / });
-    await expect(matrix.getByRole("button", { name: /: High, priority confirmed\. Arrow keys move it\.$/ })).toHaveCount(1);
-    await expect(page.getByText(/\b1 of \d+ Open gaps? with priority confirmed/).first()).toBeVisible();
+    await expect(matrix.getByRole("button", { name: /: High, priority validated\. Arrow keys move it\.$/ })).toHaveCount(1);
+    await expect(page.getByText(/\b1 of \d+ Open gaps? with priority validated/).first()).toBeVisible();
   });
 
   test("a re-run keeps the validated band and the suggestion the human judged", async ({ request }) => {
@@ -223,7 +223,7 @@ test.describe("KAN-128 priority context and next actions", () => {
       await expect(page.locator("dt").filter({ hasText: new RegExp(`^${label}$`) }).locator("..").locator("dd")).toHaveText("Unknown");
     }
     await expect(page.getByTestId("gap-priority").getByRole("link", { name: "Set priority", exact: true })).toBeVisible();
-    await expect(page.getByTestId("gap-confirmation")).toContainText("Evidence coverage review");
+    await expect(page.getByTestId("gap-confirmation")).toContainText("Evidence assessment confirmation");
 
     await page.goto("/?place=plan&setting=all");
     await page.getByTestId("unplaced-gap").filter({ hasText: "Comparative persistence" }).click();
@@ -246,22 +246,22 @@ test.describe("KAN-128 priority context and next actions", () => {
     await dialog.getByLabel("Reason for change (required)").fill("Initial manual priority assessment");
     await dialog.getByRole("button", { name: "Save placement", exact: true }).click();
     await expect(dialog).toBeHidden();
-    await detail.getByRole("button", { name: "Review and confirm priority", exact: true }).click();
+    await detail.getByRole("button", { name: "Validate priority", exact: true }).click();
     await dialog.getByLabel("Reason for change (required)").fill("Blocks reimbursement briefing papers");
-    await dialog.getByRole("button", { name: "Confirm priority", exact: true }).click();
+    await dialog.getByRole("button", { name: "Validate priority", exact: true }).click();
     await expect(dialog).toBeHidden();
-    await expect(detail).toContainText("Priority confirmed");
+    await expect(detail).toContainText("Priority validated");
     await expect(detail.getByRole("link", { name: "Continue to tactics", exact: true })).toHaveCount(0);
     await expect(detail.getByRole("link", { name: "Review remaining plan-wide priorities" })).toBeVisible();
 
     await page.goto("/?place=plan&setting=1L");
-    await expect(page.getByTestId("prioritize-toolbar")).toContainText("In 1L: 1 of 1 priorities confirmed.");
+    await expect(page.getByTestId("prioritize-toolbar")).toContainText("In 1L: 1 of 1 priorities validated.");
     await expect(page.getByTestId("prioritize-toolbar")).toContainText("1 remaining across the whole plan.");
     const highRows = page.getByRole("region", { name: "High gaps", exact: true });
     await expect(highRows).toContainText("High · Evidence needed by: Unknown");
-    await expect(highRows).toContainText("Priority confirmed");
+    await expect(highRows).toContainText("Priority validated");
     await page.goto("/?place=plan&setting=2L");
-    await expect(page.getByRole("group", { name: /^Prioritization matrix:/ }).getByRole("button", { name: /^Comparative persistence: High, priority confirmed/ })).toBeVisible();
+    await expect(page.getByRole("group", { name: /^Prioritization matrix:/ }).getByRole("button", { name: /^Comparative persistence: High, priority validated/ })).toBeVisible();
 
     await planAction(request, { action: "set_placement", gap_id: unknownGap, band: "low", validate: true, rationale: "Unknown context does not prevent manual judgement" });
     await iegpAction(request, { action: "unlock_tactics" });
@@ -271,7 +271,7 @@ test.describe("KAN-128 priority context and next actions", () => {
     await page.goto(`/gaps/${knownGap}`);
     await page.reload();
     const priority = page.getByTestId("gap-priority");
-    await expect(priority).toContainText("Priority confirmed");
+    await expect(priority).toContainText("Priority validated");
     await expect(priority).toContainText("82 / 100");
     await expect(priority).toContainText("76 / 100");
     await expect(priority).toContainText("Human placement for the dossier");

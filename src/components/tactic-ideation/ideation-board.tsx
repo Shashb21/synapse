@@ -64,7 +64,7 @@ function LinkedTacticRow({ tactic, onEdit }: { tactic: PlanTactic; onEdit?: () =
         <span className="font-mono text-[10px]" style={{ color: tacticColor(tactic) }}>
           {tactic.id}
         </span>
-        <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{tactic.name}</span>
+        <span className="min-w-0 basis-full break-words text-sm font-semibold leading-snug sm:basis-0 sm:flex-1">{tactic.name}</span>
         <TypeChip tactic={tactic} />
         <StatusChip status={tactic.status} />
         <span className="text-[10px] text-muted-foreground" aria-hidden>
@@ -128,7 +128,7 @@ function GapIdeationCard({
         aria-expanded={expanded}
         aria-controls={bodyId}
         onClick={onToggle}
-        className="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring"
+        className="flex w-full flex-wrap items-start gap-2 px-4 py-3 text-left hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring"
       >
         <span className="text-[11px] text-muted-foreground" aria-hidden>
           {expanded ? "▾" : "▸"}
@@ -136,8 +136,8 @@ function GapIdeationCard({
         <span className="shrink-0 font-mono text-[11px] font-medium text-primary" title={card.gap_id}>
           {gapNumberLabel(card.number)}
         </span>
-        <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">{card.gap_name}</span>
-        <span className="flex shrink-0 flex-wrap items-center gap-1.5">
+        <span className="min-w-0 basis-full break-words text-sm font-semibold leading-snug sm:basis-0 sm:flex-1 text-foreground">{card.gap_name}</span>
+        <span className="flex max-w-full flex-wrap items-center gap-1.5">
           {linked.length > 0 ? (
             <span className="rounded-full bg-primary/10 px-2 py-px text-[10px] font-medium text-indigo-800 dark:text-indigo-300">
               {linked.length} tactic{linked.length === 1 ? "" : "s"}
@@ -306,7 +306,7 @@ function LibraryPanel({ items, onEdit }: { items: TacticLibraryItem[]; onEdit?: 
                   <span className="font-mono text-[10px]" style={{ color: tacticColor(item) }}>
                     {item.id}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">{item.name}</span>
+                  <span className="min-w-0 basis-full break-words text-sm font-semibold leading-snug sm:basis-0 sm:flex-1 text-foreground">{item.name}</span>
                   <TypeChip tactic={item} />
                   {item.gaps.length === 0 ? (
                     <span className="rounded-sm bg-orange-50 px-1.5 py-px text-[10px] text-orange-800 dark:bg-orange-950/40 dark:text-orange-300">
@@ -449,15 +449,16 @@ export function IdeationBoard({
         <ol className="grid gap-1 text-[11px] leading-4 text-muted-foreground sm:grid-cols-3">
           <li>
             <span className="font-semibold text-foreground">1. Open a gap.</span> These are the gaps you validated as High
-            priority on the matrix — the ones this plan must close.
+            priority on the Prioritization Matrix.
           </li>
           <li>
             <span className="font-semibold text-foreground">2. Give it a tactic.</span> Assign one from the library
             {ai ? ", write a custom tactic, or accept a suggestion." : " or write a custom tactic."}
           </li>
           <li>
-            <span className="font-semibold text-foreground">3. Plan it.</span> A proposed tactic is an idea; set it to planned
-            or ongoing and it counts toward closing the gap and lands on the timeline.
+            <span className="font-semibold text-foreground">3. Plan and assess.</span> Planning alone does not make a gap Addressed. Supported,
+            human-confirmed Full coverage can count while planned; unassessed planned work leaves the gap Partially Addressed.
+            Publication tactics with evidence already available can count even when proposed. Schedule work on the Gantt Timeline.
           </li>
         </ol>
       </section>
@@ -542,7 +543,7 @@ export function IdeationBoard({
         <p className="text-[12px] text-muted-foreground">Prior work remains here when a gap leaves current High/Open eligibility. Open a gap to inspect its options, linked tactics and decision history. Search and filters above also apply here.</p>
         {existing.length ? <ul className="grid gap-2">{existing.map(gap => <li key={gap.gap_id} className="rounded-md border border-border p-3 text-[12px]">
           <GapRecordLink gapId={gap.gap_id} className="font-medium underline">{gapNumberLabel(gap.number)} · {gap.gap_name}</GapRecordLink>
-          <p className="mt-1 text-muted-foreground">{GAP_STATUS_LABELS[gap.gap_status]} · {gap.band ? BAND_LABELS[gap.band] : "Priority unset"} · {gap.needs_review ? "Needs priority review" : gap.priority_confirmed ? "Priority confirmed" : "Priority not confirmed"}</p>
+          <p className="mt-1 text-muted-foreground">{GAP_STATUS_LABELS[gap.gap_status]} · {gap.band ? BAND_LABELS[gap.band] : "Priority unset"} · {gap.needs_review ? "Needs priority review" : gap.priority_confirmed ? "Priority validated" : "Priority not validated"}</p>
           <p className="text-muted-foreground">{gap.option_count} option{gap.option_count === 1 ? "" : "s"} · {gap.tactic_count} linked tactic{gap.tactic_count === 1 ? "" : "s"}</p>
         </li>)}</ul> : <p className="text-[12px] text-muted-foreground">{retainedGaps.length ? "No existing work matches the current filters." : "No prior work outside current eligible ideation yet. Existing options are shown with their eligible gap above."}</p>}
       </section>

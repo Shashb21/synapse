@@ -18,10 +18,11 @@ test.describe("S5 classification and validation gate", () => {
     await page.goto("/?place=gaps");
     await expect(page.getByRole("heading", { name: /^evidence inventory$/i })).toBeVisible();
     await expect(
-      page.getByText(/Every evidence gap with its mapped tactics and computed status/),
+      page.getByText(/Review evidence status, confirm evidence assessments, and resolve Partial gaps before prioritization/),
     ).toBeVisible();
     await expect(page.getByRole("button", { name: /accept gap/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /^all gaps \(/i })).toBeVisible();
+    await page.locator("details[data-inventory-filters] summary").click();
     await expect(page.getByRole("button", { name: /^partially addressed \(/i })).toBeVisible();
   });
 
@@ -31,8 +32,8 @@ test.describe("S5 classification and validation gate", () => {
 
     await page.goto("/?place=gaps");
     const panel = await openInventoryRow(page, target.gap_id);
-    await panel.getByRole("link", { name: "Confirm evidence coverage", exact: true }).click();
-    const confirm = page.getByRole("button", { name: /^confirm status$/i });
+    await panel.getByRole("link", { name: "Confirm evidence assessment", exact: true }).click();
+    const confirm = page.getByRole("button", { name: /^confirm evidence assessment$/i });
     await confirm.click();
 
     // Signed in, so confirmation records the required reason under the current identity.
@@ -40,7 +41,7 @@ test.describe("S5 classification and validation gate", () => {
     await expect(dialog.getByText(/recorded in the audit trail under your name/i)).toBeVisible();
     await expect(dialog.getByRole("textbox", { name: /^name$/i })).toHaveCount(0);
     await dialog.getByRole("textbox", { name: "Reason (required)", exact: true }).fill("Both source quotes support this gap");
-    await dialog.getByRole("button", { name: /^confirm open$/i }).click();
+    await dialog.getByRole("button", { name: /^confirm evidence assessment$/i }).click();
     await expect(dialog).toBeHidden();
     await expect(confirm).toHaveCount(0);
 

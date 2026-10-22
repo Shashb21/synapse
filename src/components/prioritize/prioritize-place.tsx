@@ -177,28 +177,36 @@ export async function PrioritizePlace({
         <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
           <div className="min-w-0 flex-1">
             <p className="text-[12px] font-semibold text-foreground">
-              {allCounts.validated} of {allCounts.open} Open gaps with priority confirmed across all settings
+              {allCounts.validated} of {allCounts.open} Open gaps with priority validated across all settings
             </p>
             <p className="text-[12px] text-muted-foreground">Priority applies across all settings</p>
             {scope !== ALL_SETTINGS_SCOPE ? (
               <p className="text-[12px] text-muted-foreground">
-                In {scopeLabel}: {validatedIn(scopeGaps)} of {scopeGaps.length} priorities confirmed.
+                In {scopeLabel}: {validatedIn(scopeGaps)} of {scopeGaps.length} priorities validated.
                 {" "}{allCounts.open - allCounts.validated} remaining across the whole plan.
               </p>
             ) : null}
             <p className="text-[12px] text-muted-foreground">
               {state.asset.tactics_unlocked
                 ? "Tactics is unlocked. You can keep adjusting priorities here."
+                : allCounts.open === 0
+                  ? "There are no Open gaps to prioritize. Review evidence assessments on Evidence Inventory before continuing."
                 : allCounts.validated === allCounts.open && allCounts.open > 0
-                  ? "Every Open gap has a confirmed priority. Continue below to unlock Tactics."
-                  : "Set and confirm priority for every Open gap across the whole plan to unlock Tactics. Unknown context does not block confirmation."}
+                  ? "Every Open gap has a validated priority. Continue below to unlock Tactics."
+                  : "Set and validate priority for every Open gap across the whole plan to unlock Tactics. Unknown context does not block validation."}
             </p>
           </div>
           {unlockTactics}
         </div>
       </section>
       {scopeGaps.length === 0 ? (
-        <p className="text-[12px] text-muted-foreground">No Open gap in {scopeLabel}.</p>
+        <p className="text-[12px] text-muted-foreground">
+          {allCounts.open === 0 ? (
+            <>No Open gaps across the plan. <Link href="/?place=gaps" className="underline">Review Evidence Inventory</Link> to check gap assessments or add a gap.</>
+          ) : (
+            <>No Open gaps in {scopeLabel}. <Link href={scopeHref(ALL_SETTINGS_SCOPE)} className="underline">View all settings</Link> to continue prioritizing.</>
+          )}
+        </p>
       ) : xAxis && yAxis ? (
         <PrioritizeMatrix
           key={`${scope}:${xAxis.id}:${yAxis.id}`}
