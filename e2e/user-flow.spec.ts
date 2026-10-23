@@ -67,16 +67,19 @@ test.describe("gaps then prioritize then tactics", () => {
     await expect(page.getByRole("button", { name: /accept gap/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /accept tactic/i })).toHaveCount(0);
     await expect(
-      page.getByText(/Every evidence gap with its mapped tactics and computed status/i),
+      page.getByText(/Review evidence status, confirm evidence assessments, and resolve Partial gaps before prioritization/i),
     ).toBeVisible();
     await expect(page.getByRole("button", { name: /^all gaps \(/i })).toBeVisible();
+    // Leave the hover-open navigation before using the nearby filter control.
+    await page.mouse.move(900, 400);
+    await page.locator("[data-inventory-filters] > summary").click();
     await expect(page.getByRole("button", { name: /^partially addressed \(/i })).toBeVisible();
     await expect(page.getByTestId("evidence-inventory").getByText(/economic burden|comparative effectiveness/i).first()).toBeVisible();
     // Rows start collapsed (KAN-56); opening one shows its actions.
     await openInventoryRow(page);
     await expect(
       page
-        .getByRole("link", { name: /Confirm evidence coverage|Resolve — split or rewrite|Review evidence coverage and mappings/i })
+        .getByRole("link", { name: /Confirm evidence assessment|Resolve — split or rewrite|Review evidence assessment and mappings/i })
         .first(),
     ).toBeVisible();
   });

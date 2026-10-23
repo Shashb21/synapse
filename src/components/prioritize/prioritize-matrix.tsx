@@ -221,13 +221,13 @@ export function AxisChooser({
     <section className="grid gap-4 border border-border bg-card/40 p-4" aria-labelledby="axis-chooser">
       <div>
         <h2 id="axis-chooser" className="text-[15px] font-medium text-foreground">
-          How should {scopeLabel} be prioritized?
+          1. Choose axes for {scopeLabel}
         </h2>
         <p className="mt-1 max-w-2xl text-[12px] leading-5 text-muted-foreground">
           {ai
             ? "Pick the two axes for the matrix. The model places each Open gap as a first draft; you then drag gaps to change their priority and validate each one."
             : "Pick the two axes for the matrix. You place each Open gap yourself: type its scores or band, or drop it on the matrix, then validate it."}{" "}
-          Top-right is Prioritize (High), top-left Plan (Medium), bottom-right Monitor (Low) and bottom-left Defer. The quadrant only suggests a priority: you confirm it with a rationale.
+          Changing axes changes the plotted view. Saved priorities apply across all settings. Review placement, then validate priority with your reason. Top-right is Prioritize (High), top-left Plan (Medium), bottom-right Monitor (Low) and bottom-left Defer. The quadrant only suggests a priority: you validate it with a rationale.
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -358,7 +358,7 @@ export function PrioritizeMatrix({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [positions, setPositions] = useState<Record<string, Point>>({});
   const [busy, setBusy] = useState<string | null>(null);
-  // An error is announced as an alert; a summary (re-suggest finished) is quiet text.
+  // Errors interrupt as alerts; saved results use a polite live status.
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
   const showError = (text: string) => setMessage({ text, error: true });
 
@@ -426,6 +426,7 @@ export function PrioritizeMatrix({
       dropPosition(gapId);
       return;
     }
+    setMessage(null);
     // Preview only. Nothing is sent on cancellation, navigation or pagehide.
     setPendingMove({ gapId, point: rounded, version: gap.version ?? null, contextVersion: gap.context_version ?? null });
   }
@@ -577,27 +578,9 @@ export function PrioritizeMatrix({
 
   return (
     <div ref={matrixRef} className="grid gap-4">
-      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Highlight a priority">
-        {BANDS.map((b) => {
-          const on = highlight === b;
-          return (
-            <button
-              key={b}
-              type="button"
-              aria-pressed={on}
-              onClick={() => setHighlight(on ? null : b)}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-1.5 text-[11.5px] transition-colors",
-                on ? "border-current" : "border-border hover:bg-muted",
-              )}
-              style={on ? { color: BAND_TOKENS[b] } : undefined}
-            >
-              <span className="size-2 rounded-full" style={{ backgroundColor: BAND_TOKENS[b] }} aria-hidden />
-              <span className="font-medium text-foreground">{QUADRANT_NAMES[b]}</span>
-              <span className="font-bold" style={{ color: BAND_TOKENS[b] }}>{bandCounts[b]}</span>
-            </button>
-          );
-        })}
+      <div>
+        <h2 className="text-[15px] font-medium text-foreground">1. Choose axes</h2>
+        <p className="mt-1 text-[12px] leading-5 text-muted-foreground">Changing axes changes the plotted view for this setting and saves immediately. Priority applies across all settings.</p>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground" data-testid="matrix-axes">
@@ -655,13 +638,38 @@ export function PrioritizeMatrix({
           ) : null}
         </div>
       </div>
+      <div>
+        <h2 className="text-[15px] font-medium text-foreground">2. Review placement</h2>
+        <p className="mt-1 text-[12px] leading-5 text-muted-foreground">Select a gap to review its context and scores. Save a draft placement, then validate priority with your own reason in the gap details.</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Highlight a priority">
+        {BANDS.map((b) => {
+          const on = highlight === b;
+          return (
+            <button
+              key={b}
+              type="button"
+              aria-pressed={on}
+              onClick={() => setHighlight(on ? null : b)}
+              className={cn(
+                "inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-1.5 text-[11.5px] transition-colors",
+                on ? "border-current" : "border-border hover:bg-muted",
+              )}
+              style={on ? { color: BAND_TOKENS[b] } : undefined}
+            >
+              <span className="size-2 rounded-full" style={{ backgroundColor: BAND_TOKENS[b] }} aria-hidden />
+              <span className="font-medium text-foreground">{QUADRANT_NAMES[b]}</span>
+              <span className="font-bold" style={{ color: BAND_TOKENS[b] }}>{bandCounts[b]}</span>
+            </button>
+          );
+        })}
+      </div>
       {message?.error ? (
         <p role="alert" className="text-[12px] text-destructive">
           {message.text}
         </p>
-      ) : message ? (
-        <p className="text-[12px] text-muted-foreground">{message.text}</p>
       ) : null}
+      <p role="status" aria-atomic="true" className="text-[12px] text-foreground">{message && !message.error ? message.text : ""}</p>
 
       {pendingMove ? (
         <ActionDialog protectUnsavedChanges
@@ -679,6 +687,9 @@ export function PrioritizeMatrix({
             }
           }}
           trigger={null}
+          onSuccess={(result) => setMessage({ text: (result.placement as { validated?: boolean } | undefined)?.validated
+            ? "Matrix placement saved. Priority remains validated across all settings."
+            : "Matrix placement saved as a draft. Validate priority when you are ready.", error: false })}
           label="Save matrix move"
           title={`Review matrix move for ${gaps.find((gap) => gap.gap_id === pendingMove.gapId)?.gap_name ?? pendingMove.gapId}`}
           description={`${xAxis.label}: ${scoreFromFavourability(xAxis, pendingMove.point.x)}; ${yAxis.label}: ${scoreFromFavourability(yAxis, pendingMove.point.y)}. Proposed band: ${BAND_LABELS[bandAt(pendingMove.point, xAxis, yAxis)]}. Give a reason to save this move. Closing cancels it.`}
@@ -720,7 +731,7 @@ export function PrioritizeMatrix({
                     onPointerCancel={() => { dragRef.current = null; dropPosition(gap.gap_id); }}
                     onKeyDown={(event) => onKeyDown(event, gap.gap_id, point!)}
                     onClick={(event) => { if (suppressGapClick.current) { suppressGapClick.current = false; return; } gapTriggerRef.current = event.currentTarget; setSelectedId(gap.gap_id); }}
-                    aria-label={`${gap.gap_name}: ${band ? BAND_LABELS[band] : "unplaced"}${validated ? ", priority confirmed" : ", priority not confirmed"}. Arrow keys move it.`}
+                    aria-label={`${gap.gap_name}: ${band ? BAND_LABELS[band] : "unplaced"}${validated ? ", priority validated" : ", priority not validated"}. Arrow keys move it.`}
                     aria-pressed={isSelected}
                     className={cn(
                       "absolute flex max-w-[42%] -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full border bg-card/95 px-2 py-0.5 text-[11px] leading-4 text-foreground shadow-sm transition-opacity",
@@ -762,7 +773,7 @@ export function PrioritizeMatrix({
           </div>
           <p className="pl-7 text-[11px] leading-4 text-muted-foreground">
             Drag a gap to change its priority, or select it and use the arrow keys (Shift for bigger
-            steps). Every saved move needs a reason. A dashed edge means the priority is not confirmed yet.
+            steps). Every saved move needs a reason. A dashed edge means the priority is not validated yet.
           </p>
         </div>
 

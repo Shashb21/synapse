@@ -1,8 +1,20 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import path from "node:path";
 
 export default defineConfig({
   test: {
+    // Keep benchmark isolation and its existing I/O timeout consistent with
+    // `npm run test:kan100` when running the complete suite.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "application",
+          exclude: [...configDefaults.exclude, "tests/kan100-*.test.ts"],
+        },
+      },
+      "./vitest.kan100.config.ts",
+    ],
     environment: "node",
     include: ["tests/**/*.test.ts"],
     setupFiles: ["./tests/support/ai-on.ts"],

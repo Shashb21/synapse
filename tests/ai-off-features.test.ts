@@ -141,8 +141,10 @@ describe("the first screen with AI off", () => {
     expect(off).not.toContain('href="/?place=upload"');
     expect(off).toContain("Evidence Inventory");
     expect(off).toMatch(/href="\/\?place=gaps"/);
-    // No readiness strip on an empty manual plan.
-    expect(off).not.toContain('aria-label="Prep readiness"');
+    // The next-action strip also guides a manual plan without offering AI upload.
+    expect(off).toContain('aria-label="Prep readiness"');
+    expect(off).toContain("Check Evidence Inventory");
+    expect(off).not.toContain("Upload a source");
     const on = renderChrome(true);
     expect(on).toContain('href="/?place=upload"');
     // KAN-24: Gaps still opens with AI on and no source, but shows it is waiting.

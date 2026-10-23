@@ -17,7 +17,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { DOMAIN_LABELS, GAP_STATUS_LABELS } from "@/lib/iegp/enums";
+import { DOMAIN_LABELS } from "@/lib/iegp/enums";
 import type { ReviewGapCard } from "@/lib/iegp/engine";
 import { cn } from "@/lib/utils";
 import { postJson } from "@/lib/post-json";
@@ -353,11 +353,11 @@ function RoomGapCard({
           />
         ) : !card.human_validated ? (
           <LockForm
-            label="Confirm status"
+            label="Confirm evidence assessment"
             action="validate_gap"
             extra={{ gap_id: card.gap_id }}
             note={{ label: "Note (optional)" }}
-            confirmLabel={`Confirm ${GAP_STATUS_LABELS[card.gap_status]}`}
+            confirmLabel="Confirm evidence assessment"
             variant="default"
           />
         ) : null}

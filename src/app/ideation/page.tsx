@@ -118,10 +118,10 @@ export default async function IdeationPage() {
 
   return (
     <AppShell active="ideation">
-      <PageIntro kicker="Tactics ideation" title="Tactics ideation review">
+      <PageIntro kicker="Tactics ideation" title="Tactic Ideation">
         {ai
-          ? "The model designs candidate tactics for open gaps you validated as High priority only, compares new tactics and expansions against the tactic library and keeps the best per gap. Medium and Low gaps get their tactics from the tactic library or by hand on the gap. Accepting a new proposal creates a proposed tactic; accepting an expansion adds a proposed child to its existing target; both decisions need a rationale. You can edit any idea before deciding it, or write your own — generating again adds ideas and never rewrites yours."
-          : "Write ideas for open gaps validated as High priority. Medium and Low gaps get their tactics from the tactic library or by hand on the gap. Accepting an idea creates a proposed tactic mapped to the gap; both decisions need a rationale."}
+          ? "Review suggestions for High-priority Open gaps, or write a custom tactic. Accept or reject with your reason."
+          : "Write custom tactics for High-priority Open gaps. Accept or reject with your reason."}
       </PageIntro>
 
       <div className="grid gap-4">
@@ -155,7 +155,7 @@ export default async function IdeationPage() {
               />
             )
           ) : (
-            <p className="text-[11px] text-muted-foreground">{eligibleCount ? "Add ideas by hand." : "Existing work remains available. New AI ideation requires a confirmed High/Open priority."}</p>
+            <p className="text-[11px] text-muted-foreground">{eligibleCount ? "Add ideas by hand." : "Existing work remains available. New AI ideation requires a validated High/Open priority."}</p>
           )}
         </div>
 

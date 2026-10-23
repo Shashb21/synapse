@@ -16,6 +16,7 @@ import { useAiEnabled } from "@/components/platform/ai-status";
 import { ExportImageButton } from "@/components/timeline/export-image-button";
 import { AlertTriangle } from "lucide-react";
 import { DependencyDialog } from "@/components/timeline/dependency-dialog";
+import { TimelineActivityList } from "./timeline-activity-list";
 import { GapGantt, type TimelinePriorityFilter } from "@/components/timeline/gap-gantt";
 import { cn } from "@/lib/utils";
 import { tacticTypeLabel } from "@/lib/iegp/tactic-type-colors";
@@ -24,6 +25,7 @@ import {
   DragRescheduleDialog,
   ActivitySheetEditor,
   ManualDatesDialog,
+  CreateActivityDialog,
   type DragChange,
 } from "@/components/timeline/timeline-dialogs";
 import {
@@ -164,6 +166,7 @@ export function TimelineBoard({
   viewingVersion?: { version: number; status: string } | null;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const activityReturnFocusRef = useRef<HTMLElement | SVGElement | null>(null);
   // A saved version is shown read-only (KAN-85).
   const readOnly = Boolean(viewingVersion);
   const canSaveFinal = canSaveFinalProp && !readOnly;
@@ -173,6 +176,12 @@ export function TimelineBoard({
   const canEditDetails = canEditDetailsProp && !readOnly;
   const ai = useAiEnabled();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Keep the current HTML or SVG trigger, including when switching views.
+  function selectActivity(id: string) {
+    const trigger = document.activeElement;
+    activityReturnFocusRef.current = trigger instanceof HTMLElement || trigger instanceof SVGElement ? trigger : null;
+    setSelectedId(id);
+  }
   // Read from the live model, so an edit shows as soon as the page refreshes.
   const datedSelection = selectedId ? (model.activities.find((row) => row.id === selectedId) ?? null) : null;
   const pendingSelection = selectedId ? (model.pending.find((row) => row.activity_id === selectedId) ?? null) : null;
@@ -186,6 +195,7 @@ export function TimelineBoard({
   const selectedConflicts = selected
     ? view.conflicts.filter((row) => row.successor_id === selected.id || row.predecessor_id === selected.id)
     : [];
+  const [display, setDisplay] = useState<"responsive" | "list" | "chart">("responsive");
   const [priorityFilter, setPriorityFilter] = useState<TimelinePriorityFilter>("all");
   const [setting, setSetting] = useState<string | null>(null);
   const [showDependencies, setShowDependencies] = useState(true);
@@ -342,13 +352,14 @@ export function TimelineBoard({
       ) : null}
 
       {!viewingVersion && issues.length + gapBlockers.length > 0 ? (
-        <section className="grid gap-1 border border-amber-500/50 bg-amber-50 p-3 rounded-lg dark:bg-amber-950/30" data-testid="final-save-checklist">
-          <h2 className="flex items-center gap-1 text-[12px] font-semibold text-foreground">
-            <AlertTriangle className="size-4 text-amber-600" /> Before this can be saved as final (
+        <details className="grid gap-1 border border-amber-500/50 bg-amber-50 p-3 rounded-lg dark:bg-amber-950/30" data-testid="final-save-checklist">
+          <summary className="cursor-pointer text-[12px] font-semibold text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+            <AlertTriangle className="inline size-4 text-amber-600" aria-hidden /> Before this can be saved as final (
             {plural(issues.length + gapBlockers.length, "item")})
-          </h2>
-          <ul className="grid gap-0.5 text-[11px] text-muted-foreground">
-            {gapBlockers.slice(0, 10).map((blocker, index) => (
+            <span className="ml-2 font-normal">A draft can still be saved. Expand to review blockers.</span>
+          </summary>
+          <ul className="mt-2 grid gap-0.5 text-[11px] text-muted-foreground">
+            {gapBlockers.map((blocker, index) => (
               <li key={`${blocker.issue}:${blocker.gap_id ?? index}`} data-testid="final-gap-blocker">
                 {blocker.gap_id && blocker.issue !== "foreign_reference" ? (
                   <a href={`/gaps/${blocker.gap_id}`} className="hover:underline">
@@ -359,18 +370,15 @@ export function TimelineBoard({
                 )}
               </li>
             ))}
-            {gapBlockers.length > 10 ? <li>…and {gapBlockers.length - 10} more about gaps.</li> : null}
-            {issues.slice(0, 10).map((issue, index) => (
+            {issues.map((issue, index) => (
               <li key={`${issue.kind}:${issue.activity_id}:${index}`}>
-                <button type="button" className="text-left hover:underline" onClick={() => setSelectedId(issue.activity_id)}>
+                <button type="button" className="text-left hover:underline" onClick={() => selectActivity(issue.activity_id)}>
                   {issue.message}
                 </button>
               </li>
             ))}
-            {issues.length > 10 ? <li>…and {issues.length - 10} more.</li> : null}
           </ul>
-          <p className="text-[11px] text-muted-foreground">A draft can still be saved at any time.</p>
-        </section>
+        </details>
       ) : null}
 
       {model.cancelled?.length ? (
@@ -403,6 +411,7 @@ export function TimelineBoard({
           aria-label="Timeline filters"
           className="-mb-2 flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5"
         >
+          <div className={cn("items-center gap-2", display === "list" ? "hidden" : display === "responsive" ? "hidden md:flex" : "flex")}>
           <button
             type="button"
             aria-pressed={showDependencies}
@@ -417,6 +426,7 @@ export function TimelineBoard({
             ⤳ Dependencies
           </button>
           <span className="h-5 w-px bg-border" aria-hidden />
+          </div>
           <div role="group" aria-label="Priority" className="flex flex-wrap items-center gap-1">
             {(
               [
@@ -468,7 +478,15 @@ export function TimelineBoard({
             </>
           ) : null}
         </div>
-        <div className="overflow-x-auto border border-border bg-background">
+        <label className="flex items-center gap-2 text-xs">Timeline view
+          <select aria-label="Timeline view" value={display} onChange={event => setDisplay(event.target.value as typeof display)} className="min-h-10 rounded-md border border-input bg-background px-2">
+            <option value="responsive">Automatic (list on mobile)</option><option value="list">Activity list</option><option value="chart">Gantt chart</option>
+          </select>
+        </label>
+        <div className={cn("min-w-0", display === "chart" ? "hidden" : display === "responsive" ? "md:hidden" : "")}>
+          <TimelineActivityList view={view} filter={priorityFilter} setting={setting} onSelect={selectActivity} pendingReason={reason => pendingReason(reason, ai)} gapAction={canCreate ? group => <CreateActivityDialog identity={identity} gap={group} label="Add activity" /> : undefined} />
+        </div>
+        <div className={cn("min-w-0 overflow-x-auto border border-border bg-background", display === "list" ? "hidden" : display === "responsive" ? "hidden md:block" : "")}>
           <GapGantt
             filter={priorityFilter}
             setting={setting}
@@ -477,7 +495,7 @@ export function TimelineBoard({
             activities={model.activities}
             today={today}
             selectedId={selected?.id ?? null}
-            onSelect={(id) => setSelectedId(id)}
+            onSelect={selectActivity}
             svgRef={svgRef}
             editable={canReschedule}
             canCreate={canCreate}
@@ -489,8 +507,7 @@ export function TimelineBoard({
       )}
       {canReschedule && hasRows ? (
         <p className="-mt-2 text-[11px] text-muted-foreground">
-          Drag a bar to move it, or drag either end to change its start or end. From the keyboard, focus a bar and
-          press Enter to open it, then use Edit.
+          Open an activity to review its dates, then use Edit. In the chart, drag a bar to move it or either end to resize it; from the keyboard, focus a bar and press Enter.
         </p>
       ) : null}
 
@@ -530,7 +547,12 @@ export function TimelineBoard({
       ) : null}
 
       <Sheet open={selected !== null} onOpenChange={(open) => (open ? null : setSelectedId(null))}>
-        <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md">
+        <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md" finalFocus={() => {
+          const trigger = activityReturnFocusRef.current;
+          if (!trigger?.isConnected) return true;
+          trigger.focus();
+          return false;
+        }}>
           {selected ? (
             <>
               <SheetHeader>
@@ -798,8 +820,8 @@ function EmptyTimeline({
       <h2 className="text-[12px] font-semibold text-foreground">No activities to plot yet</h2>
       <p className="mt-1 text-[12px] text-muted-foreground">
         {ai
-          ? "The timeline is built from validated state: gaps mapped to tactics, with priority bands. Upload sources on Upload, confirm the gaps and their tactics on Gaps, validate their bands on Prioritize, then build the timeline here."
-          : "The timeline is built from validated state: gaps mapped to tactics, with validated priority bands. Add gaps and tactics by hand, map them on Gaps, validate their bands on Prioritize, then lay out dates here or add an activity by hand."}
+          ? "The timeline is built from validated state: gaps mapped to tactics, with priority bands. Upload sources, confirm evidence assessments and review tactic mappings in Evidence Inventory, then validate priorities in the Prioritization Matrix before building the Gantt Timeline."
+          : "The timeline is built from validated state: gaps mapped to tactics, with validated priority bands. Add gaps and tactics by hand, review their mappings in Evidence Inventory, validate priorities in the Prioritization Matrix, then lay out dates here or add an activity by hand."}
       </p>
       {unscheduled.length > 0 ? (
         <p className="mt-2 text-[12px] text-muted-foreground">

@@ -17,12 +17,12 @@ export function InventoryReadiness({ cards, readyForPrioritize }: {
         {cards.length ? `${cards.length} live gaps · ${attention} gaps needing attention` : "No live gaps yet."}
       </p>
       {cards.length > 0 ? <p className="mt-1 text-[12px] text-muted-foreground">
-        {`${unconfirmed} gaps with unconfirmed status · ${partial} partial gaps to resolve · ${mappings} gaps needing tactic mapping review · ${sources} gaps needing new source review`}
+        {`${unconfirmed} gaps with unconfirmed evidence assessments · ${partial} partial gaps to resolve · ${mappings} gaps needing tactic mapping review · ${sources} gaps needing new source review`}
         {". Review categories can overlap; each gap counts once in gaps needing attention."}
       </p> : null}
       <p className="mt-1 text-[12px] text-muted-foreground">
         {attention ? "Inventory review work remains. " : cards.length ? "Inventory review is complete. " : "Add gaps to begin review. "}
-        {readyForPrioritize ? "Gap assessments are ready for prioritization. " : "Confirm gap assessments and resolve partial gaps before completing initial preparation. "}
+        {readyForPrioritize ? "Gap assessments are ready for prioritization. " : "Confirm evidence assessments and resolve partial gaps before completing initial preparation. "}
         Previously unlocked stages remain available for eligible work. Human review does not mean evidence gaps are addressed.
       </p>
     </section>

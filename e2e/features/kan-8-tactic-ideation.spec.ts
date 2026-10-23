@@ -326,7 +326,7 @@ test.describe("Retained tactic discovery (KAN-137)", () => {
     await page.goto(`/gaps/${reviewedId}`);
     await page.getByRole("button", { name: `Edit ${reviewedId}`, exact: true }).click();
     const edit = page.getByRole("dialog", { name: `Edit ${reviewedId}`, exact: true });
-    await edit.getByRole("textbox", { name: "Evidence needed", exact: true }).fill("Long-term comparative evidence is missing");
+    await edit.getByRole("textbox", { name: "Evidence needed (required)", exact: true }).fill("Long-term comparative evidence is missing");
     await edit.getByLabel("Rationale (required)").fill("The committee now needs a longer follow-up comparison");
     await edit.getByRole("button", { name: "Save edit", exact: true }).click();
     await expect(edit).toBeHidden();
@@ -351,7 +351,7 @@ test.describe("Retained tactic discovery (KAN-137)", () => {
     failing = false;
     await panel.getByRole("button", { name: "Retry gap details", exact: true }).click();
     await expect(panel.getByTestId("gap-ideas")).toContainText("Existing review option");
-    await expect(panel.getByTestId("gap-planning-routes")).toContainText("Review changed context and reconfirm");
+    await expect(panel.getByTestId("gap-planning-routes")).toContainText("Review changed context and revalidate a High/Open priority before new AI ideation.");
     await expect(panel.getByTestId("gap-priority")).toContainText("Priority applies across all settings");
     const bounds = await panel.boundingBox();
     expect(bounds!.width).toBeCloseTo(390, 2);

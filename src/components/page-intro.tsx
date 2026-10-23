@@ -1,4 +1,4 @@
-/** A page's kicker, title and lead, in the design's type scale (KAN-8). Shared by the app, admin and lab. */
+/** Present a readable page title and supporting context in the existing type system. */
 export function PageIntro({
   kicker,
   title,
@@ -13,9 +13,9 @@ export function PageIntro({
       {kicker ? (
         <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{kicker}</p>
       ) : null}
-      <h1 className="text-base font-bold tracking-tight text-foreground">{title}</h1>
+      <h1 className="break-words text-xl font-bold leading-tight tracking-tight sm:text-2xl text-foreground">{title}</h1>
       {children ? (
-        <div className="mt-1 max-w-4xl text-[12px] leading-5 text-muted-foreground">
+        <div className="mt-1 max-w-[75ch] text-sm leading-5 text-muted-foreground">
           {children}
         </div>
       ) : null}

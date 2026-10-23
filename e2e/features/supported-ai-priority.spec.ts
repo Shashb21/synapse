@@ -37,7 +37,7 @@ test("inspects supplied support, accepts atomically, offers manual legacy review
       (${confirmed},'{"decision_impact":82,"time_pressure":76}'::jsonb,'high','Earlier model suggestion','high',true,'Original human rationale','Earlier reviewer','2025-01-01T00:00:00Z')`;
   } finally { await pg.end({ timeout: 5 }); }
   await page.goto("/?place=plan&setting=all");
-  await page.getByRole("button", { name: /^Supported comparison: High, priority not confirmed/ }).focus();
+  await page.getByRole("button", { name: /^Supported comparison: High, priority not validated/ }).focus();
   await page.keyboard.press("Enter");
   const article = page.getByTestId("gap-panel");
   await page.route("**/api/plan/references?*", route => route.fulfill({ status: 500, body: "Reference load failed" }), { times: 1 });
@@ -62,7 +62,7 @@ test("inspects supplied support, accepts atomically, offers manual legacy review
   await dialog.getByRole("button", { name: "Accept supported AI suggestion", exact: true }).click();
   await expect(dialog).toBeHidden();
   await page.goto(`/gaps/${supported}`);
-  await expect(page.getByTestId("gap-priority")).toContainText("Priority confirmed");
+  await expect(page.getByTestId("gap-priority")).toContainText("Priority validated");
   await page.getByTestId("gap-priority").getByRole("button", { name: "Inspect supporting references" }).click();
   await expect(page.getByTestId("gap-priority").getByText("Supports: This supplied record explains the committee evidence need").first()).toBeVisible();
   if (await page.getByRole("group", { name: "History", exact: true }).getAttribute("open") === null) await page.getByRole("group", { name: "History", exact: true }).locator("summary").first().click();
@@ -70,7 +70,7 @@ test("inspects supplied support, accepts atomically, offers manual legacy review
   await expect(page.getByRole("list", { name: "Decision supporting references" })).toContainText("This supplied record explains the committee evidence need");
 
   await page.goto("/?place=plan&setting=all");
-  await page.getByRole("button", { name: /^Older unsupported suggestion: High, priority not confirmed/ }).focus();
+  await page.getByRole("button", { name: /^Older unsupported suggestion: High, priority not validated/ }).focus();
   await page.keyboard.press("Enter");
   const older = page.getByTestId("gap-panel");
   await expect(older).toContainText("Supporting references not recorded for this suggestion");
@@ -87,10 +87,10 @@ test("inspects supplied support, accepts atomically, offers manual legacy review
   await expect(older).toContainText("Supporting references not recorded for this suggestion");
   await expect(older.getByRole("button", { name: "Accept supported AI suggestion", exact: true })).toHaveCount(0);
   await older.getByRole("button", { name: "Make manual judgement", exact: true }).click();
-  dialog = page.getByRole("dialog", { name: /^Confirm .* priority for Older unsupported suggestion$/ });
+  dialog = page.getByRole("dialog", { name: /^Validate .* priority for Older unsupported suggestion$/ });
   await expect(dialog).toContainText("explicit manual judgement");
   await dialog.getByLabel("Reason for change (required)").fill("My judgement from committee experience");
-  await dialog.getByRole("button", { name: "Confirm priority", exact: true }).click();
+  await dialog.getByRole("button", { name: "Validate priority", exact: true }).click();
   await expect(dialog).toBeHidden();
   await planAction(request, { action: "set_placement", gap_id: legacy, band: "high", axis_scores: { decision_impact: 88, time_pressure: 77 }, rationale: "Human rationale retained on rerun", reason: "Refine the human scores" });
   const before = (await planState(request)).placements;

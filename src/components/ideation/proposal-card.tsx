@@ -190,7 +190,7 @@ export function ProposalCard({
                 fields={proposal.origin !== "human" ? [{ name: "judgement_origin", label: "Decision basis", type: "select", defaultValue: "model", options: [{ value: "model", label: "Accept supported model suggestion" }, { value: "manual", label: "Manual judgement with my reason" }] }] : []}
                 label="Accept"
                 title={`Accept ${proposal.name}`}
-                description={proposal.proposal_kind === "expansion" ? "Accepting creates a proposed expansion on the existing tactic. Its coverage starts unassessed and does not count until its own lifecycle and coverage are validated." : "Accepting creates a proposed tactic mapped to this gap. The rationale is stored on the edit record."}
+                description={proposal.proposal_kind === "expansion" ? "Accepting creates a proposed expansion on the existing tactic. Its coverage starts unassessed; acceptance does not deliver evidence or automatically make the gap Addressed. Review its own lifecycle and coverage separately." : "Accepting creates a proposed tactic mapped to this gap. Its coverage starts unassessed; acceptance does not deliver evidence or automatically make the gap Addressed. Your reason is stored in history."}
                 confirmLabel="Accept proposal"
                 requireRationale
                 identity={identity}

@@ -57,10 +57,10 @@ export function priorityNextAction({ band, validated, needs_review, tacticsUnloc
   open?: boolean;
 }): string {
   if (!band) return "Set priority";
-  if (needs_review) return "Review changed context and reconfirm";
-  if (!validated) return "Review and confirm priority";
+  if (needs_review) return "Review changed context and revalidate priority";
+  if (!validated) return "Validate priority";
   if (band === "high" && open && tacticsUnlocked) return "Continue to tactics";
-  return "Priority confirmed";
+  return "Priority validated";
 }
 
 export function PriorityJudgementDetails({ priority, axes }: {
@@ -70,10 +70,10 @@ export function PriorityJudgementDetails({ priority, axes }: {
   return (
     <div className="grid gap-2 text-[13px]">
       <p>Priority applies across all settings</p>
-      {priority?.needs_review ? <p role="status">Needs priority review · Review changed context and reconfirm{priority.review_reason ? `: ${priority.review_reason}` : ""}</p> : null}
+      {priority?.needs_review ? <p role="status">Needs priority review · Review changed context and revalidate priority{priority.review_reason ? `: ${priority.review_reason}` : ""}</p> : null}
       <p>
         <span className="font-medium">{priority?.band ? BAND_LABELS[priority.band] : "No band yet"}</span>
-        {" · "}{priority?.validated ? "Priority confirmed" : "Priority not confirmed"}
+        {" · "}{priority?.validated ? "Priority validated" : "Priority not validated"}
         {priority?.validated && priority.actor_name ? ` by ${priority.actor_name}` : ""}
         {priority?.at ? ` · ${priority.at.slice(0, 10)}` : ""}
       </p>
@@ -93,8 +93,8 @@ export function PriorityJudgementDetails({ priority, axes }: {
         </div>
       </dl>
       <p className="text-[12px] text-muted-foreground">
-        Priority confirmation accepts this judgement. Evidence coverage review and Open, Partial or Addressed evidence status are separate.
-        {" "}Unknown context does not block priority confirmation.
+        Priority validation accepts this judgement. Evidence coverage review and Open, Partial or Addressed evidence status are separate.
+        {" "}Unknown context does not block priority validation.
       </p>
     </div>
   );

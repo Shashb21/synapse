@@ -42,7 +42,7 @@ function GapLink({ gap }: { gap: { id: string; name: string; number: number } })
 /** One saved coverage/status/confirmation readback for the full record and shared panel. */
 export function GapCoverageContext({ record }: { record: GapRecord }) {
   const { confirmation, gap, origin, coverage_status } = record;
-  const nextAction = gap.retired ? "Open full record" : coverage_status.shown === "validated_partial" ? "Resolve — split or rewrite" : !confirmation.confirmed ? "Confirm evidence coverage" : "Review evidence coverage and mappings";
+  const nextAction = gap.retired ? "Open full record" : coverage_status.shown === "validated_partial" ? "Resolve — split or rewrite" : !confirmation.confirmed ? "Confirm evidence assessment" : "Review evidence assessment and mappings";
   return <section className={CARD} aria-label="Evidence coverage" data-testid="gap-coverage-context">
     <div className="mb-2 flex flex-wrap items-center gap-2">
       <GapBadge status={coverage_status.shown} />
@@ -53,7 +53,7 @@ export function GapCoverageContext({ record }: { record: GapRecord }) {
     <p className="mb-2 text-muted-foreground">{GAP_STATUS_DEFINITIONS[coverage_status.shown]}</p>
     <GapStatusDisagreement computedStatus={coverage_status.computed} override={gap.status_override} />
 
-    <p className="text-[12px] font-medium text-muted-foreground">Evidence coverage review</p>
+    <p className="text-[12px] font-medium text-muted-foreground">Evidence assessment confirmation</p>
     {confirmation.confirmed && confirmation.by ? (
       <p className="mt-1">
         Confirmed by <span className="font-medium">{confirmation.by.name}</span>
@@ -65,7 +65,7 @@ export function GapCoverageContext({ record }: { record: GapRecord }) {
     ) : confirmation.confirmed ? (
       <p className="mt-1">Confirmed (before who confirmed was recorded).</p>
     ) : (
-      <p className="mt-1 text-muted-foreground">Not confirmed yet. Validate the gap to confirm it.</p>
+      <p className="mt-1 text-muted-foreground">Not confirmed yet. Confirm evidence assessment with your reason.</p>
     )}
     {origin ? (
       <p className="mt-2 text-[12px] text-muted-foreground">
@@ -189,14 +189,14 @@ export function GapRecordSections({ record, axes = [], tacticsUnlocked = false, 
         <h2 className={HEADING}>Tactic options and planned work</h2>
         <p>Existing options, decisions and linked tactics remain available when evidence status or priority changes.</p>
         <p className="mt-2">{open && priority?.validated && band === "high" && !priority.needs_review
-          ? "Current High/Open gap: new AI ideation is available from Tactics when unlocked and AI assistance is enabled."
+          ? "Current High/Open gap: new AI ideation is available from Tactic Ideation when unlocked and AI assistance is enabled."
           : priority?.needs_review
-            ? "Review changed context and reconfirm a High/Open priority before new AI ideation. Existing work is retained."
+            ? "Review changed context and revalidate a High/Open priority before new AI ideation. Existing work is retained."
             : band === "medium" || band === "low"
-              ? "Medium and Low gaps use the manual or library route. New AI ideation requires a confirmed High/Open priority."
-              : "New AI ideation requires a confirmed High/Open priority. Existing work is retained."}</p>
+              ? "Medium and Low gaps use the manual or library route. New AI ideation requires a validated High/Open priority."
+              : "New AI ideation requires a validated High/Open priority. Existing work is retained."}</p>
         <div className="mt-3 flex flex-wrap gap-3">
-          {tacticsUnlocked ? <Link href="/?place=tactics">Open Tactics and existing work</Link> : <Link href="/?place=plan&setting=all">Review initial plan-wide priorities</Link>}
+          {tacticsUnlocked ? <Link href="/?place=tactics">Open Tactic Ideation and existing work</Link> : <Link href="/?place=plan&setting=all">Review initial plan-wide priorities</Link>}
           {!record.gap.retired && !record.gap.parked_at && record.gap.status !== "excluded" ? <Link href={`/gaps/${encodeURIComponent(record.gap.id)}#gap-tactic-mappings`}>Map from library or add a tactic by hand</Link> : null}
           {ideas.length ? <Link href="/ideation">Review existing option decisions</Link> : null}
         </div>
@@ -224,7 +224,7 @@ export function GapRecordSections({ record, axes = [], tacticsUnlocked = false, 
           </ul>
         )}
       </Section>
-      <Section title="Timeline" testId="gap-timeline">
+      <Section title="Gantt Timeline" testId="gap-timeline">
         {timeline.length === 0 ? (
           <p className={`${CARD} text-muted-foreground`}>No timeline activity for this gap yet.</p>
         ) : (

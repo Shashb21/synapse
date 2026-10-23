@@ -114,6 +114,12 @@ describe("setup wizard steps", () => {
     expect(html).toContain("Save changes");
   });
 
+  it("describes completed setup without inventing a missing save timestamp", () => {
+    const html = render(createElement(SetupWizard, { initial: { ...FILLED, saved_at: "" }, actorName: "T", actorFunction: "medical_affairs", setupComplete: true }));
+    expect(html).toContain("Saved · time unavailable");
+    expect(html).not.toContain("Not saved yet");
+  });
+
   it("renders each section's fields and shows validation messages", () => {
     const empty = parsePlanningContext(null);
     const asset = step(AssetStep, empty, { asset_name: "Name the asset.", markets: "Add at least one market in scope." });
@@ -139,7 +145,7 @@ describe("setup wizard steps", () => {
     expect(objectives).toContain("papers due 10 June");
     expect(objectives).toContain('value="NICE submission"');
     expect(objectives).toContain('value="2028-01-15"');
-    expect(objectives).toContain('aria-checked="true"');
+    expect(objectives).toMatch(/type="radio"[^>]*checked=""/);
 
     const landscape = step(LandscapeStep, FILLED);
     for (const text of ["Overall competitive pressure", "Competitors", "Standard of care", "Comparators", "Key payer / HTA bodies", "Regulatory milestones", "Launch timeline"]) {
@@ -180,7 +186,7 @@ describe("setup wizard steps", () => {
 
 describe("walkthrough", () => {
   it("tours the main places in order", () => {
-    expect(TOUR_STEPS.map((s) => s.place)).toEqual(["Gaps", "Tactics", "Mapping table", "Prioritize", "Ideation", "Timeline"]);
+    expect(TOUR_STEPS.map((s) => s.place)).toEqual(["Evidence Inventory", "Tactic Ideation", "Mapping table", "Prioritization Matrix", "Tactic Ideation", "Gantt Timeline"]);
     expect(onStepPage(TOUR_STEPS[0]!, "/", new URLSearchParams("place=gaps"))).toBe(true);
     expect(onStepPage(TOUR_STEPS[0]!, "/", new URLSearchParams("place=plan"))).toBe(false);
     expect(onStepPage(TOUR_STEPS[2]!, "/mappings", new URLSearchParams())).toBe(true);
@@ -191,7 +197,7 @@ describe("walkthrough", () => {
     const on = render(createElement(WalkthroughCard, { ...props, ai: true }));
     expect(on).toContain(`1 of ${TOUR_STEPS.length}`);
     expect(on).toContain(TOUR_STEPS[0]!.ai.slice(0, 40));
-    expect(on).toContain("Next: Tactics");
+    expect(on).toContain("Next: Tactic Ideation");
     // With AI off the customer sees the manual path and is not told about AI (KAN-53).
     const off = render(createElement(WalkthroughCard, { ...props, ai: false }), false);
     expect(off).not.toContain("AI is off");

@@ -311,7 +311,7 @@ describe("priority decision context", () => {
       expect(term?.nextElementSibling?.textContent).toBe("Unknown");
     }
     expect(detail.textContent).toContain("Priority applies across all settings");
-    expect(byText("Review and confirm priority").disabled).toBe(false);
+    expect(byText("Validate priority").disabled).toBe(false);
     expect(detail.textContent).not.toContain("Continue to tactics");
   });
 
@@ -338,14 +338,14 @@ describe("priority decision context", () => {
     expect(detail().textContent).toContain("Submit the dossier");
     expect(detail().textContent).toContain("2027-06-20");
     expect(detail().textContent).toContain("Evidence needed byUnknown");
-    expect(detail().textContent).toContain("Priority confirmed by Human reviewer");
+    expect(detail().textContent).toContain("Priority validated by Human reviewer");
     expect(detail().textContent).toContain("80 / 100 · set by hand");
     expect(detail().textContent).toContain("Blocks the dossier");
     expect([...detail().querySelectorAll("a")].map((a) => [a.getAttribute("href"), a.textContent])).toContainEqual(["/?place=plan&setting=all", "Review remaining plan-wide priorities"]);
     expect(detail().textContent).not.toContain("Continue to tactics");
     await render(true);
     expect([...detail().querySelectorAll("a")].map((a) => [a.getAttribute("href"), a.textContent])).toContainEqual(["/?place=tactics", "Continue to tactics"]);
-    expect(byText("Review or change priority")).toBeTruthy();
+    expect(byText("Review or change validated priority")).toBeTruthy();
   });
 
 
@@ -371,7 +371,7 @@ describe("priority decision context", () => {
     expect(byText("Set priority").disabled).toBe(false);
     await render(false);
     expect(byText("Set priority")).toBeUndefined();
-    expect(byText("Review and confirm priority")).toBeUndefined();
+    expect(byText("Validate priority")).toBeUndefined();
     expect(document.querySelector('[data-testid="gap-panel"]')?.textContent).toContain("Evidence needed");
   });
 
@@ -413,7 +413,7 @@ describe("the full gap record priority", () => {
     expect(section.textContent).toContain("82 / 100");
     expect(section.textContent).toContain("76 / 100");
     expect(section.textContent).toContain("Reason not recorded");
-    expect([...section.querySelectorAll("a")].map((a) => a.textContent)).toContain("Review and confirm priority");
+    expect([...section.querySelectorAll("a")].map((a) => a.textContent)).toContain("Validate priority");
   });
 
   it("labels an older model suggestion with missing reasoning and references honestly", () => {
@@ -432,11 +432,11 @@ describe("the full gap record priority", () => {
 
   it.each([
     ["high", true, true, "Continue to tactics"],
-    ["high", false, true, "Priority confirmed"],
-    ["high", true, false, "Priority confirmed"],
-    ["medium", true, true, "Priority confirmed"],
-    ["low", true, true, "Priority confirmed"],
-    ["defer", true, true, "Priority confirmed"],
+    ["high", false, true, "Priority validated"],
+    ["high", true, false, "Priority validated"],
+    ["medium", true, true, "Priority validated"],
+    ["low", true, true, "Priority validated"],
+    ["defer", true, true, "Priority validated"],
   ] as const)("preserves next-action eligibility for %s, Open=%s, Tactics=%s", (band, open, tacticsUnlocked, action) => {
     act(() => root.render(createElement(GapRecordSections, {
       record: record({ ...priority, band, validated: true, rationale: "Human rationale" }),

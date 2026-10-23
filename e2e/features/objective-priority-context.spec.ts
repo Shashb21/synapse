@@ -33,7 +33,7 @@ test("edits a shared deadline without references, previews a hidden gap and reco
   await expect(context).toContainText("Unknown");
   await expect(context).toContainText("2028-06-30");
   await page.goto("/?place=plan&setting=1L");
-  await expect(page.getByRole("button", { name: /^1L comparative evidence: High, priority confirmed/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^1L comparative evidence: High, priority validated/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /^2L comparative evidence:/ })).toHaveCount(0);
 
   await page.goto("/setup");
@@ -64,7 +64,7 @@ test("edits a shared deadline without references, previews a hidden gap and reco
   await page.goto(`/tactics/${tacticId}`);
   await expect(page.getByText("Existing committee study", { exact: true }).first()).toBeVisible();
   await page.goto(`/gaps/${visibleGap}`);
-  await expect(page.getByTestId("gap-priority")).toContainText("Review changed context and reconfirm");
+  await expect(page.getByTestId("gap-priority")).toContainText("Review changed context and revalidate priority");
   await expect(page.getByTestId("gap-ideas")).toContainText("Existing committee study");
   if (await page.getByRole("group", { name: "History", exact: true }).getAttribute("open") === null) await page.getByRole("group", { name: "History", exact: true }).locator("summary").first().click();
   await expect(page.getByTestId("entity-history")).toContainText("Shared context");
@@ -73,11 +73,11 @@ test("edits a shared deadline without references, previews a hidden gap and reco
   await expect(page.locator("dl").filter({ has: page.getByText("Evidence needed by", { exact: true }) }).first()).toContainText("2028-06-10");
 
   await page.goto("/?place=plan&setting=1L");
-  await page.getByRole("button", { name: /^1L comparative evidence: High, priority not confirmed/ }).click();
-  await page.getByRole("button", { name: "Review changed context and reconfirm", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Confirm High priority for 1L comparative evidence", exact: true });
+  await page.getByRole("button", { name: /^1L comparative evidence: High, priority not validated/ }).click();
+  await page.getByRole("button", { name: "Review changed context and revalidate priority", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Validate High priority for 1L comparative evidence", exact: true });
   await dialog.getByLabel(/^Reason for change/).fill("Reviewed papers deadline; High remains appropriate");
-  await dialog.getByRole("button", { name: "Confirm priority", exact: true }).click();
+  await dialog.getByRole("button", { name: "Validate priority", exact: true }).click();
   await expect(dialog).not.toBeVisible();
   expect((await planState(request)).placements.find(p => p.gap_id === visibleGap)).toMatchObject({ validated: true, needs_review: false, band: "high" });
   await planAction(request, { action: "add_proposal", gap_id: visibleGap, name: "Reconfirmed idea", type: "rwe_study", evidence_question: "New comparative evidence?", rationale: "Reviewed context permits this idea" });

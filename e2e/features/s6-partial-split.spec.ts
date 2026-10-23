@@ -45,9 +45,10 @@ test.describe("S6 partial gap split", () => {
     await page.waitForLoadState("networkidle");
     const panel = await openInventoryRow(page, partial!.gap_id);
     await expect(panel.getByRole("link", { name: "Resolve — split or rewrite", exact: true })).toBeVisible();
-    await expect(panel.getByRole("button", { name: /^confirm status$/i })).toHaveCount(0);
+    await expect(panel.getByRole("button", { name: /^confirm evidence assessment$/i })).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(panel).toBeHidden();
+    await page.locator("[data-inventory-filters] > summary").click();
     await expect(page.getByRole("button", { name: /^partially addressed \(/i })).toBeVisible();
   });
 

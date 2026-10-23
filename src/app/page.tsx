@@ -54,19 +54,15 @@ function PlaceIntro({
         kicker={wizardComplete ? "Living plan · ingest" : "First visit · ingest"}
         title="Upload sources"
       >
-        Upload source files or paste notes. Synapse pulls out the evidence gaps and tactics, maps
-        them and computes each gap&apos;s status for you to confirm on Gaps. Or start by hand: add
-        gaps and tactics yourself, with or without a source. You can come back here to add sources
-        at any time.
+        Upload sources or paste notes, then review the extracted gaps and tactics in Evidence Inventory.
+        You can also add gaps and tactics by hand.
       </PageIntro>
     );
   }
   if (place === "gaps") {
     return (
       <PageIntro kicker="Gaps & metadata" title="Evidence Inventory">
-        Every evidence gap with its mapped tactics and computed status. Confirm each one, map
-        library tactics or record a missed study, and add gaps by hand. Partial gaps must be split or
-        rewritten before prioritization.
+        Review evidence status, confirm evidence assessments, and resolve Partial gaps before prioritization.
       </PageIntro>
     );
   }
@@ -74,16 +70,14 @@ function PlaceIntro({
     return (
       <PageIntro kicker="Gap tactics" title="Tactic Ideation">
         {sections.ideation
-          ? "The High-priority Open gaps, each with its linked tactics and AI-assisted suggestions. Accept or reject each suggestion with a reason, or write a custom tactic. Proposed tactics do not change a gap's status until they are planned, ongoing or completed."
-          : "The High-priority Open gaps, each with its linked tactics. Assign a tactic from the library or write a custom one. Proposed tactics do not change a gap's status until they are planned, ongoing or completed."}
+          ? "Plan tactics for High-priority Open gaps using the library, custom tactics or suggestions."
+          : "Plan tactics for High-priority Open gaps using the library or custom tactics."}
       </PageIntro>
     );
   }
   return (
     <PageIntro kicker="Priority canvas" title="Prioritization Matrix">
-      {sections.prioritization
-        ? "Pick a setting and two axes. Open gaps land on the matrix as a first draft; drag them to set their priority, then validate each one. The quadrant suggests Prioritize, Plan, Monitor or Defer."
-        : "Pick a setting and two axes, then place each Open gap by hand (type its scores or band, or drop it on the matrix) and validate each one. The quadrant suggests Prioritize, Plan, Monitor or Defer."}
+      Choose axes, review each Open gap’s placement, then validate priority with your reason.
     </PageIntro>
   );
 }

@@ -78,3 +78,16 @@ it("ID header sorts displayed numbers both ways with stable ties and missing num
   expect(header.getAttribute('aria-sort')).toBe('descending');
   expect(order()).toEqual(['a', 'b', 'c', 'z', 'missing']);
 });
+
+it("mobile sorting shares the desktop header sort state and has a reset", () => {
+  act(() => root.render(createElement(GapsWorkbench, { cards: [card({gap_id: "b", number: 10}), card({gap_id: "a", number: 2})], availableTactics: [], readyForPrioritize: false })));
+  const select = container.querySelector<HTMLSelectElement>('[aria-label="Sort gaps"]')!;
+  expect(select).not.toBeNull();
+  act(() => { select.value = "id"; select.dispatchEvent(new Event("change", {bubbles: true})); });
+  expect(Array.from(container.querySelectorAll('tr[data-gap-id]')).map(row => row.getAttribute('data-gap-id'))).toEqual(["a", "b"]);
+  const direction = container.querySelector<HTMLButtonElement>('[aria-label="Reverse gap sort direction"]')!;
+  act(() => direction.click());
+  expect(container.querySelector('th')?.getAttribute('aria-sort')).toBe('descending');
+  act(() => { select.value = ""; select.dispatchEvent(new Event("change", {bubbles: true})); });
+  expect(container.querySelector('th')?.getAttribute('aria-sort')).toBe('none');
+});

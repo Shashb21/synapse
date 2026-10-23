@@ -17,7 +17,7 @@ test.describe("Prep readiness strip", () => {
     page,
   }) => {
     await page.goto("/timeline");
-    const strip = page.getByRole("status", { name: "Prep readiness" });
+    const strip = page.getByRole("region", { name: "Prep readiness" });
     await expect(strip).toContainText("4 of 4 Open gaps with validated priority · Tactics open");
     await expect(strip).not.toContainText("Ready for Prioritize");
   });

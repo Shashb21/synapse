@@ -131,8 +131,8 @@ export default async function GapDetailPage({
           <GapBadge status={shown} />
         )}
         {!gap.retired && !gap.human_validated && shown !== "validated_partial" ? (
-          <LockForm label="Confirm status" action="validate_gap" extra={{ gap_id: gap.id }}
-            note={{ label: "Reason (required)", required: true }} confirmLabel={`Confirm ${GAP_STATUS_LABELS[shown]}`} variant="default" />
+          <LockForm label="Confirm evidence assessment" action="validate_gap" extra={{ gap_id: gap.id }}
+            note={{ label: "Reason (required)", required: true }} confirmLabel="Confirm evidence assessment" variant="default" />
         ) : null}
         {mapped && !gap.status_override ? (
           <span className="text-[11px] text-muted-foreground">
@@ -174,7 +174,7 @@ export default async function GapDetailPage({
               identity={identity}
               label="Edit gap"
               title={`Edit ${gap.id}`}
-              description="Changing Evidence needed requires priority review again if this gap is Open. Its previous band, scores and priority rationale remain available. Name-only or domain-only changes retain priority confirmation. Give a meaningful reason; no supporting reference is required. Your wording is retained on later AI runs."
+              description="Changing Evidence needed requires priority review again if this gap is Open. Its previous band, scores and priority rationale remain available. Name-only or domain-only changes retain priority validation. Give a meaningful reason; no supporting reference is required. Your wording is retained on later AI runs."
               confirmLabel="Save edit"
               fields={[
                 { name: "name", label: "Name", defaultValue: gap.name, required: true },

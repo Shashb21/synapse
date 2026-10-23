@@ -37,6 +37,6 @@ describe("manual start with AI on", () => {
   it("the Upload place renders it with AI on, above the ingest panel", () => {
     const page = src("src/app/page.tsx");
     expect(page).toMatch(/<AiOnly[\s\S]*?>\s*<ManualStartAlongsideUpload[\s\S]*?\/>\s*<IngestPanel/);
-    expect(page).toContain("Or start by hand");
+    expect(page).toContain("You can also add gaps and tactics by hand.");
   });
 });

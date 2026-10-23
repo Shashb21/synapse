@@ -185,7 +185,7 @@ it("labels the real combined strip count accurately for a human-confirmed Partia
     children: createElement(InventoryReadiness, { cards: workspace.review, readyForPrioritize: nav.readyForPrioritize }),
   };
   act(() => root.render(createElement(PlanChrome, chromeProps)));
-  expect(container.textContent).toContain("0 gaps with unconfirmed status");
+  expect(container.textContent).toContain("0 gaps with unconfirmed evidence assessments");
   const strip = container.querySelector('[aria-label="Prep readiness"]')!;
   expect(strip.querySelector('a[href*="gap_filter=needs_validation"]')?.textContent).toBe("Unconfirmed or partial 1");
   expect(strip.textContent).toContain("Partial 1");

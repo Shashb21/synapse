@@ -2,6 +2,7 @@
 
 import { Fragment, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import styles from "./gaps-workbench.module.css";
 import { NewSourceNote } from "@/components/gap-suggestions";
 import { GapBadge } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
@@ -47,6 +48,18 @@ const FILTER_CHIPS: { id: ReviewGapFilter; label: string }[] = [
   { id: "open", label: "Open" },
   { id: "addressed", label: "Addressed" },
 ];
+
+const REVIEW_REASONS: Record<string, string> = {
+  "Resolve partial gap": "Coverage is partial; split or rewrite this gap to resolve it.",
+  "Review tactic mappings": "Tactic mappings need review to check this gap’s coverage.",
+  "Review new source": "New source evidence needs review against this gap.",
+  "Confirm status": "The evidence status assessment needs human confirmation.",
+};
+
+/** Translate the legacy task identifier without changing engine or focus contracts. */
+function reviewTaskLabel(task: string): string {
+  return task === "Confirm status" ? "Confirm evidence assessment" : task;
+}
 
 function CreateOpenGap() {
   return (
@@ -107,11 +120,11 @@ function InventoryReviewTasks({ card, focusTask }: {
   const tasks = reviewGapTasks(card);
   const isPartial = card.gap_status === "validated_partial";
   return <section ref={paneRef} aria-label="Outstanding gap review">
-      <div className="mt-4" data-review-task="Review tactic mappings" tabIndex={-1}>
+      {tasks.includes("Review tactic mappings") ? <div className="mt-4" data-review-task="Review tactic mappings" tabIndex={-1}>
         <p className="text-[12px] text-muted-foreground">Review tactic mappings: check this gap’s coverage and confirm or edit each flagged mapping.</p>
-        {tasks.includes("Review tactic mappings") ? <Link href={`/gaps/${card.gap_id}#mapped-tactics`} className="text-[12px] text-foreground underline">Review coverage on gap page</Link> : null}
-      </div>
-      {tasks.length > 1 ? <p className="mt-3 text-[12px] text-muted-foreground">Additional tasks ({tasks.length - 1}): {tasks.slice(1).join(" · ")}</p> : null}
+        <Link href={`/gaps/${card.gap_id}#mapped-tactics`} className="text-[12px] text-foreground underline">Review coverage on gap page</Link>
+      </div> : null}
+      {tasks.length > 1 ? <p className="mt-3 text-[12px] text-muted-foreground">Additional tasks ({tasks.length - 1}): {tasks.slice(1).map(reviewTaskLabel).join(" · ")}</p> : null}
       {card.new_source ? <div data-review-task="Review new source"><NewSourceNote gapId={card.gap_id} newSource={card.new_source} /></div> : null}
       {/* Hero action first: Resolve (Partial) or Confirm (everything else still unconfirmed) stand apart from the secondary actions below. */}
       <div className="mt-4 flex flex-wrap items-center gap-2" data-review-task={isPartial ? "Resolve partial gap" : "Confirm status"}>
@@ -119,11 +132,12 @@ function InventoryReviewTasks({ card, focusTask }: {
           <Link href={`/gaps/${card.gap_id}#gap-coverage-actions`} className="underline">Resolve — split or rewrite</Link>
         ) : !card.human_validated ? (
           <LockForm
-            label="Confirm status"
+            label="Confirm evidence assessment"
             action="validate_gap"
             extra={{ gap_id: card.gap_id }}
             note={{ label: "Reason (required)", required: true }}
-            confirmLabel={`Confirm ${GAP_STATUS_LABELS[card.gap_status]}`}
+            confirmLabel="Confirm evidence assessment"
+            description={`Confirm the ${GAP_STATUS_LABELS[card.gap_status]} evidence assessment with your reason. This does not validate priority.`}
             variant="default"
           />
         ) : null}
@@ -302,7 +316,12 @@ export function GapsWorkbench({
   }, [cards, filter, attention, query, domain, setting, priority, sort, priorities]);
   const [openId, setOpenId] = useState<string | null>(null);
   const [focusTask, setFocusTask] = useState<{ label: string; sequence: number } | null>(null);
-  const extraFilters = [query, domain, setting, priority].filter(Boolean).length;
+  const secondaryFilters = [
+    domain ? DOMAIN_LABELS[domain as ReviewGapCard["domain"]] : "",
+    priority ? (priority === "none" ? "Not prioritized" : PRIORITY_LABELS[priority as GapPriority["band"]]) : "",
+    setting,
+    filter === "all" ? "" : FILTER_CHIPS.find(chip => chip.id === filter)?.label ?? "Unconfirmed or partial",
+  ].filter(Boolean);
 
   function resetFilters() {
     setFilter("all", false);
@@ -338,45 +357,6 @@ export function GapsWorkbench({
                 aria-label="Search gaps"
                 className="h-8 w-56 rounded-md border border-input bg-muted/50 px-2.5 text-[11.5px] text-foreground placeholder:text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring"
               />
-              <select aria-label="Filter by domain" value={domain} onChange={(e) => setDomain(e.target.value)} className={selectClass}>
-                <option value="">Domain</option>
-                {domains.map((d) => (
-                  <option key={d} value={d}>
-                    {DOMAIN_LABELS[d]}
-                  </option>
-                ))}
-              </select>
-              <select aria-label="Filter by priority" value={priority} onChange={(e) => setPriority(e.target.value)} className={selectClass}>
-                <option value="">Priority</option>
-                <option value="high">High</option>
-                <option value="medium">Medium</option>
-                <option value="low">Low</option>
-                <option value="defer">Defer</option>
-                <option value="none">Not prioritized</option>
-              </select>
-              <select aria-label="Filter by setting" value={setting} onChange={(e) => setSetting(e.target.value)} className={selectClass}>
-                <option value="">Setting</option>
-                {settings.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-              {extraFilters > 0 ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    setQuery("");
-                    setDomain("");
-                    setSetting("");
-                    setPriority("");
-                  }}
-                >
-                  Clear ({extraFilters})
-                </Button>
-              ) : null}
               <span className="ml-auto text-[11px] text-muted-foreground" aria-live="polite">
                 Showing {visible.length} of {cards.length} gaps · counts below cover all gaps
               </span>
@@ -386,32 +366,78 @@ export function GapsWorkbench({
               <Button type="button" size="sm" variant={attention ? "default" : "outline"} aria-pressed={attention} onClick={() => setFilter(filter, !attention)}>Needs attention ({counts.needs_attention})</Button>
               <Button type="button" size="sm" variant="ghost" onClick={resetFilters}>Reset filters</Button>
             </div>
-            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Evidence status">
-              {filter === "needs_validation" ? <span className="text-[11px]">Legacy filter: unconfirmed or partial</span> : null}
-              {FILTER_CHIPS.map((chip) => (
-                <Button
-                  key={chip.id}
-                  type="button"
-                  size="sm"
-                  variant={filter === chip.id ? "default" : "outline"}
-                  aria-pressed={filter === chip.id}
-                  onClick={() => setFilter(chip.id)}
-                >
-                  {chip.label} ({counts[chip.id]})
-                </Button>
-              ))}
-            </div>
+            <details data-inventory-filters className="text-[12px]">
+              <summary className="w-fit cursor-pointer rounded-sm px-1 py-1 font-medium focus-visible:outline-2 focus-visible:outline-ring">Filters ({secondaryFilters.length})</summary>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <select aria-label="Filter by domain" value={domain} onChange={(e) => setDomain(e.target.value)} className={selectClass}>
+                  <option value="">Domain</option>
+                  {domains.map((d) => (
+                    <option key={d} value={d}>
+                      {DOMAIN_LABELS[d]}
+                    </option>
+                  ))}
+                </select>
+                <select aria-label="Filter by priority" value={priority} onChange={(e) => setPriority(e.target.value)} className={selectClass}>
+                  <option value="">Priority</option>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                  <option value="defer">Defer</option>
+                  <option value="none">Not prioritized</option>
+                </select>
+                <select aria-label="Filter by setting" value={setting} onChange={(e) => setSetting(e.target.value)} className={selectClass}>
+                  <option value="">Setting</option>
+                  {settings.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label="Evidence status">
+                {filter === "needs_validation" ? <span className="text-[11px]">Legacy filter: unconfirmed or partial</span> : null}
+                {FILTER_CHIPS.map((chip) => (
+                  <Button
+                    key={chip.id}
+                    type="button"
+                    size="sm"
+                    variant={filter === chip.id ? "default" : "outline"}
+                    aria-pressed={filter === chip.id}
+                    onClick={() => setFilter(chip.id)}
+                  >
+                    {chip.label} ({counts[chip.id]})
+                  </Button>
+                ))}
+              </div>
+            </details>
+            {secondaryFilters.length ? <div className="flex flex-wrap items-center gap-2 text-[12px]" aria-label="Active secondary filters">
+              <span>Active filters: {secondaryFilters.join(" · ")}</span>
+              <Button type="button" size="sm" variant="ghost" onClick={() => {
+                setDomain("");
+                setPriority("");
+                setSetting("");
+                setFilter("all");
+              }}>Clear secondary filters</Button>
+            </div> : null}
           </div>
-          <div className="overflow-x-auto rounded-lg border border-border bg-card">
-            <table className="w-full min-w-[820px] border-collapse text-[12px]" data-testid="evidence-inventory">
+          <div className="flex flex-wrap items-center gap-2 md:hidden">
+            <label className="flex items-center gap-2 text-[12px]">Sort
+              <select aria-label="Sort gaps" className="min-h-10 rounded-md border border-input bg-background px-2" value={sort?.key ?? ""} onChange={(event) => setSort(event.target.value ? { key: event.target.value as SortKey, dir: sort?.dir ?? "asc" } : null)}>
+                <option value="">Review order</option>
+                <option value="id">ID</option><option value="name">Gap</option><option value="domain">Domain</option><option value="status">Evidence status</option><option value="priority">Priority</option><option value="tactics">Tactics</option>
+              </select>
+            </label>
+            <Button variant="outline" size="sm" disabled={!sort} aria-label="Reverse gap sort direction" onClick={() => setSort(current => current ? {...current, dir: current.dir === "asc" ? "desc" : "asc"} : null)}>{sort?.dir === "desc" ? "Descending" : "Ascending"}</Button>
+          </div>
+          <div className="min-w-0 overflow-x-auto rounded-lg border border-border bg-card">
+            <table className={cn(styles.inventory, "w-full md:min-w-[820px] border-collapse text-[12px]")} data-testid="evidence-inventory">
               <thead className="border-b border-border bg-muted/60">
                 <tr>
                   <SortHeader label="ID" column="id" sort={sort} onSort={onSort} className="w-[132px]" />
                   <SortHeader label="Gap" column="name" sort={sort} onSort={onSort} />
                   <SortHeader label="Domain" column="domain" sort={sort} onSort={onSort} className="w-[150px]" />
                   <SortHeader label="Evidence status" column="status" sort={sort} onSort={onSort} className="w-[160px]" />
-                  <th scope="col" className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Review state</th>
-                  <th scope="col" className="px-3 py-2 text-left text-[11px] text-muted-foreground">Next action</th>
+                  <th scope="col" className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Review state and next action</th>
                   <SortHeader label="Priority" column="priority" sort={sort} onSort={onSort} className="w-[110px]" />
                   <th scope="col" className="w-[130px] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                     Setting
@@ -422,7 +448,7 @@ export function GapsWorkbench({
               <tbody>
                 {visible.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="px-4 py-8 text-center text-[12px] text-muted-foreground">
+                    <td colSpan={8} className="px-4 py-8 text-center text-[12px] text-muted-foreground">
                       No gaps match these filters.
                     </td>
                   </tr>
@@ -454,7 +480,7 @@ export function GapsWorkbench({
                           >
                             <span aria-hidden className="mt-0.5 text-[10px] text-muted-foreground">▸</span>
                             <span className="min-w-0">
-                              <span className="block font-medium leading-snug text-foreground">{card.gap_name}</span>
+                              <span className="block md:min-w-[16rem] break-words text-sm font-semibold leading-snug text-foreground">{card.gap_name}</span>
                               {card.new_source ? <NewSourcePill /> : null}
                             </span>
                           </GapRecordLink>
@@ -469,37 +495,35 @@ export function GapsWorkbench({
                             }}>Source suggestions ({suggestions.filter((suggestion) => suggestion.gap_id === card.gap_id).length})</button>
                           ) : null}
                         </td>
-                        <td className="px-3 py-2 align-top text-[11px] text-muted-foreground">{DOMAIN_LABELS[card.domain]}</td>
+                        <td data-label="Domain" className="px-3 py-2 align-top text-[11px] text-muted-foreground">{DOMAIN_LABELS[card.domain]}</td>
                         <td className="px-3 py-2 align-top">
-                          <GapBadge status={card.gap_status} />
+                          <span className="mb-1 block text-[11px] text-muted-foreground md:hidden">Evidence status</span><GapBadge status={card.gap_status} />
                         </td>
                         <td className="px-3 py-2 align-top text-[11px]">
-                          <span className="block">{card.human_validated ? "Assessment confirmed" : "Assessment unconfirmed"}</span>
-                          {tasks.length ? <span className="text-amber-700 dark:text-amber-300">{tasks.join(" · ")}</span> : <span className="text-muted-foreground">No outstanding review</span>}
-                        </td>
-                        <td className="px-3 py-2 align-top">
+                          <span className="block text-muted-foreground">{card.human_validated ? "Assessment confirmed" : "Assessment unconfirmed"}</span>
                           <div data-next-action>
                             {tasks[0] ? <>
-                              <Button type="button" size="sm" variant="outline" aria-expanded={open} onClick={() => {
+                              <p className="mb-2 mt-1 text-[12px] text-foreground">{REVIEW_REASONS[tasks[0]]}</p>
+                              <Button type="button" size="sm" variant="default" className="h-auto min-h-8 max-w-full whitespace-normal py-1.5 text-left" aria-expanded={open} onClick={() => {
                                 setOpenId(card.gap_id);
                                 setFocusTask((previous) => ({ label: tasks[0], sequence: (previous?.sequence ?? 0) + 1 }));
-                              }}>{tasks[0]}</Button>
-                              {tasks.length > 1 ? <span className="mt-1 block text-[11px] text-muted-foreground">+{tasks.length - 1} additional tasks</span> : null}
+                              }}>{reviewTaskLabel(tasks[0])}</Button>
+                              {tasks.length > 1 ? <span className="mt-1 block text-[11px] text-muted-foreground">Additional tasks ({tasks.length - 1}): {tasks.slice(1).map(reviewTaskLabel).join(" · ")}</span> : null}
                             </> : <span className="text-[11px] text-muted-foreground">No outstanding review</span>}
                           </div>
                         </td>
                         <td className="px-3 py-2 align-top">
-                          <PriorityChip priority={priorities[card.gap_id]} />
+                          <span className="mb-1 block text-[11px] text-muted-foreground md:hidden">Priority</span><PriorityChip priority={priorities[card.gap_id]} />
                         </td>
                         <td className="px-3 py-2 align-top">
-                          {card.settings.length ? <SettingChips settings={card.settings} /> : <span className="text-[11px] text-muted-foreground">—</span>}
+                          <span className="mb-1 block text-[11px] text-muted-foreground md:hidden">Setting</span>{card.settings.length ? <SettingChips settings={card.settings} /> : <span className="text-[11px] text-muted-foreground">—</span>}
                         </td>
                         <td className="px-3 py-2 align-top text-[11px] text-muted-foreground">
-                          {card.tactics.length}
+                          <span className="mb-1 block text-[11px] text-muted-foreground md:hidden">Tactics</span>{card.tactics.length}
                           {card.needs_review ? <span className="ml-1 text-amber-700 dark:text-amber-300">· review</span> : null}
                         </td>
                       </tr>
-                      {open && focusTask ? <tr><td colSpan={9} className="bg-muted/30 px-3 py-3">
+                      {open && focusTask ? <tr><td colSpan={8} className="bg-muted/30 px-3 py-3">
                         <InventoryReviewTasks card={card} focusTask={focusTask} />
                       </td></tr> : null}
                     </Fragment>
@@ -522,7 +546,7 @@ export function GapsWorkbench({
           <>
             <h2 className="text-[13px] font-semibold">Continue to prioritize</h2>
             <p className="mt-1 mb-3 text-[12px] text-muted-foreground">
-              Every live gap has a confirmed status assessment. Check outstanding review work above. Open gaps go to the Prioritization Matrix, then Tactic Ideation.
+              Every live gap has a confirmed evidence assessment. Check outstanding review work above. Open gaps go to the Prioritization Matrix, then Tactic Ideation.
             </p>
             <LockForm
               label="Continue to prioritize"
@@ -545,7 +569,7 @@ export function GapsWorkbench({
             <h2 className="text-[13px] font-semibold">Review outstanding gap assessments</h2>
             <p className="mt-1 text-[12px] text-muted-foreground">
               You can open the
-              Prioritization Matrix now, but it only has the gaps already validated as Open.
+              Prioritization Matrix now, but it only has the gaps already confirmed as Open.
             </p>
           </>
         )}

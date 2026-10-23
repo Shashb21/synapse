@@ -105,12 +105,15 @@ export function AssignTacticButton({
 function CreateTacticFields({ inUse = [] }: { inUse?: CustomTacticType[] }) {
   return (
     <>
-      <input
-        name="name"
-        required
-        placeholder="Tactic name"
-        className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-      />
+      <label className="grid gap-1 text-[12px] text-muted-foreground">
+        Tactic name (required)
+        <input
+          name="name"
+          required
+          placeholder="Tactic name"
+          className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+        />
+      </label>
       <select
         name="type"
         required
@@ -128,12 +131,15 @@ function CreateTacticFields({ inUse = [] }: { inUse?: CustomTacticType[] }) {
         ))}
       </select>
       <CustomTypeFields inUse={inUse} />
-      <input
-        name="evidence_question"
-        required
-        placeholder="Evidence question"
-        className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-      />
+      <label className="grid gap-1 text-[12px] text-muted-foreground">
+        Evidence question (required)
+        <input
+          name="evidence_question"
+          required
+          placeholder="Evidence question"
+          className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+        />
+      </label>
       <label className="grid gap-1 text-[12px] text-muted-foreground">
         Status
         <select
@@ -191,12 +197,15 @@ export function AddTacticsButton({
       variant={variant}
       description="Record a study or programme you already have. Map it onto gaps on Gaps. Proposed new tactics are ideated on Tactics after Prioritize."
     >
-      <input
-        name="name"
-        required
-        placeholder="Study, programme, or publication name"
-        className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-      />
+      <label className="grid gap-1 text-[12px] text-muted-foreground">
+        Tactic name (required)
+        <input
+          name="name"
+          required
+          placeholder="Study, programme, or publication name"
+          className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+        />
+      </label>
       <select
         name="type"
         required
@@ -232,12 +241,15 @@ export function AddTacticsButton({
           ))}
         </select>
       </label>
-      <input
-        name="evidence_question"
-        required
-        placeholder="Evidence question"
-        className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-      />
+      <label className="grid gap-1 text-[12px] text-muted-foreground">
+        Evidence question (required)
+        <input
+          name="evidence_question"
+          required
+          placeholder="Evidence question"
+          className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+        />
+      </label>
       <TacticDetailFields />
     </LockForm>
   );

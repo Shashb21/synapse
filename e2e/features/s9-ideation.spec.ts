@@ -160,7 +160,7 @@ test.describe("S9 tactics ideation", () => {
     await card.getByRole("button", { name: `Edit ${proposal.name}`, exact: true }).click();
     const dialog = page.getByRole("dialog");
     const comparison = "A new registry adds unavailable outcomes; recruitment is feasible but costs more than secondary analysis.";
-    await dialog.getByRole("textbox", { name: "Comparison of expansion and new tactic", exact: true }).fill(comparison);
+    await dialog.getByRole("textbox", { name: "Comparison of expansion and new tactic (required)", exact: true }).fill(comparison);
     await dialog.getByLabel(/rationale.*required/i).last().fill("Clarified the alternative and feasibility");
     const saveResponse = page.waitForResponse(response => response.url().endsWith("/api/plan") && response.request().method() === "POST");
     await dialog.getByRole("button", { name: "Save edit", exact: true }).click();

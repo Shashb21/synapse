@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import { BAND_LABELS, BANDS } from "@/components/matrix/bands";
@@ -12,20 +13,28 @@ export function GapPriorityActions({ gap, xAxis, yAxis, identity, mayPrioritize 
   gap: PrioritizeGap; xAxis: PriorityAxis; yAxis: PriorityAxis;
   identity: ActionIdentity; mayPrioritize: boolean;
 }) {
+  const [saved, setSaved] = useState<string | null>(null);
+  const confirmed = () => setSaved("Priority validated across all settings.");
   const ai = useAiEnabled("prioritization");
   const band = gap.band ?? gap.suggested_band;
   const point = typeof gap.axis_scores?.[xAxis.id] === "number" && typeof gap.axis_scores?.[yAxis.id] === "number";
-  return <div className="mb-5 flex flex-wrap gap-2" aria-label="Priority actions">
+  return <section className="mb-5 grid gap-2" aria-label="Priority actions">
+      <h3 className="text-[14px] font-medium text-foreground">3. Validate priority</h3>
+      <p className="text-[12px] leading-5 text-muted-foreground">Save scores as a draft while reviewing placement. Validate priority with your reason when you are ready; it applies across all settings.</p>
+      <p role="status" aria-atomic="true" className="text-[12px] text-foreground">{saved}</p>
+      <div className="flex flex-wrap gap-2">
       {ai && band && mayPrioritize && !gap.validated && !gap.needs_review && !gap.human_band && !gap.human_axes?.length && gap.support_status === "supported" ? (
-        <ActionDialog protectUnsavedChanges endpoint="/api/plan"
+        <ActionDialog onOpenChange={(open) => { if (open) setSaved(null); }} protectUnsavedChanges endpoint="/api/plan"
+          onSuccess={confirmed}
           payload={{ action: "accept_priority_suggestion", gap_id: gap.gap_id, band: gap.suggested_band, expected_version: gap.version ?? null }}
           label="Accept supported AI suggestion" title={`Accept AI priority for ${gap.gap_name}`}
           description="Inspect the supporting records before accepting this suggestion. Your reason and its references will be retained in history."
           confirmLabel="Accept supported AI suggestion" requireRationale rationaleFieldName="reason" rationaleLabel="Reason for acceptance (required)" identity={identity} />
       ) : null}
       {mayPrioritize ? (
-        <ActionDialog protectUnsavedChanges
+        <ActionDialog onOpenChange={(open) => { if (open) setSaved(null); }} protectUnsavedChanges
           endpoint="/api/plan"
+          onSuccess={(result) => setSaved((result.placement as { validated?: boolean } | undefined)?.validated ? "Priority validated across all settings." : "Draft placement saved. Validate priority when you are ready.")}
           payload={{ action: "set_placement", gap_id: gap.gap_id, x_axis: xAxis.id, y_axis: yAxis.id, expected_version: gap.version ?? null, expected_context_version: gap.context_version ?? null }}
           fields={[
             { name: "rationale", label: "Priority rationale (optional)", type: "textarea", defaultValue: gap.rationale ?? "", hint: "Why this priority is appropriate. Kept separately from the reason for this change." },
@@ -63,12 +72,12 @@ export function GapPriorityActions({ gap, xAxis, yAxis, identity, mayPrioritize 
             },
             {
               name: "validate",
-              label: "Confirm priority now",
+              label: "Validate priority now",
               type: "select",
               defaultValue: "no",
               options: [
                 { value: "no", label: "No — keep it as a draft" },
-                { value: "yes", label: "Yes — confirm priority" },
+                { value: "yes", label: "Yes — validate priority" },
               ],
             },
           ]}
@@ -96,13 +105,14 @@ export function GapPriorityActions({ gap, xAxis, yAxis, identity, mayPrioritize 
         />
       ) : null}
       {band && mayPrioritize ? (
-        <ActionDialog protectUnsavedChanges
+        <ActionDialog onOpenChange={(open) => { if (open) setSaved(null); }} protectUnsavedChanges
           endpoint="/api/plan"
+          onSuccess={confirmed}
           payload={{ action: "validate_band", gap_id: gap.gap_id, band, expected_version: gap.version ?? null, expected_context_version: gap.context_version ?? null }}
-          label={gap.needs_review ? "Review changed context and reconfirm" : gap.validated ? "Review or change priority" : ai && (gap.run_id || gap.suggested_rationale) && !gap.human_band ? "Make manual judgement" : "Review and confirm priority"}
-          title={`Confirm ${BAND_LABELS[band]} priority for ${gap.gap_name}`}
+          label={gap.needs_review ? "Review changed context and revalidate priority" : gap.validated ? "Review or change validated priority" : ai && (gap.run_id || gap.suggested_rationale) && !gap.human_band ? "Make manual judgement" : "Validate priority"}
+          title={`Validate ${BAND_LABELS[band]} priority for ${gap.gap_name}`}
           description="Make an explicit manual judgement across all settings and record your own reason. Supporting references are not required for a manual judgement, including when you retain the same band and scores."
-          confirmLabel="Confirm priority"
+          confirmLabel="Validate priority"
           requireRationale
           rationaleFieldName="reason"
           rationaleLabel="Reason for change (required)"
@@ -111,5 +121,6 @@ export function GapPriorityActions({ gap, xAxis, yAxis, identity, mayPrioritize 
           size="sm"
         />
       ) : null}
-  </div>;
+      </div>
+  </section>;
 }

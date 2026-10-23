@@ -76,8 +76,8 @@ export function ActionDialog({
   onSuccess,
 }: {
   protectUnsavedChanges?: boolean;
-  /** Revalidate a containing record after a successful save, retaining its open drafts. */
-  onSuccess?: () => void;
+  /** Run with the saved server result as refreshed data arrives. */
+  onSuccess?: (result: Record<string, unknown>) => void;
   endpoint: string;
   payload: Record<string, unknown>;
   fields?: ActionField[];
@@ -113,6 +113,8 @@ export function ActionDialog({
   const [dirty, setDirty] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [invalidField, setInvalidField] = useState<string | null>(null);
+  const errorId = `${formId}-error`;
   const [actorName, setActorName] = useState(identity.signed_in ? identity.actor_name : "");
   const [actorFunction, setActorFunction] = useState<ActorFunction>(identity.actor_function);
 
@@ -120,11 +122,14 @@ export function ActionDialog({
     const data = new FormData(form);
     const rationale = String(data.get(rationaleFieldName) ?? "").trim();
     setError(null);
+    setInvalidField(null);
     if (requireRationale && rationale.length < 3) {
+      setInvalidField(rationaleFieldName);
       setError(rationaleFieldName === "reason" ? "A meaningful reason is required. It is stored with the decision." : "A short rationale is required. It is stored with the edit.");
       return;
     }
     if (!identity.signed_in && !actorName.trim()) {
+      setInvalidField("actor_name");
       setError("Type your name so the edit has an actor.");
       return;
     }
@@ -135,11 +140,13 @@ export function ActionDialog({
       if (value !== null) extra[field.name] = field.type === "number" ? Number(value) : String(value);
       typed[field.name] = String(value ?? "");
       if (field.required && !String(value ?? "").trim()) {
+        setInvalidField(field.name);
         setError(`${field.label} is required.`);
         return;
       }
       const invalid = field.validate?.(String(value ?? ""));
       if (invalid) {
+        setInvalidField(field.name);
         setError(invalid);
         return;
       }
@@ -160,7 +167,7 @@ export function ActionDialog({
         actor_name: actorName.trim() || identity.actor_name,
         actor_function: actorFunction,
       });
-    const json = res.json as { error?: string };
+    const json = res.json as Record<string, unknown> & { error?: string };
     setPending(false);
     if (!res.ok) {
       setError(json.error ?? "Action failed");
@@ -168,7 +175,7 @@ export function ActionDialog({
     }
     setError(null);
     // The dialog closes as the refreshed data arrives, so the page never shows the old value.
-    refresh(() => { setOpen(false); onSuccess?.(); });
+    refresh(() => { setOpen(false); onSuccess?.(json); });
   }
 
   function onOpenChange(next: boolean) {
@@ -178,6 +185,7 @@ export function ActionDialog({
       setOpenedPayload(payload);
       setOpenedFields(fields);
       setError(null);
+      setInvalidField(null);
       setPending(false);
     }
     if (!next && protectUnsavedChanges && (pending || refreshing || (dirty && !window.confirm("Discard unsaved changes?")))) return;
@@ -197,6 +205,7 @@ export function ActionDialog({
         <form
           id={formId}
           noValidate
+          aria-describedby={error && !invalidField ? errorId : undefined}
           onChange={() => setDirty(true)}
           onSubmit={(event) => {
             event.preventDefault();
@@ -212,12 +221,19 @@ export function ActionDialog({
               // A new default (the page refreshed after a save) remounts the control: Base UI
               // refuses to change an uncontrolled field's default in place (KAN-68).
               <label key={`${field.name}:${field.defaultValue ?? ""}`} className="grid gap-1 text-[12px] text-muted-foreground">
-                {field.label}
+                {field.label}{field.required ? " (required)" : ""}
                 {field.type === "textarea" ? (
-                  <Textarea name={field.name} rows={3} defaultValue={field.defaultValue} placeholder={field.placeholder} />
+                  <Textarea name={field.name} rows={3} defaultValue={field.defaultValue} placeholder={field.placeholder}
+                    required={field.required} aria-required={field.required || undefined}
+                    aria-invalid={invalidField === field.name || undefined}
+                    aria-describedby={invalidField === field.name ? errorId : undefined} />
                 ) : field.type === "select" ? (
                   <select
                     name={field.name}
+                    required={field.required}
+                    aria-required={field.required || undefined}
+                    aria-invalid={invalidField === field.name || undefined}
+                    aria-describedby={invalidField === field.name ? errorId : undefined}
                     defaultValue={field.defaultValue ?? (field.placeholder ? "" : undefined)}
                     className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
                   >
@@ -236,6 +252,10 @@ export function ActionDialog({
                 ) : (
                   <Input
                     name={field.name}
+                    required={field.required}
+                    aria-required={field.required || undefined}
+                    aria-invalid={invalidField === field.name || undefined}
+                    aria-describedby={invalidField === field.name ? errorId : undefined}
                     type={field.type ?? "text"}
                     defaultValue={field.defaultValue}
                     placeholder={field.placeholder}
@@ -247,7 +267,10 @@ export function ActionDialog({
             {requireRationale ? (
               <label className="grid gap-1 text-[12px] text-muted-foreground">
                 {rationaleLabel ?? "Rationale (required)"}
-                <Textarea name={rationaleFieldName} rows={3} placeholder="Why this decision, in one line" />
+                <Textarea name={rationaleFieldName} rows={3} placeholder="Why this decision, in one line"
+                  required aria-required="true"
+                  aria-invalid={invalidField === rationaleFieldName || undefined}
+                  aria-describedby={invalidField === rationaleFieldName ? errorId : undefined} />
                 <span className="text-[11px] text-muted-foreground/80">
                   Stored on the edit record.
                 </span>
@@ -261,6 +284,9 @@ export function ActionDialog({
                   Name
                   <Input
                     value={actorName}
+                    required aria-required="true"
+                    aria-invalid={invalidField === "actor_name" || undefined}
+                    aria-describedby={invalidField === "actor_name" ? errorId : undefined}
                     placeholder="Your name"
                     onChange={(event) => setActorName(event.target.value)}
                   />
@@ -282,7 +308,7 @@ export function ActionDialog({
               </div>
             ) : null}
             {error ? (
-              <p role="alert" className="text-[12px] text-destructive">
+              <p id={errorId} role="alert" className="text-[12px] text-destructive">
                 {error}
               </p>
             ) : null}
