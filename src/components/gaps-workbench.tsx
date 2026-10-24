@@ -1,5 +1,6 @@
 "use client";
 
+import { PriorityBars } from "@/components/matrix/bands";
 import { Fragment, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import styles from "./gaps-workbench.module.css";
@@ -154,21 +155,15 @@ const PRIORITY_LABELS: Record<GapPriority["band"], string> = { high: "High", med
 
 function PriorityChip({ priority }: { priority?: GapPriority }) {
   if (!priority) return <span className="text-caption text-muted-foreground">—</span>;
-  const tone =
-    priority.band === "high"
-      ? "border-destructive/40 bg-destructive/10 text-destructive   "
-      : priority.band === "medium"
-        ? "border-unknown/40 bg-unknown/10 text-unknown-foreground   "
-        : priority.band === "low"
-          ? "border-primary/40 bg-primary/10 text-primary   "
-          : "border-stone-200 bg-stone-100 text-stone-600 dark:border-stone-500/30 dark:bg-stone-500/10 dark:text-stone-300";
+  // Priority has no hue (KAN-158): bars and a word, so it never reads as a status.
   return (
     <span
-      className={cn("inline-flex items-center rounded border px-1.5 py-0.5 text-caption font-medium", tone)}
+      className="inline-flex items-center gap-1.5 text-callout font-medium text-foreground"
       title={priority.validated ? "Validated on the Prioritization Matrix" : "Draft — not validated yet"}
     >
+      <PriorityBars band={priority.band} />
       {PRIORITY_LABELS[priority.band]}
-      {priority.validated ? null : <span className="ml-1 font-normal opacity-70">draft</span>}
+      {priority.validated ? null : <span className="font-normal text-muted-foreground">draft</span>}
     </span>
   );
 }

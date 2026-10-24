@@ -148,7 +148,7 @@ function GapIdeationCard({
         <span className="shrink-0 font-mono text-caption font-medium text-primary" title={card.gap_id}>
           {gapNumberLabel(card.number)}
         </span>
-        <span className="min-w-0 basis-full break-words text-sm font-semibold leading-snug sm:basis-0 sm:flex-1 text-foreground">{card.gap_name}</span>
+        <span className="min-w-0 basis-full break-words text-body font-semibold sm:basis-80 sm:flex-1 text-foreground">{card.gap_name}</span>
         <span className="flex max-w-full flex-wrap items-center gap-1.5">
           <span className="rounded-sm bg-muted px-2 py-px text-caption text-foreground">{planningLabel(linked)}</span>
           <span className="text-caption text-muted-foreground">Coverage status: {GAP_STATUS_LABELS[card.gap_status]}</span>
@@ -157,7 +157,7 @@ function GapIdeationCard({
               {suggestions.length} option{suggestions.length === 1 ? "" : "s"}
             </span>
           ) : null}
-          <span className="rounded-sm bg-destructive/10 px-1.5 py-px text-caption text-destructive">
+          <span className="text-caption text-muted-foreground">
             {DOMAIN_LABELS[card.domain]}
           </span>
         </span>
@@ -315,7 +315,7 @@ function LibraryPanel({ items, onEdit }: { items: TacticLibraryItem[]; onEdit?: 
                   <span className="font-mono text-caption" style={{ color: tacticColor(item) }}>
                     {item.id}
                   </span>
-                  <span className="min-w-0 basis-full break-words text-sm font-semibold leading-snug sm:basis-0 sm:flex-1 text-foreground">{item.name}</span>
+                  <span className="min-w-0 basis-full break-words text-body font-semibold sm:basis-80 sm:flex-1 text-foreground">{item.name}</span>
                   <TypeChip tactic={item} />
                   {item.gaps.length === 0 ? (
                     <span className="rounded-sm bg-unknown/10 px-1.5 py-px text-caption text-unknown-foreground">
@@ -474,7 +474,7 @@ export function IdeationBoard({
               setDomain("");
               setCoverage("");
             }}
-            className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-caption text-destructive"
+            className="rounded-md px-2 py-0.5 text-caption text-primary hover:bg-muted"
           >
             Clear
           </button>
