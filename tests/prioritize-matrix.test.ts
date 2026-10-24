@@ -30,12 +30,12 @@ describe("matrix geometry", () => {
   const impact = axis("decision_impact");
   const effort = axis("effort_cost");
 
-  it("names the four quadrants as in the design: Prioritize, Plan, Monitor, Defer (KAN-8)", () => {
+  it("places the four quadrants as High, Medium, Low and Defer (KAN-8, KAN-158)", () => {
     const band = (y: number, x: number) =>
       quadrantBand({ xAxis: impact, yAxis: axis("time_pressure"), scores: { decision_impact: x, time_pressure: y } });
-    expect(band(80, 80)).toBe("high"); // favourable on both: Prioritize
-    expect(band(80, 20)).toBe("medium"); // vertical only: Plan
-    expect(band(20, 80)).toBe("low"); // horizontal only: Monitor
+    expect(band(80, 80)).toBe("high"); // favourable on both: High
+    expect(band(80, 20)).toBe("medium"); // vertical only: Medium
+    expect(band(20, 80)).toBe("low"); // horizontal only: Low
     expect(band(20, 20)).toBe("defer"); // neither: Defer
   });
 

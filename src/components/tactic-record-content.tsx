@@ -33,7 +33,7 @@ export function TacticRecordContent({ record, identity = { signed_in: true, acto
     <h2 className="font-medium">{tactic.name}</h2>
     <p>{tactic.description}</p>
     <div className="flex flex-wrap items-center gap-2"><TacticBadge status={tactic.status} /><span>Review: {tactic.review_status}</span><LockMeta lock={tactic.lock} /></div>
-      <dl className="mb-6 grid gap-2 text-[13px] sm:grid-cols-2">
+      <dl className="mb-6 grid gap-2 text-body sm:grid-cols-2">
         <Item k="Type" v={tacticTypeLabel(tactic)} />
         <Item k="Tactic evidence question" v={tactic.evidence_question} />
         <Item k="Population" v={tactic.population} />
@@ -51,10 +51,10 @@ export function TacticRecordContent({ record, identity = { signed_in: true, acto
       </dl>
       {record.source_references.length ? <section aria-label="Tactic source references" className="my-6 space-y-2"><h2 className="text-base font-semibold">Source references</h2>{record.source_references.map(ref => <blockquote key={ref.id} className="text-sm break-words">“{ref.quote}” · <Link href={`/sources/${encodeURIComponent(ref.source_id)}`}>{ref.title}</Link></blockquote>)}</section> : null}
       <SourceClaimReviewContent onRefresh={onRefresh} data={record.source_review} identity={identity} canReview={record.permissions.coverage} />
-      <section aria-label="Gaps this tactic is mapped to"><h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Gaps this tactic is mapped to</h2>
+      <section aria-label="Gaps this tactic is mapped to"><h2 className="mb-2 text-caption font-semibold text-muted-foreground">Gaps this tactic is mapped to</h2>
       <div className="mb-6 grid gap-2">
         {maps.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">No mappings yet.</p>
+          <p className="text-body text-muted-foreground">No mappings yet.</p>
         ) : (
           maps.map((c) => {
             const gap = c.gap;
@@ -75,8 +75,8 @@ export function TacticRecordContent({ record, identity = { signed_in: true, acto
         <h2 className="mb-2 text-sm font-semibold">Expansions</h2>
         {expansions.map((child) => <div id={child.id} key={child.id} className="mb-4 border-t border-border pt-3">
           <h3 className="text-sm font-medium">{child.scope.name}</h3>
-          <p className="mb-2 text-[13px]">{child.status} · {["planned", "ongoing", "completed"].includes(child.status) ? "Eligible for coverage review" : "Does not count toward coverage"}</p>
-          <dl className="mb-3 grid gap-2 text-[13px] sm:grid-cols-2">
+          <p className="mb-2 text-body">{child.status} · {["planned", "ongoing", "completed"].includes(child.status) ? "Eligible for coverage review" : "Does not count toward coverage"}</p>
+          <dl className="mb-3 grid gap-2 text-body sm:grid-cols-2">
             <Item k="Added question" v={child.scope.evidence_question} />
             <Item k="Gap coverage" v={child.scope.gap_coverage} />
             <Item k="Population" v={child.scope.population} />
@@ -94,7 +94,7 @@ export function TacticRecordContent({ record, identity = { signed_in: true, acto
             <Item k="Post-hoc analysis" v={child.scope.post_hoc ? "Yes" : "No"} />
             <Item k="Protocol amendment" v={child.scope.protocol_amendment ? "Required" : "Not required"} />
           </dl>
-          {record.coverages.filter(c => c.expansion_id === child.id && c.tactic_id === child.tactic_id && child.gap_ids.includes(c.gap_id)).map(coverage => <div key={coverage.id} className="mb-3 text-[13px]">
+          {record.coverages.filter(c => c.expansion_id === child.id && c.tactic_id === child.tactic_id && child.gap_ids.includes(c.gap_id)).map(coverage => <div key={coverage.id} className="mb-3 text-body">
             <p className="mb-2">Coverage for {coverage.gap?.name ?? coverage.gap_id}</p>
             <div className="mb-2 flex flex-wrap items-center gap-2"><CoverageBadge overall={coverage.overall} /><LockMeta lock={coverage.overall_lock} /></div>
             {record.permissions.coverage ? <ActionDialog onSuccess={onRefresh} protectUnsavedChanges endpoint="/api/iegp" payload={{action: "lock_overall", coverage_id: coverage.id, expected_relationship: coverage.relationship_version, expected_version: coverage.review_version, expected_basis_version: coverage.requirement_review.version}}
@@ -118,7 +118,7 @@ export function TacticRecordContent({ record, identity = { signed_in: true, acto
             description="Planned, ongoing and completed scope is eligible for coverage review. Full coverage still requires human validation."
             confirmLabel="Save status" fields={[{name: "status", label: "Status", type: "select", defaultValue: child.status,
               options: TACTIC_STATUSES.map(status => ({value: status, label: status}))}]} /> : null}
-          <details className="mt-3 text-[13px]"><summary>Scope history</summary>
+          <details className="mt-3 text-body"><summary>Scope history</summary>
             <p>Origin: {child.proposal_id}</p>
             <ul className="mt-2 grid gap-1">{child.history.map(event => <li key={event.version}>
               {event.at} · {event.actor.name} · {event.status}: {event.rationale}
@@ -149,7 +149,7 @@ export function TacticRecordContent({ record, identity = { signed_in: true, acto
 function Item({ k, v }: { k: string; v: string | null | undefined }) {
   return (
     <div>
-      <dt className="text-[11px] text-muted-foreground">{k}</dt>
+      <dt className="text-caption text-muted-foreground">{k}</dt>
       {/* An empty field reads "—", like the dates and budget, not a blank line. */}
       <dd className="text-foreground">{v?.trim() ? v : "—"}</dd>
     </div>

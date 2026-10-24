@@ -52,29 +52,29 @@ export function CoveragePairCard({
     <article className="grid gap-3 border border-border bg-card p-3 rounded-lg">
       <div className="grid gap-2 md:grid-cols-2">
         <div>
-          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Gap</p>
-          <p className="text-[13px] text-foreground">{pair.gap_statement}</p>
-          <p className="mt-1 font-mono text-[10px] text-muted-foreground">{pair.gap_id}</p>
+          <p className="text-caption text-muted-foreground">Gap</p>
+          <p className="text-body text-foreground">{pair.gap_statement}</p>
+          <p className="mt-1 font-mono text-caption text-muted-foreground">{pair.gap_id}</p>
         </div>
         <div>
-          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Tactic</p>
-          <p className="text-[13px] text-foreground">{pair.tactic_statement}</p>
-          <p className="mt-1 font-mono text-[10px] text-muted-foreground">{pair.tactic_id}</p>
+          <p className="text-caption text-muted-foreground">Tactic</p>
+          <p className="text-body text-foreground">{pair.tactic_statement}</p>
+          <p className="mt-1 font-mono text-caption text-muted-foreground">{pair.tactic_id}</p>
         </div>
       </div>
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-caption text-muted-foreground">
         Status: {pair.validated ? `decided · ${overall}` : "undecided"}
       </p>
-      <label className="grid gap-1 text-[12px]">
+      <label className="grid gap-1 text-callout">
         <span className="text-muted-foreground">Rationale (required)</span>
         <textarea
-          className="min-h-16 border border-border bg-background px-2 py-1.5 text-[12px]"
+          className="min-h-16 border border-border bg-background px-2 py-1.5 text-callout"
           value={rationale}
           onChange={(e) => setRationale(e.target.value)}
           placeholder="Why this coverage overall?"
         />
       </label>
-      {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+      {error ? <p className="text-callout text-destructive">{error}</p> : null}
       <div className="flex flex-wrap gap-2">
         {(["covers", "partial", "none", "unknown"] as const).map((value) => (
           <button
@@ -82,7 +82,7 @@ export function CoveragePairCard({
             type="button"
             disabled={pending || rationale.trim().length < 3}
             onClick={() => submit(value)}
-            className="border border-border px-2 py-1 text-[11px] capitalize text-foreground disabled:opacity-40 hover:bg-muted/40"
+            className="border border-border px-2 py-1 text-caption capitalize text-foreground disabled:opacity-40 hover:bg-muted/40"
           >
             {value}
           </button>

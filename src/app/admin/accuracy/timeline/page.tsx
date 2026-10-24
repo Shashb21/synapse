@@ -80,22 +80,22 @@ export default async function AccuracyTimelinePage({
       </PageIntro>
 
       {loadError ? (
-        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
+        <p className="mb-4 border border-destructive/40 bg-card p-2 text-callout text-destructive rounded-lg">
           {loadError}
         </p>
       ) : null}
 
       {!workspaceId ? (
         <section className="grid gap-2" aria-labelledby="timeline-empty">
-          <h2 id="timeline-empty" className="text-[13px] font-semibold text-foreground">
+          <h2 id="timeline-empty" className="text-body font-semibold text-foreground">
             Choose a workspace
           </h2>
-          <p className="text-[12px] text-muted-foreground">
+          <p className="text-callout text-muted-foreground">
             No workspace selected. Open a workspace from{" "}
             <Link href="/admin/accuracy" className="text-foreground underline-offset-2 hover:underline">
               Workspaces
             </Link>{" "}
-            or append <code className="text-[11px]">?workspace_id=</code> to this URL.
+            or append <code className="text-caption">?workspace_id=</code> to this URL.
           </p>
           {workspaces.length > 0 ? (
             <ul className="mt-2 flex flex-wrap gap-2">
@@ -103,7 +103,7 @@ export default async function AccuracyTimelinePage({
                 <li key={workspace.id}>
                   <Link
                     href={`/admin/accuracy/timeline?workspace_id=${encodeURIComponent(workspace.id)}`}
-                    className="inline-flex rounded-md border border-border px-2 py-1 text-[12px] text-muted-foreground no-underline hover:text-foreground"
+                    className="inline-flex rounded-md border border-border px-2 py-1 text-callout text-muted-foreground no-underline hover:text-foreground"
                   >
                     {workspace.name}
                   </Link>
@@ -117,10 +117,10 @@ export default async function AccuracyTimelinePage({
       ) : (
         <>
           <section className="mb-6 grid gap-2" aria-labelledby="workspace-picker">
-            <h2 id="workspace-picker" className="text-[13px] font-semibold text-foreground">
+            <h2 id="workspace-picker" className="text-body font-semibold text-foreground">
               Workspace
               {activeWorkspace ? (
-                <span className="ml-2 text-[12px] font-normal text-muted-foreground">
+                <span className="ml-2 text-callout font-normal text-muted-foreground">
                   · {activeWorkspace.name}
                   {planLabel ? ` · ${planLabel}` : ""}
                 </span>
@@ -131,7 +131,7 @@ export default async function AccuracyTimelinePage({
                 <li key={workspace.id}>
                   <Link
                     href={`/admin/accuracy/timeline?workspace_id=${encodeURIComponent(workspace.id)}`}
-                    className={`inline-flex rounded-md border px-2 py-1 text-[12px] no-underline ${
+                    className={`inline-flex rounded-md border px-2 py-1 text-callout no-underline ${
                       workspace.id === workspaceId
                         ? "border-foreground bg-card text-foreground"
                         : "border-border text-muted-foreground hover:text-foreground"
@@ -142,7 +142,7 @@ export default async function AccuracyTimelinePage({
                 </li>
               ))}
             </ul>
-            <p className="text-[12px] text-muted-foreground">
+            <p className="text-callout text-muted-foreground">
               Review claims on the{" "}
               <Link
                 href={`/admin/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}

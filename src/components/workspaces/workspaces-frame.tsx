@@ -17,7 +17,7 @@ export function WorkspacesFrame({
         <Link href="/workspaces" className="no-underline" aria-label="Synapse IEGP">
           <BrandLockup />
         </Link>
-        <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+        <div className="flex items-center gap-2 text-callout text-muted-foreground">
           <span data-testid="signed-in-as">
             Signed in as <span className="text-foreground">{person.name}</span>
             {person.email ? <span className="hidden sm:inline"> · {person.email}</span> : null}

@@ -36,10 +36,10 @@ export function AccuracyRoutingPanel({
   return (
     <section className="grid gap-3" aria-labelledby="accuracy-routing">
       <div>
-        <h2 id="accuracy-routing" className="text-[13px] font-semibold text-foreground">
+        <h2 id="accuracy-routing" className="text-body font-semibold text-foreground">
           Per call kind · per agent role
         </h2>
-        <p className="mt-1 text-[12px] text-muted-foreground">
+        <p className="mt-1 text-callout text-muted-foreground">
           Each LLM role on an agentic call kind resolves its own provider, model, and parameters.
           Mechanical kinds have no routable role.
         </p>
@@ -114,20 +114,20 @@ function AccuracyRouteCard({
     <article className="grid gap-2 border border-border bg-card p-3 rounded-lg">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="text-[12px] font-semibold text-foreground">{title}</h3>
-          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{route.call_kind}</p>
+          <h3 className="text-callout font-semibold text-foreground">{title}</h3>
+          <p className="mt-0.5 truncate text-caption text-muted-foreground">{route.call_kind}</p>
         </div>
-        <Badge variant="outline" className="text-[10px]">
+        <Badge variant="outline" className="text-caption">
           {route.kind}
         </Badge>
       </div>
 
       {route.agentic ? (
         <div className="grid gap-2 sm:grid-cols-2">
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             Provider
             <select
-              className="h-8 rounded-lg border border-input bg-transparent px-2 text-[12px] text-foreground"
+              className="h-8 rounded-lg border border-input bg-transparent px-2 text-callout text-foreground"
               value={providerId}
               disabled={!canRoute}
               onChange={(event) => {
@@ -144,10 +144,10 @@ function AccuracyRouteCard({
               ))}
             </select>
           </label>
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             Model
             <select
-              className="h-8 rounded-lg border border-input bg-transparent px-2 text-[12px] text-foreground"
+              className="h-8 rounded-lg border border-input bg-transparent px-2 text-callout text-foreground"
               value={model}
               disabled={!canRoute}
               onChange={(event) => setModel(event.target.value)}
@@ -159,7 +159,7 @@ function AccuracyRouteCard({
               ))}
             </select>
           </label>
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             Temperature
             <Input
               value={temperature}
@@ -167,7 +167,7 @@ function AccuracyRouteCard({
               onChange={(event) => setTemperature(event.target.value)}
             />
           </label>
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             Max tokens
             <Input
               value={maxTokens}
@@ -175,7 +175,7 @@ function AccuracyRouteCard({
               onChange={(event) => setMaxTokens(event.target.value)}
             />
           </label>
-          <label className="grid gap-1 text-[11px] text-muted-foreground sm:col-span-2">
+          <label className="grid gap-1 text-caption text-muted-foreground sm:col-span-2">
             Fallbacks, in order
             <Input
               value={fallbacks}
@@ -185,7 +185,7 @@ function AccuracyRouteCard({
           </label>
         </div>
       ) : (
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-caption text-muted-foreground">
           This call kind does not invoke an LLM for this role.
         </p>
       )}
@@ -197,11 +197,11 @@ function AccuracyRouteCard({
             Save route
           </Button>
         ) : null}
-        <span className="text-[11px] text-muted-foreground">
+        <span className="text-caption text-muted-foreground">
           {saved ? "Saved." : `Last set by ${route.updated_by} · ${route.updated_at}`}
         </span>
       </div>
-      {error ? <p className="text-[11px] text-destructive">{error}</p> : null}
+      {error ? <p className="text-caption text-destructive">{error}</p> : null}
     </article>
   );
 }

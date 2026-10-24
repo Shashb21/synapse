@@ -15,7 +15,7 @@ export function SettingChips({ settings, className }: { settings: string[]; clas
       {settings.map((tag) => (
         <span
           key={tag}
-          className="rounded-md border border-border bg-muted/40 px-1.5 py-px text-[10px] text-foreground"
+          className="rounded-md border border-border bg-muted/40 px-1.5 py-px text-caption text-foreground"
         >
           {tag}
         </span>
@@ -86,12 +86,12 @@ export function GapSettingsEditor({
 
   return (
     <div className="grid gap-1.5">
-      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Settings</p>
+      <p className="text-caption text-muted-foreground">Settings</p>
       <div className="flex flex-wrap items-center gap-1.5" aria-busy={pending}>
         {tags.map((tag) => (
           <span
             key={tag}
-            className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 py-px pl-1.5 pr-0.5 text-[11px] text-foreground"
+            className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 py-px pl-1.5 pr-0.5 text-caption text-foreground"
           >
             {tag}
             <button
@@ -126,7 +126,7 @@ export function GapSettingsEditor({
             aria-label="Add a treatment setting"
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? errorId : undefined}
-            className="h-7 w-40 rounded-md border border-input bg-transparent px-2 text-[12px] text-foreground"
+            className="h-7 w-40 rounded-md border border-input bg-transparent px-2 text-callout text-foreground"
           />
           <datalist id={listId}>
             {suggestions.map((option) => (
@@ -137,7 +137,7 @@ export function GapSettingsEditor({
       </div>
       {dirty ? (
         <div className="grid gap-2">
-          <label className="grid gap-1 text-[12px] text-muted-foreground">
+          <label className="grid gap-1 text-callout text-muted-foreground">
             Reason for settings change (required)
             <textarea value={reason} onChange={event => setReason(event.target.value)} disabled={pending} className="rounded-lg border border-input bg-card px-2.5 py-1.5" />
           </label>
@@ -147,10 +147,10 @@ export function GapSettingsEditor({
           </div>
         </div>
       ) : null}
-      {pending ? <p role="status" className="text-[11px] text-muted-foreground">Saving settings…</p> : null}
+      {pending ? <p role="status" className="text-caption text-muted-foreground">Saving settings…</p> : null}
       {error ? <>
-        <p id={errorId} role="alert" className="text-[11px] text-destructive">{error} Changes have not been saved.</p>
-        <button type="button" disabled={pending} onClick={() => void save()} className="justify-self-start text-[12px] underline focus-visible:outline-2 focus-visible:outline-ring">Retry saving settings</button>
+        <p id={errorId} role="alert" className="text-caption text-destructive">{error} Changes have not been saved.</p>
+        <button type="button" disabled={pending} onClick={() => void save()} className="justify-self-start text-callout underline focus-visible:outline-2 focus-visible:outline-ring">Retry saving settings</button>
       </> : null}
     </div>
   );

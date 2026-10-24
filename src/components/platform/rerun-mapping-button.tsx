@@ -60,7 +60,7 @@ export function RerunMappingButton({
       {result ? (
         <p
           role={result.ok ? "status" : "alert"}
-          className={result.ok ? "text-[11px] text-muted-foreground" : "text-[11px] text-destructive"}
+          className={result.ok ? "text-caption text-muted-foreground" : "text-caption text-destructive"}
         >
           {result.text}
         </p>

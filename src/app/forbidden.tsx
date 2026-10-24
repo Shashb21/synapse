@@ -4,13 +4,13 @@ import Link from "next/link";
 export default function Forbidden() {
   return (
     <main className="mx-auto grid w-full max-w-md flex-1 content-center gap-3 px-6 py-16" data-testid="owner-only">
-      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">403</p>
+      <p className="text-caption text-muted-foreground">403</p>
       <h1 className="text-base font-bold tracking-tight text-foreground">Owner only</h1>
-      <p className="text-[13px] leading-5 text-muted-foreground">
+      <p className="text-body leading-5 text-muted-foreground">
         This is the platform owner&apos;s control panel. It is not part of your workspace. If you are the
         owner, sign in with your owner account.
       </p>
-      <p className="flex gap-4 text-[13px]">
+      <p className="flex gap-4 text-body">
         <Link href="/" className="text-foreground underline-offset-2 hover:underline">
           Back to your plan
         </Link>

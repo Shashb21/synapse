@@ -55,7 +55,7 @@ export function AiSectionToggle({
           }`}
         />
       </button>
-      {error ? <span className="text-[10px] text-destructive">{error}</span> : null}
+      {error ? <span className="text-caption text-destructive">{error}</span> : null}
     </div>
   );
 }

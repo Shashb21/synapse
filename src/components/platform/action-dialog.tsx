@@ -220,7 +220,7 @@ export function ActionDialog({
             {openedFields.map((field) => (
               // A new default (the page refreshed after a save) remounts the control: Base UI
               // refuses to change an uncontrolled field's default in place (KAN-68).
-              <label key={`${field.name}:${field.defaultValue ?? ""}`} className="grid gap-1 text-[12px] text-muted-foreground">
+              <label key={`${field.name}:${field.defaultValue ?? ""}`} className="grid gap-1 text-callout text-muted-foreground">
                 {field.label}{field.required ? " (required)" : ""}
                 {field.type === "textarea" ? (
                   <Textarea name={field.name} rows={3} defaultValue={field.defaultValue} placeholder={field.placeholder}
@@ -261,17 +261,17 @@ export function ActionDialog({
                     placeholder={field.placeholder}
                   />
                 )}
-                {field.hint ? <span className="text-[11px] text-muted-foreground/80">{field.hint}</span> : null}
+                {field.hint ? <span className="text-caption text-muted-foreground/80">{field.hint}</span> : null}
               </label>
             ))}
             {requireRationale ? (
-              <label className="grid gap-1 text-[12px] text-muted-foreground">
+              <label className="grid gap-1 text-callout text-muted-foreground">
                 {rationaleLabel ?? "Rationale (required)"}
                 <Textarea name={rationaleFieldName} rows={3} placeholder="Why this decision, in one line"
                   required aria-required="true"
                   aria-invalid={invalidField === rationaleFieldName || undefined}
                   aria-describedby={invalidField === rationaleFieldName ? errorId : undefined} />
-                <span className="text-[11px] text-muted-foreground/80">
+                <span className="text-caption text-muted-foreground/80">
                   Stored on the edit record.
                 </span>
               </label>
@@ -280,7 +280,7 @@ export function ActionDialog({
             )}
             {!identity.signed_in ? (
               <div className="grid gap-2 border-t border-border pt-3">
-                <label className="grid gap-1 text-[12px] text-muted-foreground">
+                <label className="grid gap-1 text-callout text-muted-foreground">
                   Name
                   <Input
                     value={actorName}
@@ -291,7 +291,7 @@ export function ActionDialog({
                     onChange={(event) => setActorName(event.target.value)}
                   />
                 </label>
-                <label className="grid gap-1 text-[12px] text-muted-foreground">
+                <label className="grid gap-1 text-callout text-muted-foreground">
                   Function
                   <select
                     className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
@@ -308,7 +308,7 @@ export function ActionDialog({
               </div>
             ) : null}
             {error ? (
-              <p id={errorId} role="alert" className="text-[12px] text-destructive">
+              <p id={errorId} role="alert" className="text-callout text-destructive">
                 {error}
               </p>
             ) : null}

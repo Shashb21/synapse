@@ -45,7 +45,7 @@ export function WorkspaceHygieneActions({
           type="button"
           disabled={pending}
           onClick={() => run("unarchive_workspace")}
-          className="border border-border bg-background px-2 py-1 text-[11px] text-foreground disabled:opacity-50"
+          className="border border-border bg-background px-2 py-1 text-caption text-foreground disabled:opacity-50"
         >
           {pending ? "Working…" : "Unarchive"}
         </button>
@@ -54,7 +54,7 @@ export function WorkspaceHygieneActions({
           type="button"
           disabled={pending}
           onClick={() => run("archive_workspace")}
-          className="border border-border bg-background px-2 py-1 text-[11px] text-foreground disabled:opacity-50"
+          className="border border-border bg-background px-2 py-1 text-caption text-foreground disabled:opacity-50"
         >
           {pending ? "Working…" : "Archive"}
         </button>
@@ -63,11 +63,11 @@ export function WorkspaceHygieneActions({
         type="button"
         disabled={pending}
         onClick={() => run("delete_workspace")}
-        className="border border-destructive/40 bg-background px-2 py-1 text-[11px] text-destructive disabled:opacity-50"
+        className="border border-destructive/40 bg-background px-2 py-1 text-caption text-destructive disabled:opacity-50"
       >
         Delete
       </button>
-      {error ? <span className="text-[11px] text-destructive">{error}</span> : null}
+      {error ? <span className="text-caption text-destructive">{error}</span> : null}
     </div>
   );
 }

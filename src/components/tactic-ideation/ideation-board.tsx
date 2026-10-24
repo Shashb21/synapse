@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils";
 type Coverage = "" | "unlinked" | "linked";
 
 const FIELD =
-  "h-7 rounded-md border border-input bg-background px-2 text-[11px] text-foreground focus-visible:outline-2 focus-visible:outline-ring";
+  "h-7 rounded-md border border-input bg-background px-2 text-caption text-foreground focus-visible:outline-2 focus-visible:outline-ring";
 
 type Typed = { type: string; custom_type?: CustomTacticType | null };
 
@@ -33,7 +33,7 @@ function TypeChip({ tactic }: { tactic: Typed }) {
   const color = tacticColor(tactic);
   return (
     <span
-      className="inline-flex items-center rounded-sm border-l-[3px] px-1.5 py-px text-[10px] font-medium text-foreground"
+      className="inline-flex items-center rounded-sm border-l-[3px] px-1.5 py-px text-caption font-medium text-foreground"
       style={{ borderLeftColor: color, backgroundColor: `${color}1a` }}
     >
       {tacticTypeLabel(tactic)}
@@ -42,16 +42,16 @@ function TypeChip({ tactic }: { tactic: Typed }) {
 }
 
 const STATUS_TONE: Record<string, string> = {
-  ongoing: "bg-[color:var(--known)]/10 text-emerald-800 dark:text-emerald-300",
-  planned: "bg-[color:var(--opportunity)]/10 text-blue-800 dark:text-blue-300",
+  ongoing: "bg-[color:var(--known)]/10 text-known-foreground ",
+  planned: "bg-[color:var(--opportunity)]/10 text-primary ",
   completed: "bg-muted text-foreground",
-  proposed: "bg-primary/10 text-indigo-800 dark:text-indigo-300",
+  proposed: "bg-primary/10 text-primary ",
   cancelled: "bg-muted text-muted-foreground",
 };
 
 function StatusChip({ status }: { status: string }) {
   return (
-    <span className={cn("rounded-sm px-1.5 py-px text-[10px] capitalize", STATUS_TONE[status] ?? "bg-muted text-foreground")}>
+    <span className={cn("rounded-sm px-1.5 py-px text-caption capitalize", STATUS_TONE[status] ?? "bg-muted text-foreground")}>
       {status}
     </span>
   );
@@ -62,13 +62,13 @@ function LinkedTacticRow({ tactic, onEdit }: { tactic: PlanTactic; onEdit?: () =
     "flex w-full flex-wrap items-center gap-2 rounded-md border border-border px-3 py-1.5 text-left text-foreground no-underline hover:bg-muted/60";
   const body = (
     <>
-        <span className="font-mono text-[10px]" style={{ color: tacticColor(tactic) }}>
+        <span className="font-mono text-caption" style={{ color: tacticColor(tactic) }}>
           {tactic.id}
         </span>
         <span className="min-w-0 basis-full break-words text-sm font-semibold leading-snug sm:basis-0 sm:flex-1">{tactic.name}</span>
         <TypeChip tactic={tactic} />
         <StatusChip status={tactic.status} />
-        <span className="text-[10px] text-muted-foreground" aria-hidden>
+        <span className="text-caption text-muted-foreground" aria-hidden>
           ✎
         </span>
         <span className="sr-only">Edit {tactic.name}</span>
@@ -85,7 +85,7 @@ function LinkedTacticRow({ tactic, onEdit }: { tactic: PlanTactic; onEdit?: () =
           {body}
         </Link>
       )}
-      <div className="mt-1 grid gap-1 px-3 text-[11px] leading-5 text-muted-foreground" data-testid="linked-planning-facts">
+      <div className="mt-1 grid gap-1 px-3 text-caption leading-5 text-muted-foreground" data-testid="linked-planning-facts">
         <p>{planningLabel([tactic])} · Lifecycle: <span className="capitalize">{tactic.status}</span></p>
         <p>Coverage: {tactic.overall ? OVERALL_COVERAGE_LABELS[tactic.overall] : "Unassessed"}
           {tactic.overall && tactic.overall !== "unassessed" && !tactic.fit?.confirmation.locked ? " · Provisional" : ""}
@@ -142,22 +142,22 @@ function GapIdeationCard({
         onClick={onToggle}
         className="flex w-full flex-wrap items-start gap-2 px-4 py-3 text-left hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring"
       >
-        <span className="text-[11px] text-muted-foreground" aria-hidden>
+        <span className="text-caption text-muted-foreground" aria-hidden>
           {expanded ? "▾" : "▸"}
         </span>
-        <span className="shrink-0 font-mono text-[11px] font-medium text-primary" title={card.gap_id}>
+        <span className="shrink-0 font-mono text-caption font-medium text-primary" title={card.gap_id}>
           {gapNumberLabel(card.number)}
         </span>
-        <span className="min-w-0 basis-full break-words text-sm font-semibold leading-snug sm:basis-0 sm:flex-1 text-foreground">{card.gap_name}</span>
+        <span className="min-w-0 basis-full break-words text-body font-semibold sm:basis-80 sm:flex-1 text-foreground">{card.gap_name}</span>
         <span className="flex max-w-full flex-wrap items-center gap-1.5">
-          <span className="rounded-sm bg-muted px-2 py-px text-[11px] text-foreground">{planningLabel(linked)}</span>
-          <span className="text-[11px] text-muted-foreground">Coverage status: {GAP_STATUS_LABELS[card.gap_status]}</span>
+          <span className="rounded-sm bg-muted px-2 py-px text-caption text-foreground">{planningLabel(linked)}</span>
+          <span className="text-caption text-muted-foreground">Coverage status: {GAP_STATUS_LABELS[card.gap_status]}</span>
           {suggestions.length > 0 ? (
-            <span className="rounded-full bg-muted px-2 py-px text-[10px] font-medium text-muted-foreground">
+            <span className="rounded-full bg-muted px-2 py-px text-caption font-medium text-muted-foreground">
               {suggestions.length} option{suggestions.length === 1 ? "" : "s"}
             </span>
           ) : null}
-          <span className="rounded-sm bg-rose-50 px-1.5 py-px text-[10px] text-rose-800 dark:bg-rose-950/40 dark:text-rose-300">
+          <span className="text-caption text-muted-foreground">
             {DOMAIN_LABELS[card.domain]}
           </span>
         </span>
@@ -166,15 +166,15 @@ function GapIdeationCard({
       {expanded ? (
         <div id={bodyId} className="grid gap-3 border-t border-border px-4 pb-4 pt-3">
           <div className="flex flex-wrap items-start gap-2">
-            <p className="min-w-0 flex-1 text-[12px] leading-5 text-muted-foreground">
+            <p className="min-w-0 flex-1 text-callout leading-5 text-muted-foreground">
               {card.statement}
               {card.settings.length > 0 ? (
-                <span className="ml-1 text-[11px]">· {card.settings.join(" · ")}</span>
+                <span className="ml-1 text-caption">· {card.settings.join(" · ")}</span>
               ) : null}
               <GapMetadataView metadata={card.metadata} compact className="block" />
             </p>
             <div className="flex flex-wrap items-center gap-2">
-              <GapRecordLink gapId={card.gap_id} className="text-[11px] text-muted-foreground no-underline hover:underline">
+              <GapRecordLink gapId={card.gap_id} className="text-caption text-muted-foreground no-underline hover:underline">
                 Open gap ↗
               </GapRecordLink>
               <AssignTacticButton gapId={card.gap_id} tactics={assignable} previews={card.fit_previews} expectedRelationships={JSON.stringify(card.relationship_versions ?? {})} />
@@ -183,11 +183,11 @@ function GapIdeationCard({
           </div>
 
           <section aria-label={`Linked tactics for ${card.gap_name}`}>
-            <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+            <h3 className="mb-1.5 text-caption font-semibold text-muted-foreground">
               Linked tactics
             </h3>
             {linked.length === 0 ? (
-              <p className="rounded-md border border-dashed border-border px-3 py-2 text-[11px] text-muted-foreground">
+              <p className="rounded-md border border-dashed border-border px-3 py-2 text-caption text-muted-foreground">
                 No tactic yet. Assign one from the library or add a custom tactic.
               </p>
             ) : (
@@ -206,8 +206,8 @@ function GapIdeationCard({
           {ai || suggestions.length > 0 ? (
             <section aria-label={`Tactic options for ${card.gap_name}`}>
               <div className="mb-1.5 flex flex-wrap items-center gap-2">
-                <h3 className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Current and prior options</h3>
-                {ai ? <span className="rounded-sm bg-primary/10 px-1.5 py-px text-[10px] text-indigo-800 dark:text-indigo-300">AI-assisted</span> : null}
+                <h3 className="text-caption font-semibold text-muted-foreground">Current and prior options</h3>
+                {ai ? <span className="rounded-sm bg-primary/10 px-1.5 py-px text-caption text-primary">AI-assisted</span> : null}
                 {ai && mayIdeate ? <div className="ml-auto">
                   <RunStageButton
                     stage="S9"
@@ -218,7 +218,7 @@ function GapIdeationCard({
                 </div> : null}
               </div>
               {suggestions.length === 0 ? (
-                <p className="rounded-md border border-dashed border-border px-3 py-2 text-[11px] text-muted-foreground">
+                <p className="rounded-md border border-dashed border-border px-3 py-2 text-caption text-muted-foreground">
                   No suggestion waiting. The model designs candidates against the tactic library; you accept or reject each
                   one with a reason.
                 </p>
@@ -266,18 +266,18 @@ function LibraryPanel({ items, onEdit }: { items: TacticLibraryItem[]; onEdit?: 
           onClick={() => setOpen((value) => !value)}
           className="flex items-center gap-2 rounded-md py-1 text-left focus-visible:outline-2 focus-visible:outline-ring"
         >
-          <span className="text-[11px] text-muted-foreground" aria-hidden>
+          <span className="text-caption text-muted-foreground" aria-hidden>
             {open ? "▾" : "▸"}
           </span>
-          <span id="tactic-library" className="text-[12px] font-semibold text-foreground">
+          <span id="tactic-library" className="text-callout font-semibold text-foreground">
             Tactic Library
           </span>
         </button>
-        <span className="rounded-full bg-primary/10 px-2 py-px text-[10px] text-indigo-800 dark:text-indigo-300">
+        <span className="rounded-full bg-primary/10 px-2 py-px text-caption text-primary">
           {items.length} tactic{items.length === 1 ? "" : "s"}
         </span>
         {unassigned > 0 ? (
-          <span className="rounded-full bg-orange-50 px-2 py-px text-[10px] text-orange-800 dark:bg-orange-950/40 dark:text-orange-300">
+          <span className="rounded-full bg-unknown/10 px-2 py-px text-caption text-unknown-foreground">
             {unassigned} unassigned
           </span>
         ) : null}
@@ -287,7 +287,7 @@ function LibraryPanel({ items, onEdit }: { items: TacticLibraryItem[]; onEdit?: 
       </div>
       {open ? (
         <div id="tactic-library-body" className="grid gap-2 border-t border-border px-4 pb-4 pt-3">
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             Tag the same tactic onto as many gaps as you need — it is not copied.
           </p>
           <input
@@ -299,7 +299,7 @@ function LibraryPanel({ items, onEdit }: { items: TacticLibraryItem[]; onEdit?: 
             className={cn(FIELD, "w-full")}
           />
           {shown.length === 0 ? (
-            <p className="rounded-md border border-dashed border-border px-3 py-2 text-center text-[11px] text-muted-foreground">
+            <p className="rounded-md border border-dashed border-border px-3 py-2 text-center text-caption text-muted-foreground">
               {items.length === 0 ? "The library is empty. Add a tactic with Create tactic." : "No tactics match."}
             </p>
           ) : (
@@ -309,16 +309,16 @@ function LibraryPanel({ items, onEdit }: { items: TacticLibraryItem[]; onEdit?: 
                   key={item.id}
                   className={cn(
                     "flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-1.5",
-                    item.gaps.length === 0 ? "bg-amber-50/60 dark:bg-amber-950/20" : "bg-background",
+                    item.gaps.length === 0 ? "bg-unknown/15 " : "bg-background",
                   )}
                 >
-                  <span className="font-mono text-[10px]" style={{ color: tacticColor(item) }}>
+                  <span className="font-mono text-caption" style={{ color: tacticColor(item) }}>
                     {item.id}
                   </span>
-                  <span className="min-w-0 basis-full break-words text-sm font-semibold leading-snug sm:basis-0 sm:flex-1 text-foreground">{item.name}</span>
+                  <span className="min-w-0 basis-full break-words text-body font-semibold sm:basis-80 sm:flex-1 text-foreground">{item.name}</span>
                   <TypeChip tactic={item} />
                   {item.gaps.length === 0 ? (
-                    <span className="rounded-sm bg-orange-50 px-1.5 py-px text-[10px] text-orange-800 dark:bg-orange-950/40 dark:text-orange-300">
+                    <span className="rounded-sm bg-unknown/10 px-1.5 py-px text-caption text-unknown-foreground">
                       Unassigned
                     </span>
                   ) : (
@@ -328,7 +328,7 @@ function LibraryPanel({ items, onEdit }: { items: TacticLibraryItem[]; onEdit?: 
                           key={gap.id}
                           gapId={gap.id}
                           title={gap.name}
-                          className="rounded-sm bg-primary/10 px-1.5 py-px font-mono text-[10px] text-indigo-800 no-underline hover:underline dark:text-indigo-300"
+                          className="rounded-sm bg-primary/10 px-1.5 py-px font-mono text-caption text-primary no-underline hover:underline"
                         >
                           {gap.id}
                         </GapRecordLink>
@@ -340,12 +340,12 @@ function LibraryPanel({ items, onEdit }: { items: TacticLibraryItem[]; onEdit?: 
                     <button
                       type="button"
                       onClick={() => onEdit(item.id)}
-                      className="text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+                      className="text-caption text-muted-foreground hover:text-foreground hover:underline"
                     >
                       ✎ Edit<span className="sr-only"> {item.name}</span>
                     </button>
                   ) : (
-                    <Link href={`/tactics/${item.id}`} className="text-[11px] text-muted-foreground no-underline hover:underline">
+                    <Link href={`/tactics/${item.id}`} className="text-caption text-muted-foreground no-underline hover:underline">
                       ✎ Edit<span className="sr-only"> {item.name}</span>
                     </Link>
                   )}
@@ -418,10 +418,10 @@ export function IdeationBoard({
     <div className="grid gap-2" data-testid="tactic-ideation">
       {/* What this section is for, and how far along it is (owner feedback, KAN-56). */}
       <section aria-label="How Tactic Ideation works" className="grid gap-2 rounded-lg border border-border bg-card p-3" data-testid="ideation-guide">
-        <p className="text-[12px] font-semibold text-foreground" data-testid="current-planning-summary">
+        <p className="text-callout font-semibold text-foreground" data-testid="current-planning-summary">
           Current eligible gaps: {currentSummary.total} shown · No candidate linked: {currentSummary.unlinked} · Candidate linked: {currentSummary.linked} · Tactic planned: {currentSummary.planned}
         </p>
-        <ol className="grid gap-1 text-[11px] leading-4 text-muted-foreground sm:grid-cols-3">
+        <ol className="grid gap-1 text-caption leading-4 text-muted-foreground sm:grid-cols-3">
           <li>
             <span className="font-semibold text-foreground">1. Open a gap.</span> These are the gaps you validated as High
             priority on the Prioritization Matrix.
@@ -436,7 +436,7 @@ export function IdeationBoard({
             Publication tactics with evidence already available can count even when proposed. Schedule work on the Gantt Timeline.
           </li>
         </ol>
-        <p className="text-[11px] leading-4 text-muted-foreground">Planning counts describe saved links and lifecycle, separately from coverage assessment. Planned, ongoing and completed work is labelled Tactic planned; a cancelled link remains Candidate linked. A link or lifecycle does not verify delivery of evidence. Counts follow the search and filters below.</p>
+        <p className="text-caption leading-4 text-muted-foreground">Planning counts describe saved links and lifecycle, separately from coverage assessment. Planned, ongoing and completed work is labelled Tactic planned; a cancelled link remains Candidate linked. A link or lifecycle does not verify delivery of evidence. Counts follow the search and filters below.</p>
       </section>
       <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5">
         <input
@@ -474,18 +474,18 @@ export function IdeationBoard({
               setDomain("");
               setCoverage("");
             }}
-            className="rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300"
+            className="rounded-md px-2 py-0.5 text-caption text-primary hover:bg-muted"
           >
             Clear
           </button>
         ) : null}
-        <span className="ml-auto text-[11px] text-muted-foreground">
+        <span className="ml-auto text-caption text-muted-foreground">
           {filtered.length} of {gaps.length} currently eligible gaps
         </span>
       </div>
 
       <div className="grid gap-2">
-        <h2 className="text-[13px] font-semibold">Current eligible ideation</h2>
+        <h2 className="text-body font-semibold">Current eligible ideation</h2>
         {filtered.map((card) => (
           <GapIdeationCard
             key={card.gap_id}
@@ -500,7 +500,7 @@ export function IdeationBoard({
           />
         ))}
         {gaps.length === 0 ? (
-          <div className="rounded-lg border border-border bg-card p-8 text-center text-[12px] text-muted-foreground">
+          <div className="rounded-lg border border-border bg-card p-8 text-center text-callout text-muted-foreground">
             No confirmed High/Open gaps eligible for new ideation. Use the{" "}
             <Link href="/?place=plan" className="text-foreground">
               Prioritization Matrix
@@ -508,17 +508,17 @@ export function IdeationBoard({
             to validate a gap as High.
           </div>
         ) : filtered.length === 0 ? (
-          <div className="rounded-lg border border-border bg-card p-8 text-center text-[12px] text-muted-foreground">
+          <div className="rounded-lg border border-border bg-card p-8 text-center text-callout text-muted-foreground">
             No gaps match the current filters.
           </div>
         ) : null}
       </div>
 
       <section aria-label="Existing options and planned work" className="grid gap-2 rounded-lg border border-border bg-card p-3">
-        <h2 className="text-[13px] font-semibold">Existing options and planned work</h2>
-        <p className="text-[12px] text-muted-foreground">Prior work remains here when a gap leaves current High/Open eligibility. Open a gap to inspect its options, linked tactics and decision history. Search and filters above also apply here.</p>
-        <p className="text-[12px] font-medium" data-testid="retained-planning-summary">Retained work: {retainedSummary.total} shown · No candidate linked: {retainedSummary.unlinked} · Candidate linked: {retainedSummary.linked} · Tactic planned: {retainedSummary.planned}</p>
-        {existing.length ? <ul className="grid gap-2">{existing.map(gap => <li key={gap.gap_id} className="rounded-md border border-border p-3 text-[12px]">
+        <h2 className="text-body font-semibold">Existing options and planned work</h2>
+        <p className="text-callout text-muted-foreground">Prior work remains here when a gap leaves current High/Open eligibility. Open a gap to inspect its options, linked tactics and decision history. Search and filters above also apply here.</p>
+        <p className="text-callout font-medium" data-testid="retained-planning-summary">Retained work: {retainedSummary.total} shown · No candidate linked: {retainedSummary.unlinked} · Candidate linked: {retainedSummary.linked} · Tactic planned: {retainedSummary.planned}</p>
+        {existing.length ? <ul className="grid gap-2">{existing.map(gap => <li key={gap.gap_id} className="rounded-md border border-border p-3 text-callout">
           <GapRecordLink gapId={gap.gap_id} className="font-medium underline">{gapNumberLabel(gap.number)} · {gap.gap_name}</GapRecordLink>
           <p className="mt-1 text-muted-foreground">{GAP_STATUS_LABELS[gap.gap_status]} · {gap.band ? BAND_LABELS[gap.band] : "Priority unset"} · {gap.needs_review ? "Needs priority review" : gap.priority_confirmed ? "Priority validated" : "Priority not validated"}</p>
           <p className="mt-1">{planningLabel(gap.tactics)}</p>
@@ -526,7 +526,7 @@ export function IdeationBoard({
           {gap.tactics.length ? <ul className="mt-2 grid gap-2" aria-label={`Linked tactics for ${gap.gap_name}`}>
             {gap.tactics.map(tactic => <LinkedTacticRow key={`${tactic.id}::${tactic.expansion_id ?? "parent"}`} tactic={tactic} onEdit={!tactic.expansion_id && canEdit ? () => void openEditor(tactic.id) : undefined} />)}
           </ul> : null}
-        </li>)}</ul> : <p className="text-[12px] text-muted-foreground">{retainedGaps.length ? "No existing work matches the current filters." : "No prior work outside current eligible ideation yet. Existing options are shown with their eligible gap above."}</p>}
+        </li>)}</ul> : <p className="text-callout text-muted-foreground">{retainedGaps.length ? "No existing work matches the current filters." : "No prior work outside current eligible ideation yet. Existing options are shown with their eligible gap above."}</p>}
       </section>
       <LibraryPanel items={library} onEdit={canEdit ? (id) => void openEditor(id) : undefined} />
       <TacticEditPanel

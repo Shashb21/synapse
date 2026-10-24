@@ -222,13 +222,13 @@ export function SetupWizard({
   return (
     <div className="mx-auto grid max-w-5xl gap-6" data-testid="setup-wizard">
       <header className="grid gap-3">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        <p className="text-caption font-semibold text-muted-foreground">
           IEGP setup{workspaceName ? ` · ${workspaceName}` : ""}
         </p>
-        <h2 className="text-[15px] font-bold tracking-tight text-foreground">
+        <h2 className="text-headline font-bold tracking-tight text-foreground">
           {form.asset_name ? `${form.asset_name} evidence plan` : "Set up this Integrated Evidence Generation Plan"}
         </h2>
-        <p className="max-w-2xl text-[12px] leading-5 text-muted-foreground">
+        <p className="max-w-2xl text-callout leading-5 text-muted-foreground">
           {ai
             ? "Capture this plan's context: asset, objectives and decisions, evidence landscape and people. Prioritization, ideation and the timeline use it throughout."
             : "Capture this plan's context: asset, objectives and decisions, evidence landscape and people. After setup you start with Add gaps and Add tactics and do every step by hand."}
@@ -236,7 +236,7 @@ export function SetupWizard({
         <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
           <div className="h-full bg-[var(--chart-1)] transition-all duration-500" style={{ width: `${progress}%` }} />
         </div>
-        <ol className="flex flex-wrap gap-2 text-[11px] text-muted-foreground" aria-label="Setup steps">
+        <ol className="flex flex-wrap gap-2 text-caption text-muted-foreground" aria-label="Setup steps">
           {steps.map((item, i) => {
             const flagged = isSection(item.id) && attempted.has(item.id) && Boolean(bySection[item.id]?.length);
             return (
@@ -266,7 +266,7 @@ export function SetupWizard({
       </header>
 
       {error ? (
-        <p role="alert" className="text-[12px] text-destructive">
+        <p role="alert" className="text-callout text-destructive">
           {error}
         </p>
       ) : null}
@@ -276,8 +276,8 @@ export function SetupWizard({
           <div className="flex items-start gap-3">
             <Rocket className="mt-0.5 size-6 shrink-0 text-[var(--chart-1)]" aria-hidden />
             <div className="grid gap-1">
-              <h2 className="text-[15px] font-bold tracking-tight">Welcome to your new workspace</h2>
-              <p className="max-w-2xl text-[13px] leading-relaxed text-muted-foreground">
+              <h2 className="text-headline font-bold tracking-tight">Welcome to your new workspace</h2>
+              <p className="max-w-2xl text-body leading-relaxed text-muted-foreground">
                 This workspace holds one Integrated Evidence Generation Plan. The next six short steps capture its context:
                 the asset, the company and plan, strategic objectives and key decisions, the evidence landscape, the people
                 involved and the treatment settings. Everything is saved to this workspace only; you can save and come back,
@@ -291,8 +291,8 @@ export function SetupWizard({
               return (
                 <article key={item.title} className="grid content-start gap-1 border border-border bg-card p-3 rounded-lg">
                   <Icon className="size-4 text-[var(--chart-1)]" aria-hidden />
-                  <h3 className="text-[12px] font-semibold text-foreground">{item.title}</h3>
-                  <p className="text-[11px] leading-relaxed text-muted-foreground">{item.detail}</p>
+                  <h3 className="text-callout font-semibold text-foreground">{item.title}</h3>
+                  <p className="text-caption leading-relaxed text-muted-foreground">{item.detail}</p>
                 </article>
               );
             })}
@@ -305,11 +305,11 @@ export function SetupWizard({
       {step.id === "models" && !ai ? (
         <section className="grid gap-4 rounded-lg border border-border bg-card p-5 md:grid-cols-[1fr_280px]" data-testid="setup-ai-off">
           <div className="grid gap-3">
-            <h2 className="flex items-center gap-2 text-[13px] font-semibold">
+            <h2 className="flex items-center gap-2 text-body font-semibold">
               <Hand className="size-4 text-[var(--chart-1)]" aria-hidden />
               You work by hand
             </h2>
-            <p className="text-[12px] leading-relaxed text-muted-foreground">
+            <p className="text-callout leading-relaxed text-muted-foreground">
               You enter gaps and tactics yourself; every later step has a manual form. The context you entered still guides
               your own prioritization and the timeline&apos;s decision dates.
             </p>
@@ -322,7 +322,7 @@ export function SetupWizard({
               </Link>
             </div>
           </div>
-          <aside className="grid content-start gap-2 border border-dashed border-border p-3 text-[11px] text-muted-foreground">
+          <aside className="grid content-start gap-2 border border-dashed border-border p-3 text-caption text-muted-foreground">
             <p className="flex items-center gap-1.5 font-medium text-foreground" data-testid="setup-ai-status">
               <Hand className="size-3.5" aria-hidden />
               Manual plan
@@ -340,17 +340,17 @@ export function SetupWizard({
           data-testid="setup-ai-on"
         >
           <div className="grid gap-3">
-            <h2 className="flex items-center gap-2 text-[13px] font-semibold">
+            <h2 className="flex items-center gap-2 text-body font-semibold">
               <Brain className="size-4 text-[var(--chart-1)]" aria-hidden />
               AI models
             </h2>
-            <p className="text-[12px] leading-relaxed text-muted-foreground">
+            <p className="text-callout leading-relaxed text-muted-foreground">
               Your Synapse administrator connects and manages the AI models, so there is nothing to set up here. The
               context from this wizard is sent with prioritization, ideation and timeline requests. If no model is
               connected when you run an AI step, Synapse tells you, and you can always do that step by hand.
             </p>
           </div>
-          <aside className="grid content-start gap-2 border border-dashed border-border p-3 text-[11px] text-muted-foreground">
+          <aside className="grid content-start gap-2 border border-dashed border-border p-3 text-caption text-muted-foreground">
             <p className="flex items-center gap-1.5 font-medium text-foreground" data-testid="setup-ai-status">
               <CheckCircle2 className="size-3.5 text-[var(--known-foreground)]" aria-hidden />
               AI is on for this workspace
@@ -368,11 +368,11 @@ export function SetupWizard({
               complete ? "border-[var(--known)]/30 bg-[var(--known)]/5" : "border-border bg-card",
             )}
           >
-            <h2 className="flex items-center gap-2 text-[13px] font-semibold">
+            <h2 className="flex items-center gap-2 text-body font-semibold">
               {complete ? <CheckCircle2 className="size-5 text-[var(--known-foreground)]" aria-hidden /> : null}
               {complete ? "This plan is set up" : "Review and finish"}
             </h2>
-            <p className="max-w-2xl text-[12px] leading-relaxed text-muted-foreground">
+            <p className="max-w-2xl text-callout leading-relaxed text-muted-foreground">
               {complete
                 ? "The context below is saved for this workspace. Edit any section and save; the stages pick the changes up on their next run."
                 : "Check the context below, then finish. A short walkthrough of the main places follows."}{" "}
@@ -409,16 +409,16 @@ export function SetupWizard({
 
       {objectiveChanges ? (
         <section aria-label="Objective change impact" className="grid gap-3 rounded-lg border border-border bg-card p-4">
-          <h3 className="text-[13px] font-semibold">Shared objective context</h3>
+          <h3 className="text-body font-semibold">Shared objective context</h3>
           {changedContextIds.size ? (
             <>
-              <p className="text-[12px]" role="status">{affectedGaps.length} linked Open gap{affectedGaps.length === 1 ? "" : "s"} will need priority review across all settings.</p>
-              <ul className="list-inside list-disc text-[12px]">
+              <p className="text-callout" role="status">{affectedGaps.length} linked Open gap{affectedGaps.length === 1 ? "" : "s"} will need priority review across all settings.</p>
+              <ul className="list-inside list-disc text-callout">
                 {affectedGaps.map(gap => <li key={gap.id}>{gap.name} · {gap.settings.join(", ") || "All settings"}</li>)}
               </ul>
-              <p className="text-[12px] text-muted-foreground">Previous bands, scores, rationale and history are retained. The server checks all linked gaps again when you save.</p>
+              <p className="text-callout text-muted-foreground">Previous bands, scores, rationale and history are retained. The server checks all linked gaps again when you save.</p>
             </>
-          ) : <p className="text-[12px] text-muted-foreground">These objective edits will be recorded with your reason. Name and note changes retain priority validation.</p>}
+          ) : <p className="text-callout text-muted-foreground">These objective edits will be recorded with your reason. Name and note changes retain priority validation.</p>}
           <TextField label="Reason for objective changes" required multiline value={reason} onChange={setReason} hint="Explain why this context is changing. A manual edit does not need a supporting reference." />
           <Button type="button" variant="ghost" className="w-fit" disabled={busy} onClick={() => { setForm(baseline); setReason(""); setError(null); }}>Cancel changes</Button>
         </section>
@@ -429,7 +429,7 @@ export function SetupWizard({
           <Button type="button" variant="ghost" disabled={index === 0 || busy} onClick={() => setIndex((i) => Math.max(0, i - 1))}>
             Back
           </Button>
-          <span className="text-[11px] text-muted-foreground" data-testid="setup-saved-at">
+          <span className="text-caption text-muted-foreground" data-testid="setup-saved-at">
             {JSON.stringify(form) !== JSON.stringify(baseline)
               ? "Unsaved changes"
               : savedAt ? `Saved ${new Date(savedAt).toLocaleString()}` : complete ? "Saved · time unavailable" : "Not saved yet"}

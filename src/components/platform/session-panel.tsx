@@ -62,17 +62,17 @@ export function SessionPanel({
     <section className="grid gap-3 border border-border bg-card p-3 rounded-lg" aria-labelledby="session">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h2 id="session" className="text-[13px] font-semibold text-foreground">
+          <h2 id="session" className="text-body font-semibold text-foreground">
             Who is acting
           </h2>
-          <p className="mt-1 text-[12px] text-muted-foreground">
+          <p className="mt-1 text-callout text-muted-foreground">
             {signedIn
               ? `${actorName} · ${ROLE_LABELS[role]}`
               : demo && DEMO_SIGN_IN
                 ? "No identity provider is configured. In development you can continue as a demo user."
                 : "Sign in to act on the plan."}
           </p>
-          <p className="mt-1 text-[11px] text-muted-foreground">{ROLE_SUMMARIES[role]}</p>
+          <p className="mt-1 text-caption text-muted-foreground">{ROLE_SUMMARIES[role]}</p>
         </div>
         {signedIn ? (
           <Button
@@ -89,7 +89,7 @@ export function SessionPanel({
 
       <div className="flex flex-wrap gap-1">
         {capabilities.map((capability) => (
-          <Badge key={capability} variant="secondary" className="text-[10px]">
+          <Badge key={capability} variant="secondary" className="text-caption">
             {capability.replaceAll("_", " ")}
           </Badge>
         ))}
@@ -126,14 +126,14 @@ export function SessionPanel({
             );
           }}
         >
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             Name
             <Input value={name} placeholder="Your name" onChange={(event) => setName(event.target.value)} />
           </label>
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             Function
             <select
-              className="h-8 rounded-lg border border-input bg-transparent px-2 text-[12px] text-foreground"
+              className="h-8 rounded-lg border border-input bg-transparent px-2 text-callout text-foreground"
               value={fn}
               onChange={(event) => setFn(event.target.value as ActorFunction)}
             >
@@ -144,10 +144,10 @@ export function SessionPanel({
               ))}
             </select>
           </label>
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             Role
             <select
-              className="h-8 rounded-lg border border-input bg-transparent px-2 text-[12px] text-foreground"
+              className="h-8 rounded-lg border border-input bg-transparent px-2 text-callout text-foreground"
               value={pickedRole}
               onChange={(event) => setPickedRole(event.target.value as Role)}
             >
@@ -164,7 +164,7 @@ export function SessionPanel({
         </form>
       ) : null}
 
-      {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+      {error ? <p className="text-callout text-destructive">{error}</p> : null}
     </section>
   );
 }

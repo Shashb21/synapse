@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 
 function Json({ value }: { value: unknown }) {
   return (
-    <pre className="max-h-80 overflow-auto border border-border bg-card p-2 text-[11px] leading-4 text-muted-foreground rounded-lg">
+    <pre className="max-h-80 overflow-auto border border-border bg-card p-2 text-caption leading-4 text-muted-foreground rounded-lg">
       {JSON.stringify(value, null, 2)}
     </pre>
   );
@@ -63,14 +63,14 @@ export default async function RunDetailPage({
 
       <AdminWorkspaceBar workspace={workspace} path="/admin/runs" />
 
-      <Link href="/admin/runs" className="text-[12px] text-muted-foreground no-underline hover:text-foreground">
+      <Link href="/admin/runs" className="text-callout text-muted-foreground no-underline hover:text-foreground">
         ← All runs
       </Link>
 
       <section className="mt-4 grid gap-3 md:grid-cols-2">
         <article className="border border-border bg-card p-3 rounded-lg">
-          <h2 className="text-[12px] font-semibold text-foreground">Run</h2>
-          <dl className="mt-2 grid gap-1 text-[11px] text-muted-foreground">
+          <h2 className="text-callout font-semibold text-foreground">Run</h2>
+          <dl className="mt-2 grid gap-1 text-caption text-muted-foreground">
             <div className="flex justify-between gap-2">
               <dt>Status</dt>
               <dd className={run.status === "error" ? "text-destructive" : "text-foreground"}>{run.status}</dd>
@@ -94,18 +94,18 @@ export default async function RunDetailPage({
               </dd>
             </div>
           </dl>
-          {run.error ? <p className="mt-2 text-[12px] text-destructive">{run.error}</p> : null}
+          {run.error ? <p className="mt-2 text-callout text-destructive">{run.error}</p> : null}
         </article>
 
         <article className="border border-border bg-card p-3 rounded-lg md:col-span-2" data-testid="run-llm-totals">
-          <h2 className="text-[12px] font-semibold text-foreground">Model calls</h2>
+          <h2 className="text-callout font-semibold text-foreground">Model calls</h2>
           <LlmTotalsLine calls={calls} />
         </article>
 
         <article className="border border-border bg-card p-3 rounded-lg">
-          <h2 className="text-[12px] font-semibold text-foreground">Route</h2>
+          <h2 className="text-callout font-semibold text-foreground">Route</h2>
           {run.route ? (
-            <dl className="mt-2 grid gap-1 text-[11px] text-muted-foreground">
+            <dl className="mt-2 grid gap-1 text-caption text-muted-foreground">
               <div className="flex justify-between gap-2">
                 <dt>Provider</dt>
                 <dd className="text-foreground">{run.route.provider_label}</dd>
@@ -132,16 +132,16 @@ export default async function RunDetailPage({
                 <dd className="text-foreground">{run.route.params.temperature}</dd>
               </div>
               {run.route.degraded ? (
-                <p className="mt-1 text-[11px] text-[var(--unknown-foreground)]">{run.route.reason}</p>
+                <p className="mt-1 text-caption text-[var(--unknown-foreground)]">{run.route.reason}</p>
               ) : null}
             </dl>
           ) : (
-            <p className="mt-2 text-[11px] text-muted-foreground">No route recorded.</p>
+            <p className="mt-2 text-caption text-muted-foreground">No route recorded.</p>
           )}
           {run.evals.length > 0 ? (
             <div className="mt-3 flex flex-wrap gap-1 border-t border-border pt-2">
               {run.evals.map((score) => (
-                <Badge key={score.name} variant="secondary" className="text-[10px]">
+                <Badge key={score.name} variant="secondary" className="text-caption">
                   {score.name} {score.value}
                   {score.target === undefined ? "" : ` / ${score.target}`}
                 </Badge>
@@ -153,15 +153,15 @@ export default async function RunDetailPage({
 
       {exchanges.length > 0 ? (
         <section className="mt-6 grid gap-2">
-          <h2 className="text-[13px] font-semibold text-foreground">
+          <h2 className="text-body font-semibold text-foreground">
             Proposer ↔ critic exchanges
           </h2>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             Locked: three exchanges before the judge sees anything. Each row is one critic response and
             the revision the proposer made in answer to it.
           </p>
           <div className="overflow-x-auto border border-border bg-card rounded-lg">
-            <table className="w-full text-[11px]">
+            <table className="w-full text-caption">
               <thead className="text-muted-foreground">
                 <tr className="border-b border-border">
                   <th className="px-2 py-1.5 text-left font-normal">Exchange</th>
@@ -198,27 +198,27 @@ export default async function RunDetailPage({
       <LlmCallList calls={calls} />
 
       <section className="mt-6 grid gap-2">
-        <h2 className="text-[13px] font-semibold text-foreground">Steps</h2>
+        <h2 className="text-body font-semibold text-foreground">Steps</h2>
         {run.steps.length === 0 ? (
-          <p className="text-[12px] text-muted-foreground">No steps recorded.</p>
+          <p className="text-callout text-muted-foreground">No steps recorded.</p>
         ) : (
           <ol className="grid gap-2">
             {run.steps.map((step, index) => (
               <li key={`${step.name}-${index}`} className="border border-border bg-card p-3 rounded-lg">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <h3 className="text-[13px] text-foreground">{step.name}</h3>
-                  <span className="text-[11px] text-muted-foreground">
+                  <h3 className="text-body text-foreground">{step.name}</h3>
+                  <span className="text-caption text-muted-foreground">
                     {step.duration_ms === null ? step.at.slice(11, 19) : `${step.duration_ms} ms`}
                   </span>
                 </div>
-                {step.detail ? <p className="mt-1 text-[11px] text-muted-foreground">{step.detail}</p> : null}
+                {step.detail ? <p className="mt-1 text-caption text-muted-foreground">{step.detail}</p> : null}
                 {llmCallIdOf(step.data) ? (
-                  <a href={`#${llmCallIdOf(step.data)}`} className="mt-1 inline-block text-[11px] text-muted-foreground">
+                  <a href={`#${llmCallIdOf(step.data)}`} className="mt-1 inline-block text-caption text-muted-foreground">
                     Model call {llmCallIdOf(step.data)}
                   </a>
                 ) : null}
                 <details className="mt-2">
-                  <summary className="cursor-pointer text-[11px] text-muted-foreground">Payload</summary>
+                  <summary className="cursor-pointer text-caption text-muted-foreground">Payload</summary>
                   <div className="mt-2">
                     <Json value={step.data} />
                   </div>
@@ -231,11 +231,11 @@ export default async function RunDetailPage({
 
       <section className="mt-6 grid gap-3 md:grid-cols-2">
         <div>
-          <h2 className="mb-2 text-[13px] font-semibold text-foreground">Input</h2>
+          <h2 className="mb-2 text-body font-semibold text-foreground">Input</h2>
           <Json value={run.input} />
         </div>
         <div>
-          <h2 className="mb-2 text-[13px] font-semibold text-foreground">Output</h2>
+          <h2 className="mb-2 text-body font-semibold text-foreground">Output</h2>
           <Json value={run.output} />
         </div>
       </section>

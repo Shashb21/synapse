@@ -23,8 +23,8 @@ export function SuggestionReferences({ gapId, version, references }: { gapId: st
       setError(failure instanceof Error ? failure.message : "Supporting references could not be loaded. Try again.");
     } finally { setPending(false); }
   }
-  if (!references?.length) return <p className="text-[12px] text-muted-foreground">Supporting references not recorded for this suggestion</p>;
-  return <div className="grid gap-2 text-[12px]">
+  if (!references?.length) return <p className="text-callout text-muted-foreground">Supporting references not recorded for this suggestion</p>;
+  return <div className="grid gap-2 text-callout">
     <button type="button" onClick={() => void inspect()} disabled={pending} className="justify-self-start underline">{pending ? "Loading supporting references…" : "Inspect supporting references"}</button>
     {error ? <p role="alert">{error}</p> : null}
     {records ? <ul className="grid gap-2">{records.map((reference, index) => <li key={`${reference.entity_type}-${reference.entity_id}-${index}`} className="break-words border border-border p-2">

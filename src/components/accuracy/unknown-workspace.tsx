@@ -15,11 +15,11 @@ export function UnknownWorkspaceNotice({ workspaceId }: { workspaceId: string })
       aria-labelledby="unknown-workspace"
       data-testid="accuracy-unknown-workspace"
     >
-      <h2 id="unknown-workspace" className="text-[13px] font-semibold text-destructive">
+      <h2 id="unknown-workspace" className="text-body font-semibold text-destructive">
         Unknown workspace
       </h2>
-      <p className="text-[12px] text-muted-foreground">
-        No lab workspace has the ID <code className="text-[11px]">{workspaceId}</code>. It may have been
+      <p className="text-callout text-muted-foreground">
+        No lab workspace has the ID <code className="text-caption">{workspaceId}</code>. It may have been
         deleted. Choose one from{" "}
         <Link href="/admin/accuracy" className="text-foreground underline-offset-2 hover:underline">
           Workspaces

@@ -195,7 +195,7 @@ export function AccuracyGanttBoard({
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[12px] text-muted-foreground">
+        <p className="text-callout text-muted-foreground">
           {activities.length} bar(s) from validated tactics only
           {planVersion != null ? (
             <span>
@@ -233,9 +233,9 @@ export function AccuracyGanttBoard({
       </div>
 
       {hash ? (
-        <p className="text-[11px] text-muted-foreground" data-testid="gantt-snapshot-hash">
+        <p className="text-caption text-muted-foreground" data-testid="gantt-snapshot-hash">
           Snapshot hash{" "}
-          <code className="break-all font-mono text-[11px] text-foreground" title={hash}>
+          <code className="break-all font-mono text-caption text-foreground" title={hash}>
             {hash}
           </code>
           {auditHref ? (
@@ -254,21 +254,21 @@ export function AccuracyGanttBoard({
         </p>
       ) : null}
 
-      <label className="grid gap-1 text-[11px] text-muted-foreground">
+      <label className="grid gap-1 text-caption text-muted-foreground">
         Sign-off rationale (required)
         <Textarea
           value={note}
           onChange={(event) => setNote(event.target.value)}
           rows={2}
           placeholder="Why this projection is the final IEGP truth"
-          className="text-[12px]"
+          className="text-callout"
         />
       </label>
-      {error ? <p className="text-[11px] text-destructive">{error}</p> : null}
-      {message ? <p className="text-[11px] text-[var(--known-foreground)]">{message}</p> : null}
+      {error ? <p className="text-caption text-destructive">{error}</p> : null}
+      {message ? <p className="text-caption text-[var(--known-foreground)]">{message}</p> : null}
 
       {activities.length === 0 ? (
-        <p className="text-[12px] text-muted-foreground">
+        <p className="text-callout text-muted-foreground">
           No Gantt bars yet. Validate tactics with start and end dates in the ledger first.
           Coverage joins and dependencies keep successor bars after upstream readouts.
         </p>
@@ -308,11 +308,11 @@ export function AccuracyGanttBoard({
                   onKeyDown={(event) => onBarKeyDown(index, event)}
                 >
                   <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-                    <p className="text-[13px] text-foreground">
+                    <p className="text-body text-foreground">
                       {catalog.find((row) => row.id === activity.tactic_id)?.statement ??
                         activity.tactic_id}
                     </p>
-                    <span className="text-[11px] text-muted-foreground">
+                    <span className="text-caption text-muted-foreground">
                       {activity.start.slice(0, 10)} → {activity.end.slice(0, 10)}
                       {activity.readout ? ` · readout ${activity.readout.slice(0, 10)}` : ""}
                     </span>
@@ -331,12 +331,12 @@ export function AccuracyGanttBoard({
                     ) : null}
                   </div>
                   {activity.gap_ids.length > 0 ? (
-                    <p className="mt-2 text-[11px] text-muted-foreground">
+                    <p className="mt-2 text-caption text-muted-foreground">
                       Covers {activity.gap_ids.join(", ")}
                     </p>
                   ) : null}
                   {activity.depends_on.length > 0 ? (
-                    <p className="mt-2 text-[11px] text-muted-foreground">
+                    <p className="mt-2 text-caption text-muted-foreground">
                       Depends on {activity.depends_on.join(", ")}
                     </p>
                   ) : null}
@@ -355,10 +355,10 @@ export function AccuracyGanttBoard({
         >
           <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
             <div>
-              <h2 id="activity-detail-title" className="text-[13px] font-semibold text-foreground">
+              <h2 id="activity-detail-title" className="text-body font-semibold text-foreground">
                 {detail.tactic?.statement ?? detail.activity.tactic_id}
               </h2>
-              <p className="text-[12px] text-muted-foreground">
+              <p className="text-callout text-muted-foreground">
                 Tactic {detail.activity.tactic_id} · activity {detail.activity.id}
               </p>
             </div>
@@ -368,15 +368,15 @@ export function AccuracyGanttBoard({
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <h3 className="text-[12px] font-medium text-foreground">Evidence gaps</h3>
+              <h3 className="text-callout font-medium text-foreground">Evidence gaps</h3>
               {detail.gaps.length === 0 ? (
-                <p className="mt-1 text-[12px] text-muted-foreground">
+                <p className="mt-1 text-callout text-muted-foreground">
                   No validated coverage joins on this bar.
                 </p>
               ) : (
                 <ul className="mt-1 grid gap-1">
                   {detail.gaps.map((gap) => (
-                    <li key={gap.id} className="text-[12px] text-muted-foreground">
+                    <li key={gap.id} className="text-callout text-muted-foreground">
                       <span className="text-foreground">{gap.statement}</span>{" "}
                       <span className="text-muted-foreground/70">{gap.id}</span>
                     </li>
@@ -385,8 +385,8 @@ export function AccuracyGanttBoard({
               )}
             </div>
             <div>
-              <h3 className="text-[12px] font-medium text-foreground">Interdependencies</h3>
-              <dl className="mt-1 grid gap-1 text-[12px] text-muted-foreground">
+              <h3 className="text-callout font-medium text-foreground">Interdependencies</h3>
+              <dl className="mt-1 grid gap-1 text-callout text-muted-foreground">
                 <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-2">
                   <dt>Start</dt>
                   <dd className="text-foreground">{detail.activity.start.slice(0, 10)}</dd>
@@ -403,15 +403,15 @@ export function AccuracyGanttBoard({
                 </div>
               </dl>
               {detail.depends_on.length > 0 ? (
-                <p className="mt-2 text-[12px] text-muted-foreground">
+                <p className="mt-2 text-callout text-muted-foreground">
                   Depends on{" "}
                   {detail.depends_on.map((row) => `${row.statement} (${row.id})`).join("; ")}
                 </p>
               ) : (
-                <p className="mt-2 text-[12px] text-muted-foreground">No upstream waits.</p>
+                <p className="mt-2 text-callout text-muted-foreground">No upstream waits.</p>
               )}
               {detail.dependents.length > 0 ? (
-                <p className="mt-1 text-[12px] text-muted-foreground">
+                <p className="mt-1 text-callout text-muted-foreground">
                   Unblocks{" "}
                   {detail.dependents.map((row) => `${row.statement} (${row.id})`).join("; ")}
                 </p>
@@ -420,7 +420,7 @@ export function AccuracyGanttBoard({
           </div>
           {selectedTactic ? (
             <div className="mt-4 border-t border-border pt-3">
-              <h3 className="mb-2 text-[12px] font-medium text-foreground">Edit schedule</h3>
+              <h3 className="mb-2 text-callout font-medium text-foreground">Edit schedule</h3>
               <GanttScheduleEditor
                 key={`${selectedTactic.id}-${selectedTactic.start}-${selectedTactic.end}-${selectedTactic.readout}-${selectedTactic.depends_on.join(",")}`}
                 workspaceId={workspaceId}
@@ -433,17 +433,17 @@ export function AccuracyGanttBoard({
       ) : null}
       {unscheduled.length > 0 ? (
         <section className="grid gap-2" aria-labelledby="gantt-unscheduled" data-testid="gantt-unscheduled">
-          <h2 id="gantt-unscheduled" className="text-[12px] font-semibold text-foreground">
+          <h2 id="gantt-unscheduled" className="text-callout font-semibold text-foreground">
             Validated tactics without a bar ({unscheduled.length})
           </h2>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             Enter start and end dates (and optional readout / dependencies) to place them on the
             timeline.
           </p>
           <ul className="grid gap-2">
             {unscheduled.map((row) => (
               <li key={row.id} className="border border-border bg-card p-3 rounded-lg">
-                <p className="mb-2 text-[12px] text-foreground">
+                <p className="mb-2 text-callout text-foreground">
                   {row.statement} <span className="text-muted-foreground">{row.id}</span>
                 </p>
                 <GanttScheduleEditor

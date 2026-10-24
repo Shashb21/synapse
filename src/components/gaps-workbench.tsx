@@ -1,5 +1,6 @@
 "use client";
 
+import { PriorityBars } from "@/components/matrix/bands";
 import { Fragment, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import styles from "./gaps-workbench.module.css";
@@ -86,7 +87,7 @@ function CreateAddressedGap({ tactics }: { tactics: TacticLibraryItem[] }) {
       description="A gap an existing study already answers. Name the study below."
     >
       <GapFormFields />
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
+      <label className="grid gap-1 text-callout text-muted-foreground">
         Accompanying library tactic
         <select name="tactic_id" className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm">
           <option value="">Record a missed tactic below</option>
@@ -97,7 +98,7 @@ function CreateAddressedGap({ tactics }: { tactics: TacticLibraryItem[] }) {
           ))}
         </select>
       </label>
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-caption text-muted-foreground">
         Pick a library tactic, or record a missed real study (completed, ongoing, or planned). At least
         one is required. Do not invent proposed tactics here.
       </p>
@@ -121,10 +122,10 @@ function InventoryReviewTasks({ card, focusTask }: {
   const isPartial = card.gap_status === "validated_partial";
   return <section ref={paneRef} aria-label="Outstanding gap review">
       {tasks.includes("Review tactic mappings") ? <div className="mt-4" data-review-task="Review tactic mappings" tabIndex={-1}>
-        <p className="text-[12px] text-muted-foreground">Review tactic mappings: check this gap’s coverage and confirm or edit each flagged mapping.</p>
-        <Link href={`/gaps/${card.gap_id}#mapped-tactics`} className="text-[12px] text-foreground underline">Review coverage on gap page</Link>
+        <p className="text-callout text-muted-foreground">Review tactic mappings: check this gap’s coverage and confirm or edit each flagged mapping.</p>
+        <Link href={`/gaps/${card.gap_id}#mapped-tactics`} className="text-callout text-foreground underline">Review coverage on gap page</Link>
       </div> : null}
-      {tasks.length > 1 ? <p className="mt-3 text-[12px] text-muted-foreground">Additional tasks ({tasks.length - 1}): {tasks.slice(1).map(reviewTaskLabel).join(" · ")}</p> : null}
+      {tasks.length > 1 ? <p className="mt-3 text-callout text-muted-foreground">Additional tasks ({tasks.length - 1}): {tasks.slice(1).map(reviewTaskLabel).join(" · ")}</p> : null}
       {card.new_source ? <div data-review-task="Review new source"><NewSourceNote gapId={card.gap_id} newSource={card.new_source} /></div> : null}
       {/* Hero action first: Resolve (Partial) or Confirm (everything else still unconfirmed) stand apart from the secondary actions below. */}
       <div className="mt-4 flex flex-wrap items-center gap-2" data-review-task={isPartial ? "Resolve partial gap" : "Confirm status"}>
@@ -153,22 +154,16 @@ const PRIORITY_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2, def
 const PRIORITY_LABELS: Record<GapPriority["band"], string> = { high: "High", medium: "Medium", low: "Low", defer: "Defer" };
 
 function PriorityChip({ priority }: { priority?: GapPriority }) {
-  if (!priority) return <span className="text-[11px] text-muted-foreground">—</span>;
-  const tone =
-    priority.band === "high"
-      ? "border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300"
-      : priority.band === "medium"
-        ? "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
-        : priority.band === "low"
-          ? "border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300"
-          : "border-stone-200 bg-stone-100 text-stone-600 dark:border-stone-500/30 dark:bg-stone-500/10 dark:text-stone-300";
+  if (!priority) return <span className="text-caption text-muted-foreground">—</span>;
+  // Priority has no hue (KAN-158): bars and a word, so it never reads as a status.
   return (
     <span
-      className={cn("inline-flex items-center rounded border px-1.5 py-0.5 text-[10.5px] font-medium", tone)}
+      className="inline-flex items-center gap-1.5 text-callout font-medium text-foreground"
       title={priority.validated ? "Validated on the Prioritization Matrix" : "Draft — not validated yet"}
     >
+      <PriorityBars band={priority.band} />
       {PRIORITY_LABELS[priority.band]}
-      {priority.validated ? null : <span className="ml-1 font-normal opacity-70">draft</span>}
+      {priority.validated ? null : <span className="font-normal text-muted-foreground">draft</span>}
     </span>
   );
 }
@@ -197,10 +192,10 @@ function SortHeader({
         type="button"
         onClick={() => onSort(column)}
         aria-label={`Sort by ${label}`}
-        className="inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.08em] text-muted-foreground hover:text-foreground"
+        className="inline-flex items-center gap-1 text-caption text-muted-foreground hover:text-foreground"
       >
         {label}
-        <span aria-hidden className={cn("text-[9px]", active ? "text-foreground" : "opacity-40")}>
+        <span aria-hidden className={cn("text-caption", active ? "text-foreground" : "opacity-40")}>
           {active && sort!.dir === "desc" ? "▼" : "▲"}
         </span>
       </button>
@@ -209,7 +204,7 @@ function SortHeader({
 }
 
 const selectClass =
-  "h-8 rounded-md border border-input bg-card px-2 text-[11.5px] text-foreground focus-visible:outline-2 focus-visible:outline-ring";
+  "h-8 rounded-md border border-input bg-card px-2 text-caption text-foreground focus-visible:outline-2 focus-visible:outline-ring";
 
 /**
  * Evidence Inventory (KAN-8, the owner's Figma design): a Jira-style list of every
@@ -337,10 +332,10 @@ export function GapsWorkbench({
 
   return (
     <div className="grid gap-4">
-      {suggestions.length === 0 ? <p className="text-[11px] text-muted-foreground">Pending source suggestions: 0</p> : null}
+      {suggestions.length === 0 ? <p className="text-caption text-muted-foreground">Pending source suggestions: 0</p> : null}
       <GapSuggestions suggestions={suggestions} />
       {cards.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-border bg-card px-4 py-6 text-center text-[12px] text-muted-foreground">
+        <p className="rounded-lg border border-dashed border-border bg-card px-4 py-6 text-center text-callout text-muted-foreground">
           {ai
             ? "No gaps yet. Ingest a source on Upload, or add an Open or Addressed gap here."
             : "No gaps yet. Add an Open or Addressed gap here."}
@@ -355,9 +350,9 @@ export function GapsWorkbench({
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search gaps…"
                 aria-label="Search gaps"
-                className="h-8 w-56 rounded-md border border-input bg-muted/50 px-2.5 text-[11.5px] text-foreground placeholder:text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                className="h-8 w-56 rounded-md border border-input bg-muted/50 px-2.5 text-caption text-foreground placeholder:text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring"
               />
-              <span className="ml-auto text-[11px] text-muted-foreground" aria-live="polite">
+              <span className="ml-auto text-caption text-muted-foreground" aria-live="polite">
                 Showing {visible.length} of {cards.length} gaps · counts below cover all gaps
               </span>
             </div>
@@ -366,7 +361,7 @@ export function GapsWorkbench({
               <Button type="button" size="sm" variant={attention ? "default" : "outline"} aria-pressed={attention} onClick={() => setFilter(filter, !attention)}>Needs attention ({counts.needs_attention})</Button>
               <Button type="button" size="sm" variant="ghost" onClick={resetFilters}>Reset filters</Button>
             </div>
-            <details data-inventory-filters className="text-[12px]">
+            <details data-inventory-filters className="text-callout">
               <summary className="w-fit cursor-pointer rounded-sm px-1 py-1 font-medium focus-visible:outline-2 focus-visible:outline-ring">Filters ({secondaryFilters.length})</summary>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <select aria-label="Filter by domain" value={domain} onChange={(e) => setDomain(e.target.value)} className={selectClass}>
@@ -395,7 +390,7 @@ export function GapsWorkbench({
                 </select>
               </div>
               <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label="Evidence status">
-                {filter === "needs_validation" ? <span className="text-[11px]">Legacy filter: unconfirmed or partial</span> : null}
+                {filter === "needs_validation" ? <span className="text-caption">Legacy filter: unconfirmed or partial</span> : null}
                 {FILTER_CHIPS.map((chip) => (
                   <Button
                     key={chip.id}
@@ -410,7 +405,7 @@ export function GapsWorkbench({
                 ))}
               </div>
             </details>
-            {secondaryFilters.length ? <div className="flex flex-wrap items-center gap-2 text-[12px]" aria-label="Active secondary filters">
+            {secondaryFilters.length ? <div className="flex flex-wrap items-center gap-2 text-callout" aria-label="Active secondary filters">
               <span>Active filters: {secondaryFilters.join(" · ")}</span>
               <Button type="button" size="sm" variant="ghost" onClick={() => {
                 setDomain("");
@@ -421,7 +416,7 @@ export function GapsWorkbench({
             </div> : null}
           </div>
           <div className="flex flex-wrap items-center gap-2 md:hidden">
-            <label className="flex items-center gap-2 text-[12px]">Sort
+            <label className="flex items-center gap-2 text-callout">Sort
               <select aria-label="Sort gaps" className="min-h-10 rounded-md border border-input bg-background px-2" value={sort?.key ?? ""} onChange={(event) => setSort(event.target.value ? { key: event.target.value as SortKey, dir: sort?.dir ?? "asc" } : null)}>
                 <option value="">Review order</option>
                 <option value="id">ID</option><option value="name">Gap</option><option value="domain">Domain</option><option value="status">Evidence status</option><option value="priority">Priority</option><option value="tactics">Tactics</option>
@@ -430,16 +425,16 @@ export function GapsWorkbench({
             <Button variant="outline" size="sm" disabled={!sort} aria-label="Reverse gap sort direction" onClick={() => setSort(current => current ? {...current, dir: current.dir === "asc" ? "desc" : "asc"} : null)}>{sort?.dir === "desc" ? "Descending" : "Ascending"}</Button>
           </div>
           <div className="min-w-0 overflow-x-auto rounded-lg border border-border bg-card">
-            <table className={cn(styles.inventory, "w-full md:min-w-[820px] border-collapse text-[12px]")} data-testid="evidence-inventory">
+            <table className={cn(styles.inventory, "w-full md:min-w-[820px] border-collapse text-callout")} data-testid="evidence-inventory">
               <thead className="border-b border-border bg-muted/60">
                 <tr>
                   <SortHeader label="ID" column="id" sort={sort} onSort={onSort} className="w-[132px]" />
                   <SortHeader label="Gap" column="name" sort={sort} onSort={onSort} />
                   <SortHeader label="Domain" column="domain" sort={sort} onSort={onSort} className="w-[150px]" />
                   <SortHeader label="Evidence status" column="status" sort={sort} onSort={onSort} className="w-[160px]" />
-                  <th scope="col" className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Review state and next action</th>
+                  <th scope="col" className="px-3 py-2 text-left text-caption font-semibold text-muted-foreground">Review state and next action</th>
                   <SortHeader label="Priority" column="priority" sort={sort} onSort={onSort} className="w-[110px]" />
-                  <th scope="col" className="w-[130px] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                  <th scope="col" className="w-[130px] px-3 py-2 text-left text-caption font-semibold text-muted-foreground">
                     Setting
                   </th>
                   <SortHeader label="Tactics" column="tactics" sort={sort} onSort={onSort} className="w-[84px]" />
@@ -448,7 +443,7 @@ export function GapsWorkbench({
               <tbody>
                 {visible.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center text-[12px] text-muted-foreground">
+                    <td colSpan={8} className="px-4 py-8 text-center text-callout text-muted-foreground">
                       No gaps match these filters.
                     </td>
                   </tr>
@@ -467,7 +462,7 @@ export function GapsWorkbench({
                       >
                         {/* Every row carries its status colour (KAN-56): open, partial or addressed. */}
                         <td
-                          className={cn("border-l-[3px] px-3 py-2 align-top font-mono text-[11px] text-primary", STATUS_BAND[card.gap_status] ?? "border-l-border")}
+                          className={cn("border-l-[3px] px-3 py-2 align-top font-mono text-caption text-primary", STATUS_BAND[card.gap_status] ?? "border-l-border")}
                           title={card.gap_id}
                         >
                           {gapNumberLabel(card.number)}
@@ -478,14 +473,14 @@ export function GapsWorkbench({
                             data-testid="gap-row-toggle"
                             className="flex w-full items-start gap-1.5 text-left focus-visible:outline-2 focus-visible:outline-ring"
                           >
-                            <span aria-hidden className="mt-0.5 text-[10px] text-muted-foreground">▸</span>
+                            <span aria-hidden className="mt-0.5 text-caption text-muted-foreground">▸</span>
                             <span className="min-w-0">
                               <span className="block md:min-w-[16rem] break-words text-sm font-semibold leading-snug text-foreground">{card.gap_name}</span>
                               {card.new_source ? <NewSourcePill /> : null}
                             </span>
                           </GapRecordLink>
                           {suggestions.some((suggestion) => suggestion.gap_id === card.gap_id) ? (
-                            <button type="button" className="mt-1 text-[11px] text-primary underline focus-visible:outline-2 focus-visible:outline-ring" onClick={() => {
+                            <button type="button" className="mt-1 text-caption text-primary underline focus-visible:outline-2 focus-visible:outline-ring" onClick={() => {
                               const panel = document.getElementById("source-suggestions") as HTMLDetailsElement | null;
                               const suggestion = suggestions.find((item) => item.gap_id === card.gap_id);
                               if (panel && suggestion) {
@@ -495,32 +490,32 @@ export function GapsWorkbench({
                             }}>Source suggestions ({suggestions.filter((suggestion) => suggestion.gap_id === card.gap_id).length})</button>
                           ) : null}
                         </td>
-                        <td data-label="Domain" className="px-3 py-2 align-top text-[11px] text-muted-foreground">{DOMAIN_LABELS[card.domain]}</td>
+                        <td data-label="Domain" className="px-3 py-2 align-top text-caption text-muted-foreground">{DOMAIN_LABELS[card.domain]}</td>
                         <td className="px-3 py-2 align-top">
-                          <span className="mb-1 block text-[11px] text-muted-foreground md:hidden">Evidence status</span><GapBadge status={card.gap_status} />
+                          <span className="mb-1 block text-caption text-muted-foreground md:hidden">Evidence status</span><GapBadge status={card.gap_status} />
                         </td>
-                        <td className="px-3 py-2 align-top text-[11px]">
+                        <td className="px-3 py-2 align-top text-caption">
                           <span className="block text-muted-foreground">{card.human_validated ? "Assessment confirmed" : "Assessment unconfirmed"}</span>
                           <div data-next-action>
                             {tasks[0] ? <>
-                              <p className="mb-2 mt-1 text-[12px] text-foreground">{REVIEW_REASONS[tasks[0]]}</p>
+                              <p className="mb-2 mt-1 text-callout text-foreground">{REVIEW_REASONS[tasks[0]]}</p>
                               <Button type="button" size="sm" variant="default" className="h-auto min-h-8 max-w-full whitespace-normal py-1.5 text-left" aria-expanded={open} onClick={() => {
                                 setOpenId(card.gap_id);
                                 setFocusTask((previous) => ({ label: tasks[0], sequence: (previous?.sequence ?? 0) + 1 }));
                               }}>{reviewTaskLabel(tasks[0])}</Button>
-                              {tasks.length > 1 ? <span className="mt-1 block text-[11px] text-muted-foreground">Additional tasks ({tasks.length - 1}): {tasks.slice(1).map(reviewTaskLabel).join(" · ")}</span> : null}
-                            </> : <span className="text-[11px] text-muted-foreground">No outstanding review</span>}
+                              {tasks.length > 1 ? <span className="mt-1 block text-caption text-muted-foreground">Additional tasks ({tasks.length - 1}): {tasks.slice(1).map(reviewTaskLabel).join(" · ")}</span> : null}
+                            </> : <span className="text-caption text-muted-foreground">No outstanding review</span>}
                           </div>
                         </td>
                         <td className="px-3 py-2 align-top">
-                          <span className="mb-1 block text-[11px] text-muted-foreground md:hidden">Priority</span><PriorityChip priority={priorities[card.gap_id]} />
+                          <span className="mb-1 block text-caption text-muted-foreground md:hidden">Priority</span><PriorityChip priority={priorities[card.gap_id]} />
                         </td>
                         <td className="px-3 py-2 align-top">
-                          <span className="mb-1 block text-[11px] text-muted-foreground md:hidden">Setting</span>{card.settings.length ? <SettingChips settings={card.settings} /> : <span className="text-[11px] text-muted-foreground">—</span>}
+                          <span className="mb-1 block text-caption text-muted-foreground md:hidden">Setting</span>{card.settings.length ? <SettingChips settings={card.settings} /> : <span className="text-caption text-muted-foreground">—</span>}
                         </td>
-                        <td className="px-3 py-2 align-top text-[11px] text-muted-foreground">
-                          <span className="mb-1 block text-[11px] text-muted-foreground md:hidden">Tactics</span>{card.tactics.length}
-                          {card.needs_review ? <span className="ml-1 text-amber-700 dark:text-amber-300">· review</span> : null}
+                        <td className="px-3 py-2 align-top text-caption text-muted-foreground">
+                          <span className="mb-1 block text-caption text-muted-foreground md:hidden">Tactics</span>{card.tactics.length}
+                          {card.needs_review ? <span className="ml-1 text-unknown-foreground">· review</span> : null}
                         </td>
                       </tr>
                       {open && focusTask ? <tr><td colSpan={8} className="bg-muted/30 px-3 py-3">
@@ -539,13 +534,13 @@ export function GapsWorkbench({
         <CreateAddressedGap tactics={availableTactics} />
         <AddTacticsButton variant="outline" inUse={customTypesInUse(availableTactics)} />
       </div>
-      <p className="-mt-2 text-[11px] text-muted-foreground">{GAPS_TACTIC_HELPER}</p>
+      <p className="-mt-2 text-caption text-muted-foreground">{GAPS_TACTIC_HELPER}</p>
       <InventoryReadiness cards={cards} readyForPrioritize={readyForPrioritize} />
       <div className="rounded-lg border border-border bg-card p-4">
         {readyForPrioritize ? (
           <>
-            <h2 className="text-[13px] font-semibold">Continue to prioritize</h2>
-            <p className="mt-1 mb-3 text-[12px] text-muted-foreground">
+            <h2 className="text-body font-semibold">Continue to prioritize</h2>
+            <p className="mt-1 mb-3 text-callout text-muted-foreground">
               Every live gap has a confirmed evidence assessment. Check outstanding review work above. Open gaps go to the Prioritization Matrix, then Tactic Ideation.
             </p>
             <LockForm
@@ -558,16 +553,16 @@ export function GapsWorkbench({
         ) : cards.length === 0 ? (
           // No gaps: there is nothing to confirm yet, so name the first step, not "0 unconfirmed" (KAN-68).
           <>
-            <h2 className="text-[13px] font-semibold">Add gaps first</h2>
-            <p className="mt-1 text-[12px] text-muted-foreground">
+            <h2 className="text-body font-semibold">Add gaps first</h2>
+            <p className="mt-1 text-callout text-muted-foreground">
               There are no gaps yet. Add them{ai ? " from an uploaded source or" : ""} by hand, confirm each one here,
               then continue to prioritize.
             </p>
           </>
         ) : (
           <>
-            <h2 className="text-[13px] font-semibold">Review outstanding gap assessments</h2>
-            <p className="mt-1 text-[12px] text-muted-foreground">
+            <h2 className="text-body font-semibold">Review outstanding gap assessments</h2>
+            <p className="mt-1 text-callout text-muted-foreground">
               You can open the
               Prioritization Matrix now, but it only has the gaps already confirmed as Open.
             </p>

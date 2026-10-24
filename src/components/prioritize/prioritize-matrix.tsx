@@ -122,7 +122,7 @@ function AxisSelect({
 }) {
   const selected = axes.find((axis) => axis.id === value);
   return (
-    <label className="grid gap-1 text-[12px] text-muted-foreground">
+    <label className="grid gap-1 text-callout text-muted-foreground">
       {label}
       <select
         value={value}
@@ -138,7 +138,7 @@ function AxisSelect({
           </option>
         ))}
       </select>
-      {selected ? <span className="text-[11px] leading-4">{selected.description}</span> : null}
+      {selected ? <span className="text-caption leading-4">{selected.description}</span> : null}
     </label>
   );
 }
@@ -220,10 +220,10 @@ export function AxisChooser({
   return (
     <section className="grid gap-4 border border-border bg-card/40 p-4" aria-labelledby="axis-chooser">
       <div>
-        <h2 id="axis-chooser" className="text-[15px] font-medium text-foreground">
+        <h2 id="axis-chooser" className="text-headline font-medium text-foreground">
           1. Choose axes for {scopeLabel}
         </h2>
-        <p className="mt-1 max-w-2xl text-[12px] leading-5 text-muted-foreground">
+        <p className="mt-1 max-w-2xl text-callout leading-5 text-muted-foreground">
           {ai
             ? "Pick the two axes for the matrix. The model places each Open gap as a first draft; you then drag gaps to change their priority and validate each one."
             : "Pick the two axes for the matrix. You place each Open gap yourself: type its scores or band, or drop it on the matrix, then validate it."}{" "}
@@ -235,14 +235,14 @@ export function AxisChooser({
         <AxisSelect label="Horizontal axis (X)" value={xAxis} onChange={setXAxis} axes={axes} exclude={yAxis} />
       </div>
       {x && y ? (
-        <p className="text-[11px] leading-4 text-muted-foreground">
+        <p className="text-caption leading-4 text-muted-foreground">
           Prioritize = <span className="text-foreground">{favourableLabel(y)}</span> and{" "}
           <span className="text-foreground">{favourableLabel(x)}</span>. Defer ={" "}
           {unfavourableLabel(y)} and {unfavourableLabel(x)}.
         </p>
       ) : null}
       {error ? (
-        <p role="alert" className="text-[12px] text-destructive">
+        <p role="alert" className="text-callout text-destructive">
           {error}
         </p>
       ) : null}
@@ -251,7 +251,7 @@ export function AxisChooser({
           type="button"
           disabled={pending || !mayPrioritize}
           onClick={() => void submit()}
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-[13px] font-medium text-primary-foreground disabled:opacity-50"
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-body font-medium text-primary-foreground disabled:opacity-50"
         >
           {pending ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : null}
           {pending ? (ai ? "Placing gaps…" : "Saving axes…") : ai ? submitLabel : "Save axes"}
@@ -261,15 +261,15 @@ export function AxisChooser({
             type="button"
             disabled={pending}
             onClick={onCancel}
-            className="h-8 rounded-lg px-3 text-[13px] text-muted-foreground hover:text-foreground"
+            className="h-8 rounded-lg px-3 text-body text-muted-foreground hover:text-foreground"
           >
             Cancel
           </button>
         ) : null}
         {!mayPrioritize ? (
-          <span className="text-[11px] text-muted-foreground">Your role may not prioritize.</span>
+          <span className="text-caption text-muted-foreground">Your role may not prioritize.</span>
         ) : (
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-caption text-muted-foreground">
             {gapIds.length} Open gap{gapIds.length === 1 ? "" : "s"} in {scopeLabel}
           </span>
         )}
@@ -298,7 +298,7 @@ function QuadrantBackdrop() {
         >
           <span
             className={cn(
-              "absolute text-[10px] font-medium uppercase tracking-wide",
+              "absolute text-caption font-medium",
               cell.className.includes("top") ? "top-1.5" : "bottom-1.5",
               cell.className.includes("left") ? "left-2" : "right-2",
             )}
@@ -402,9 +402,11 @@ export function PrioritizeMatrix({
   });
   const placed = view.filter((row) => row.point);
   const validatedCount = view.filter((row) => row.validated).length;
-  // The design's priority chips: each counts its gaps and highlights them on the canvas.
+  // The design's priority chips: each counts the gaps on the canvas in its band and
+  // highlights them, so the chips, canvas and band lists always agree (KAN-158).
+  // Gaps not on the canvas yet are counted under "Not placed yet".
   const [highlight, setHighlight] = useState<Band | null>(null);
-  const bandCounts = Object.fromEntries(BANDS.map((b) => [b, view.filter((row) => row.band === b).length])) as Record<Band, number>;
+  const bandCounts = Object.fromEntries(BANDS.map((b) => [b, placed.filter((row) => row.band === b).length])) as Record<Band, number>;
 
   function pointFromEvent(event: PointerEvent): Point | null {
     const rect = plotRef.current?.getBoundingClientRect();
@@ -579,19 +581,19 @@ export function PrioritizeMatrix({
   return (
     <div ref={matrixRef} className="grid gap-4">
       <div>
-        <h2 className="text-[15px] font-medium text-foreground">1. Choose axes</h2>
-        <p className="mt-1 text-[12px] leading-5 text-muted-foreground">Changing axes changes the plotted view for this setting and saves immediately. Priority applies across all settings.</p>
+        <h2 className="text-headline font-medium text-foreground">1. Choose axes</h2>
+        <p className="mt-1 text-callout leading-5 text-muted-foreground">Changing axes changes the plotted view for this setting and saves immediately. Priority applies across all settings.</p>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground" data-testid="matrix-axes">
+        <div className="flex flex-wrap items-center gap-2 text-callout text-muted-foreground" data-testid="matrix-axes">
           <label className="inline-flex items-center gap-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.08em]">Vertical</span>
+            <span className="text-caption font-semibold">Vertical</span>
             <select
               aria-label="Vertical axis (Y)"
               value={yAxis.id}
               disabled={!mayPrioritize || Boolean(busy)}
               onChange={(event) => void changeAxes(xAxis.id, event.target.value)}
-              className="h-7 rounded-md border border-input bg-card px-2 text-[12px] text-foreground"
+              className="h-7 rounded-md border border-input bg-card px-2 text-callout text-foreground"
             >
               {axes.map((axis) => (
                 <option key={axis.id} value={axis.id} disabled={axis.id === xAxis.id}>
@@ -602,13 +604,13 @@ export function PrioritizeMatrix({
           </label>
           <span aria-hidden>×</span>
           <label className="inline-flex items-center gap-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.08em]">Horizontal</span>
+            <span className="text-caption font-semibold">Horizontal</span>
             <select
               aria-label="Horizontal axis (X)"
               value={xAxis.id}
               disabled={!mayPrioritize || Boolean(busy)}
               onChange={(event) => void changeAxes(event.target.value, yAxis.id)}
-              className="h-7 rounded-md border border-input bg-card px-2 text-[12px] text-foreground"
+              className="h-7 rounded-md border border-input bg-card px-2 text-callout text-foreground"
             >
               {axes.map((axis) => (
                 <option key={axis.id} value={axis.id} disabled={axis.id === yAxis.id}>
@@ -620,7 +622,7 @@ export function PrioritizeMatrix({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {busy ? (
-            <span role="status" className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <span role="status" className="inline-flex items-center gap-1.5 text-caption text-muted-foreground">
               <Loader2 className="size-3 animate-spin" aria-hidden />
               {busy}
             </span>
@@ -630,7 +632,7 @@ export function PrioritizeMatrix({
               type="button"
               onClick={() => void resuggest()}
               disabled={!mayPrioritize || Boolean(busy) || validatedCount === gaps.length}
-              className="h-7 rounded-md border border-border px-2.5 text-[12px] text-foreground hover:bg-muted disabled:opacity-50"
+              className="h-7 rounded-md border border-border px-2.5 text-callout text-foreground hover:bg-muted disabled:opacity-50"
               title="Ask the model again for every gap you have not validated yet"
             >
               Re-suggest unvalidated
@@ -639,8 +641,8 @@ export function PrioritizeMatrix({
         </div>
       </div>
       <div>
-        <h2 className="text-[15px] font-medium text-foreground">2. Review placement</h2>
-        <p className="mt-1 text-[12px] leading-5 text-muted-foreground">Select a gap to review its context and scores. Save a draft placement, then validate priority with your own reason in the gap details.</p>
+        <h2 className="text-headline font-medium text-foreground">2. Review placement</h2>
+        <p className="mt-1 text-callout leading-5 text-muted-foreground">Select a gap to review its context and scores. Save a draft placement, then validate priority with your own reason in the gap details.</p>
       </div>
       <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Highlight a priority">
         {BANDS.map((b) => {
@@ -652,7 +654,7 @@ export function PrioritizeMatrix({
               aria-pressed={on}
               onClick={() => setHighlight(on ? null : b)}
               className={cn(
-                "inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-1.5 text-[11.5px] transition-colors",
+                "inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-1.5 text-caption transition-colors",
                 on ? "border-current" : "border-border hover:bg-muted",
               )}
               style={on ? { color: BAND_TOKENS[b] } : undefined}
@@ -665,11 +667,11 @@ export function PrioritizeMatrix({
         })}
       </div>
       {message?.error ? (
-        <p role="alert" className="text-[12px] text-destructive">
+        <p role="alert" className="text-callout text-destructive">
           {message.text}
         </p>
       ) : null}
-      <p role="status" aria-atomic="true" className="text-[12px] text-foreground">{message && !message.error ? message.text : ""}</p>
+      <p role="status" aria-atomic="true" className="text-callout text-foreground">{message && !message.error ? message.text : ""}</p>
 
       {pendingMove ? (
         <ActionDialog protectUnsavedChanges
@@ -705,7 +707,7 @@ export function PrioritizeMatrix({
       <div className="grid gap-4 lg:grid-cols-[minmax(0,auto)_minmax(280px,1fr)] lg:items-start">
         <div className="grid w-full min-w-0 max-w-[min(748px,calc(100dvh-140px))] gap-2 max-lg:max-w-[748px]">
           <div className="flex items-stretch gap-2">
-            <div className="flex w-5 shrink-0 flex-col items-center justify-between py-1 text-[11px] text-muted-foreground">
+            <div className="flex w-5 shrink-0 flex-col items-center justify-between py-1 text-caption text-muted-foreground">
               <span className="[writing-mode:vertical-rl] rotate-180 whitespace-nowrap">{favourableLabel(yAxis)}</span>
               <span className="[writing-mode:vertical-rl] rotate-180 whitespace-nowrap text-foreground">{yAxis.label}</span>
               <span className="[writing-mode:vertical-rl] rotate-180 whitespace-nowrap">{unfavourableLabel(yAxis)}</span>
@@ -734,7 +736,7 @@ export function PrioritizeMatrix({
                     aria-label={`${gap.gap_name}: ${band ? BAND_LABELS[band] : "unplaced"}${validated ? ", priority validated" : ", priority not validated"}. Arrow keys move it.`}
                     aria-pressed={isSelected}
                     className={cn(
-                      "absolute flex max-w-[42%] -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full border bg-card/95 px-2 py-0.5 text-[11px] leading-4 text-foreground shadow-sm transition-opacity",
+                      "absolute flex max-w-[42%] -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full border bg-card/95 px-2 py-0.5 text-caption leading-4 text-foreground shadow-sm transition-opacity",
                       highlight && band !== highlight && !isSelected && "opacity-15",
                       mayPrioritize ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
                       isSelected ? "z-30 ring-2 ring-foreground/60" : "z-10 hover:z-20",
@@ -752,12 +754,12 @@ export function PrioritizeMatrix({
                       aria-hidden
                     />
                     <span className="truncate">{gap.gap_name}</span>
-                    {validated ? <span className="shrink-0 text-[10px] text-muted-foreground">✓</span> : null}
+                    {validated ? <span className="shrink-0 text-caption text-muted-foreground">✓</span> : null}
                   </button>
                 );
               })}
               {placed.length === 0 ? (
-                <p className="absolute inset-0 grid place-items-center p-6 text-center text-[12px] text-muted-foreground">
+                <p className="absolute inset-0 grid place-items-center p-6 text-center text-callout text-muted-foreground">
                   {busy ??
                     (ai
                       ? "No gap is placed yet."
@@ -766,12 +768,12 @@ export function PrioritizeMatrix({
               ) : null}
             </div>
           </div>
-          <div className="flex items-center justify-between pl-7 text-[11px] text-muted-foreground">
+          <div className="flex items-center justify-between pl-7 text-caption text-muted-foreground">
             <span>{unfavourableLabel(xAxis)}</span>
             <span className="text-foreground">{xAxis.label}</span>
             <span>{favourableLabel(xAxis)}</span>
           </div>
-          <p className="pl-7 text-[11px] leading-4 text-muted-foreground">
+          <p className="pl-7 text-caption leading-4 text-muted-foreground">
             Drag a gap to change its priority, or select it and use the arrow keys (Shift for bigger
             steps). Every saved move needs a reason. A dashed edge means the priority is not validated yet.
           </p>
@@ -785,10 +787,10 @@ export function PrioritizeMatrix({
           <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">
             {unplaced.length > 0 && !busy ? (
               <section aria-label="Gaps not placed yet">
-                <h3 className="mb-1 text-[12px] font-medium text-foreground">
+                <h3 className="mb-1 text-callout font-medium text-foreground">
                   Not placed yet <span className="font-normal text-muted-foreground">{unplaced.length}</span>
                 </h3>
-                <p className="mb-1 text-[11px] leading-4 text-muted-foreground">
+                <p className="mb-1 text-caption leading-4 text-muted-foreground">
                   {mayPrioritize
                     ? "Drag a gap onto the matrix: where you drop it sets its two scores. Or select it to type them."
                     : "Your role may view the matrix but not place gaps."}
@@ -804,7 +806,7 @@ export function PrioritizeMatrix({
                         onClick={(event) => { if (suppressGapClick.current) { suppressGapClick.current = false; return; } gapTriggerRef.current = event.currentTarget; setSelectedId(gap.gap_id); }}
                         aria-label={`${gap.gap_name}: not placed. Drag onto the matrix, or select to type its scores.`}
                         className={cn(
-                          "flex w-full touch-none select-none items-center gap-1.5 rounded px-1.5 py-1 text-left text-[12px] hover:bg-muted",
+                          "flex w-full touch-none select-none items-center gap-1.5 rounded px-1.5 py-1 text-left text-callout hover:bg-muted",
                           mayPrioritize && "cursor-grab active:cursor-grabbing",
                           gap.gap_id === selectedId && "bg-muted",
                         )}
@@ -814,10 +816,10 @@ export function PrioritizeMatrix({
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-foreground">{gap.gap_name}</span>
-                          <span className="block text-[11px] text-muted-foreground">
+                          <span className="block text-caption text-muted-foreground">
                             {gap.band ? BAND_LABELS[gap.band] : "No band yet"} · Evidence needed by: {gap.objective?.evidence_needed_by || "Unknown"}
                           </span>
-                          <span className="block text-[11px] text-muted-foreground">
+                          <span className="block text-caption text-muted-foreground">
                             {priorityNextAction({ band: gap.band ?? gap.suggested_band, validated: gap.validated, needs_review: gap.needs_review, tacticsUnlocked })}
                           </span>
                         </span>
@@ -831,14 +833,12 @@ export function PrioritizeMatrix({
               const rows = view.filter((row) => row.point && row.band === band);
               return (
                 <section key={band} aria-label={`${BAND_LABELS[band]} gaps`}>
-                  <h3 className="mb-1 flex items-center gap-1.5 text-[12px] font-medium text-foreground">
+                  <h3 className="mb-1 flex items-center gap-1.5 text-callout font-medium text-foreground">
                     <span className="size-2 rounded-full" style={{ backgroundColor: BAND_TOKENS[band] }} aria-hidden />
                     {BAND_LABELS[band]}
                     <span className="font-normal text-muted-foreground">{rows.length}</span>
                   </h3>
-                  {rows.length === 0 ? (
-                    <p className="text-[11px] text-muted-foreground">None</p>
-                  ) : (
+                  {rows.length === 0 ? null : (
                     <ul className="grid grid-cols-[minmax(0,1fr)] gap-0.5">
                       {rows.map(({ gap, validated }) => (
                         <li key={gap.gap_id}>
@@ -846,16 +846,16 @@ export function PrioritizeMatrix({
                             type="button"
                             onClick={(event) => { if (suppressGapClick.current) { suppressGapClick.current = false; return; } gapTriggerRef.current = event.currentTarget; setSelectedId(gap.gap_id); }}
                             className={cn(
-                              "flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[12px] hover:bg-muted",
+                              "flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-callout hover:bg-muted",
                               gap.gap_id === selectedId && "bg-muted",
                             )}
                           >
                             <span className="min-w-0 flex-1">
                               <span className="block break-words text-foreground">{gap.gap_name}</span>
-                              <span className="block text-[11px] text-muted-foreground">
+                              <span className="block text-caption text-muted-foreground">
                                 {BAND_LABELS[band]} · Evidence needed by: {gap.objective?.evidence_needed_by || "Unknown"}
                               </span>
-                              <span className="block text-[11px] text-muted-foreground">
+                              <span className="block text-caption text-muted-foreground">
                                 {priorityNextAction({ band, validated, needs_review: gap.needs_review, tacticsUnlocked })}
                               </span>
                             </span>

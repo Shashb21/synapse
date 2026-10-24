@@ -30,20 +30,20 @@ const LEGEND_LABELS: Record<TimelineBand, string> = {
  * PNG export serialises this node on its own, with no stylesheet attached.
  */
 export const FALLBACK = {
-  high: "#e11d48",
-  medium: "#d97706",
-  low: "#2563eb",
-  unprioritized: "#6b7280",
-  addressed: "#059669",
-  readout: "#2563eb",
-  today: "#7e22ce",
-  grid: "#e5e7eb",
+  high: "#d70015",
+  medium: "#c77700",
+  low: "#0a66d6",
+  unprioritized: "#5e5e63",
+  addressed: "#1f9d55",
+  readout: "#0a66d6",
+  today: "#6e56cf",
+  grid: "#e5e5ea",
   card: "#ffffff",
-  background: "#f4f5f7",
-  foreground: "#111827",
-  muted: "#6b7280",
-  conflict: "#e11d48",
-  primary: "#4f46e5",
+  background: "#f5f5f7",
+  foreground: "#1d1d1f",
+  muted: "#5e5e63",
+  conflict: "#d70015",
+  primary: "#0a66d6",
 };
 
 export type Palette = typeof FALLBACK;

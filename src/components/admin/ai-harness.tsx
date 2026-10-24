@@ -30,9 +30,9 @@ type Result = {
   workspace_id: string;
 };
 
-const FIELD = "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-[12px] text-foreground";
-const AREA = "w-full rounded-lg border border-input bg-card px-2.5 py-2 text-[12px] text-foreground";
-const LABEL = "grid gap-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground";
+const FIELD = "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-callout text-foreground";
+const AREA = "w-full rounded-lg border border-input bg-card px-2.5 py-2 text-callout text-foreground";
+const LABEL = "grid gap-1 text-caption font-semibold text-muted-foreground";
 
 /** What each use case runs on. */
 const SAMPLE_NOTE: Record<AiSectionId, string> = {
@@ -127,29 +127,29 @@ function HarnessCard({
     >
       <header className="flex flex-wrap items-start gap-2">
         <div className="min-w-0 flex-1">
-          <h2 id={`harness-${entry.id}-title`} className="text-[13px] font-semibold text-foreground">
-            {entry.label} <span className="font-mono text-[10px] font-normal text-muted-foreground">{entry.stages.join(" · ")}</span>
+          <h2 id={`harness-${entry.id}-title`} className="text-body font-semibold text-foreground">
+            {entry.label} <span className="font-mono text-caption font-normal text-muted-foreground">{entry.stages.join(" · ")}</span>
           </h2>
-          <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">{entry.detail}</p>
+          <p className="mt-0.5 text-caption leading-4 text-muted-foreground">{entry.detail}</p>
         </div>
         {entry.built ? (
           <span
             className={cn(
-              "rounded-sm px-1.5 py-0.5 text-[10px] font-semibold",
+              "rounded-sm px-1.5 py-0.5 text-caption font-semibold",
               entry.customersOn ? "bg-[var(--known)]/15 text-[var(--known-foreground)]" : "bg-muted text-muted-foreground",
             )}
           >
             Customers: AI {entry.customersOn ? "on" : "off"}
           </span>
         ) : (
-          <span className="rounded-sm bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:text-amber-300">
+          <span className="rounded-sm bg-unknown/15 px-1.5 py-0.5 text-caption font-semibold text-unknown-foreground">
             No AI module developed yet
           </span>
         )}
       </header>
 
       {!entry.built ? (
-        <p className="rounded-md border border-dashed border-amber-500/40 bg-amber-500/5 px-3 py-2 text-[12px] text-foreground" role="note">
+        <p className="rounded-md border border-dashed border-unknown/40 bg-unknown/5 px-3 py-2 text-callout text-foreground" role="note">
           There is no AI module for this use case, so there is nothing to run. Today the gap status is computed by rules
           from the mappings (completed, ongoing and planned tactics count; proposed ones do not) and a person confirms it
           on Evidence Inventory.
@@ -165,7 +165,7 @@ function HarnessCard({
                 aria-selected={mode === value}
                 onClick={() => setMode(value)}
                 className={cn(
-                  "rounded-md border px-2.5 py-1 text-[11px] font-medium",
+                  "rounded-md border px-2.5 py-1 text-caption font-medium",
                   mode === value ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background text-muted-foreground",
                 )}
               >
@@ -176,7 +176,7 @@ function HarnessCard({
 
           {mode === "sample" ? (
             <div className="grid gap-2">
-              <p className="text-[11px] text-muted-foreground">{SAMPLE_NOTE[entry.id]}</p>
+              <p className="text-caption text-muted-foreground">{SAMPLE_NOTE[entry.id]}</p>
               {TAKES_SOURCE.includes(entry.id) ? (
                 <label className={LABEL}>
                   Sample source
@@ -228,7 +228,7 @@ function HarnessCard({
                 What evidence is missing
                 <textarea rows={3} value={gapStatement} onChange={(event) => setGapStatement(event.target.value)} className={AREA} />
               </label>
-              <p className="text-[11px] text-muted-foreground sm:col-span-2">
+              <p className="text-caption text-muted-foreground sm:col-span-2">
                 Runs against the Velmara plan in the sandbox, with your gap added to it.
               </p>
             </div>
@@ -251,11 +251,11 @@ function HarnessCard({
               {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
               {pending ? `Running… ${elapsed}s` : "Run on the live model"}
             </Button>
-            <span className="text-[11px] text-muted-foreground">Runs in a private sandbox; no customer data is touched.</span>
+            <span className="text-caption text-muted-foreground">Runs in a private sandbox; no customer data is touched.</span>
           </div>
 
           {error ? (
-            <p role="alert" className="text-[12px] text-destructive">
+            <p role="alert" className="text-callout text-destructive">
               {error.message}{" "}
               {error.code === "no_model" ? (
                 <Link href="/admin/control" className="text-foreground">
@@ -267,7 +267,7 @@ function HarnessCard({
 
           {result && main ? (
             <section className="grid gap-2 border-t border-border pt-3" aria-label={`${entry.label} result`} data-testid="harness-result">
-              <dl className="grid gap-x-4 gap-y-1 text-[11px] sm:grid-cols-3">
+              <dl className="grid gap-x-4 gap-y-1 text-caption sm:grid-cols-3">
                 <div>
                   <dt className="text-muted-foreground">Model</dt>
                   <dd className="text-foreground">{result.route}</dd>
@@ -282,19 +282,19 @@ function HarnessCard({
                 </div>
               </dl>
               <div className="rounded-md border border-border bg-background p-3">
-                <p className="flex flex-wrap items-center gap-2 text-[12px] font-semibold text-foreground">
+                <p className="flex flex-wrap items-center gap-2 text-callout font-semibold text-foreground">
                   {main.stage} · {main.module}
-                  <Link href={runTraceHref(main.run_id, result.workspace_id)} className="text-[11px] font-normal text-muted-foreground">
+                  <Link href={runTraceHref(main.run_id, result.workspace_id)} className="text-caption font-normal text-muted-foreground">
                     Trace ↗
                   </Link>
                 </p>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">{main.summary}</p>
-                <pre className="mt-2 max-h-96 overflow-auto rounded bg-muted/50 p-2 text-[11px] leading-4 text-foreground" data-testid="harness-output">
+                <p className="mt-0.5 text-caption text-muted-foreground">{main.summary}</p>
+                <pre className="mt-2 max-h-96 overflow-auto rounded bg-muted/50 p-2 text-caption leading-4 text-foreground" data-testid="harness-output">
                   {JSON.stringify(main.output, null, 2)}
                 </pre>
               </div>
               {setup.length > 0 ? (
-                <details className="text-[11px]">
+                <details className="text-caption">
                   <summary className="cursor-pointer text-muted-foreground">Setup runs ({setup.map((step) => step.stage).join(", ")})</summary>
                   <ul className="mt-1 grid gap-1">
                     {setup.map((step) => (

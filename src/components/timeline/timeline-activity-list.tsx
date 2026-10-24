@@ -29,7 +29,7 @@ export function TimelineActivityList({ view, filter, setting, onSelect, pendingR
           {activity?.readout_date ? <p className="text-xs">Readout: {activity.readout_date}</p> : null}
           <p className="text-xs text-muted-foreground">Owner: {activity?.meta.owner || item.pending?.meta.owner || "Not recorded"}</p>
           {item.pending ? <p className="mt-1 text-xs">{pendingReason(item.pending.reason)}</p> : null}
-          {activity && estimatedFields(activity.meta.schedule_basis).length > 0 ? <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">{activity.meta.estimate_stale ? "Estimate — out of date" : "Estimate — check dates before accepting"}</p> : null}
+          {activity && estimatedFields(activity.meta.schedule_basis).length > 0 ? <p className="mt-1 text-xs text-unknown-foreground">{activity.meta.estimate_stale ? "Estimate — out of date" : "Estimate — check dates before accepting"}</p> : null}
           {item.expansion_id ? <p className="text-xs">{(activity ?? item.pending)?.meta.counts_toward_addressing ? "Counts toward addressing" : "Not counting toward addressing"}</p> : null}
           {activity?.depends_on.length ? <p className="mt-1 text-xs">Depends on: {activity.depends_on.map(id => names.get(id) ?? id).join(", ")}</p> : null}
           {conflicts.map(conflict => <p key={`${conflict.predecessor_id}:${conflict.successor_id}`} className="mt-1 text-xs text-destructive">Broken dependency: {conflict.successor_name} starts {conflict.successor_start} before {conflict.predecessor_name} ends {conflict.predecessor_end}.</p>)}

@@ -53,30 +53,30 @@ export default async function SourcesPage() {
 
       <section className="mt-4 border border-border bg-card p-3 rounded-lg" aria-labelledby="source-blocks">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 id="source-blocks" className="text-[12px] font-semibold text-foreground">
+          <h2 id="source-blocks" className="text-callout font-semibold text-foreground">
             Source blocks
           </h2>
           {ai ? (
-            <Link href="/sources/new" className="text-[12px] underline-offset-2 hover:underline">
+            <Link href="/sources/new" className="text-callout underline-offset-2 hover:underline">
               Type a source by hand (no AI)
             </Link>
           ) : null}
         </div>
-        <p className="mt-1 text-[11px] text-muted-foreground">
+        <p className="mt-1 text-caption text-muted-foreground">
           {ai
             ? "Review, edit, split, merge, delete or add blocks, restore text the model dropped, and set each source's stakeholder function. Human edits survive every re-parse."
             : "Open a source to read its blocks. No new sources are added in this plan."}
         </p>
         {state.sources.length === 0 ? (
-          <p className="mt-2 text-[11px] text-muted-foreground">No sources yet.</p>
+          <p className="mt-2 text-caption text-muted-foreground">No sources yet.</p>
         ) : (
-          <ul className="mt-2 grid gap-1 text-[12px]">
+          <ul className="mt-2 grid gap-1 text-callout">
             {state.sources.map((source) => (
               <li key={source.id}>
                 <Link href={`/sources/${encodeURIComponent(source.id)}`} className="underline-offset-2 hover:underline">
                   {source.id} · {source.title}
                 </Link>{" "}
-                <span className="text-[11px] text-muted-foreground">
+                <span className="text-caption text-muted-foreground">
                   {plural(blockCount.get(source.id) ?? 0, "block")} · {source.stakeholder_function}
                 </span>
                 <SourceComparisonStatus comparison={comparisons.find(row => row.source_id === source.id)} sourceId={source.id} />

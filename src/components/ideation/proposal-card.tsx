@@ -21,15 +21,15 @@ function StatusChip({ status }: { status: string }) {
         : "border-[color:var(--opportunity)] text-[color:var(--opportunity)]";
   const label = status === "accepted" ? "Accepted" : status === "rejected" ? "Rejected" : "Proposed";
   return (
-    <span className={`rounded-4xl border px-1.5 py-px text-[10px] font-medium ${tone}`}>{label}</span>
+    <span className={`rounded-4xl border px-1.5 py-px text-caption font-medium ${tone}`}>{label}</span>
   );
 }
 
 function DesignField({ label, value }: { label: string; value: string }) {
   return (
     <div className="grid gap-0.5">
-      <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="text-[12px] leading-4 text-foreground">{value}</dd>
+      <dt className="text-caption text-muted-foreground">{label}</dt>
+      <dd className="text-callout leading-4 text-foreground">{value}</dd>
     </div>
   );
 }
@@ -59,39 +59,39 @@ export function ProposalCard({
     >
       <div className="flex flex-wrap items-center gap-1.5">
         <StatusChip status={proposal.status} />
-        <span className="rounded-4xl border border-border px-1.5 py-px text-[10px] text-muted-foreground">
+        <span className="rounded-4xl border border-border px-1.5 py-px text-caption text-muted-foreground">
           {typeLabel(proposal.type)}
         </span>
         {proposal.origin === "human" ? (
-          <span className="text-[10px] text-muted-foreground">Written by {proposal.edited_by ?? "a person"}</span>
+          <span className="text-caption text-muted-foreground">Written by {proposal.edited_by ?? "a person"}</span>
         ) : (
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-caption text-muted-foreground">
             Judge {proposal.judge_score}
             {proposal.rank ? ` · rank ${proposal.rank}` : ""}
           </span>
         )}
         {proposal.origin !== "human" && proposal.edited_by ? (
-          <span className="text-[10px] text-muted-foreground">· edited by {proposal.edited_by}</span>
+          <span className="text-caption text-muted-foreground">· edited by {proposal.edited_by}</span>
         ) : null}
       </div>
 
-      <p className="text-[12px] font-medium">{proposal.proposal_kind === "expansion" ? `Expand: ${proposal.reviewed_parent?.name ?? proposal.target_tactic_id}` : "New tactic"}</p>
-      <h4 className="text-[13px] leading-5 text-foreground">{proposal.name}</h4>
+      <p className="text-callout font-medium">{proposal.proposal_kind === "expansion" ? `Expand: ${proposal.reviewed_parent?.name ?? proposal.target_tactic_id}` : "New tactic"}</p>
+      <h4 className="text-body leading-5 text-foreground">{proposal.name}</h4>
 
       <div className="grid gap-0.5">
-        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Evidence question</p>
-        <p className="text-[12px] leading-4 text-foreground">{proposal.evidence_question}</p>
+        <p className="text-caption text-muted-foreground">Evidence question</p>
+        <p className="text-callout leading-4 text-foreground">{proposal.evidence_question}</p>
       </div>
 
       {proposal.proposal_kind === "expansion" && proposal.expansion_scope ? (
         <div className="grid gap-2 border-t border-border pt-2">
-          <p className="text-[12px]">Reviewed current scope ({proposal.reviewed_parent?.status}): {proposal.reviewed_parent?.population}; {proposal.reviewed_parent?.outcomes}; {proposal.reviewed_parent?.study_design}</p>
+          <p className="text-callout">Reviewed current scope ({proposal.reviewed_parent?.status}): {proposal.reviewed_parent?.population}; {proposal.reviewed_parent?.outcomes}; {proposal.reviewed_parent?.study_design}</p>
           <dl className="grid gap-2 sm:grid-cols-2">
             {Object.entries(proposal.expansion_scope).filter(([,value]) => value !== null && value !== "").map(([key,value]) => <DesignField key={key} label={`Added scope: ${key.replaceAll("_", " ")}`} value={typeof value === "boolean" ? value ? "Yes" : "No" : value ?? ""} />)}
           </dl>
         </div>
       ) : null}
-      {proposal.comparative_rationale ? <p className="text-[12px]">Comparison: {proposal.comparative_rationale}</p> : null}
+      {proposal.comparative_rationale ? <p className="text-callout">Comparison: {proposal.comparative_rationale}</p> : null}
       <dl className="grid gap-2 border-t border-border pt-2 sm:grid-cols-2">
         <DesignField label="Population" value={proposal.design.population} />
         <DesignField label="Comparator" value={proposal.design.comparator} />
@@ -109,21 +109,21 @@ export function ProposalCard({
       </dl>
 
       <details className="group">
-        <summary className="cursor-pointer list-none text-[11px] text-muted-foreground hover:text-foreground">
+        <summary className="cursor-pointer list-none text-caption text-muted-foreground hover:text-foreground">
           Rationale and critic note
         </summary>
         <div className="mt-1 grid gap-1 border-l border-border pl-2">
-          <p className="text-[11px] leading-4 text-muted-foreground">{proposal.rationale || "Reason not recorded"}</p>
-          <p className="text-[11px] leading-4 text-muted-foreground">
+          <p className="text-caption leading-4 text-muted-foreground">{proposal.rationale || "Reason not recorded"}</p>
+          <p className="text-caption leading-4 text-muted-foreground">
             Critic: {proposal.critic_note?.trim() ? proposal.critic_note : "no note recorded"}
           </p>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             Proposed {proposal.created_at.slice(0, 10)}
           </p>
         </div>
       </details>
 
-      {proposal.origin !== "human" ? <div className="grid gap-1 text-[12px]" aria-label="Model suggestion support">
+      {proposal.origin !== "human" ? <div className="grid gap-1 text-callout" aria-label="Model suggestion support">
         <p>Model suggestion; acceptance or rejection is a human decision.</p>
         {proposal.supporting_references?.length ? <ul aria-label="Option supporting references">
           {proposal.supporting_references.map((reference, index) => <li key={index}>
@@ -133,7 +133,7 @@ export function ProposalCard({
       </div> : null}
       {settled ? (
         <div className="grid gap-1 border-t border-border pt-2">
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             {proposal.status === "accepted" ? "Accepted" : "Rejected"} by{" "}
             {proposal.decided_by ?? "unknown"}
             {proposal.decision_rationale ? ` — ${proposal.decision_rationale}` : " — Reason not recorded"}
@@ -141,7 +141,7 @@ export function ProposalCard({
           {proposal.tactic_id ? (
             <TacticRecordLink
               tacticId={proposal.tactic_id}
-              className="text-[11px] text-[color:var(--known-foreground)] no-underline hover:underline"
+              className="text-caption text-[color:var(--known-foreground)] no-underline hover:underline"
             >
               {proposal.expansion_id ? `Expansion ${proposal.expansion_id} on tactic ${proposal.tactic_id}` : `Tactic ${proposal.tactic_id}`}
             </TacticRecordLink>
@@ -212,7 +212,7 @@ export function ProposalCard({
               />
             </>
           ) : (
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-caption text-muted-foreground">
               Your role may not decide ideation proposals.
             </p>
           )}

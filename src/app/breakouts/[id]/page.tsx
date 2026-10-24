@@ -61,7 +61,7 @@ export default async function BreakoutRoomPage({
   return (
     <AppShell active="breakouts">
       <RoomAutoRefresh />
-      <Link href="/breakouts" className="text-[12px] text-muted-foreground no-underline hover:underline">
+      <Link href="/breakouts" className="text-callout text-muted-foreground no-underline hover:underline">
         ← All breakout groups
       </Link>
       <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
@@ -75,10 +75,10 @@ export default async function BreakoutRoomPage({
       </div>
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        <h2 className="text-caption font-semibold text-muted-foreground">
           Gaps in this group ({assigned.length})
         </h2>
-        <p className="text-[11px] text-muted-foreground">← → moves between cards, Esc clears it.</p>
+        <p className="text-caption text-muted-foreground">← → moves between cards, Esc clears it.</p>
       </div>
       <BreakoutBoard groupId={group.id} cards={assigned} otherGroups={otherGroups} />
 

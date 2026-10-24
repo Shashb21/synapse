@@ -229,11 +229,11 @@ function NavButton({
       ) : null}
       <Icon className={cn("size-4 shrink-0", isActive ? "text-sidebar-primary" : "text-muted-foreground")} aria-hidden />
       <span className={cn("grid min-w-0 flex-1", reveal)}>
-        <span className={cn("truncate text-[11.5px] tracking-tight", isActive && "font-semibold")}>{item.label}</span>
-        {sub ? <span className="truncate text-[10px] text-muted-foreground">{sub}</span> : null}
+        <span className={cn("truncate text-caption tracking-tight", isActive && "font-semibold")}>{item.label}</span>
+        {sub ? <span className="truncate text-caption text-muted-foreground">{sub}</span> : null}
       </span>
       {typeof count === "number" && count > 0 ? (
-        <span className={cn("text-[10px] text-muted-foreground", reveal)}>{count}</span>
+        <span className={cn("text-caption text-muted-foreground", reveal)}>{count}</span>
       ) : null}
       {!ready ? (
         <>
@@ -265,7 +265,7 @@ export function PrepRoomToggle({ mode = "prep", dense }: { mode?: "prep" | "room
     "flex h-6 items-center justify-center rounded text-sidebar-foreground/70 no-underline hover:bg-sidebar-accent/70 hover:text-sidebar-foreground";
   return (
     <div
-      className={cn("grid grid-cols-2 gap-0.5 rounded-md bg-sidebar-accent/40 p-0.5 text-[11px]", dense ? "mb-3" : "mb-3")}
+      className={cn("grid grid-cols-2 gap-0.5 rounded-md bg-sidebar-accent/40 p-0.5 text-caption", dense ? "mb-3" : "mb-3")}
       role="group"
       aria-label="Prep or Room mode"
     >
@@ -308,7 +308,7 @@ function NavLists({
   const openOnly = dense ? "hidden group-data-[open=true]/rail:block group-has-[:focus-visible]/rail:block" : "";
   return (
     <>
-      <p className={cn("px-2 pb-1 text-[9px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/70", openOnly)}>
+      <p className={cn("px-2 pb-1 text-caption font-semibold text-muted-foreground/70", openOnly)}>
         Workspace
       </p>
       <nav aria-label={label} className="grid gap-0.5">
@@ -319,7 +319,7 @@ function NavLists({
       <details className={cn("mt-auto border-t border-sidebar-border pt-3", reveal)} aria-label={dense ? "More" : "More places"}>
         <summary
           className={cn(
-            "cursor-pointer list-none text-[11px] text-sidebar-foreground/60 marker:content-none",
+            "cursor-pointer list-none text-caption text-sidebar-foreground/60 marker:content-none",
             dense ? "text-center md:text-left" : "",
           )}
         >
@@ -411,8 +411,8 @@ export function PlanChrome({
           >
             <BrandMark />
             <span className="grid leading-tight opacity-0 transition-opacity group-data-[open=true]/rail:opacity-100 group-has-[:focus-visible]/rail:opacity-100">
-              <span className="text-[12px] font-bold tracking-tight text-foreground">Synapse</span>
-              <span className="text-[9.5px] text-muted-foreground">IEGP Workspace</span>
+              <span className="text-callout font-bold tracking-tight text-foreground">Synapse</span>
+              <span className="text-caption text-muted-foreground">IEGP Workspace</span>
             </span>
           </Link>
           <button
@@ -421,7 +421,7 @@ export function PlanChrome({
             aria-pressed={pinned}
             title={pinned ? "Unpin navigation" : "Pin navigation"}
             onClick={togglePinned}
-            className="mx-[6px] my-1 flex min-h-8 shrink-0 items-center gap-2.5 rounded-md px-[11px] text-[12px] text-sidebar-foreground hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
+            className="mx-[6px] my-1 flex min-h-8 shrink-0 items-center gap-2.5 rounded-md px-[11px] text-callout text-sidebar-foreground hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
           >
             {pinned ? <PinOff className="size-4 shrink-0" aria-hidden /> : <Pin className="size-4 shrink-0" aria-hidden />}
             <span className="whitespace-nowrap opacity-0 group-data-[open=true]/rail:opacity-100 group-has-[:focus-visible]/rail:opacity-100">{pinned ? "Unpin navigation" : "Pin navigation"}</span>
@@ -450,14 +450,14 @@ export function PlanChrome({
             </SheetTrigger>
             <SheetContent side="left" className="w-64 bg-sidebar p-3">
               <SheetHeader className="px-1 pb-2">
-                <SheetTitle className="text-[13px]">Synapse IEGP</SheetTitle>
+                <SheetTitle className="text-body">Synapse IEGP</SheetTitle>
               </SheetHeader>
               <div className="flex h-[calc(100%-3rem)] flex-col" onClick={() => setOpen(false)}>
                 <NavLists nav={nav} active={active} label="All places" />
               </div>
             </SheetContent>
           </Sheet>
-          <p className="text-[13px] font-medium text-foreground">{current}</p>
+          <p className="text-body font-medium text-foreground">{current}</p>
         </header>
         )}
         {workspace?.current.demo && !present ? (

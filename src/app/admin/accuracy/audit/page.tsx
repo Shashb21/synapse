@@ -138,13 +138,13 @@ export default async function AccuracyAuditPage({
       </PageIntro>
 
       {loadError ? (
-        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
+        <p className="mb-4 border border-destructive/40 bg-card p-2 text-callout text-destructive rounded-lg">
           {loadError}
         </p>
       ) : null}
 
       {!workspaceId ? (
-        <p className="text-[12px] text-muted-foreground">
+        <p className="text-callout text-muted-foreground">
           Open from{" "}
           <Link href="/admin/accuracy" className="underline-offset-2 hover:underline">
             Workspaces
@@ -155,11 +155,11 @@ export default async function AccuracyAuditPage({
         <UnknownWorkspaceNotice workspaceId={workspaceId} />
       ) : (
         <>
-          <p className="mb-3 text-[12px] text-muted-foreground">
+          <p className="mb-3 text-callout text-muted-foreground">
             Workspace · {active ? workspaceLabel(active) : workspaceId} · {rows.length} event(s)
           </p>
           {planId && !plan ? (
-            <p className="mb-3 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
+            <p className="mb-3 border border-destructive/40 bg-card p-2 text-callout text-destructive rounded-lg">
               Save-final plan {planId} was not found in this workspace.
             </p>
           ) : null}
@@ -169,29 +169,29 @@ export default async function AccuracyAuditPage({
               data-testid="gantt-audit-bundle"
               aria-labelledby="save-final-bundle"
             >
-              <h2 id="save-final-bundle" className="text-[12px] font-semibold text-foreground">
+              <h2 id="save-final-bundle" className="text-callout font-semibold text-foreground">
                 Save-final Gantt snapshot
               </h2>
-              <p className="mt-1 text-[12px] text-muted-foreground">
+              <p className="mt-1 text-callout text-muted-foreground">
                 v{plan.version} · {plan.status} · {plan.saved_by} ·{" "}
                 {plan.saved_at.slice(0, 16).replace("T", " ")} · {plan.snapshot.counts.activities}{" "}
                 bar(s)
               </p>
               {plan.note ? (
-                <p className="mt-1 text-[12px] text-muted-foreground">“{plan.note}”</p>
+                <p className="mt-1 text-callout text-muted-foreground">“{plan.note}”</p>
               ) : null}
-              <p className="mt-2 text-[11px] text-muted-foreground">
+              <p className="mt-2 text-caption text-muted-foreground">
                 Snapshot hash{" "}
-                <code className="break-all font-mono text-[11px] text-foreground" data-testid="audit-snapshot-hash">
+                <code className="break-all font-mono text-caption text-foreground" data-testid="audit-snapshot-hash">
                   {snapshotHashForPlan(plan)}
                 </code>
               </p>
               {queryHash && queryHash !== snapshotHashForPlan(plan) ? (
-                <p className="mt-1 text-[11px] text-destructive">
+                <p className="mt-1 text-caption text-destructive">
                   Linked hash does not match the stored snapshot.
                 </p>
               ) : null}
-              <p className="mt-2 text-[12px]">
+              <p className="mt-2 text-callout">
                 <Link
                   href={`/admin/accuracy/timeline?workspace_id=${encodeURIComponent(workspaceId)}`}
                   className="text-foreground underline-offset-2 hover:underline"
@@ -203,7 +203,7 @@ export default async function AccuracyAuditPage({
           ) : null}
           {rollup ? <CostRollupPanel rollup={rollup} workspaceName={active?.name} /> : null}
           {rows.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">
+            <p className="text-callout text-muted-foreground">
               No audit events yet. Validate claims, decide coverage, or run modules.
             </p>
           ) : (
@@ -211,11 +211,11 @@ export default async function AccuracyAuditPage({
               {rows.slice(0, 80).map((row, index) => (
                 <li key={`${row.kind}-${row.at}-${index}`} className="border border-border bg-card p-3 rounded-lg">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <p className="text-[12px] font-medium text-foreground">{row.title}</p>
-                    <span className="font-mono text-[10px] text-muted-foreground">{row.at}</span>
+                    <p className="text-callout font-medium text-foreground">{row.title}</p>
+                    <span className="font-mono text-caption text-muted-foreground">{row.at}</span>
                   </div>
-                  <p className="mt-1 text-[12px] text-muted-foreground">{row.detail}</p>
-                  <p className="mt-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                  <p className="mt-1 text-callout text-muted-foreground">{row.detail}</p>
+                  <p className="mt-1 text-caption text-muted-foreground">
                     {row.kind}
                   </p>
                 </li>

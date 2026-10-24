@@ -25,8 +25,8 @@ export function StepWaiting({
     >
       <Hourglass className="mt-0.5 size-4 shrink-0 text-[var(--unknown-foreground)]" aria-hidden />
       <div className="min-w-0 flex-1">
-        <h2 className="text-[13px] font-medium text-foreground">{title}</h2>
-        <p className="mt-1 text-[12px] text-muted-foreground">{body}</p>
+        <h2 className="text-body font-medium text-foreground">{title}</h2>
+        <p className="mt-1 text-callout text-muted-foreground">{body}</p>
       </div>
       <Link href={href} className={buttonVariants({ size: "sm", variant: "outline" })}>
         {cta}

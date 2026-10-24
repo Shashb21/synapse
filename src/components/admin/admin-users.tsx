@@ -62,17 +62,17 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
   return (
     <div className="grid gap-6">
       {error ? (
-        <p role="alert" data-testid="users-error" className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
+        <p role="alert" data-testid="users-error" className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-callout text-destructive">
           {error}
         </p>
       ) : null}
       {secret ? (
-        <div role="status" data-testid="temporary-password" className="grid gap-1 border border-primary/40 bg-primary/5 px-3 py-2 text-[12px]">
+        <div role="status" data-testid="temporary-password" className="grid gap-1 border border-primary/40 bg-primary/5 px-3 py-2 text-callout">
           <p className="text-foreground">
             Temporary password for <span className="font-medium">{secret.email}</span>. It is shown only this once: copy
             it now and share it securely. They can change it at /account.
           </p>
-          <code className="select-all break-all bg-background px-2 py-1 font-mono text-[13px] text-foreground">{secret.password}</code>
+          <code className="select-all break-all bg-background px-2 py-1 font-mono text-body text-foreground">{secret.password}</code>
           <Button size="sm" variant="ghost" className="justify-self-start" onClick={() => setSecret(null)}>
             Done, hide it
           </Button>
@@ -91,18 +91,18 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
           }
         }}
       >
-        <label className="grid gap-1 text-[11px] text-muted-foreground">
+        <label className="grid gap-1 text-caption text-muted-foreground">
           Email
           <Input type="email" value={email} required onChange={(e) => setEmail(e.target.value)} />
         </label>
-        <label className="grid gap-1 text-[11px] text-muted-foreground">
+        <label className="grid gap-1 text-caption text-muted-foreground">
           Name
           <Input value={name} required onChange={(e) => setName(e.target.value)} />
         </label>
-        <label className="grid gap-1 text-[11px] text-muted-foreground">
+        <label className="grid gap-1 text-caption text-muted-foreground">
           Role
           <select
-            className="h-8 rounded-md border border-input bg-background px-2 text-[13px] text-foreground"
+            className="h-8 rounded-md border border-input bg-background px-2 text-body text-foreground"
             value={role}
             onChange={(e) => setRole(e.target.value as Role)}
           >
@@ -113,10 +113,10 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
             ))}
           </select>
         </label>
-        <label className="grid gap-1 text-[11px] text-muted-foreground">
+        <label className="grid gap-1 text-caption text-muted-foreground">
           Function
           <select
-            className="h-8 rounded-md border border-input bg-background px-2 text-[13px] text-foreground"
+            className="h-8 rounded-md border border-input bg-background px-2 text-body text-foreground"
             value={fn}
             onChange={(e) => setFn(e.target.value)}
           >
@@ -127,7 +127,7 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
             ))}
           </select>
         </label>
-        <label className="flex h-8 items-center gap-1.5 text-[12px] text-foreground">
+        <label className="flex h-8 items-center gap-1.5 text-callout text-foreground">
           <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} />
           Admin
         </label>
@@ -138,8 +138,8 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
       </form>
 
       <div className="overflow-x-auto border border-border">
-        <table className="w-full min-w-[900px] text-left text-[12px]">
-          <thead className="bg-muted/40 text-[11px] text-muted-foreground">
+        <table className="w-full min-w-[900px] text-left text-callout">
+          <thead className="bg-muted/40 text-caption text-muted-foreground">
             <tr>
               <th className="px-3 py-2 font-medium">Email</th>
               <th className="px-3 py-2 font-medium">Name</th>
@@ -172,7 +172,7 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
                   <td className="px-3 py-2">
                     <select
                       aria-label={`Role for ${user.email}`}
-                      className="h-7 rounded-md border border-input bg-background px-1 text-[12px] text-foreground disabled:opacity-60"
+                      className="h-7 rounded-md border border-input bg-background px-1 text-callout text-foreground disabled:opacity-60"
                       value={user.role}
                       disabled={self || busy !== null}
                       title={self ? "You can't change your own role." : undefined}
@@ -248,7 +248,7 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
                       ) : null}
                       {!self && confirmDelete === user.id ? (
                         <span role="group" aria-label={`Confirm deleting ${user.email}`} className="flex flex-wrap items-center gap-1" data-testid="confirm-delete-user">
-                          <span className="text-[11px] text-foreground">Delete {user.email}? They are signed out at once.</span>
+                          <span className="text-caption text-foreground">Delete {user.email}? They are signed out at once.</span>
                           <Button
                             size="sm"
                             variant="destructive"

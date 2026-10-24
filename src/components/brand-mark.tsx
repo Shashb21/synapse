@@ -6,7 +6,7 @@ export function BrandMark({ className }: { className?: string }) {
     <span
       aria-hidden
       className={cn(
-        "flex size-[22px] shrink-0 items-center justify-center rounded-[5px] bg-gradient-to-br from-indigo-600 to-violet-600 text-[10px] font-bold text-white shadow-sm",
+        "flex size-[22px] shrink-0 items-center justify-center rounded-[5px] bg-gradient-to-br from-indigo-600 to-violet-600 text-caption font-bold text-white shadow-sm",
         className,
       )}
     >
@@ -21,8 +21,8 @@ export function BrandLockup({ subtitle = "IEGP Workspace" }: { subtitle?: string
     <span className="flex items-center gap-2.5">
       <BrandMark />
       <span className="grid leading-tight">
-        <span className="text-[12px] font-bold tracking-tight text-foreground">Synapse</span>
-        <span className="text-[9.5px] text-muted-foreground">{subtitle}</span>
+        <span className="text-callout font-bold tracking-tight text-foreground">Synapse</span>
+        <span className="text-caption text-muted-foreground">{subtitle}</span>
       </span>
     </span>
   );

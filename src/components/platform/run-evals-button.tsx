@@ -60,9 +60,9 @@ function EvalsButton({
         Run evals
       </Button>
       {result?.error ? (
-        <p className="text-[11px] text-destructive">{result.error}</p>
+        <p className="text-caption text-destructive">{result.error}</p>
       ) : result?.metrics ? (
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-caption text-muted-foreground">
           {result.cases} case(s) · {result.passed ? "passed" : "below target"} ·{" "}
           {result.metrics.map((metric) => `${metric.name} ${metric.value}`).join(", ")}
         </p>

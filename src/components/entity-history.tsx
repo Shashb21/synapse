@@ -60,21 +60,21 @@ export function EntityHistory({ entries, empty = "No changes recorded yet." }: {
   return (
     <section className="mb-8" data-testid="entity-history" aria-label="Recorded changes">
       <h2
-        className="mb-2 text-[12px] font-semibold uppercase tracking-[0.08em] text-muted-foreground"
+        className="mb-2 text-callout font-semibold text-muted-foreground"
       >
         History
       </h2>
-      <p className="mb-2 text-[12px] text-muted-foreground">Read-only, newest first. Up to 200 recorded changes are shown; older changes may be omitted. Corrections use the authorised editors and append history.</p>
+      <p className="mb-2 text-callout text-muted-foreground">Read-only, newest first. Up to 200 recorded changes are shown; older changes may be omitted. Corrections use the authorised editors and append history.</p>
       {entries.length === 0 ? (
-        <p className="rounded-lg border border-border bg-card p-3 text-[13px] text-muted-foreground">{empty}</p>
+        <p className="rounded-lg border border-border bg-card p-3 text-body text-muted-foreground">{empty}</p>
       ) : (
         <ol className="grid gap-2">
           {entries.map((entry) => {
             const before = changeText(entry.before, entry.field);
             const after = changeText(entry.after, entry.field);
             return (
-              <li key={entry.id} className="rounded-lg border border-border bg-card p-3 text-[13px]" data-testid="history-entry">
-                <p className="text-[12px] text-muted-foreground">
+              <li key={entry.id} className="rounded-lg border border-border bg-card p-3 text-body" data-testid="history-entry">
+                <p className="text-callout text-muted-foreground">
                   <time dateTime={entry.at}>{when(entry.at)}</time>
                   {" · "}
                   <span className="font-medium text-foreground">{entry.actor_name}</span>

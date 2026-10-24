@@ -21,8 +21,8 @@ export default async function AccuracySlugWorkshopPage({
   if (!workspace) {
     return (
       <div className="min-h-dvh bg-background p-8 text-foreground">
-        <p className="text-[13px] text-destructive">Unknown workspace slug.</p>
-        <Link href="/admin/accuracy" className="mt-4 inline-block text-[13px] underline-offset-2 hover:underline">
+        <p className="text-body text-destructive">Unknown workspace slug.</p>
+        <Link href="/admin/accuracy" className="mt-4 inline-block text-body underline-offset-2 hover:underline">
           Workspaces
         </Link>
       </div>
@@ -33,12 +33,12 @@ export default async function AccuracySlugWorkshopPage({
     return (
       <div className="min-h-dvh bg-background p-8 text-foreground">
         <p className="text-2xl font-medium">No workshop snapshot yet.</p>
-        <p className="mt-2 max-w-xl text-[15px] text-muted-foreground">
+        <p className="mt-2 max-w-xl text-headline text-muted-foreground">
           Save state for workshop from Coverage after validate/map.
         </p>
         <Link
           href={`/admin/accuracy/coverage?workspace_id=${encodeURIComponent(workspace.id)}`}
-          className="mt-6 inline-block border border-foreground px-4 py-2 text-[13px] no-underline"
+          className="mt-6 inline-block border border-foreground px-4 py-2 text-body no-underline"
         >
           Open Coverage
         </Link>

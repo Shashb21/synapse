@@ -1,11 +1,17 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { JetBrains_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AiOffBanner, AiStatusProvider } from "@/components/platform/ai-status";
 import { WalkthroughHost } from "@/components/walkthrough/walkthrough-host";
 import { aiState } from "@/modules/kernel/ai-switch";
 import "./globals.css";
+
+/** Inter for the interface; JetBrains Mono only for IDs and code (KAN-158). */
+const inter = Inter({
+  variable: "--font-inter",
+  subsets: ["latin"],
+});
 
 const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
@@ -33,7 +39,7 @@ export default async function RootLayout({
   // Effective AI, per section: the admin's master switch AND that section's switch (KAN-53).
   const ai = await aiState().catch(() => null);
   return (
-    <html lang="en" className={`${jetbrainsMono.variable} h-full`} suppressHydrationWarning>
+    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable} h-full`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>

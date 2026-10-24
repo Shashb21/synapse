@@ -4,9 +4,9 @@ import { LockForm } from "@/components/lock-form";
 import { gapNumberLabel } from "@/lib/iegp/gap-number";
 import type { GapSuggestionCard } from "@/lib/iegp/gap-suggestion-cards";
 
-const INPUT = "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-[12px] text-foreground";
-const AREA = "w-full rounded-lg border border-input bg-card px-2.5 py-2 text-[12px] text-foreground";
-const LABEL = "grid gap-1 text-[11px] font-medium text-muted-foreground";
+const INPUT = "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-callout text-foreground";
+const AREA = "w-full rounded-lg border border-input bg-card px-2.5 py-2 text-callout text-foreground";
+const LABEL = "grid gap-1 text-caption font-medium text-muted-foreground";
 
 /** The proposed wording, editable before it is accepted. */
 function WordingFields({ name, statement }: { name: string; statement: string }) {
@@ -28,27 +28,27 @@ function SuggestionItem({ suggestion }: { suggestion: GapSuggestionCard }) {
   const label = gapNumberLabel(suggestion.gap_number);
   return (
     <li tabIndex={-1} id={`source-suggestion-${suggestion.id}`} className="min-w-0 break-words rounded-lg border border-border bg-card p-4 focus-visible:outline-2 focus-visible:outline-ring" data-suggestion-id={suggestion.id}>
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-caption text-muted-foreground">
         Overlaps <span className="font-mono">{label}</span> · {suggestion.gap_name}
       </p>
       <div className="mt-2 grid gap-3 md:grid-cols-2">
         <div>
-          <p className="text-[11px] font-medium text-muted-foreground">The gap now</p>
-          <p className="mt-1 text-[13px] leading-5 text-foreground">{suggestion.gap_statement}</p>
+          <p className="text-caption font-medium text-muted-foreground">The gap now</p>
+          <p className="mt-1 text-body leading-5 text-foreground">{suggestion.gap_statement}</p>
         </div>
         <div>
-          <p className="text-[11px] font-medium text-muted-foreground">
+          <p className="text-caption font-medium text-muted-foreground">
             New source: {suggestion.source_title}
             {suggestion.extra_source_count > 0
               ? ` and ${suggestion.extra_source_count} more saying the same`
               : ""}
           </p>
-          <blockquote className="mt-1 border-l-2 border-border pl-2 text-[13px] leading-5 text-foreground">
+          <blockquote className="mt-1 border-l-2 border-border pl-2 text-body leading-5 text-foreground">
             “{suggestion.source_quote}”
           </blockquote>
         </div>
       </div>
-      <dl className="mt-3 grid gap-1 text-[12px]">
+      <dl className="mt-3 grid gap-1 text-callout">
         <div className="flex gap-2">
           <dt className="w-24 shrink-0 text-muted-foreground">In common</dt>
           <dd className="text-foreground">{suggestion.shared_part}</dd>
@@ -60,9 +60,9 @@ function SuggestionItem({ suggestion }: { suggestion: GapSuggestionCard }) {
       </dl>
       <div className="mt-3 grid gap-3 md:grid-cols-2">
         <section className="rounded-md border border-border bg-muted/30 p-3" aria-label="Merge into existing gap">
-          <p className="text-[12px] font-semibold text-foreground">Merge into existing gap</p>
-          <p className="mt-1 text-[12px] font-medium text-foreground">{suggestion.merged_name}</p>
-          <p className="mt-0.5 text-[12px] leading-5 text-muted-foreground">{suggestion.merged_statement}</p>
+          <p className="text-callout font-semibold text-foreground">Merge into existing gap</p>
+          <p className="mt-1 text-callout font-medium text-foreground">{suggestion.merged_name}</p>
+          <p className="mt-0.5 text-callout leading-5 text-muted-foreground">{suggestion.merged_statement}</p>
           <div className="mt-2">
             <LockForm
               label="Merge into existing gap"
@@ -79,9 +79,9 @@ function SuggestionItem({ suggestion }: { suggestion: GapSuggestionCard }) {
           </div>
         </section>
         <section className="rounded-md border border-border bg-muted/30 p-3" aria-label="Create separate gap">
-          <p className="text-[12px] font-semibold text-foreground">Create separate gap</p>
-          <p className="mt-1 text-[12px] font-medium text-foreground">{suggestion.split_name}</p>
-          <p className="mt-0.5 text-[12px] leading-5 text-muted-foreground">{suggestion.split_statement}</p>
+          <p className="text-callout font-semibold text-foreground">Create separate gap</p>
+          <p className="mt-1 text-callout font-medium text-foreground">{suggestion.split_name}</p>
+          <p className="mt-0.5 text-callout leading-5 text-muted-foreground">{suggestion.split_statement}</p>
           <div className="mt-2">
             <LockForm
               label="Create separate gap"
@@ -122,14 +122,14 @@ export function GapSuggestions({ suggestions }: { suggestions: GapSuggestionCard
   return (
     <section
       aria-labelledby="gap-suggestions-heading"
-      className="rounded-lg border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-500/30 dark:bg-amber-500/5"
+      className="rounded-lg border border-unknown/40 bg-unknown/15 p-4"
       data-testid="gap-suggestions"
     >
       <details id="source-suggestions">
-        <summary id="gap-suggestions-heading" className="cursor-pointer text-[13px] font-semibold text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+        <summary id="gap-suggestions-heading" className="cursor-pointer text-body font-semibold text-foreground focus-visible:outline-2 focus-visible:outline-ring">
           Pending source suggestions: {suggestions.length}
         </summary>
-        <p className="mt-1 text-[12px] text-muted-foreground">
+        <p className="mt-1 text-callout text-muted-foreground">
           A new source shares part of an existing gap&apos;s question and adds something of its own. Merge it into the
           gap, keep the new part as a separate gap, or reject it. Nothing changes until you decide.
         </p>
@@ -152,8 +152,8 @@ export function NewSourceNote({
   newSource: { at: string; statement: string | null; source_title: string | null };
 }) {
   return (
-    <div className="mt-3 rounded-md border border-amber-200 bg-amber-50/70 p-3 text-[12px] dark:border-amber-500/30 dark:bg-amber-500/5">
-      <p className="font-medium text-amber-800 dark:text-amber-300">
+    <div className="mt-3 rounded-md border border-unknown/40 bg-unknown/15 p-3 text-callout">
+      <p className="font-medium text-unknown-foreground">
         New source added{newSource.source_title ? `: ${newSource.source_title}` : ""}
       </p>
       {newSource.statement ? <p className="mt-1 text-foreground">{newSource.statement}</p> : null}
@@ -176,7 +176,7 @@ export function NewSourceNote({
 /** A small pill for a gap row: a new source joined after it was validated. */
 export function NewSourcePill() {
   return (
-    <span className="ml-1 inline-flex items-center rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10.5px] font-medium text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+    <span className="ml-1 inline-flex items-center rounded border border-unknown/40 bg-unknown/10 px-1.5 py-0.5 text-caption font-medium text-unknown-foreground">
       New source added
     </span>
   );

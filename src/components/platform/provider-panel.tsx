@@ -72,15 +72,15 @@ export function ProviderPanel({
     <section className="grid gap-3" aria-labelledby="providers">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 id="providers" className="text-[13px] font-semibold text-foreground">
+          <h2 id="providers" className="text-body font-semibold text-foreground">
             LLM providers
           </h2>
-          <p className="mt-1 text-[12px] text-muted-foreground">
+          <p className="mt-1 text-callout text-muted-foreground">
             Each provider uses an API key set in the server environment (.env.local or your host&apos;s
             settings). Keys are never shown or entered here.
           </p>
           {ai ? null : (
-            <p className="mt-1 text-[12px] text-[var(--unknown-foreground)]" data-testid="providers-ai-off">
+            <p className="mt-1 text-callout text-[var(--unknown-foreground)]" data-testid="providers-ai-off">
               AI is off, so no provider is called. Keys stay in place for when AI is turned back on.
             </p>
           )}
@@ -88,7 +88,7 @@ export function ProviderPanel({
         {canRoute ? (
           <div className="grid justify-items-end gap-1">
             <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Route every stage to">
-              <span className="text-[11px] text-muted-foreground">Route every stage to</span>
+              <span className="text-caption text-muted-foreground">Route every stage to</span>
               {[
                 { connection: primary, id: defaults.primary, fallback: "Grok", key: "switch-primary" },
                 { connection: alternate, id: defaults.alternate, fallback: "Claude", key: "switch-alternate" },
@@ -116,7 +116,7 @@ export function ProviderPanel({
                 );
               })}
             </div>
-            <p className="text-[11px] text-muted-foreground" data-testid="providers-routed-to">
+            <p className="text-caption text-muted-foreground" data-testid="providers-routed-to">
               {routedTo
                 ? `Every stage routes to ${connections.find((connection) => connection.provider_id === routedTo)?.label ?? routedTo}.`
                 : "Stages use a mix of providers. See Routing below."}
@@ -126,11 +126,11 @@ export function ProviderPanel({
       </div>
 
       {notice ? (
-        <p role="status" className="text-[12px] text-[var(--known-foreground)]">
+        <p role="status" className="text-callout text-[var(--known-foreground)]">
           {notice}
         </p>
       ) : null}
-      {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+      {error ? <p className="text-callout text-destructive">{error}</p> : null}
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {connections.map((connection) => {
@@ -148,23 +148,23 @@ export function ProviderPanel({
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <h3 className="truncate text-[12px] font-semibold text-foreground">{connection.label}</h3>
+                    <h3 className="truncate text-callout font-semibold text-foreground">{connection.label}</h3>
                     {routedTo === connection.provider_id ? (
-                      <Badge className="text-[10px]" data-testid="provider-routing-every-stage">
+                      <Badge className="text-caption" data-testid="provider-routing-every-stage">
                         Routing every stage
                       </Badge>
                     ) : null}
                     {connection.tier === "default" ? (
-                      <Badge variant="outline" className="border-[var(--chart-1)]/50 text-[10px]">
+                      <Badge variant="outline" className="border-[var(--chart-1)]/50 text-caption">
                         Default route
                       </Badge>
                     ) : connection.tier === "alternate" ? (
-                      <Badge variant="outline" className="border-[var(--chart-3)]/50 text-[10px]">
+                      <Badge variant="outline" className="border-[var(--chart-3)]/50 text-caption">
                         One-click alternate
                       </Badge>
                     ) : null}
                   </div>
-                  <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{connection.summary}</p>
+                  <p className="mt-1 text-caption leading-4 text-muted-foreground">{connection.summary}</p>
                 </div>
                 <Icon
                   className={cn(
@@ -175,7 +175,7 @@ export function ProviderPanel({
                 />
               </div>
 
-              <dl className="grid gap-1 text-[11px] text-muted-foreground">
+              <dl className="grid gap-1 text-caption text-muted-foreground">
                 <div className="flex justify-between gap-2">
                   <dt>Status</dt>
                   <dd

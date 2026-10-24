@@ -105,7 +105,7 @@ export function MissFlagInbox({
 
   if (!current) {
     return (
-      <p className="text-[12px] text-muted-foreground">
+      <p className="text-callout text-muted-foreground">
         Inbox clear — every auditable parse block is cited, overlaps a claim, or was resolved.{" "}
         <Link
           href={`/admin/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}
@@ -122,7 +122,7 @@ export function MissFlagInbox({
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[12px] text-muted-foreground">{progress}</p>
+        <p className="text-callout text-muted-foreground">{progress}</p>
         <div className="flex gap-2">
           <Button
             type="button"
@@ -155,26 +155,26 @@ export function MissFlagInbox({
 
       <article className="border border-border bg-card p-4 rounded-lg" aria-labelledby="miss-flag-title">
         <div className="mb-2 flex flex-wrap items-center gap-2">
-          <h2 id="miss-flag-title" className="text-[13px] font-semibold text-foreground">
+          <h2 id="miss-flag-title" className="text-body font-semibold text-foreground">
             Miss flag
           </h2>
-          <Badge variant="outline" className="text-[11px]">
+          <Badge variant="outline" className="text-caption">
             Suggest {promoteAs}
           </Badge>
-          <Badge variant="secondary" className="text-[11px]">
+          <Badge variant="secondary" className="text-caption">
             {current.kind} · #{current.index}
           </Badge>
         </div>
-        <p className="mb-2 text-[11px] text-muted-foreground">
-          Block <code className="text-[10px]">{current.block_id}</code>
+        <p className="mb-2 text-caption text-muted-foreground">
+          Block <code className="text-caption">{current.block_id}</code>
           {" · "}
           {current.source_filename ?? current.source_file_id}
         </p>
-        <p className="mb-3 text-[13px] leading-relaxed text-foreground">{current.excerpt}</p>
-        <p className="mb-4 text-[12px] text-muted-foreground">{current.reason}</p>
+        <p className="mb-3 text-body leading-relaxed text-foreground">{current.excerpt}</p>
+        <p className="mb-4 text-callout text-muted-foreground">{current.reason}</p>
 
         <fieldset className="mb-3 grid gap-2">
-          <legend className="text-[12px] text-muted-foreground">Promote as</legend>
+          <legend className="text-callout text-muted-foreground">Promote as</legend>
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
@@ -198,33 +198,33 @@ export function MissFlagInbox({
         </fieldset>
 
         <label className="mb-3 grid gap-1">
-          <span className="text-[12px] text-muted-foreground">
+          <span className="text-callout text-muted-foreground">
             Claim statement (edit before promoting — defaults to the block excerpt)
           </span>
           <Textarea
             value={statementDraft ?? current.excerpt}
             onChange={(e) => setStatementDraft(e.target.value)}
             rows={3}
-            className="text-[13px]"
+            className="text-body"
             disabled={pending !== null}
             data-testid="miss-flag-statement"
           />
         </label>
 
         <label className="grid gap-1">
-          <span className="text-[12px] text-muted-foreground">Rationale (required)</span>
+          <span className="text-callout text-muted-foreground">Rationale (required)</span>
           <Textarea
             value={rationale}
             onChange={(e) => setRationale(e.target.value)}
             placeholder="Why promote this block, or why dismiss it?"
             rows={3}
-            className="text-[13px]"
+            className="text-body"
             disabled={pending !== null}
           />
         </label>
 
         {error ? (
-          <p className="mt-2 text-[12px] text-destructive" role="alert">
+          <p className="mt-2 text-callout text-destructive" role="alert">
             {error}
           </p>
         ) : null}
@@ -249,7 +249,7 @@ export function MissFlagInbox({
           </Button>
           <Link
             href={`/admin/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}
-            className="inline-flex h-8 items-center px-2 text-[12px] text-muted-foreground underline-offset-2 hover:underline"
+            className="inline-flex h-8 items-center px-2 text-callout text-muted-foreground underline-offset-2 hover:underline"
           >
             Ledger
           </Link>

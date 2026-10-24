@@ -66,13 +66,13 @@ export default async function AccuracyCoveragePage({
       </PageIntro>
 
       {loadError ? (
-        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
+        <p className="mb-4 border border-destructive/40 bg-card p-2 text-callout text-destructive rounded-lg">
           {loadError}
         </p>
       ) : null}
 
       {!workspaceId ? (
-        <p className="text-[12px] text-muted-foreground">
+        <p className="text-callout text-muted-foreground">
           Open from{" "}
           <Link href="/admin/accuracy" className="underline-offset-2 hover:underline">
             Workspaces
@@ -83,7 +83,7 @@ export default async function AccuracyCoveragePage({
         <UnknownWorkspaceNotice workspaceId={workspaceId} />
       ) : (
         <>
-          <p className="mb-3 text-[12px] text-muted-foreground">
+          <p className="mb-3 text-callout text-muted-foreground">
             Workspace · {active ? workspaceLabel(active) : workspaceId} · {queue.total_count} pair(s) ·{" "}
             {queue.undecided_count} undecided
           </p>
@@ -102,7 +102,7 @@ export default async function AccuracyCoveragePage({
             tactics={tacticOptions}
           />
           {pairs.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">
+            <p className="text-callout text-muted-foreground">
               No gap/tactic pairs yet. Seed gold or add claims on the Ledger.
             </p>
           ) : (

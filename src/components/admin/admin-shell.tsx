@@ -25,20 +25,20 @@ export function AdminShell({
   const active = adminSectionFor(pathname);
   return (
     <div className="flex min-h-full flex-1 flex-col" data-testid="admin-shell">
-      <header className="border-b border-amber-500/30 border-t-2 border-t-amber-500 bg-card">
+      <header className="border-b border-unknown/40 border-t-2 border-t-amber-500 bg-card">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 pt-2">
           <Link
             href="/admin"
-            className="flex items-center gap-1.5 text-[13px] font-semibold text-foreground no-underline"
+            className="flex items-center gap-1.5 text-body font-semibold text-foreground no-underline"
           >
             <BrandMark />
-            <ShieldCheck className="size-4 text-amber-600 dark:text-amber-400" aria-hidden />
+            <ShieldCheck className="size-4 text-unknown-foreground" aria-hidden />
             Synapse Admin
           </Link>
-          <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-800 dark:text-amber-300">
+          <span className="rounded bg-unknown/15 px-1.5 py-0.5 text-caption font-semibold text-unknown-foreground">
             Owner only
           </span>
-          <p className="ml-auto flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+          <p className="ml-auto flex flex-wrap items-center gap-2 text-caption text-muted-foreground">
             <span data-testid="admin-workspace">
               Workspace: <span className="text-foreground">{workspaceName}</span>
             </span>
@@ -65,9 +65,9 @@ export function AdminShell({
               href={section.href}
               aria-current={active === section.id ? "page" : undefined}
               className={cn(
-                "shrink-0 rounded-md px-2 py-1 text-[12px] no-underline transition-colors",
+                "shrink-0 rounded-md px-2 py-1 text-callout no-underline transition-colors",
                 active === section.id
-                  ? "bg-amber-500/15 text-foreground"
+                  ? "bg-unknown/15 text-foreground"
                   : "text-muted-foreground hover:bg-accent hover:text-foreground",
               )}
             >

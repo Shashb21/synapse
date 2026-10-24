@@ -99,7 +99,7 @@ export default async function PipelinePage() {
       <AdminWorkspaceBar workspace={workspace} path="/admin/pipeline" verb="Running in" />
 
       {!iegp.asset.setup_complete ? (
-        <p className="mb-6 border border-[var(--chart-1)]/30 bg-[var(--chart-1)]/5 px-3 py-2 text-[12px] text-muted-foreground">
+        <p className="mb-6 border border-[var(--chart-1)]/30 bg-[var(--chart-1)]/5 px-3 py-2 text-callout text-muted-foreground">
           New here?{" "}
           <Link href="/setup" className="font-medium text-foreground underline-offset-2 hover:underline">
             Complete the setup wizard
@@ -114,15 +114,15 @@ export default async function PipelinePage() {
           aria-labelledby="manual"
           data-testid="pipeline-ai-off"
         >
-          <h2 id="manual" className="text-[12px] font-semibold text-foreground">
+          <h2 id="manual" className="text-callout font-semibold text-foreground">
             AI is off — done by hand
           </h2>
-          <p className="mb-3 mt-1 text-[11px] text-muted-foreground">
+          <p className="mb-3 mt-1 text-caption text-muted-foreground">
             Start with Add gaps and Add tactics, then work down the list.
           </p>
           <ol className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {MANUAL_STEPS.map((step, index) => (
-              <li key={step.href + step.label} className="text-[12px] text-muted-foreground">
+              <li key={step.href + step.label} className="text-callout text-muted-foreground">
                 <span className="text-foreground">{index + 1}. </span>
                 <Link href={step.href} className="font-medium text-foreground underline-offset-2 hover:underline">
                   {step.label}
@@ -137,20 +137,20 @@ export default async function PipelinePage() {
       {ai ? (
       <div className="mb-8 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <section className="border border-border bg-card p-3 rounded-lg" aria-labelledby="ingest">
-          <h2 id="ingest" className="text-[12px] font-semibold text-foreground">
+          <h2 id="ingest" className="text-callout font-semibold text-foreground">
             S0 · Upload sources
           </h2>
-          <p className="mb-3 mt-1 text-[11px] text-muted-foreground">
+          <p className="mb-3 mt-1 text-caption text-muted-foreground">
             {files.length} file(s) uploaded, {documents.length} parsed.
           </p>
           <ModularUploadForm demoOptions={DEMO_FILE_OPTIONS} identity={actionIdentity} target={stageTarget} />
         </section>
 
         <section className="border border-border bg-card p-3 rounded-lg" aria-labelledby="chain">
-          <h2 id="chain" className="text-[12px] font-semibold text-foreground">
+          <h2 id="chain" className="text-callout font-semibold text-foreground">
             Run the chain
           </h2>
-          <p className="mb-3 mt-1 text-[11px] text-muted-foreground">
+          <p className="mb-3 mt-1 text-caption text-muted-foreground">
             Extraction through mapping, then consolidation, prioritization and the timeline. Human gates
             (S5, S6) stay where they belong: on Gaps and the split dialog.
           </p>
@@ -192,17 +192,17 @@ export default async function PipelinePage() {
             <article key={stage} className="grid content-start gap-2 border border-border bg-card p-3 rounded-lg">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <h2 className="text-[12px] font-semibold text-foreground">
+                  <h2 className="text-callout font-semibold text-foreground">
                     {stage} · {descriptor.title}
                   </h2>
-                  <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{descriptor.purpose}</p>
+                  <p className="mt-1 text-caption leading-4 text-muted-foreground">{descriptor.purpose}</p>
                 </div>
-                <Badge variant="outline" className="shrink-0 text-[10px]">
+                <Badge variant="outline" className="shrink-0 text-caption">
                   {KIND_COPY[descriptor.kind]}
                 </Badge>
               </div>
 
-              <dl className="grid gap-1 text-[11px] text-muted-foreground">
+              <dl className="grid gap-1 text-caption text-muted-foreground">
                 <div className="flex justify-between gap-2">
                   <dt>Module</dt>
                   <dd className="truncate text-foreground">
@@ -226,16 +226,16 @@ export default async function PipelinePage() {
               </dl>
 
               {ai && route.degraded && wired.active?.agentic ? (
-                <p className="text-[11px] text-[var(--unknown-foreground)]">{route.reason}</p>
+                <p className="text-caption text-[var(--unknown-foreground)]">{route.reason}</p>
               ) : null}
 
               {lastRun?.summary ? (
-                <p className="text-[11px] text-muted-foreground">{lastRun.summary}</p>
+                <p className="text-caption text-muted-foreground">{lastRun.summary}</p>
               ) : null}
 
               <div className="flex flex-wrap items-center gap-2">
                 {!ai && stageNeedsAi(stage) ? (
-                  <span className="text-[11px] text-muted-foreground" data-testid={`ai-off-${stage}`}>
+                  <span className="text-caption text-muted-foreground" data-testid={`ai-off-${stage}`}>
                     AI is off — done by hand.{" "}
                     {(MANUAL_PATH[stage] ?? []).map((path, pathIndex) => (
                       <span key={path.href + path.label}>
@@ -255,15 +255,15 @@ export default async function PipelinePage() {
                     target={stageTarget}
                   />
                 ) : stage === "S0" ? (
-                  <span className="text-[11px] text-muted-foreground">Upload above.</span>
+                  <span className="text-caption text-muted-foreground">Upload above.</span>
                 ) : (
-                  <span className="text-[11px] text-muted-foreground">
+                  <span className="text-caption text-muted-foreground">
                     Runs from the {stage === "S5" ? "Gaps workbench" : "split dialog"}, per gap.
                   </span>
                 )}
                 {ai && wired.has_evals ? <RunEvalsButton stage={stage} identity={actionIdentity} target={evalsTarget} /> : null}
                 {lastRun ? (
-                  <Link href={runTraceHref(lastRun.id, workspace.id)} className="text-[11px] text-muted-foreground no-underline hover:text-foreground">
+                  <Link href={runTraceHref(lastRun.id, workspace.id)} className="text-caption text-muted-foreground no-underline hover:text-foreground">
                     View trace
                   </Link>
                 ) : null}

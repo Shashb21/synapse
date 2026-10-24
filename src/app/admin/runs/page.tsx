@@ -51,21 +51,21 @@ export default async function RunsPage() {
       <AdminWorkspaceBar workspace={workspace} path="/admin/runs" />
 
       <section className="mb-8 grid gap-3" aria-labelledby="health">
-        <h2 id="health" className="text-[13px] font-semibold text-foreground">
+        <h2 id="health" className="text-body font-semibold text-foreground">
           Stage health
         </h2>
         {health.length === 0 ? (
-          <p className="text-[12px] text-muted-foreground">
+          <p className="text-callout text-muted-foreground">
             No runs recorded yet. Start on the Pipeline page.
           </p>
         ) : (
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             {health.map((row) => (
               <article key={row.stage} className="border border-border bg-card p-3 rounded-lg">
-                <h3 className="text-[12px] font-semibold text-foreground">
+                <h3 className="text-callout font-semibold text-foreground">
                   {row.stage} · {STAGES[row.stage as StageId]?.title ?? ""}
                 </h3>
-                <dl className="mt-2 grid gap-1 text-[11px] text-muted-foreground">
+                <dl className="mt-2 grid gap-1 text-caption text-muted-foreground">
                   <div className="flex justify-between gap-2">
                     <dt>Runs</dt>
                     <dd className="text-foreground">{row.runs}</dd>
@@ -98,28 +98,28 @@ export default async function RunsPage() {
       </section>
 
       <section className="mb-8 grid gap-2" aria-labelledby="recent">
-        <h2 id="recent" className="text-[13px] font-semibold text-foreground">
+        <h2 id="recent" className="text-body font-semibold text-foreground">
           Recent runs
         </h2>
         {runs.length === 0 ? (
-          <p className="text-[12px] text-muted-foreground">Nothing has run yet.</p>
+          <p className="text-callout text-muted-foreground">Nothing has run yet.</p>
         ) : (
           <ul className="grid gap-2">
             {runs.map((run) => (
               <li key={run.id} className="border border-border bg-card p-3 rounded-lg">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <Link href={runTraceHref(run.id, workspace.id)} className="text-[13px] text-foreground no-underline hover:underline">
+                  <Link href={runTraceHref(run.id, workspace.id)} className="text-body text-foreground no-underline hover:underline">
                     {run.stage} · {run.module_id} v{run.module_version}
                   </Link>
-                  <span className={`text-[11px] ${statusTone(run.status)}`}>
+                  <span className={`text-caption ${statusTone(run.status)}`}>
                     {run.status}
                     {run.duration_ms === null ? "" : ` · ${run.duration_ms} ms`}
                   </span>
                 </div>
-                <p className="mt-1 text-[12px] text-muted-foreground">
+                <p className="mt-1 text-callout text-muted-foreground">
                   {run.summary ?? run.error ?? "no summary"}
                 </p>
-                <p className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                <p className="mt-1 flex flex-wrap items-center gap-2 text-caption text-muted-foreground">
                   <span>{run.started_at.slice(0, 16).replace("T", " ")}</span>
                   <span>·</span>
                   <span>{run.actor.name}</span>
@@ -133,7 +133,7 @@ export default async function RunsPage() {
                     </>
                   ) : null}
                   {run.evals.map((score) => (
-                    <Badge key={score.name} variant="secondary" className="text-[10px]">
+                    <Badge key={score.name} variant="secondary" className="text-caption">
                       {score.name} {score.value}
                     </Badge>
                   ))}
@@ -146,25 +146,25 @@ export default async function RunsPage() {
 
       <div className="grid gap-8 lg:grid-cols-3">
         <section className="grid gap-2" aria-labelledby="edits">
-          <h2 id="edits" className="text-[13px] font-semibold text-foreground">
+          <h2 id="edits" className="text-body font-semibold text-foreground">
             Edit rationales
           </h2>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             Every user edit carries a rationale. These are the hillclimb inputs.
           </p>
           {edits.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">No edits recorded yet.</p>
+            <p className="text-callout text-muted-foreground">No edits recorded yet.</p>
           ) : (
             <ul className="grid gap-2">
               {edits.map((edit) => (
                 <li key={edit.id} className="border border-border bg-card p-2 rounded-lg">
-                  <p className="text-[12px] text-foreground">{edit.rationale}</p>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
+                  <p className="text-callout text-foreground">{edit.rationale}</p>
+                  <p className="mt-1 text-caption text-muted-foreground">
                     {edit.stage} · {edit.entity_type} {edit.entity_id} · {edit.field} · {edit.action} ·{" "}
                     {edit.actor.name}
                   </p>
                   {edit.before || edit.after ? (
-                    <p className="mt-1 text-[11px] text-muted-foreground">
+                    <p className="mt-1 text-caption text-muted-foreground">
                       {edit.before ?? "—"} → {edit.after ?? "—"}
                     </p>
                   ) : null}
@@ -175,10 +175,10 @@ export default async function RunsPage() {
         </section>
 
         <section className="grid gap-2" aria-labelledby="hillclimb-loop">
-          <h2 id="hillclimb-loop" className="text-[13px] font-semibold text-foreground">
+          <h2 id="hillclimb-loop" className="text-body font-semibold text-foreground">
             Hillclimb loop
           </h2>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             Score registered prompt variants against curated gold, store per-version baselines, and promote
             the winning variant when it beats its baseline.
           </p>
@@ -193,27 +193,27 @@ export default async function RunsPage() {
               ))}
             </div>
           ) : (
-            <p className="text-[11px] text-muted-foreground" data-testid="hillclimb-ai-off">
+            <p className="text-caption text-muted-foreground" data-testid="hillclimb-ai-off">
               AI is off, so there are no prompts to tune. Past scores stay listed here.
             </p>
           )}
         </section>
 
         <section className="grid gap-2" aria-labelledby="signals">
-          <h2 id="signals" className="text-[13px] font-semibold text-foreground">
+          <h2 id="signals" className="text-body font-semibold text-foreground">
             Hillclimb signals
           </h2>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             Scored in the hillclimb sweep. Runs learn from similar past decisions as worked examples, not from these rationales as rules.
           </p>
           {signals.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">No signals yet.</p>
+            <p className="text-callout text-muted-foreground">No signals yet.</p>
           ) : (
             <ul className="grid gap-2">
               {signals.map((signal) => (
                 <li key={signal.id} className="border border-border bg-card p-2 rounded-lg">
-                  <p className="text-[12px] text-foreground">{signal.rationale}</p>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
+                  <p className="text-callout text-foreground">{signal.rationale}</p>
+                  <p className="mt-1 text-caption text-muted-foreground">
                     {signal.stage} · {signal.kind.replaceAll("_", " ")} · {signal.subject}
                   </p>
                 </li>
@@ -223,19 +223,19 @@ export default async function RunsPage() {
         </section>
 
         <section className="grid gap-2" aria-labelledby="evals">
-          <h2 id="evals" className="text-[13px] font-semibold text-foreground">
+          <h2 id="evals" className="text-body font-semibold text-foreground">
             Eval runs
           </h2>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             Per-stage scores. A stage can hillclimb without touching its neighbours.
           </p>
           {evals.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">No eval runs yet.</p>
+            <p className="text-callout text-muted-foreground">No eval runs yet.</p>
           ) : (
             <ul className="grid gap-2">
               {evals.map((run) => (
                 <li key={run.id} className="border border-border bg-card p-2 rounded-lg">
-                  <p className="text-[12px] text-foreground">
+                  <p className="text-callout text-foreground">
                     {run.stage} · {run.module_id} v{run.module_version}
                   </p>
                   <p className="mt-1 flex flex-wrap gap-1">
@@ -245,8 +245,8 @@ export default async function RunsPage() {
                         variant="outline"
                         className={
                           metric.target !== undefined && metric.value < metric.target
-                            ? "border-destructive/50 text-[10px]"
-                            : "text-[10px]"
+                            ? "border-destructive/50 text-caption"
+                            : "text-caption"
                         }
                       >
                         {metric.name} {metric.value}

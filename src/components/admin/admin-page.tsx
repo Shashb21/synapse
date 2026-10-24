@@ -21,13 +21,13 @@ export function AdminWorkspaceBar({
 }) {
   return (
     <p
-      className="mb-6 flex flex-wrap items-center gap-2 border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[13px] text-muted-foreground rounded-lg"
+      className="mb-6 flex flex-wrap items-center gap-2 border border-unknown/40 bg-unknown/5 px-3 py-2 text-body text-muted-foreground rounded-lg"
       data-testid="admin-workspace-bar"
       data-workspace-id={workspace.id}
     >
       <span>
         {verb} workspace <span className="font-medium text-foreground">{workspace.name}</span>{" "}
-        <span className="font-mono text-[12px]">({workspace.id})</span>
+        <span className="font-mono text-callout">({workspace.id})</span>
         {workspace.demo ? " · demo" : ""}
       </span>
       <Link href={adminWorkspacePickerHref(path)} className="text-foreground underline-offset-2 hover:underline">

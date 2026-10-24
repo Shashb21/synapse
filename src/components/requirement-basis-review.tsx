@@ -38,7 +38,7 @@ export function RequirementBasisReview({ gapId, review, onRefresh }: {
                   ))}
                 </ul>
               ) : <p className="text-xs text-muted-foreground">No sourced requirement recorded. Choose applicability explicitly.</p>}
-              {requirement.conflicts.length ? <p className="text-sm text-amber-700 dark:text-amber-400">Source disagreement: {requirement.conflicts.join(" / ")}. Record how this decision resolves it.</p> : null}
+              {requirement.conflicts.length ? <p className="text-sm text-unknown-foreground">Source disagreement: {requirement.conflicts.join(" / ")}. Record how this decision resolves it.</p> : null}
               <label className="grid gap-1 text-xs">
                 {label} applicability
                 <select name={`req_${dim}_applicability`} defaultValue={requirement.applicability} className={CONTROL}>

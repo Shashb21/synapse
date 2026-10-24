@@ -122,7 +122,7 @@ function StageButton({
         {label ?? `Run ${stage}`}
       </Button>
       {result?.error ? (
-        <p className="text-[11px] text-destructive">
+        <p className="text-caption text-destructive">
           {result.error}
           {result.admin_href ? (
             <>
@@ -134,7 +134,7 @@ function StageButton({
           ) : null}
         </p>
       ) : result?.summary ? (
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-caption text-muted-foreground">
           {result.summary}
           {result.mode ? ` · ${result.mode === "llm" ? "LLM route" : "no model call"}` : ""}
         </p>

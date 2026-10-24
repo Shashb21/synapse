@@ -34,7 +34,7 @@ export function GapStatusDisagreement({
   if (!override) return null;
   if (!override.stale) {
     return (
-      <p className="text-[12px] leading-5 text-muted-foreground">
+      <p className="text-callout leading-5 text-muted-foreground">
         Status set by hand: {GAP_STATUS_LABELS[override.status]} (
         {GAP_STATUS_LABELS[override.from]} → {GAP_STATUS_LABELS[override.to]}
         ). {override.actor_name}. Reason: {override.reason}
@@ -42,7 +42,7 @@ export function GapStatusDisagreement({
     );
   }
   return (
-    <p className="text-[12px] leading-5 text-amber-700 dark:text-amber-300" role="status">
+    <p className="text-callout leading-5 text-unknown-foreground" role="status">
       This gap was set to {GAP_STATUS_LABELS[override.status]} by hand, but the status computed from its mapped tactics is now{" "}
       {computedStatus ? GAP_STATUS_LABELS[computedStatus] : "a different status"}. The hand-set status is kept. To use the
       computed status instead, open the status dialog.
@@ -165,7 +165,7 @@ export function GapStatusOverride({
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 py-3">
-            <label className="grid gap-1 text-[12px] text-muted-foreground" htmlFor={statusId}>
+            <label className="grid gap-1 text-callout text-muted-foreground" htmlFor={statusId}>
               Status
               <select
                 id={statusId}
@@ -184,7 +184,7 @@ export function GapStatusOverride({
               </select>
             </label>
             <div className="grid gap-1">
-              <label htmlFor={reasonId} className="text-[12px] text-muted-foreground">
+              <label htmlFor={reasonId} className="text-callout text-muted-foreground">
                 Reason
               </label>
               <Textarea
@@ -204,12 +204,12 @@ export function GapStatusOverride({
                 }}
               />
               {reasonError ? (
-                <p id={reasonErrorId} role="alert" className="text-[12px] text-destructive">{reasonError}</p>
+                <p id={reasonErrorId} role="alert" className="text-callout text-destructive">{reasonError}</p>
               ) : (
-                <p className="text-[11px] text-muted-foreground">Required. Empty reason does not save.</p>
+                <p className="text-caption text-muted-foreground">Required. Empty reason does not save.</p>
               )}
             </div>
-            {error ? <p id={saveErrorId} role="alert" className="text-[12px] text-destructive">{error}</p> : null}
+            {error ? <p id={saveErrorId} role="alert" className="text-callout text-destructive">{error}</p> : null}
           </div>
           <DialogFooter>
             <DialogClose render={<Button type="button" size="sm" variant="outline" />}>

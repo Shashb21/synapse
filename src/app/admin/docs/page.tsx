@@ -13,7 +13,7 @@ export default async function DocsPage() {
       <PageIntro kicker="Owner · reference" title="Docs">
         The raw spec documents, as markdown. SDLC renders the same set with diagrams.
       </PageIntro>
-      <ul className="grid gap-1 text-[13px]">
+      <ul className="grid gap-1 text-body">
         {SPEC_DOCS.map(({ slug, retired }) => (
           <li key={slug} className="flex flex-wrap items-baseline gap-3">
             <a href={`/admin/docs/sdlc/${slug}`} className="text-foreground underline-offset-2 hover:underline">
@@ -22,7 +22,7 @@ export default async function DocsPage() {
             {retired ? <RetiredMarker /> : null}
             <Link
               href={`/admin/sdlc?spec=${slug}`}
-              className="text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+              className="text-caption text-muted-foreground underline-offset-2 hover:underline"
             >
               rendered
             </Link>

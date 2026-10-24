@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 
 export function FieldError({ message }: { message?: string }) {
   return message ? (
-    <span role="alert" className="text-[11px] text-destructive">
+    <span role="alert" className="text-caption text-destructive">
       {message}
     </span>
   ) : null;
@@ -33,7 +33,7 @@ export function Field({
   className?: string;
 }) {
   return (
-    <label className={cn("grid content-start gap-1 text-[11px] text-muted-foreground", className)}>
+    <label className={cn("grid content-start gap-1 text-caption text-muted-foreground", className)}>
       <span>
         {label}
         {required ? (
@@ -44,7 +44,7 @@ export function Field({
         ) : null}
       </span>
       {children}
-      {hint ? <span className="text-[10px] text-muted-foreground/80">{hint}</span> : null}
+      {hint ? <span className="text-caption text-muted-foreground/80">{hint}</span> : null}
       <FieldError message={error} />
     </label>
   );
@@ -87,7 +87,7 @@ export function TextField({
           aria-invalid={error ? true : undefined}
           aria-required={required || undefined}
           data-testid={testId}
-          className="min-h-[72px] text-[13px]"
+          className="min-h-[72px] text-body"
         />
       ) : (
         <Input
@@ -123,7 +123,7 @@ export function ChoiceField<T extends string | number>({
 }) {
   const groupId = useId();
   return (
-    <div role="radiogroup" aria-label={label} aria-invalid={error ? true : undefined} className="grid gap-1 text-[11px] text-muted-foreground">
+    <div role="radiogroup" aria-label={label} aria-invalid={error ? true : undefined} className="grid gap-1 text-caption text-muted-foreground">
       <span>
         {label}
         {required ? <span className="text-[var(--chart-1)]"> *</span> : null}
@@ -144,7 +144,7 @@ export function ChoiceField<T extends string | number>({
                 className="peer sr-only"
               />
               <span className={cn(
-                "inline-block rounded-md border px-2.5 py-1 text-[12px] transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2",
+                "inline-block rounded-md border px-2.5 py-1 text-callout transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2",
                 on
                   ? "border-[var(--chart-1)] bg-[var(--chart-1)]/15 text-foreground"
                   : "border-border text-muted-foreground hover:border-[var(--chart-1)]/40 hover:text-foreground",
@@ -195,7 +195,7 @@ export function TagField({
   };
   const open = suggestions.filter((tag) => !has(tag));
   return (
-    <div className="grid gap-1 text-[11px] text-muted-foreground">
+    <div className="grid gap-1 text-caption text-muted-foreground">
       <label htmlFor={inputId}>
         {label}
         {required ? <span className="text-[var(--chart-1)]"> *</span> : null}
@@ -205,7 +205,7 @@ export function TagField({
           {values.map((value) => (
             <li
               key={value}
-              className="inline-flex items-center gap-1 rounded-full border border-border bg-card py-0.5 pl-2 pr-1 text-[12px] text-foreground"
+              className="inline-flex items-center gap-1 rounded-full border border-border bg-card py-0.5 pl-2 pr-1 text-callout text-foreground"
             >
               {value}
               <button
@@ -245,7 +245,7 @@ export function TagField({
               key={tag}
               type="button"
               onClick={() => add(tag)}
-              className="inline-flex items-center gap-0.5 rounded-full border border-dashed border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:border-[var(--chart-1)]/50 hover:text-foreground"
+              className="inline-flex items-center gap-0.5 rounded-full border border-dashed border-border px-2 py-0.5 text-caption text-muted-foreground hover:border-[var(--chart-1)]/50 hover:text-foreground"
             >
               <Plus className="size-3" aria-hidden />
               {tag}
@@ -253,7 +253,7 @@ export function TagField({
           ))}
         </div>
       ) : null}
-      {hint ? <span className="text-[10px] text-muted-foreground/80">{hint}</span> : null}
+      {hint ? <span className="text-caption text-muted-foreground/80">{hint}</span> : null}
       <FieldError message={error} />
     </div>
   );
@@ -285,12 +285,12 @@ export function ListField<T>({
   hint?: string;
 }) {
   return (
-    <div className="grid gap-2 text-[11px] text-muted-foreground" role="group" aria-label={label}>
+    <div className="grid gap-2 text-caption text-muted-foreground" role="group" aria-label={label}>
       <span>
         {label}
         {required ? <span className="text-[var(--chart-1)]"> *</span> : null}
       </span>
-      {hint ? <span className="text-[10px] text-muted-foreground/80">{hint}</span> : null}
+      {hint ? <span className="text-caption text-muted-foreground/80">{hint}</span> : null}
       {items.length > 0 ? (
         <ol className="grid gap-2">
           {items.map((item, index) => (

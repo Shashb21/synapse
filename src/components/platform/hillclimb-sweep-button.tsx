@@ -49,8 +49,8 @@ function SweepButton({
         {busy ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : null}
         Hillclimb {stage}
       </Button>
-      {message ? <span className="text-[11px] text-muted-foreground">{message}</span> : null}
-      {error ? <span className="text-[11px] text-destructive">{error}</span> : null}
+      {message ? <span className="text-caption text-muted-foreground">{message}</span> : null}
+      {error ? <span className="text-caption text-destructive">{error}</span> : null}
     </div>
   );
 }

@@ -42,14 +42,14 @@ export function LoginPanel({
   return (
     <div className="grid gap-4">
       {error ? (
-        <p role="alert" data-testid="login-error" className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
+        <p role="alert" data-testid="login-error" className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-callout text-destructive">
           {error}
         </p>
       ) : null}
 
       {providers.length > 0 ? (
         <div className="grid gap-2">
-          <p className="text-[11px] text-muted-foreground">Sign in with your organisation&apos;s single sign-on</p>
+          <p className="text-caption text-muted-foreground">Sign in with your organisation&apos;s single sign-on</p>
           {providers.map((provider) => (
             <Button
               key={provider.id}
@@ -74,8 +74,8 @@ export function LoginPanel({
           void signIn({ email: loginEmail, password }, "password", "/api/auth/password/login");
         }}
       >
-        <p className="text-[11px] text-muted-foreground">Email and password</p>
-        <label className="grid gap-1 text-[11px] text-muted-foreground">
+        <p className="text-caption text-muted-foreground">Email and password</p>
+        <label className="grid gap-1 text-caption text-muted-foreground">
           Email
           <Input
             type="email"
@@ -86,7 +86,7 @@ export function LoginPanel({
             onChange={(event) => setLoginEmail(event.target.value)}
           />
         </label>
-        <label className="grid gap-1 text-[11px] text-muted-foreground">
+        <label className="grid gap-1 text-caption text-muted-foreground">
           Password
           <Input
             type="password"

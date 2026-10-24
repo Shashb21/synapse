@@ -32,9 +32,9 @@ const ORIGIN_LABEL: Record<FinalPackage["evidence_tactics"][0]["origin"], string
 function Section({ title, count, children }: { title: string; count?: number; children: React.ReactNode }) {
   return (
     <section className="grid gap-3 rounded-md border border-border bg-card p-4">
-      <h2 className="text-[15px] font-medium text-foreground">
+      <h2 className="text-headline font-medium text-foreground">
         {title}
-        {count !== undefined ? <span className="ml-2 text-[12px] text-muted-foreground">({count})</span> : null}
+        {count !== undefined ? <span className="ml-2 text-callout text-muted-foreground">({count})</span> : null}
       </h2>
       {children}
     </section>
@@ -42,7 +42,7 @@ function Section({ title, count, children }: { title: string; count?: number; ch
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <p className="text-[13px] text-muted-foreground">{children}</p>;
+  return <p className="text-body text-muted-foreground">{children}</p>;
 }
 
 function CompletePlan({ view }: { view: Extract<FinalPlanView, { kind: "complete" }> }) {
@@ -53,12 +53,12 @@ function CompletePlan({ view }: { view: Extract<FinalPlanView, { kind: "complete
   return (
     <div className="grid gap-4">
       <Section title="Plan">
-        <p className="text-[13px] text-foreground">
+        <p className="text-body text-foreground">
           {pkg.plan_context.asset.name} ({pkg.plan_context.asset.inn}) · {pkg.plan_context.asset.indication} ·{" "}
           {pkg.plan_context.asset.geography}
         </p>
         {pkg.plan_context.objectives.length > 0 ? (
-          <ul className="list-disc pl-5 text-[13px] text-muted-foreground">
+          <ul className="list-disc pl-5 text-body text-muted-foreground">
             {pkg.plan_context.objectives.map((o) => (
               <li key={o.id}>{o.title}</li>
             ))}
@@ -66,28 +66,28 @@ function CompletePlan({ view }: { view: Extract<FinalPlanView, { kind: "complete
         ) : (
           <Empty>No strategic objectives were recorded.</Empty>
         )}
-        <p className="text-[12px] text-muted-foreground">{pkg.workshop_outcomes.note}</p>
+        <p className="text-callout text-muted-foreground">{pkg.workshop_outcomes.note}</p>
       </Section>
 
       <Section title="1. Evidence Gap Inventory" count={pkg.evidence_gap_inventory.length}>
         <ul className="grid gap-3">
           {pkg.evidence_gap_inventory.map((gap) => (
             <li key={gap.id} className="rounded-md border border-border p-3" data-testid="final-gap">
-              <p className="text-[13px] font-medium text-foreground">
+              <p className="text-body font-medium text-foreground">
                 {gap.id} · {gap.name}{" "}
-                <span className="text-[12px] font-normal text-muted-foreground">
+                <span className="text-callout font-normal text-muted-foreground">
                   {STATUS_LABEL[gap.effective_status] ?? gap.effective_status}
                   {gap.override ? " (override)" : ""} · {gap.domain}
                 </span>
               </p>
-              <p className="mt-1 text-[13px] text-muted-foreground">{gap.statement}</p>
-              <p className="mt-1 text-[12px] text-muted-foreground">
+              <p className="mt-1 text-body text-muted-foreground">{gap.statement}</p>
+              <p className="mt-1 text-callout text-muted-foreground">
                 Objective: {gap.objective?.title ?? "Not recorded"} · Confirmed{" "}
                 {gap.confirmation.by ? `by ${gap.confirmation.by.name}` : "(before who confirmed was recorded)"}
                 {gap.confirmation.at ? ` on ${gap.confirmation.at.slice(0, 10)}` : ""}
               </p>
               {gap.needs.length > 0 ? (
-                <ul className="mt-2 grid gap-1 text-[12px] text-muted-foreground">
+                <ul className="mt-2 grid gap-1 text-callout text-muted-foreground">
                   {gap.needs.map((need) => (
                     <li key={need.id}>
                       {need.role === "primary" ? "Source" : "Also raised in"}: {need.source?.title ?? "Added by hand"}
@@ -97,7 +97,7 @@ function CompletePlan({ view }: { view: Extract<FinalPlanView, { kind: "complete
                 </ul>
               ) : null}
               {gap.coverages.length > 0 ? (
-                <p className="mt-1 text-[12px] text-muted-foreground">
+                <p className="mt-1 text-callout text-muted-foreground">
                   Mapped: {gap.coverages.map((c) => `${c.tactic_id} (${c.overall})`).join(", ")}
                 </p>
               ) : null}
@@ -109,18 +109,18 @@ function CompletePlan({ view }: { view: Extract<FinalPlanView, { kind: "complete
       <Section title="2. Evidence Tactics" count={pkg.evidence_tactics.length}>
         <ul className="grid gap-2">
           {pkg.evidence_tactics.map((tactic) => (
-            <li key={tactic.id} className="rounded-md border border-border p-3 text-[13px]" data-testid="final-tactic">
+            <li key={tactic.id} className="rounded-md border border-border p-3 text-body" data-testid="final-tactic">
               <p className="font-medium text-foreground">
                 {tactic.id} · {tactic.name}{" "}
-                <span className="text-[12px] font-normal text-muted-foreground">{EVIDENCE_LABEL[tactic.evidence_state]}</span>
+                <span className="text-callout font-normal text-muted-foreground">{EVIDENCE_LABEL[tactic.evidence_state]}</span>
               </p>
-              <p className="text-[12px] text-muted-foreground">
+              <p className="text-callout text-muted-foreground">
                 {ORIGIN_LABEL[tactic.origin]} · Owner: {tactic.owner || "Not recorded"} · Objective: {tactic.objective || "Not recorded"} ·
                 Outputs: {tactic.outputs || "Not recorded"} · Timing: {tactic.timing.start_date ?? "—"} →{" "}
                 {tactic.timing.evidence_available ?? "—"}
               </p>
               {tactic.gap_ids.length > 0 ? (
-                <p className="text-[12px] text-muted-foreground">
+                <p className="text-callout text-muted-foreground">
                   Answers: {tactic.gap_ids.map((id) => gapName.get(id) ?? id).join("; ")}
                 </p>
               ) : null}
@@ -130,11 +130,11 @@ function CompletePlan({ view }: { view: Extract<FinalPlanView, { kind: "complete
       </Section>
 
       <Section title="3. Prioritisation" count={pkg.prioritisation.placements.length}>
-        <p className="text-[12px] text-muted-foreground">
+        <p className="text-callout text-muted-foreground">
           Matrix axes: {axisLabel.get(pkg.prioritisation.x_axis) ?? pkg.prioritisation.x_axis} ×{" "}
           {axisLabel.get(pkg.prioritisation.y_axis) ?? pkg.prioritisation.y_axis}
         </p>
-        <ul className="grid gap-1 text-[13px]">
+        <ul className="grid gap-1 text-body">
           {pkg.prioritisation.placements.map((p) => (
             <li key={p.gap_id}>
               <span className="text-foreground">{gapName.get(p.gap_id) ?? p.gap_id}</span>
@@ -150,10 +150,10 @@ function CompletePlan({ view }: { view: Extract<FinalPlanView, { kind: "complete
       </Section>
 
       <Section title="4. Roadmap" count={pkg.roadmap.activities.length}>
-        <p className="text-[12px] text-muted-foreground">
+        <p className="text-callout text-muted-foreground">
           {pkg.roadmap.window.start} → {pkg.roadmap.window.end} · roadmap fingerprint {pkg.roadmap.fingerprint_code}
         </p>
-        <ul className="grid gap-1 text-[13px]">
+        <ul className="grid gap-1 text-body">
           {pkg.roadmap.activities.map((a) => (
             <li key={a.id}>
               <span className="text-foreground">{a.tactic_name}</span>
@@ -166,14 +166,14 @@ function CompletePlan({ view }: { view: Extract<FinalPlanView, { kind: "complete
             </li>
           ))}
         </ul>
-        <p className="text-[12px] text-muted-foreground">
+        <p className="text-callout text-muted-foreground">
           <Link href={`/timeline?version=${view.version}`}>Open this version on the timeline</Link> to see the chart or export it as an
           image.
         </p>
       </Section>
 
       <Section title="5. Open items and limitations">
-        <ul className="grid gap-1 text-[13px] text-muted-foreground" data-testid="final-limitations">
+        <ul className="grid gap-1 text-body text-muted-foreground" data-testid="final-limitations">
           {open.limitations.map((line) => (
             <li key={line}>{line}</li>
           ))}
@@ -188,11 +188,11 @@ function CompletePlan({ view }: { view: Extract<FinalPlanView, { kind: "complete
           ] as const
         ).map(([title, rows]) => (
           <div key={title}>
-            <p className="text-[12px] font-medium text-foreground">
+            <p className="text-callout font-medium text-foreground">
               {title} ({rows.length})
             </p>
             {rows.length > 0 ? (
-              <ul className="list-disc pl-5 text-[12px] text-muted-foreground">
+              <ul className="list-disc pl-5 text-callout text-muted-foreground">
                 {rows.map((row) => (
                   <li key={row}>{row}</li>
                 ))}
@@ -210,17 +210,17 @@ function CompletePlan({ view }: { view: Extract<FinalPlanView, { kind: "complete
 function LegacyPlan({ view }: { view: Extract<FinalPlanView, { kind: "legacy" }> }) {
   return (
     <Section title="Roadmap only" count={view.timeline.activities.length}>
-      <p className="text-[13px] text-foreground" data-testid="legacy-note">
+      <p className="text-body text-foreground" data-testid="legacy-note">
         {view.legacy_note}.
       </p>
-      <ul className="grid gap-1 text-[13px] text-muted-foreground">
+      <ul className="grid gap-1 text-body text-muted-foreground">
         {view.timeline.activities.map((a) => (
           <li key={a.id}>
             {a.tactic_name} · {a.start_date} → {a.end_date}
           </li>
         ))}
       </ul>
-      <p className="text-[12px] text-muted-foreground">
+      <p className="text-callout text-muted-foreground">
         <Link href={`/timeline?version=${view.version}`}>Open this version on the timeline</Link>.
       </p>
     </Section>
@@ -242,7 +242,7 @@ export default async function FinalPlanPage({ searchParams }: { searchParams: Pr
           still open. Nothing here changes when the live plan is edited; a new final is a new version.
         </PageIntro>
         {finals.length > 0 ? (
-          <nav className="flex flex-wrap gap-2 text-[12px]" aria-label="Saved final versions">
+          <nav className="flex flex-wrap gap-2 text-callout" aria-label="Saved final versions">
             {finals.map((entry) => (
               <Link
                 key={entry.id}
@@ -265,7 +265,7 @@ export default async function FinalPlanPage({ searchParams }: { searchParams: Pr
         </Section>
       ) : (
         <div className="grid gap-4">
-          <p className="text-[12px] text-muted-foreground" data-testid="final-meta">
+          <p className="text-callout text-muted-foreground" data-testid="final-meta">
             v{view.version} · {view.status === "final" ? "Final" : "Draft"} · saved by {view.saved_by} on {view.saved_at.slice(0, 10)}
             {view.note ? ` · “${view.note}”` : ""}
             {view.kind === "complete" ? ` · package ${view.schema_version} · fingerprint ${view.package_fingerprint.slice(0, 12)}` : ""}

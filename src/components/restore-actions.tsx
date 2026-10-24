@@ -90,20 +90,20 @@ export function SetAsideGaps({ gaps }: { gaps: IegpState["gaps"] }) {
       data-testid="set-aside-gaps"
       className="mt-8 border border-border bg-card p-4 rounded-lg"
     >
-      <h2 id="set-aside-gaps" className="text-[12px] font-semibold text-foreground">
+      <h2 id="set-aside-gaps" className="text-callout font-semibold text-foreground">
         Set aside ({excluded.length + parked.length})
       </h2>
-      <p className="mt-0.5 mb-3 text-[12px] text-muted-foreground">
+      <p className="mt-0.5 mb-3 text-callout text-muted-foreground">
         Excluded and parked gaps stay out of Prioritize and Tactics. Restore or unpark one to bring it back.
       </p>
       <ul className="grid gap-2">
         {excluded.map((gap) => (
           <li key={gap.id} className="flex flex-wrap items-center gap-3 border border-border bg-card p-3 rounded-lg">
             <div className="min-w-0 flex-1">
-              <Link href={`/gaps/${gap.id}`} className="text-[13px] text-foreground no-underline hover:underline">
+              <Link href={`/gaps/${gap.id}`} className="text-body text-foreground no-underline hover:underline">
                 {gap.name}
               </Link>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">
+              <p className="mt-0.5 text-caption text-muted-foreground">
                 Excluded
                 {gap.exclusion_reason ? `: ${EXCLUSION_LABELS[gap.exclusion_reason as ExclusionReason] ?? gap.exclusion_reason}` : ""}
                 {gap.status_lock.actor_name ? ` · by ${gap.status_lock.actor_name}` : ""}
@@ -116,10 +116,10 @@ export function SetAsideGaps({ gaps }: { gaps: IegpState["gaps"] }) {
         {parked.map((gap) => (
           <li key={gap.id} className="flex flex-wrap items-center gap-3 border border-border bg-card p-3 rounded-lg">
             <div className="min-w-0 flex-1">
-              <Link href={`/gaps/${gap.id}`} className="text-[13px] text-foreground no-underline hover:underline">
+              <Link href={`/gaps/${gap.id}`} className="text-body text-foreground no-underline hover:underline">
                 {gap.name}
               </Link>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">
+              <p className="mt-0.5 text-caption text-muted-foreground">
                 Parked{gap.parked_reason ? `: ${gap.parked_reason}` : ""}
               </p>
             </div>
@@ -141,20 +141,20 @@ export function RejectedTactics({ tactics }: { tactics: IegpState["tactics"] }) 
       data-testid="rejected-tactics"
       className="mt-8 border border-border bg-card p-4 rounded-lg"
     >
-      <h2 id="rejected-tactics" className="text-[12px] font-semibold text-foreground">
+      <h2 id="rejected-tactics" className="text-callout font-semibold text-foreground">
         Rejected tactics ({rejected.length})
       </h2>
-      <p className="mt-0.5 mb-3 text-[12px] text-muted-foreground">
+      <p className="mt-0.5 mb-3 text-callout text-muted-foreground">
         Out of the library and the timeline. Restore one to map it onto gaps again.
       </p>
       <ul className="grid gap-2">
         {rejected.map((tactic) => (
           <li key={tactic.id} className="flex flex-wrap items-center gap-3 border border-border bg-card p-3 rounded-lg">
             <div className="min-w-0 flex-1">
-              <Link href={`/tactics/${tactic.id}`} className="text-[13px] text-foreground no-underline hover:underline">
+              <Link href={`/tactics/${tactic.id}`} className="text-body text-foreground no-underline hover:underline">
                 {tactic.name}
               </Link>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">
+              <p className="mt-0.5 text-caption text-muted-foreground">
                 Rejected
                 {tactic.lock.actor_name ? ` by ${tactic.lock.actor_name}` : ""}
                 {tactic.lock.note ? ` · “${tactic.lock.note}”` : ""}
@@ -189,14 +189,14 @@ export function RejectedMappings({ rows }: { rows: RejectedMappingRow[] }) {
       data-testid="rejected-mappings"
       className="mt-8 border border-border bg-card p-4 rounded-lg"
     >
-      <h2 id="rejected-mappings" className="text-[12px] font-semibold text-foreground">
+      <h2 id="rejected-mappings" className="text-callout font-semibold text-foreground">
         Rejected mappings ({rows.length})
       </h2>
-      <p className="mt-0.5 mb-3 text-[12px] text-muted-foreground">
+      <p className="mt-0.5 mb-3 text-callout text-muted-foreground">
         Pairs you or a colleague rejected or removed. They are never mapped again unless you restore them.
       </p>
       {rows.length === 0 ? (
-        <p className="text-[12px] text-muted-foreground">None.</p>
+        <p className="text-callout text-muted-foreground">None.</p>
       ) : (
         <ul className="grid gap-2">
           {rows.map((row) => (
@@ -205,7 +205,7 @@ export function RejectedMappings({ rows }: { rows: RejectedMappingRow[] }) {
               className="flex flex-wrap items-center gap-3 border border-border bg-card p-3 rounded-lg"
             >
               <div className="min-w-0 flex-1">
-                <p className="text-[13px] text-foreground">
+                <p className="text-body text-foreground">
                   <Link href={`/tactics/${row.tactic_id}`} className="text-foreground no-underline hover:underline">
                     {row.tactic_name}
                   </Link>{" "}
@@ -214,7 +214,7 @@ export function RejectedMappings({ rows }: { rows: RejectedMappingRow[] }) {
                     {row.gap_name}
                   </Link>
                 </p>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                <p className="mt-0.5 text-caption text-muted-foreground">
                   Rejected{row.actor_name ? ` by ${row.actor_name}` : ""}
                   {row.note ? ` · “${row.note}”` : ""}
                 </p>

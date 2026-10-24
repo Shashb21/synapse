@@ -6,7 +6,7 @@ import {
 } from "@/accuracy/domain/ledger-filters";
 
 function chipClass(active: boolean): string {
-  return `inline-flex rounded-md border px-2 py-1 text-[12px] no-underline ${
+  return `inline-flex rounded-md border px-2 py-1 text-callout no-underline ${
     active
       ? "border-foreground bg-card text-foreground"
       : "border-border text-muted-foreground hover:text-foreground"
@@ -29,7 +29,7 @@ function FilterRow({
   const current = selected[keyName] ?? null;
   return (
     <fieldset className="grid gap-1.5">
-      <legend className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+      <legend className="text-caption font-medium text-muted-foreground">
         {legend}
       </legend>
       <ul className="flex flex-wrap gap-2">
@@ -55,7 +55,7 @@ function FilterRow({
                 aria-current={active ? "page" : undefined}
               >
                 {facet.label}
-                <span className="ml-1 text-[10px] text-muted-foreground">{facet.count}</span>
+                <span className="ml-1 text-caption text-muted-foreground">{facet.count}</span>
               </Link>
             </li>
           );
@@ -78,10 +78,10 @@ export function LedgerFilterBar({
 
   return (
     <section className="mb-6 grid gap-3" aria-labelledby="ledger-filters">
-      <h2 id="ledger-filters" className="text-[13px] font-semibold text-foreground">
+      <h2 id="ledger-filters" className="text-body font-semibold text-foreground">
         Filters
       </h2>
-      <p className="text-[12px] text-muted-foreground">
+      <p className="text-callout text-muted-foreground">
         Chapter follows Tislelizumab indication boards; SI follows BGB NSCLC theme codes. Cards stay
         the ledger — not a spreadsheet.
       </p>

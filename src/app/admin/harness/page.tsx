@@ -44,10 +44,10 @@ export default async function AiHarnessPage() {
           aria-labelledby="harness-ai-off"
           data-testid="harness-ai-off"
         >
-          <h2 id="harness-ai-off" className="text-[12px] font-semibold text-foreground">
+          <h2 id="harness-ai-off" className="text-callout font-semibold text-foreground">
             AI is off — the harness calls no model
           </h2>
-          <p className="mt-1 text-[11px] text-muted-foreground">
+          <p className="mt-1 text-caption text-muted-foreground">
             The platform AI switch is off, so no use case can run here. Turn AI on in{" "}
             <Link href="/admin/control" className="font-medium text-foreground underline-offset-2 hover:underline">
               AI &amp; routing

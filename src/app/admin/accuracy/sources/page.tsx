@@ -107,13 +107,13 @@ export default async function AccuracySourcesPage({
       </PageIntro>
 
       {loadError ? (
-        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
+        <p className="mb-4 border border-destructive/40 bg-card p-2 text-callout text-destructive rounded-lg">
           {loadError}
         </p>
       ) : null}
 
       {!workspaceId ? (
-        <p className="text-[12px] text-muted-foreground">
+        <p className="text-callout text-muted-foreground">
           Select a workspace from{" "}
           <Link href="/admin/accuracy" className="underline-offset-2 hover:underline">
             Workspaces
@@ -124,7 +124,7 @@ export default async function AccuracySourcesPage({
         <UnknownWorkspaceNotice workspaceId={workspaceId} />
       ) : (
         <>
-          <p className="mb-3 text-[12px] text-muted-foreground">
+          <p className="mb-3 text-callout text-muted-foreground">
             Workspace · <span className="text-foreground">{active ? workspaceLabel(active) : workspaceId}</span>
           </p>
           {!aiOn ? (
@@ -133,10 +133,10 @@ export default async function AccuracySourcesPage({
               role="status"
               data-testid="sources-ai-off"
             >
-              <p className="text-[13px] text-foreground">
+              <p className="text-body text-foreground">
                 AI is off — upload, parse and extract are AI steps.
               </p>
-              <p className="text-[12px] text-muted-foreground">
+              <p className="text-callout text-muted-foreground">
                 Enter gaps and tactics yourself:{" "}
                 <Link
                   href={`/admin/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}
@@ -151,10 +151,10 @@ export default async function AccuracySourcesPage({
           {aiOn ? <SourceUploadForm workspaceId={workspaceId} /> : null}
           {aiOn ? (
             <details className="mb-3 border border-border bg-card p-3 rounded-lg">
-              <summary className="cursor-pointer text-[12px] text-foreground">
+              <summary className="cursor-pointer text-callout text-foreground">
                 Type or paste a source by hand (no AI)
               </summary>
-              <p className="mb-2 mt-1 text-[11px] text-muted-foreground">
+              <p className="mb-2 mt-1 text-caption text-muted-foreground">
                 One block per paragraph you confirm. Stored as human-entered; no model runs and a re-parse never
                 replaces these blocks.
               </p>
@@ -185,7 +185,7 @@ export default async function AccuracySourcesPage({
             </details>
           ) : null}
           {sources.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">
+            <p className="text-callout text-muted-foreground">
               {aiOn
                 ? "No sources yet. Upload above or seed from gold on the Workspaces page."
                 : "No sources in this workspace."}
@@ -195,14 +195,14 @@ export default async function AccuracySourcesPage({
               {sources.map((source) => (
                 <li key={source.id} className="border border-border bg-card p-3 rounded-lg">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <p className="text-[12px] font-semibold text-foreground">{source.filename}</p>
-                    <span className="text-[11px] text-muted-foreground">{source.doc_role}</span>
+                    <p className="text-callout font-semibold text-foreground">{source.filename}</p>
+                    <span className="text-caption text-muted-foreground">{source.doc_role}</span>
                   </div>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
+                  <p className="mt-1 text-caption text-muted-foreground">
                     {source.block_count} parse block(s) · {source.mime}
                     {source.reference_pack_id ? ` · pack ${source.reference_pack_id}` : ""}
                   </p>
-                  <p className="mt-1 font-mono text-[10px] text-muted-foreground">{source.id}</p>
+                  <p className="mt-1 font-mono text-caption text-muted-foreground">{source.id}</p>
                   {aiOn ? (
                     <ParseSourceControls
                       edit={{ workspaceId, sourceFileId: source.id, identity, kinds: PARSE_BLOCK_KINDS }}
@@ -231,7 +231,7 @@ export default async function AccuracySourcesPage({
               ))}
             </ul>
           )}
-          <p className="mt-4 flex flex-wrap gap-3 text-[12px]">
+          <p className="mt-4 flex flex-wrap gap-3 text-callout">
             <Link
               href={`/admin/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}
               className="underline-offset-2 hover:underline"

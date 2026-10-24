@@ -46,8 +46,8 @@ function MergedRow({ row, workspaceId }: { row: MergedClaimModel; workspaceId: s
 
   return (
     <li className="border border-border bg-card p-3 rounded-lg" data-testid={`merged-claim-${row.id}`}>
-      <p className="text-[12px] text-foreground">{row.statement}</p>
-      <p className="mt-1 text-[11px] text-muted-foreground">
+      <p className="text-callout text-foreground">{row.statement}</p>
+      <p className="mt-1 text-caption text-muted-foreground">
         {row.claim_type} {row.id} · merged into{" "}
         {row.merged_into_statement ? `“${row.merged_into_statement.slice(0, 90)}” ` : ""}
         {row.merged_into ?? "?"}
@@ -59,10 +59,10 @@ function MergedRow({ row, workspaceId }: { row: MergedClaimModel; workspaceId: s
           onChange={(e) => setRationale(e.target.value)}
           rows={2}
           placeholder="Why these are not the same item (required to unmerge)"
-          className="text-[12px]"
+          className="text-callout"
         />
         {error ? (
-          <p className="text-[11px] text-destructive" role="alert">
+          <p className="text-caption text-destructive" role="alert">
             {error}
           </p>
         ) : null}
@@ -89,7 +89,7 @@ export function LedgerMergedList({
   return (
     <section className="mt-8 grid gap-2" aria-labelledby="merged-section">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 id="merged-section" className="text-[13px] font-semibold text-foreground">
+        <h2 id="merged-section" className="text-body font-semibold text-foreground">
           Merged duplicates ({rows.length})
         </h2>
         <Button size="sm" variant="outline" onClick={() => setOpen(!open)}>

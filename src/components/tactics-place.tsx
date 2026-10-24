@@ -55,7 +55,7 @@ export function TacticsPlace({
         mayIdeate={mayIdeate}
         tactics={tactics}
       />
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-caption text-muted-foreground">
         {otherCount > 0
           ? `${otherCount} other Open gap${otherCount === 1 ? " is" : "s are"} Medium, Low or not validated yet; map tactics to them on `
           : "Medium and Low gaps get their tactics mapped on "}

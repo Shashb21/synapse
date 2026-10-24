@@ -51,7 +51,7 @@ export function ParseBlockPreview({
   if (blocks.length === 0) {
     return (
       <div className="mt-2">
-        <p className="text-[11px] text-muted-foreground" data-testid="parse-block-preview-empty">
+        <p className="text-caption text-muted-foreground" data-testid="parse-block-preview-empty">
           No parse blocks to preview.
         </p>
         {addFirst}
@@ -62,11 +62,11 @@ export function ParseBlockPreview({
   const humanCount = blocks.filter((b) => b.provenance?.human).length;
   return (
     <details className="mt-2 border border-border/70 bg-background/40 p-2" data-testid="parse-block-preview">
-      <summary className="cursor-pointer text-[12px] text-foreground">
+      <summary className="cursor-pointer text-callout text-foreground">
         Preview {blocks.length} parse block{blocks.length === 1 ? "" : "s"} (verbatim)
         {humanCount ? ` · ${humanCount} human` : ""}
       </summary>
-      <p className="mt-2 text-[11px] text-muted-foreground">
+      <p className="mt-2 text-caption text-muted-foreground">
         Quotes must be substrings of this text. One source file per preview — packs stay isolated.
         {edit ? " Human blocks are locked: a re-parse keeps them and replaces only model blocks." : ""}
       </p>
@@ -81,22 +81,22 @@ export function ParseBlockPreview({
             data-source-file-id={block.source_file_id}
             data-origin={block.provenance?.origin}
           >
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-caption text-muted-foreground">
               #{block.index} · {block.kind}
               {block.heading ? ` · ${block.heading}` : ""}
               {block.provenance ? ` · ${originLabel(block.provenance)}` : ""}
               {block.provenance?.edited_by ? ` · ${block.provenance.edited_by}` : ""}
               {block.provenance?.cited_by.length ? ` · quoted by ${block.provenance.cited_by.join(", ")}` : ""}
             </p>
-            <p className="font-mono text-[10px] text-muted-foreground">{block.id}</p>
+            <p className="font-mono text-caption text-muted-foreground">{block.id}</p>
             <pre
               data-testid="parse-block-text"
-              className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-sans text-[12px] leading-relaxed text-foreground"
+              className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-sans text-callout leading-relaxed text-foreground"
             >
               {block.text}
             </pre>
             {block.provenance?.original_text && block.provenance.original_text !== block.text ? (
-              <details className="mt-1 text-[11px] text-muted-foreground">
+              <details className="mt-1 text-caption text-muted-foreground">
                 <summary className="cursor-pointer">Model&apos;s original text</summary>
                 <pre className="whitespace-pre-wrap font-sans">{block.provenance.original_text}</pre>
               </details>
@@ -176,7 +176,7 @@ export function ParseSourceControls({
   dropped: { id: string; location: string; reason: string; text: string; restored_block_id: string | null }[];
 }) {
   return (
-    <div className="mt-2 grid gap-2 text-[11px] text-muted-foreground">
+    <div className="mt-2 grid gap-2 text-caption text-muted-foreground">
       <div className="flex flex-wrap items-center gap-2">
         <span>
           Stakeholder function:{" "}

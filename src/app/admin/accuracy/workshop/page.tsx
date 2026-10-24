@@ -65,22 +65,22 @@ export default async function AccuracyWorkshopPage({
       </PageIntro>
 
       {loadError ? (
-        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
+        <p className="mb-4 border border-destructive/40 bg-card p-2 text-callout text-destructive rounded-lg">
           {loadError}
         </p>
       ) : null}
 
       {!workspaceId ? (
         <section className="grid gap-2" aria-labelledby="workshop-empty">
-          <h2 id="workshop-empty" className="text-[13px] font-semibold text-foreground">
+          <h2 id="workshop-empty" className="text-body font-semibold text-foreground">
             Choose a workspace
           </h2>
-          <p className="text-[12px] text-muted-foreground">
+          <p className="text-callout text-muted-foreground">
             Open from{" "}
             <Link href="/admin/accuracy" className="underline-offset-2 hover:underline">
               Workspaces
             </Link>{" "}
-            or append <code className="text-[11px]">?workspace_id=</code>.
+            or append <code className="text-caption">?workspace_id=</code>.
           </p>
           {workspaces.length > 0 ? (
             <ul className="mt-2 flex flex-wrap gap-2">
@@ -88,7 +88,7 @@ export default async function AccuracyWorkshopPage({
                 <li key={row.id}>
                   <Link
                     href={`/admin/accuracy/workshop?workspace_id=${encodeURIComponent(row.id)}`}
-                    className="inline-flex rounded-md border border-border px-2 py-1 text-[12px] text-muted-foreground no-underline hover:text-foreground"
+                    className="inline-flex rounded-md border border-border px-2 py-1 text-callout text-muted-foreground no-underline hover:text-foreground"
                   >
                     {row.name}
                   </Link>

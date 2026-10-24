@@ -92,9 +92,9 @@ export function claimPatchFromValues(
   return patch;
 }
 
-const labelClass = "grid gap-1 text-[11px] text-muted-foreground";
+const labelClass = "grid gap-1 text-caption text-muted-foreground";
 const selectClass =
-  "h-8 rounded-md border border-border bg-background px-2 text-[12px] text-foreground";
+  "h-8 rounded-md border border-border bg-background px-2 text-callout text-foreground";
 
 export function ClaimFieldsForm({
   kind,
@@ -128,7 +128,7 @@ export function ClaimFieldsForm({
           onChange={(e) => set("statement", e.target.value)}
           rows={2}
           disabled={disabled}
-          className="text-[12px]"
+          className="text-callout"
           data-testid={`${idPrefix}-statement`}
         />
       </label>
@@ -139,7 +139,7 @@ export function ClaimFieldsForm({
             value={values.external_id}
             onChange={(e) => set("external_id", e.target.value)}
             disabled={disabled}
-            className="h-8 text-[12px]"
+            className="h-8 text-callout"
           />
         </label>
         {kind === "gap" && showStatusOverride ? (
@@ -206,7 +206,7 @@ export function ClaimFieldsForm({
               onChange={(e) => set("evidence_question", e.target.value)}
               rows={2}
               disabled={disabled}
-              className="text-[12px]"
+              className="text-callout"
             />
           </label>
           <label className={labelClass}>
@@ -216,7 +216,7 @@ export function ClaimFieldsForm({
               onChange={(e) => set("design_summary", e.target.value)}
               rows={2}
               disabled={disabled}
-              className="text-[12px]"
+              className="text-callout"
             />
           </label>
           <ClaimScheduleFields
@@ -236,7 +236,7 @@ export function ClaimFieldsForm({
           rows={2}
           disabled={disabled}
           placeholder="Verbatim source quote backing this claim"
-          className="text-[12px]"
+          className="text-callout"
         />
       </label>
     </div>
@@ -274,7 +274,7 @@ export function ClaimScheduleFields({
             value={values.start}
             onChange={(e) => set("start", e.target.value)}
             disabled={disabled}
-            className="h-8 text-[12px]"
+            className="h-8 text-callout"
             data-testid={`${idPrefix}-start`}
           />
         </label>
@@ -285,7 +285,7 @@ export function ClaimScheduleFields({
             value={values.end}
             onChange={(e) => set("end", e.target.value)}
             disabled={disabled}
-            className="h-8 text-[12px]"
+            className="h-8 text-callout"
             data-testid={`${idPrefix}-end`}
           />
         </label>
@@ -296,18 +296,18 @@ export function ClaimScheduleFields({
             value={values.readout}
             onChange={(e) => set("readout", e.target.value)}
             disabled={disabled}
-            className="h-8 text-[12px]"
+            className="h-8 text-callout"
           />
         </label>
       </div>
       <fieldset className="grid gap-1">
-        <legend className="text-[11px] text-muted-foreground">Depends on (waits for)</legend>
+        <legend className="text-caption text-muted-foreground">Depends on (waits for)</legend>
         {tacticOptions.length === 0 ? (
-          <p className="text-[11px] text-muted-foreground">No other tactics in this workspace.</p>
+          <p className="text-caption text-muted-foreground">No other tactics in this workspace.</p>
         ) : (
           <div className="max-h-32 overflow-y-auto border border-border p-2">
             {tacticOptions.map((row) => (
-              <label key={row.id} className="flex items-start gap-2 text-[11px] text-foreground">
+              <label key={row.id} className="flex items-start gap-2 text-caption text-foreground">
                 <input
                   type="checkbox"
                   checked={values.depends_on.includes(row.id)}

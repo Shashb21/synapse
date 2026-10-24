@@ -70,15 +70,15 @@ export function SourceUploadForm({ workspaceId }: { workspaceId: string }) {
       onSubmit={onSubmit}
       className="mb-4 grid gap-3 border border-dashed border-border bg-card p-3 rounded-lg"
     >
-      <h3 className="text-[12px] font-semibold text-foreground">Upload source</h3>
-      <p className="text-[12px] text-muted-foreground">
+      <h3 className="text-callout font-semibold text-foreground">Upload source</h3>
+      <p className="text-callout text-muted-foreground">
         PDF, PPTX, DOCX, XLSX and text are all parsed by the LLM on the parse route in{" "}
         <code>/admin/control</code>: the file&apos;s text is extracted, then the model decides the blocks.
       </p>
-      <label className="grid gap-1 text-[12px]">
+      <label className="grid gap-1 text-callout">
         <span className="text-muted-foreground">Doc role</span>
         <select
-          className="border border-border bg-background px-2 py-1.5 text-[13px]"
+          className="border border-border bg-background px-2 py-1.5 text-body"
           value={docRole}
           onChange={(e) => setDocRole(e.target.value)}
         >
@@ -89,22 +89,22 @@ export function SourceUploadForm({ workspaceId }: { workspaceId: string }) {
           ))}
         </select>
       </label>
-      <label className="grid gap-1 text-[12px]">
+      <label className="grid gap-1 text-callout">
         <span className="text-muted-foreground">File</span>
         <input
           name="file"
           type="file"
           accept=".pptx,.ppt,.docx,.xlsx,.xls,.pdf,.txt,.md"
-          className="text-[12px]"
+          className="text-callout"
           required
         />
       </label>
-      {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
-      {summary ? <p className="text-[12px] text-muted-foreground">{summary}</p> : null}
+      {error ? <p className="text-callout text-destructive">{error}</p> : null}
+      {summary ? <p className="text-callout text-muted-foreground">{summary}</p> : null}
       <button
         type="submit"
         disabled={pending}
-        className="w-fit border border-foreground bg-foreground px-3 py-1.5 text-[12px] text-background disabled:opacity-50"
+        className="w-fit border border-foreground bg-foreground px-3 py-1.5 text-callout text-background disabled:opacity-50"
       >
         {pending ? "Uploading…" : "Upload & parse"}
       </button>

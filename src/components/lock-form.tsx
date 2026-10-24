@@ -205,7 +205,7 @@ export function LockForm({
           <div className="grid gap-3 py-3">
             {children}
             {note ? (
-              <label className="grid gap-1 text-[12px] text-muted-foreground">
+              <label className="grid gap-1 text-callout text-muted-foreground">
                 {note.label}
                 <Textarea
                   ref={noteRef}
@@ -216,9 +216,9 @@ export function LockForm({
                 />
               </label>
             ) : null}
-            {pending && progress ? <p role="status" className="text-[12px] text-muted-foreground">{progress}</p> : null}
+            {pending && progress ? <p role="status" className="text-callout text-muted-foreground">{progress}</p> : null}
             {error ? (
-              <p role="alert" className="text-[12px] text-destructive">
+              <p role="alert" className="text-callout text-destructive">
                 {error}
               </p>
             ) : null}

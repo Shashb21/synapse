@@ -64,19 +64,19 @@ export default async function SourceBlocksPage({ params }: { params: Promise<{ i
       <SourceClaimReview state={state} identity={identity} canReview={can(identityContext.role, "validate")} sourceId={id} />
 
       <section className="mb-4 border border-border bg-card p-3 rounded-lg" aria-labelledby="stakeholder">
-        <h2 id="stakeholder" className="text-[12px] font-semibold text-foreground">
+        <h2 id="stakeholder" className="text-callout font-semibold text-foreground">
           Stakeholder function
         </h2>
-        <p className="mt-1 text-[12px] text-foreground">
+        <p className="mt-1 text-callout text-foreground">
           {label(stakeholder.stakeholder_function)}{" "}
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-caption text-muted-foreground">
             ({stakeholder.set_by === "human" ? `set by ${stakeholder.override_by}` : "chosen at upload"})
           </span>
         </p>
         {stakeholder.override_rationale ? (
-          <p className="text-[11px] text-muted-foreground">Why: {stakeholder.override_rationale}</p>
+          <p className="text-caption text-muted-foreground">Why: {stakeholder.override_rationale}</p>
         ) : null}
-        <p className="mt-1 text-[11px] text-muted-foreground">
+        <p className="mt-1 text-caption text-muted-foreground">
           Model&apos;s classification: {stakeholder.llm_function ?? "none (not parsed by a model)"}
           {stakeholder.llm_rationale ? ` — ${stakeholder.llm_rationale}` : ""}
         </p>
@@ -102,7 +102,7 @@ export default async function SourceBlocksPage({ params }: { params: Promise<{ i
 
       <section className="mb-4 border border-border bg-card p-3 rounded-lg" aria-labelledby="blocks">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 id="blocks" className="text-[12px] font-semibold text-foreground">
+          <h2 id="blocks" className="text-callout font-semibold text-foreground">
             {plural(blocks.length, "block")} · {humanCount} human
           </h2>
           <ActionDialog
@@ -119,7 +119,7 @@ export default async function SourceBlocksPage({ params }: { params: Promise<{ i
         <ol className="mt-2 grid gap-2">
           {blocks.map((block, index) => (
             <li key={block.id} className="border border-border/60 bg-background/40 p-2" data-block-id={block.id}>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-caption text-muted-foreground">
                 #{index + 1} · {block.heading} · {block.location}
                 {" · "}
                 <span className={block.human ? "text-foreground" : undefined}>
@@ -128,12 +128,12 @@ export default async function SourceBlocksPage({ params }: { params: Promise<{ i
                 {block.edited_by ? ` · ${block.edited_by}` : ""}
                 {block.cited_by.length ? ` · quoted by ${block.cited_by.join(", ")}` : ""}
               </p>
-              <p className="font-mono text-[10px] text-muted-foreground">{block.id}</p>
-              <pre className="mt-1 whitespace-pre-wrap break-words font-sans text-[12px] leading-relaxed text-foreground">
+              <p className="font-mono text-caption text-muted-foreground">{block.id}</p>
+              <pre className="mt-1 whitespace-pre-wrap break-words font-sans text-callout leading-relaxed text-foreground">
                 {block.text}
               </pre>
               {block.original_text && block.original_text !== block.text ? (
-                <details className="mt-1 text-[11px] text-muted-foreground">
+                <details className="mt-1 text-caption text-muted-foreground">
                   <summary className="cursor-pointer">Model&apos;s original text</summary>
                   <pre className="whitespace-pre-wrap font-sans">{block.original_text}</pre>
                 </details>
@@ -191,13 +191,13 @@ export default async function SourceBlocksPage({ params }: { params: Promise<{ i
 
       {dropped.length > 0 ? (
         <section className="mb-4 border border-border bg-card p-3 rounded-lg" aria-labelledby="dropped">
-          <h2 id="dropped" className="text-[12px] font-semibold text-foreground">
+          <h2 id="dropped" className="text-callout font-semibold text-foreground">
             Dropped by the model as noise
           </h2>
           <ul className="mt-2 grid gap-2">
             {dropped.map((unit) => (
-              <li key={unit.id} className="border border-border/60 p-2 text-[12px]">
-                <p className="text-[11px] text-muted-foreground">
+              <li key={unit.id} className="border border-border/60 p-2 text-callout">
+                <p className="text-caption text-muted-foreground">
                   {unit.location} · {unit.reason}
                   {unit.restored_block_id ? ` · restored as ${unit.restored_block_id}` : ""}
                 </p>
@@ -217,13 +217,13 @@ export default async function SourceBlocksPage({ params }: { params: Promise<{ i
       ) : null}
 
       <section className="border border-border bg-card p-3 rounded-lg" aria-labelledby="trail">
-        <h2 id="trail" className="text-[12px] font-semibold text-foreground">
+        <h2 id="trail" className="text-callout font-semibold text-foreground">
           Edit trail
         </h2>
         {edits.length === 0 ? (
-          <p className="mt-1 text-[11px] text-muted-foreground">No human edits yet.</p>
+          <p className="mt-1 text-caption text-muted-foreground">No human edits yet.</p>
         ) : (
-          <ul className="mt-2 grid gap-1 text-[11px] text-muted-foreground">
+          <ul className="mt-2 grid gap-1 text-caption text-muted-foreground">
             {edits.map((edit) => (
               <li key={edit.id}>
                 {edit.at.slice(0, 16).replace("T", " ")} · {edit.actor.name} · {edit.action} {edit.field} on{" "}

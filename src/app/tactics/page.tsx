@@ -51,25 +51,25 @@ export default async function TacticsPage() {
       {/* With AI off nothing new is rejected; the list shows only if earlier runs left some. */}
       {ai || rejected.length > 0 ? (
       <section className="mt-8">
-        <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Rejected by the AI ({pending.length})</h2>
-        <p className="mb-3 text-[12px] leading-5 text-muted-foreground">
+        <h2 className="mb-2 text-caption font-semibold text-muted-foreground">Rejected by the AI ({pending.length})</h2>
+        <p className="mb-3 text-callout leading-5 text-muted-foreground">
           Tactic candidates the AI rejected while extracting tactics. If a real study was dropped, promote it: it is
           recorded by hand with its source quote, and can be mapped onto a gap at once.
         </p>
         {pending.length === 0 ? (
-          <p className="text-[12px] text-muted-foreground">None.</p>
+          <p className="text-callout text-muted-foreground">None.</p>
         ) : (
           <div className="grid gap-3">
             {pending.map((row) => {
               const source = state.sources.find((s) => s.id === row.source_id);
               return (
                 <article key={row.id} className="border border-border bg-card p-4 rounded-lg">
-                  <p className="text-[13px] text-foreground">{row.name}</p>
-                  <p className="mt-1 text-[12px] text-foreground">{row.evidence_question}</p>
-                  <p className="mt-1 text-[12px] text-muted-foreground">
+                  <p className="text-body text-foreground">{row.name}</p>
+                  <p className="mt-1 text-callout text-foreground">{row.evidence_question}</p>
+                  <p className="mt-1 text-callout text-muted-foreground">
                     “{row.source_quote}” · {source?.title ?? row.source_id}
                   </p>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
+                  <p className="mt-1 text-caption text-muted-foreground">
                     AI reason: {row.critic_note} · score {row.score}
                   </p>
                   <div className="mt-2">
@@ -118,7 +118,7 @@ export default async function TacticsPage() {
           </div>
         )}
         {rejected.length > pending.length ? (
-          <p className="mt-3 text-[12px] text-muted-foreground">
+          <p className="mt-3 text-callout text-muted-foreground">
             Promoted by hand:{" "}
             {rejected
               .filter((row) => row.promoted_tactic_id)

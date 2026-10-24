@@ -29,31 +29,31 @@ export default async function AdminOverviewPage() {
 
       <dl className="mb-8 grid gap-3 sm:grid-cols-3">
         <div className="border border-border bg-card p-3 rounded-lg">
-          <dt className="text-[11px] text-muted-foreground">AI</dt>
-          <dd className="mt-1 text-[15px] text-foreground" data-testid="admin-ai-state">
+          <dt className="text-caption text-muted-foreground">AI</dt>
+          <dd className="mt-1 text-headline text-foreground" data-testid="admin-ai-state">
             {ai === null ? "unknown" : ai.enabled ? "On" : "Off"}
           </dd>
-          <dd className="mt-1 text-[11px]">
+          <dd className="mt-1 text-caption">
             <Link href="/admin/control" className="text-muted-foreground underline-offset-2 hover:underline">
               Switch it in AI &amp; routing
             </Link>
           </dd>
         </div>
         <div className="border border-border bg-card p-3 rounded-lg">
-          <dt className="text-[11px] text-muted-foreground">Workspace</dt>
-          <dd className="mt-1 truncate text-[15px] text-foreground">{workspaceName}</dd>
-          <dd className="mt-1 text-[11px]">
+          <dt className="text-caption text-muted-foreground">Workspace</dt>
+          <dd className="mt-1 truncate text-headline text-foreground">{workspaceName}</dd>
+          <dd className="mt-1 text-caption">
             <Link href={ADMIN_WORKSPACE_PICKER} className="text-muted-foreground underline-offset-2 hover:underline">
               Switch workspace
             </Link>
           </dd>
         </div>
         <div className="border border-border bg-card p-3 rounded-lg">
-          <dt className="text-[11px] text-muted-foreground">Stage runs in this workspace</dt>
-          <dd className="mt-1 text-[15px] text-foreground">
-            {runs} {errors > 0 ? <span className="text-[12px] text-destructive">· {errors} errors</span> : null}
+          <dt className="text-caption text-muted-foreground">Stage runs in this workspace</dt>
+          <dd className="mt-1 text-headline text-foreground">
+            {runs} {errors > 0 ? <span className="text-callout text-destructive">· {errors} errors</span> : null}
           </dd>
-          <dd className="mt-1 text-[11px]">
+          <dd className="mt-1 text-caption">
             <Link href="/admin/runs" className="text-muted-foreground underline-offset-2 hover:underline">
               Open runs &amp; traces
             </Link>
@@ -64,10 +64,10 @@ export default async function AdminOverviewPage() {
       <ul className="grid gap-2 md:grid-cols-2">
         {ADMIN_SECTIONS.filter((section) => section.id !== "overview").map((section) => (
           <li key={section.id} className="border border-border bg-card p-3 rounded-lg">
-            <Link href={section.href} className="text-[12px] font-semibold text-foreground no-underline hover:underline">
+            <Link href={section.href} className="text-callout font-semibold text-foreground no-underline hover:underline">
               {section.label}
             </Link>
-            <p className="mt-1 text-[12px] text-muted-foreground">{section.summary}</p>
+            <p className="mt-1 text-callout text-muted-foreground">{section.summary}</p>
           </li>
         ))}
       </ul>

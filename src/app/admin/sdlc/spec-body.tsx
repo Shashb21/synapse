@@ -56,7 +56,7 @@ function MermaidBlock({ chart, index }: { chart: string; index: number }) {
   return (
     <div
       ref={ref}
-      className="overflow-x-auto border border-border bg-card p-4 text-[12px] text-foreground rounded-lg"
+      className="overflow-x-auto border border-border bg-card p-4 text-callout text-foreground rounded-lg"
     />
   );
 }
@@ -71,7 +71,7 @@ export function SpecBody({ markdown }: { markdown: string }) {
         ) : (
           <pre
             key={index}
-            className="overflow-auto border border-border bg-card p-4 font-mono text-[12px] leading-5 whitespace-pre-wrap text-foreground/90 rounded-lg"
+            className="overflow-auto border border-border bg-card p-4 font-mono text-callout leading-5 whitespace-pre-wrap text-foreground/90 rounded-lg"
           >
             {part.text.trim()}
           </pre>

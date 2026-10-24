@@ -32,7 +32,7 @@ export type PickableGap = {
   other_groups: string[];
 };
 
-const FIELD = "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-[12px] text-foreground";
+const FIELD = "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-callout text-foreground";
 
 async function postAction(body: Record<string, unknown>): Promise<string | null> {
   const res = await postJson("/api/iegp", body);
@@ -119,7 +119,7 @@ export function AddGapsDialog({
           </DialogDescription>
         </DialogHeader>
         {availableGaps.length === 0 ? (
-          <p className="text-[12px] text-muted-foreground">Every live gap is already in this group.</p>
+          <p className="text-callout text-muted-foreground">Every live gap is already in this group.</p>
         ) : (
           <div className="grid gap-2">
             <div className="grid gap-2 sm:grid-cols-4">
@@ -150,7 +150,7 @@ export function AddGapsDialog({
                 ))}
               </select>
             </div>
-            <div className="flex flex-wrap items-center gap-3 text-[11px]">
+            <div className="flex flex-wrap items-center gap-3 text-caption">
               <label className="flex items-center gap-1.5 text-foreground">
                 <input
                   type="checkbox"
@@ -186,10 +186,10 @@ export function AddGapsDialog({
                       }
                     />
                     <span className="min-w-0 flex-1">
-                      <span className="block text-[12px] text-foreground">
-                        <span className="font-mono text-[10px] text-primary">{gap.gap_id}</span> {gap.gap_name}
+                      <span className="block text-callout text-foreground">
+                        <span className="font-mono text-caption text-primary">{gap.gap_id}</span> {gap.gap_name}
                       </span>
-                      <span className="block text-[10px] text-muted-foreground">
+                      <span className="block text-caption text-muted-foreground">
                         {[gap.domain_label, gap.priority, ...gap.settings].join(" · ")}
                         {gap.other_groups.length > 0 ? ` · also in ${gap.other_groups.join(", ")}` : ""}
                       </span>
@@ -197,11 +197,11 @@ export function AddGapsDialog({
                   </label>
                 </li>
               ))}
-              {shown.length === 0 ? <li className="text-[12px] text-muted-foreground">No gaps match.</li> : null}
+              {shown.length === 0 ? <li className="text-callout text-muted-foreground">No gaps match.</li> : null}
             </ul>
           </div>
         )}
-        {error ? <p role="alert" className="text-[12px] text-destructive">{error}</p> : null}
+        {error ? <p role="alert" className="text-callout text-destructive">{error}</p> : null}
         <DialogFooter>
           <Button disabled={pending || selected.length === 0} onClick={() => void onSubmit()}>
             {pending ? "Adding…" : `Add ${selected.length || ""} gap${selected.length === 1 ? "" : "s"}`.replace("  ", " ")}
@@ -241,15 +241,15 @@ export function EditGroupDialog({ groupId, name, note }: { groupId: string; name
           <DialogDescription>The name and what the group covers.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             Name
             <input value={nextName} onChange={(event) => setNextName(event.target.value)} className={FIELD} />
           </label>
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             What it covers
             <input value={nextNote} onChange={(event) => setNextNote(event.target.value)} className={FIELD} />
           </label>
-          {error ? <p role="alert" className="text-[12px] text-destructive">{error}</p> : null}
+          {error ? <p role="alert" className="text-callout text-destructive">{error}</p> : null}
         </div>
         <DialogFooter>
           <Button
@@ -289,7 +289,7 @@ function MoveSelect({ gapId, groupId, otherGroups }: { gapId: string; groupId: s
         setPending(false);
         router.refresh();
       }}
-      className="h-8 rounded-lg border border-input bg-card px-2 text-[12px] text-foreground"
+      className="h-8 rounded-lg border border-input bg-card px-2 text-callout text-foreground"
     >
       <option value="">{pending ? "Moving…" : "Move to…"}</option>
       {otherGroups.map((group) => (
@@ -331,14 +331,14 @@ function RoomGapCard({
             override={card.status_override}
           />
         )}
-        <span className="text-[13px] text-muted-foreground">{DOMAIN_LABELS[card.domain]}</span>
+        <span className="text-body text-muted-foreground">{DOMAIN_LABELS[card.domain]}</span>
       </div>
       <GapStatusDisagreement computedStatus={card.computed_status} override={card.status_override} />
-      <h3 className="mt-2 text-[15px] font-semibold leading-6 text-foreground">
-        <span className="mr-1 font-mono text-[11px] font-normal text-primary">{card.gap_id}</span>
+      <h3 className="mt-2 text-headline font-semibold leading-6 text-foreground">
+        <span className="mr-1 font-mono text-caption font-normal text-primary">{card.gap_id}</span>
         {card.gap_name}
       </h3>
-      <p className="mt-2 text-[13px] text-muted-foreground">
+      <p className="mt-2 text-body text-muted-foreground">
         {card.tactics.length} tactic{card.tactics.length === 1 ? "" : "s"} mapped
         {!card.human_validated ? " · unconfirmed" : ""}
       </p>
@@ -426,7 +426,7 @@ export function BreakoutBoard({
 
   if (cards.length === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-border bg-card p-6 text-center text-[12px] text-muted-foreground">
+      <p className="rounded-lg border border-dashed border-border bg-card p-6 text-center text-callout text-muted-foreground">
         No gaps in this group yet. Use Add gaps to pick them, or filter by a theme and add them all at once.
       </p>
     );

@@ -39,11 +39,11 @@ export async function IngestPanel({
     <div>
       {demoFiles ? (
       <section aria-labelledby="demo-pack">
-        <h2 id="demo-pack" className="text-[13px] font-semibold text-foreground">
+        <h2 id="demo-pack" className="text-body font-semibold text-foreground">
           Demo source files
         </h2>
         {clientDemo ? (
-          <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
+          <p className="mb-4 mt-1 text-callout text-muted-foreground">
             Client demo: ingest each document to read it, pull out its evidence gaps and tactics, and map
             them. The AI steps replay a recorded run, so no model is called and the results are the same
             every time.{" "}
@@ -52,7 +52,7 @@ export async function IngestPanel({
             </a>
           </p>
         ) : (
-          <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
+          <p className="mb-4 mt-1 text-callout text-muted-foreground">
             Nothing is ingested until you do it. Ingesting a file reads it, pulls out its evidence gaps
             and tactics and maps them, using the connected AI model. If no model is connected it stops
             and says so.
@@ -64,17 +64,17 @@ export async function IngestPanel({
             return (
               <article key={file.id} className="border border-border bg-card p-4 rounded-lg">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <p className="text-[13px] text-foreground">{file.title}</p>
-                  <span className="text-[11px] text-muted-foreground">
+                  <p className="text-body text-foreground">{file.title}</p>
+                  <span className="text-caption text-muted-foreground">
                     {ingested ? "Ingested" : savedTitles.has(file.title) ? "Source saved · ingest to finish extraction" : "Not ingested"}
                   </span>
                 </div>
-                <p className="mt-1 text-[12px] text-muted-foreground">
+                <p className="mt-1 text-callout text-muted-foreground">
                   {file.filename} · {SOURCE_TYPE_LABELS[file.source_type]} ·{" "}
                   {FUNCTION_LABELS[file.stakeholder_function]}
                 </p>
                 {compact ? null : (
-                  <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
+                  <p className="mt-2 text-callout leading-5 text-muted-foreground">
                     {file.text.replace(/\s+/g, " ").slice(0, 220)}…
                   </p>
                 )}
@@ -82,7 +82,7 @@ export async function IngestPanel({
                   <a
                     href={clientDemo ? `/api/demo/files?file=${encodeURIComponent(file.filename)}` : `/demo-sources/${file.filename}`}
                     download={file.filename}
-                    className="inline-flex h-8 items-center rounded-lg border border-input px-2.5 text-[13px] text-foreground no-underline"
+                    className="inline-flex h-8 items-center rounded-lg border border-input px-2.5 text-body text-foreground no-underline"
                   >
                     Download
                   </a>
@@ -106,19 +106,19 @@ export async function IngestPanel({
 
       {compact ? null : (
         <>
-          <h2 className="mb-3 mt-8 text-[13px] text-foreground">Saved sources</h2>
+          <h2 className="mb-3 mt-8 text-body text-foreground">Saved sources</h2>
           {sources.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">None yet.</p>
+            <p className="text-callout text-muted-foreground">None yet.</p>
           ) : (
             <div className="grid gap-3">
               {sources.map((s) => (
                 <article key={s.id} className="border border-border bg-card p-4 rounded-lg">
-                  <Link href={`/sources/${encodeURIComponent(s.id)}`} className="text-[13px] text-foreground underline">{s.title}</Link>
+                  <Link href={`/sources/${encodeURIComponent(s.id)}`} className="text-body text-foreground underline">{s.title}</Link>
                   <SourceComparisonStatus comparison={comparisons.find(row => row.source_id === s.id)} sourceId={s.id} />
-                  <p className="mt-1 text-[12px] text-muted-foreground">
+                  <p className="mt-1 text-callout text-muted-foreground">
                     {SOURCE_TYPE_LABELS[s.source_type]} · {FUNCTION_LABELS[s.stakeholder_function]}
                   </p>
-                  <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
+                  <p className="mt-2 text-callout leading-5 text-muted-foreground">
                     {s.full_text.slice(0, 280)}
                     {s.full_text.length > 280 ? "…" : ""}
                   </p>
