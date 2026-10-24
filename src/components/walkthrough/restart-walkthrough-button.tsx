@@ -38,7 +38,7 @@ export function RestartWalkthroughButton({
         data-testid="restart-walkthrough"
         disabled={busy}
         onClick={() => void start()}
-        className={cn("inline-flex items-center gap-1.5 text-left text-[12px] text-muted-foreground hover:text-foreground disabled:opacity-50", className)}
+        className={cn("inline-flex items-center gap-1.5 text-left text-callout text-muted-foreground hover:text-foreground disabled:opacity-50", className)}
       >
         <Compass className="size-3.5 shrink-0" aria-hidden />
         {label}

@@ -27,19 +27,19 @@ export function GapMetadataView({
   if (compact) {
     const parts = [metadata.stakeholders.join(" · "), metadata.geography].filter(Boolean);
     if (parts.length === 0) return null;
-    return <span className={cn("text-[11px] text-muted-foreground", className)}>{parts.join(" · ")}</span>;
+    return <span className={cn("text-caption text-muted-foreground", className)}>{parts.join(" · ")}</span>;
   }
   if (!hasGapMetadata(metadata)) return null;
   return (
-    <dl className={cn("grid gap-2 text-[12px] sm:grid-cols-2", className)}>
+    <dl className={cn("grid gap-2 text-callout sm:grid-cols-2", className)}>
       {metadata.stakeholders.length ? (
         <div className="grid gap-1">
-          <dt className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+          <dt className="text-caption font-semibold text-muted-foreground">
             Impacted stakeholders
           </dt>
           <dd className="flex flex-wrap gap-1">
             {metadata.stakeholders.map((tag) => (
-              <span key={tag} className="rounded-md bg-primary/10 px-1.5 py-px text-[11px] text-indigo-800 dark:text-indigo-300">
+              <span key={tag} className="rounded-md bg-primary/10 px-1.5 py-px text-caption text-primary">
                 {tag}
               </span>
             ))}
@@ -48,13 +48,13 @@ export function GapMetadataView({
       ) : null}
       {metadata.geography ? (
         <div className="grid gap-1">
-          <dt className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Geography</dt>
+          <dt className="text-caption font-semibold text-muted-foreground">Geography</dt>
           <dd className="text-foreground">{metadata.geography}</dd>
         </div>
       ) : null}
       {metadata.regional_nuances ? (
         <div className="grid gap-1 sm:col-span-2">
-          <dt className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+          <dt className="text-caption font-semibold text-muted-foreground">
             Regional nuances
           </dt>
           <dd className="whitespace-pre-line text-foreground">{metadata.regional_nuances}</dd>
@@ -62,7 +62,7 @@ export function GapMetadataView({
       ) : null}
       {metadata.notes ? (
         <div className="grid gap-1 sm:col-span-2">
-          <dt className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Notes</dt>
+          <dt className="text-caption font-semibold text-muted-foreground">Notes</dt>
           <dd className="whitespace-pre-line text-foreground">{metadata.notes}</dd>
         </div>
       ) : null}
@@ -144,9 +144,9 @@ export function GapDetailsEditor({
     router.refresh();
   }
 
-  const input = "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-[12px] text-foreground disabled:opacity-70";
-  const area = "w-full rounded-lg border border-input bg-card px-2.5 py-1.5 text-[12px] text-foreground disabled:opacity-70";
-  const label = "grid gap-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground";
+  const input = "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-callout text-foreground disabled:opacity-70";
+  const area = "w-full rounded-lg border border-input bg-card px-2.5 py-1.5 text-callout text-foreground disabled:opacity-70";
+  const label = "grid gap-1 text-caption font-semibold text-muted-foreground";
   return (
     <div className={cn("grid gap-2", className)} data-testid="gap-metadata">
       <div className="grid gap-2 sm:grid-cols-2">
@@ -199,7 +199,7 @@ export function GapDetailsEditor({
           {message ? (
             <span
               role={message.tone === "error" ? "alert" : "status"}
-              className={cn("text-[11px]", message.tone === "error" ? "text-destructive" : "text-[var(--known-foreground)]")}
+              className={cn("text-caption", message.tone === "error" ? "text-destructive" : "text-[var(--known-foreground)]")}
             >
               {message.text}
             </span>

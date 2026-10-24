@@ -32,9 +32,9 @@ function StatusSummary({ row }: { row: MappingTableViewRow }) {
   const view = row.mapping_status;
   return (
     <div className="mb-2 grid gap-0.5" data-testid="mapping-gap-status">
-      <p className="text-[12px] text-foreground">{STATUS_LABEL[row.gap_status]}</p>
+      <p className="text-callout text-foreground">{STATUS_LABEL[row.gap_status]}</p>
       {view && view !== row.gap_status ? (
-        <p className="text-[10px] text-muted-foreground">
+        <p className="text-caption text-muted-foreground">
           {row.source === "human" ? "Saved row" : "AI view"}: {STATUS_LABEL[view].toLowerCase()}
           {STATUS_RANK[view] > STATUS_RANK[row.gap_status] ? " (proposed tactics don't count until planned)" : ""}
         </p>
@@ -72,7 +72,7 @@ export function MappingTableWorkbench({
   if (rows.length === 0) {
     if (!ai) {
       return (
-        <section className="border border-border bg-card p-4 text-[13px] text-muted-foreground rounded-lg">
+        <section className="border border-border bg-card p-4 text-body text-muted-foreground rounded-lg">
           No gaps to map yet. Add gaps and tactics on{" "}
           <Link href="/?place=upload" className="text-foreground underline-offset-2 hover:underline">
             Start
@@ -82,7 +82,7 @@ export function MappingTableWorkbench({
       );
     }
     return (
-      <section className="border border-border bg-card p-4 text-[13px] text-muted-foreground rounded-lg">
+      <section className="border border-border bg-card p-4 text-body text-muted-foreground rounded-lg">
         Upload and ingest sources on{" "}
         <Link href="/sources" className="text-foreground underline-offset-2 hover:underline">
           Sources
@@ -113,7 +113,7 @@ export function MappingTableWorkbench({
             {chip.label}
           </Button>
         ))}
-        <span className="text-[11px] text-muted-foreground">
+        <span className="text-caption text-muted-foreground">
           {ai
             ? "Accept, reject or edit any row — a saved row wins over later AI mapping runs, and a removed or rejected tactic is never mapped to that gap again."
             : "Pick the tactics and a status for each row and save it with a rationale."}
@@ -124,9 +124,9 @@ export function MappingTableWorkbench({
       </div>
 
       <div className="overflow-x-auto border border-border bg-card rounded-lg">
-        <table className="w-full min-w-[720px] border-collapse text-left text-[12px]">
+        <table className="w-full min-w-[720px] border-collapse text-left text-callout">
           <thead>
-            <tr className="border-b border-border bg-muted/30 text-[11px] uppercase tracking-wide text-muted-foreground">
+            <tr className="border-b border-border bg-muted/30 text-caption text-muted-foreground">
               <th className="px-3 py-2 font-medium">Gap</th>
               <th className="px-3 py-2 font-medium">Tactic(s)</th>
               <th className="px-3 py-2 font-medium">Status</th>
@@ -151,7 +151,7 @@ function tacticLabel(id: string, tactics: TacticLibraryItem[]) {
 
 function RationaleField({ placeholder }: { placeholder: string }) {
   return (
-    <label className="grid gap-1 text-[12px] text-muted-foreground">
+    <label className="grid gap-1 text-callout text-muted-foreground">
       Rationale (required)
       <textarea
         name="rationale"
@@ -172,25 +172,25 @@ function ProposalDecisions({ row }: { row: MappingTableViewRow }) {
     <ul className="mt-2 grid gap-2">
       {bearing.map((mapping) => {
         if (mapping.expansion_id && mapping.parent_tactic_id) return <li key={mapping.expansion_id} className="border border-border/70 p-2">
-          <p className="text-[11px]">Expansion: {mapping.tactic_name} · AI coverage {mapping.coverage.replaceAll("_", " ")}</p>
-          <p className="text-[10px] text-muted-foreground">{mapping.rationale}</p>
-          <Link href={`/tactics/${mapping.parent_tactic_id}`} className="text-[12px] underline">Review expansion scope and coverage</Link>
+          <p className="text-caption">Expansion: {mapping.tactic_name} · AI coverage {mapping.coverage.replaceAll("_", " ")}</p>
+          <p className="text-caption text-muted-foreground">{mapping.rationale}</p>
+          <Link href={`/tactics/${mapping.parent_tactic_id}`} className="text-callout underline">Review expansion scope and coverage</Link>
         </li>;
         const references = row.supporting_references?.[mapping.tactic_id] ?? [];
         const decision = row.decisions[mapping.tactic_id];
         const pair = { gap_id: row.gap_id, tactic_id: mapping.tactic_id, expected_relationship: row.relationship_versions?.[mapping.tactic_id] ?? "" };
         return (
           <li key={mapping.tactic_id} className="border border-border/70 p-2">
-            <p className="text-[11px] text-foreground">
+            <p className="text-caption text-foreground">
               {mapping.tactic_name} · AI coverage{" "}
               {mapping.coverage.replaceAll("_", " ")} ({mapping.confidence})
             </p>
-            <p className="text-[10px] text-muted-foreground">{mapping.rationale}</p>
-            {references.length ? <details className="mt-1 text-[11px]"><summary>Inspect supporting references</summary><ul>{references.map((reference, index) => <li key={index}>
+            <p className="text-caption text-muted-foreground">{mapping.rationale}</p>
+            {references.length ? <details className="mt-1 text-caption"><summary>Inspect supporting references</summary><ul>{references.map((reference, index) => <li key={index}>
               <Link href={reference.href}>{reference.title}</Link><p className="whitespace-pre-wrap">{reference.excerpt}</p><p>Supports: {reference.reason}</p>
-            </li>)}</ul></details> : <p className="text-[11px] text-muted-foreground">{mapping.references?.length ? "Supporting references unavailable for this suggestion" : "Supporting references not recorded for this suggestion"}. Make a manual judgement with a reason on the gap record.</p>}
+            </li>)}</ul></details> : <p className="text-caption text-muted-foreground">{mapping.references?.length ? "Supporting references unavailable for this suggestion" : "Supporting references not recorded for this suggestion"}. Make a manual judgement with a reason on the gap record.</p>}
             {decision ? (
-              <p className="mt-1 text-[10px] text-[var(--chart-3)]">
+              <p className="mt-1 text-caption text-[var(--chart-3)]">
                 {decision.status === "accepted" ? "Accepted" : "Rejected"} by {decision.actor_name ?? "a person"}
                 {decision.note ? `: ${decision.note}` : ""}
               </p>
@@ -251,17 +251,17 @@ function MappingRowEditor({
         <Link href={`/gaps/${row.gap_id}`} className="font-medium text-foreground no-underline hover:underline">
           {row.gap_name}
         </Link>
-        <p className="mt-1 text-[11px] text-muted-foreground">{row.gap_id}</p>
+        <p className="mt-1 text-caption text-muted-foreground">{row.gap_id}</p>
         {row.source === "proposal" ? (
-          <span className="mt-1 inline-block text-[10px] text-[var(--chart-3)]">AI proposal</span>
+          <span className="mt-1 inline-block text-caption text-[var(--chart-3)]">AI proposal</span>
         ) : null}
         {row.source === "human" ? (
-          <span className="mt-1 inline-block text-[10px] text-[var(--chart-3)]">
+          <span className="mt-1 inline-block text-caption text-[var(--chart-3)]">
             Saved by {row.human_lock?.actor_name ?? "a person"}
           </span>
         ) : null}
         {row.source === "human" && row.unreviewed_tactic_ids.length > 0 ? (
-          <p className="mt-1 text-[10px] text-amber-700 dark:text-amber-300" role="status">
+          <p className="mt-1 text-caption text-unknown-foreground" role="status">
             Mapped after your save, not yet reviewed:{" "}
             {row.unreviewed_tactic_ids.map((id) => tacticLabel(id, tactics)).join(", ")}
           </p>
@@ -270,7 +270,7 @@ function MappingRowEditor({
       <td className="px-3 py-3">
         <select
           multiple
-          className="min-h-[4.5rem] w-full max-w-xs rounded-md border border-input bg-transparent px-2 py-1 text-[12px]"
+          className="min-h-[4.5rem] w-full max-w-xs rounded-md border border-input bg-transparent px-2 py-1 text-callout"
           value={tacticIds.split(",").filter(Boolean)}
           onChange={(event) => {
             const selected = [...event.target.selectedOptions].map((option) => option.value);
@@ -283,7 +283,7 @@ function MappingRowEditor({
             </option>
           ))}
         </select>
-        <p className="mt-1 text-[10px] text-muted-foreground">
+        <p className="mt-1 text-caption text-muted-foreground">
           Hold Ctrl/Cmd to pick several. Deselecting a mapped tactic removes it and records it as rejected.
         </p>
       </td>
@@ -291,7 +291,7 @@ function MappingRowEditor({
         <StatusSummary row={row} />
         <select
           aria-label="Row status to save"
-          className="h-8 w-full min-w-[9.5rem] max-w-[12rem] rounded-md border border-input bg-card px-2 text-[12px]"
+          className="h-8 w-full min-w-[9.5rem] max-w-[12rem] rounded-md border border-input bg-card px-2 text-callout"
           value={status ?? ""}
           onChange={(event) => setStatus(event.target.value as MappingTableViewRow["mapping_status"])}
         >
@@ -308,20 +308,20 @@ function MappingRowEditor({
           ))}
         </select>
       </td>
-      <td className="px-3 py-3 text-[11px] text-muted-foreground">
+      <td className="px-3 py-3 text-caption text-muted-foreground">
         <ul className="list-disc pl-4">
           {row.rationale.slice(0, 2).map((line) => (
             <li key={line}>{line}</li>
           ))}
         </ul>
         {row.source === "proposal" ? <ProposalDecisions row={row} /> : null}
-        <Link href={`/gaps/${row.gap_id}`} className="mt-2 inline-block text-[10px] underline-offset-2 hover:underline">
+        <Link href={`/gaps/${row.gap_id}`} className="mt-2 inline-block text-caption underline-offset-2 hover:underline">
           Set coverage and dimensions on the gap page
         </Link>
       </td>
       <td className="px-3 py-3">
         {status ? null : (
-          <p className="mb-2 text-[11px] text-muted-foreground">
+          <p className="mb-2 text-caption text-muted-foreground">
             {ai ? "Pick a status, or choose Re-run mapping, before saving." : "Pick a status before saving."}
           </p>
         )}
@@ -330,7 +330,7 @@ function MappingRowEditor({
           <input type="hidden" name="tactic_ids" value={tacticIds} />
           <input type="hidden" name="mapping_status" value={status ?? ""} />
           <input type="hidden" name="before" value={JSON.stringify({ tactic_ids: row.tactic_ids, status: row.mapping_status })} />
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             Rationale (required)
             <textarea
               name="rationale"
@@ -339,7 +339,7 @@ function MappingRowEditor({
               value={rationale}
               onChange={(event) => setRationale(event.target.value)}
               placeholder="Why you accept or change this row"
-              className="min-h-14 w-full max-w-xs rounded-md border border-input bg-transparent px-2 py-1 text-[12px]"
+              className="min-h-14 w-full max-w-xs rounded-md border border-input bg-transparent px-2 py-1 text-callout"
             />
           </label>
         </LockForm>

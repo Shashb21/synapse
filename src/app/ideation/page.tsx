@@ -126,7 +126,7 @@ export default async function IdeationPage() {
 
       <div className="grid gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+          <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-caption text-muted-foreground">
             <li>
               <span className="text-foreground">{total}</span> {total === 1 ? "proposal" : "proposals"}
             </li>
@@ -155,16 +155,16 @@ export default async function IdeationPage() {
               />
             )
           ) : (
-            <p className="text-[11px] text-muted-foreground">{eligibleCount ? "Add ideas by hand." : "Existing work remains available. New AI ideation requires a validated High/Open priority."}</p>
+            <p className="text-caption text-muted-foreground">{eligibleCount ? "Add ideas by hand." : "Existing work remains available. New AI ideation requires a validated High/Open priority."}</p>
           )}
         </div>
 
         {withoutProposal.length > 0 ? (
           <section className="grid gap-2 rounded-md border border-[color:var(--unknown)]/40 bg-card p-3">
-            <h2 className="text-[13px] text-foreground">
+            <h2 className="text-body text-foreground">
               Prioritized gaps with no proposal ({withoutProposal.length})
             </h2>
-            <p className="max-w-3xl text-[12px] leading-4 text-muted-foreground">
+            <p className="max-w-3xl text-callout leading-4 text-muted-foreground">
               {ai
                 ? "These open gaps are validated as High priority but have no ideated tactic yet. Generate ideas for them, or add an idea by hand. Medium and Low gaps are not listed: their tactics come from the tactic library or by hand on the gap."
                 : "These open gaps are validated as High priority but have no ideated tactic yet. Add an idea by hand. Medium and Low gaps are not listed: their tactics come from the tactic library or by hand on the gap."}
@@ -174,11 +174,11 @@ export default async function IdeationPage() {
                 <li key={gap.gap_id} className="rounded-md border border-border bg-card p-2">
                   <Link
                     href={`/gaps/${gap.gap_id}`}
-                    className="text-[12px] text-foreground no-underline hover:underline"
+                    className="text-callout text-foreground no-underline hover:underline"
                   >
                     {gap.gap_name}
                   </Link>
-                  <p className="text-[10px] text-muted-foreground">
+                  <p className="text-caption text-muted-foreground">
                     {gap.band_label} priority · {gap.domain_label}
                   </p>
                   {mayIdeate ? (
@@ -205,8 +205,8 @@ export default async function IdeationPage() {
 
         {groups.length === 0 ? (
           <section className="grid gap-3 rounded-md border border-border bg-card p-4">
-            <h2 className="text-[13px] text-foreground">No proposal to review yet</h2>
-            <p className="max-w-2xl text-[12px] leading-5 text-muted-foreground">
+            <h2 className="text-body text-foreground">No proposal to review yet</h2>
+            <p className="max-w-2xl text-callout leading-5 text-muted-foreground">
               {ai ? "Ideas are generated" : "Ideas are added"} for open gaps validated as High priority only;
               Medium and Low gaps get their tactics from the tactic library or by hand on the gap. Validate a band on the{" "}
               <Link href="/?place=plan" className="text-foreground no-underline hover:underline">

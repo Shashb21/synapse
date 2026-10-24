@@ -112,8 +112,8 @@ export function ExportImageButton({
         {pending ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <Download className="size-3.5" aria-hidden />}
         Export PNG
       </Button>
-      {error ? <p className="text-[11px] text-destructive">{error}</p> : null}
-      {disabledReason ? <p className="text-[11px] text-muted-foreground">{disabledReason}</p> : null}
+      {error ? <p className="text-caption text-destructive">{error}</p> : null}
+      {disabledReason ? <p className="text-caption text-muted-foreground">{disabledReason}</p> : null}
     </div>
   );
 }

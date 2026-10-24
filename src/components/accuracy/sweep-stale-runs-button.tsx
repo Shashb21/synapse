@@ -29,11 +29,11 @@ export function SweepStaleRunsButton({ workspaceId }: { workspaceId: string }) {
         type="button"
         disabled={pending}
         onClick={sweep}
-        className="border border-border bg-background px-2 py-1 text-[11px] text-foreground disabled:opacity-50"
+        className="border border-border bg-background px-2 py-1 text-caption text-foreground disabled:opacity-50"
       >
         {pending ? "Sweeping…" : "Sweep stale runs"}
       </button>
-      {message ? <span className="text-[11px] text-muted-foreground">{message}</span> : null}
+      {message ? <span className="text-caption text-muted-foreground">{message}</span> : null}
     </div>
   );
 }

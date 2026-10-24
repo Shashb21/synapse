@@ -36,13 +36,13 @@ function TacticChecklist({
   empty: string;
 }) {
   if (tactics.length === 0) {
-    return <p className="mt-2 text-[11px] text-muted-foreground">{empty}</p>;
+    return <p className="mt-2 text-caption text-muted-foreground">{empty}</p>;
   }
   return (
     <ul className="mt-2 grid gap-1.5">
       {tactics.map((tactic) => (
         <li key={tactic.expansion_id ?? tactic.id}>
-          <label className="flex items-start gap-2 text-[12px] text-foreground">
+          <label className="flex items-start gap-2 text-callout text-foreground">
             <input
               type="checkbox"
               className="mt-0.5"
@@ -392,7 +392,7 @@ export function SplitGapDialog({
               {proposing ? "Proposing…" : "Suggest a split"}
             </Button>
           ) : (
-            <span className="self-center text-[11px] text-muted-foreground">
+            <span className="self-center text-caption text-muted-foreground">
               Fill the split in yourself.
             </span>
           )}
@@ -401,16 +401,16 @@ export function SplitGapDialog({
           <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={() => void rejectProposal()}>Reject suggestion</Button>
         ) : null}
         {proposalNote ? (
-          <p className="text-[11px] text-muted-foreground">{proposalNote}</p>
+          <p className="text-caption text-muted-foreground">{proposalNote}</p>
         ) : null}
         {mode === "split" ? (
           <div className="grid gap-4 md:grid-cols-2">
             <section className="border border-border bg-card p-3 rounded-lg">
-              <h3 className="text-[12px] font-semibold">Addressed</h3>
-              <p className="mt-1 text-[11px] text-muted-foreground">
+              <h3 className="text-callout font-semibold">Addressed</h3>
+              <p className="mt-1 text-caption text-muted-foreground">
                 Covered slice plus the mapped tactics that close it. At least one tactic is required.
               </p>
-              <label className="mt-3 grid gap-1 text-[12px] text-muted-foreground">
+              <label className="mt-3 grid gap-1 text-callout text-muted-foreground">
                 Title
                 <Textarea
                   value={addressedName}
@@ -422,7 +422,7 @@ export function SplitGapDialog({
                   }}
                 />
               </label>
-              <label className="mt-3 grid gap-1 text-[12px] text-muted-foreground">
+              <label className="mt-3 grid gap-1 text-callout text-muted-foreground">
                 Statement
                 <Textarea
                   value={addressedStatement}
@@ -435,7 +435,7 @@ export function SplitGapDialog({
                   }}
                 />
               </label>
-              <p className="mt-3 text-[12px] text-muted-foreground">Mapped tactics</p>
+              <p className="mt-3 text-callout text-muted-foreground">Mapped tactics</p>
               <TacticChecklist
                 tactics={tactics.filter(t => t.counts_toward_addressing)}
                 selected={addressedTacticIds}
@@ -447,11 +447,11 @@ export function SplitGapDialog({
               />
             </section>
             <section className="border border-border bg-card p-3 rounded-lg">
-              <h3 className="text-[12px] font-semibold">Open</h3>
-              <p className="mt-1 text-[11px] text-muted-foreground">
+              <h3 className="text-callout font-semibold">Open</h3>
+              <p className="mt-1 text-caption text-muted-foreground">
                 Residual evidence need. Remaining tactics are optional (usually none until Tactics).
               </p>
-              <label className="mt-3 grid gap-1 text-[12px] text-muted-foreground">
+              <label className="mt-3 grid gap-1 text-callout text-muted-foreground">
                 Title
                 <Textarea
                   value={openName}
@@ -463,7 +463,7 @@ export function SplitGapDialog({
                   }}
                 />
               </label>
-              <label className="mt-3 grid gap-1 text-[12px] text-muted-foreground">
+              <label className="mt-3 grid gap-1 text-callout text-muted-foreground">
                 Statement
                 <Textarea
                   value={openStatement}
@@ -477,7 +477,7 @@ export function SplitGapDialog({
                 />
               </label>
               {uncoveredDimensions.length > 0 ? (
-                <p className="mt-2 text-[11px] leading-4 text-muted-foreground">
+                <p className="mt-2 text-caption leading-4 text-muted-foreground">
                   Suggested as uncovered:{" "}
                   {uncoveredDimensions
                     .map((dimension) => DIMENSION_LABELS[dimension as CoverageDimension] ?? dimension)
@@ -485,7 +485,7 @@ export function SplitGapDialog({
                   . Say so in the statement if it matters; the split records the statement, not this list.
                 </p>
               ) : null}
-              <p className="mt-3 text-[12px] text-muted-foreground">Remaining tactics (optional)</p>
+              <p className="mt-3 text-callout text-muted-foreground">Remaining tactics (optional)</p>
               <TacticChecklist
                 tactics={leftoverTactics}
                 selected={openTacticIds}
@@ -499,7 +499,7 @@ export function SplitGapDialog({
           </div>
         ) : (
           <div className="grid gap-3">
-            <label className="grid gap-1 text-[12px] text-muted-foreground">
+            <label className="grid gap-1 text-callout text-muted-foreground">
               Rewritten title
               <Textarea
                 value={rewriteName}
@@ -508,7 +508,7 @@ export function SplitGapDialog({
                 onChange={(e) => setRewriteName(e.target.value)}
               />
             </label>
-            <label className="grid gap-1 text-[12px] text-muted-foreground">
+            <label className="grid gap-1 text-callout text-muted-foreground">
               Status
               <select
                 className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
@@ -523,7 +523,7 @@ export function SplitGapDialog({
             </label>
             {rewriteStatus === "validated_addressed" ? (
               <div>
-                <p className="text-[12px] text-muted-foreground">
+                <p className="text-callout text-muted-foreground">
                   Accompanying tactics (at least one)
                 </p>
                 <TacticChecklist
@@ -537,7 +537,7 @@ export function SplitGapDialog({
           </div>
         )}
         <div className="grid gap-2">
-          <label className="grid gap-1 text-[12px] text-muted-foreground">
+          <label className="grid gap-1 text-callout text-muted-foreground">
             {rationaleRequired
               ? "Rationale (required)"
               : suggested
@@ -549,7 +549,7 @@ export function SplitGapDialog({
               placeholder={rationaleRequired ? "Why this split or rewrite, in one line" : "Optional — add a note if you'd like"}
               onChange={(e) => setRationale(e.target.value)}
             />
-            <span className="text-[11px] text-muted-foreground/80">
+            <span className="text-caption text-muted-foreground/80">
               {mode === "split" && suggested
                 ? touched
                   ? "Required because you changed the suggested split. Stored on the edit record."
@@ -558,7 +558,7 @@ export function SplitGapDialog({
             </span>
           </label>
           {error ? (
-            <p role="alert" className="text-[12px] text-destructive">
+            <p role="alert" className="text-callout text-destructive">
               {error}
             </p>
           ) : null}

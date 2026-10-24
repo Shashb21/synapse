@@ -162,22 +162,22 @@ export default async function AccuracyLedgerPage({
       </PageIntro>
 
       {loadError ? (
-        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
+        <p className="mb-4 border border-destructive/40 bg-card p-2 text-callout text-destructive rounded-lg">
           {loadError}
         </p>
       ) : null}
 
       {!workspaceId ? (
         <section className="grid gap-2" aria-labelledby="ledger-empty">
-          <h2 id="ledger-empty" className="text-[13px] font-semibold text-foreground">
+          <h2 id="ledger-empty" className="text-body font-semibold text-foreground">
             Choose a workspace
           </h2>
-          <p className="text-[12px] text-muted-foreground">
+          <p className="text-callout text-muted-foreground">
             No workspace selected. Open a workspace from{" "}
             <Link href="/admin/accuracy" className="text-foreground underline-offset-2 hover:underline">
               Workspaces
             </Link>{" "}
-            or append <code className="text-[11px]">?workspace_id=</code> to this URL.
+            or append <code className="text-caption">?workspace_id=</code> to this URL.
           </p>
           {workspaces.length > 0 ? (
             <ul className="mt-2 flex flex-wrap gap-2">
@@ -185,7 +185,7 @@ export default async function AccuracyLedgerPage({
                 <li key={workspace.id}>
                   <Link
                     href={`/admin/accuracy/ledger?workspace_id=${encodeURIComponent(workspace.id)}`}
-                    className="inline-flex rounded-md border border-border px-2 py-1 text-[12px] text-muted-foreground no-underline hover:text-foreground"
+                    className="inline-flex rounded-md border border-border px-2 py-1 text-callout text-muted-foreground no-underline hover:text-foreground"
                   >
                     {workspace.name}
                   </Link>
@@ -199,10 +199,10 @@ export default async function AccuracyLedgerPage({
       ) : (
         <>
           <section className="mb-6 grid gap-2" aria-labelledby="workspace-picker">
-            <h2 id="workspace-picker" className="text-[13px] font-semibold text-foreground">
+            <h2 id="workspace-picker" className="text-body font-semibold text-foreground">
               Workspace
               {activeWorkspace ? (
-                <span className="ml-2 text-[12px] font-normal text-muted-foreground">
+                <span className="ml-2 text-callout font-normal text-muted-foreground">
                   · {activeWorkspace.name}
                   {planLabel ? ` · ${planLabel}` : ""}
                 </span>
@@ -213,7 +213,7 @@ export default async function AccuracyLedgerPage({
                 <li key={workspace.id}>
                   <Link
                     href={`/admin/accuracy/ledger?workspace_id=${encodeURIComponent(workspace.id)}`}
-                    className={`inline-flex rounded-md border px-2 py-1 text-[12px] no-underline ${
+                    className={`inline-flex rounded-md border px-2 py-1 text-callout no-underline ${
                       workspace.id === workspaceId
                         ? "border-foreground bg-card text-foreground"
                         : "border-border text-muted-foreground hover:text-foreground"
@@ -255,11 +255,11 @@ export default async function AccuracyLedgerPage({
           <LedgerFilterBar workspaceId={workspaceId} facets={facets} selected={filters} />
 
           <section className="mb-8 grid gap-2" aria-labelledby="gaps-section">
-            <h2 id="gaps-section" className="text-[13px] font-semibold text-foreground">
+            <h2 id="gaps-section" className="text-body font-semibold text-foreground">
               Gaps
             </h2>
             {gaps.length === 0 ? (
-              <p className="text-[12px] text-muted-foreground">
+              <p className="text-callout text-muted-foreground">
                 {filtering
                   ? "No gap cards match these filters."
                   : "No gap claims in this workspace yet."}
@@ -280,11 +280,11 @@ export default async function AccuracyLedgerPage({
           </section>
 
           <section className="grid gap-2" aria-labelledby="tactics-section">
-            <h2 id="tactics-section" className="text-[13px] font-semibold text-foreground">
+            <h2 id="tactics-section" className="text-body font-semibold text-foreground">
               Tactics
             </h2>
             {tactics.length === 0 ? (
-              <p className="text-[12px] text-muted-foreground">
+              <p className="text-callout text-muted-foreground">
                 {filtering
                   ? "No tactic cards match these filters."
                   : "No tactic claims in this workspace yet."}

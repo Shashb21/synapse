@@ -75,14 +75,14 @@ export async function PrioritizePlace({
   const footer = (
     <>
       <details className="group mt-6">
-        <summary className="cursor-pointer list-none text-[13px] font-medium text-foreground marker:content-none">
+        <summary className="cursor-pointer list-none text-body font-medium text-foreground marker:content-none">
           Addressed
-          <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">
+          <span className="ml-1.5 text-caption font-normal text-muted-foreground">
             ({addressed.length}) · not prioritized · click to expand
           </span>
         </summary>
         {addressed.length === 0 ? (
-          <p className="mt-2 text-[12px] text-muted-foreground">No addressed gaps yet.</p>
+          <p className="mt-2 text-callout text-muted-foreground">No addressed gaps yet.</p>
         ) : (
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             {addressed.map((card) => (
@@ -139,7 +139,7 @@ export async function PrioritizePlace({
         data-testid="prioritize-toolbar"
       >
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Setting</span>
+          <span className="text-caption font-semibold text-muted-foreground">Setting</span>
           <nav className="flex flex-wrap items-center gap-1" aria-label="Setting">
             {[ALL_SETTINGS_SCOPE, ...tags].map((tag) => {
               const active = tag === scope;
@@ -150,14 +150,14 @@ export async function PrioritizePlace({
                   href={scopeHref(tag)}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11.5px] font-medium no-underline",
+                    "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-caption font-medium no-underline",
                     active
                       ? "border-primary bg-primary text-primary-foreground"
                       : "border-border bg-background text-muted-foreground hover:text-foreground",
                   )}
                 >
                   {tag === ALL_SETTINGS_SCOPE ? "All settings" : tag}
-                  <span className={cn("text-[10px]", active ? "text-primary-foreground/80" : "text-muted-foreground")}>
+                  <span className={cn("text-caption", active ? "text-primary-foreground/80" : "text-muted-foreground")}>
                     {validatedIn(inScope)}/{inScope.length}
                   </span>
                 </Link>
@@ -165,7 +165,7 @@ export async function PrioritizePlace({
             })}
           </nav>
           {tags.length === 0 ? (
-            <span className="text-[11px] text-muted-foreground">
+            <span className="text-caption text-muted-foreground">
               Tag treatment settings on{" "}
               <Link href="/?place=gaps" className="text-foreground">
                 Evidence Inventory
@@ -176,17 +176,17 @@ export async function PrioritizePlace({
         </div>
         <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
           <div className="min-w-0 flex-1">
-            <p className="text-[12px] font-semibold text-foreground">
+            <p className="text-callout font-semibold text-foreground">
               {allCounts.validated} of {allCounts.open} Open gaps with priority validated across all settings
             </p>
-            <p className="text-[12px] text-muted-foreground">Priority applies across all settings</p>
+            <p className="text-callout text-muted-foreground">Priority applies across all settings</p>
             {scope !== ALL_SETTINGS_SCOPE ? (
-              <p className="text-[12px] text-muted-foreground">
+              <p className="text-callout text-muted-foreground">
                 In {scopeLabel}: {validatedIn(scopeGaps)} of {scopeGaps.length} priorities validated.
                 {" "}{allCounts.open - allCounts.validated} remaining across the whole plan.
               </p>
             ) : null}
-            <p className="text-[12px] text-muted-foreground">
+            <p className="text-callout text-muted-foreground">
               {state.asset.tactics_unlocked
                 ? "Tactics is unlocked. You can keep adjusting priorities here."
                 : allCounts.open === 0
@@ -200,7 +200,7 @@ export async function PrioritizePlace({
         </div>
       </section>
       {scopeGaps.length === 0 ? (
-        <p className="text-[12px] text-muted-foreground">
+        <p className="text-callout text-muted-foreground">
           {allCounts.open === 0 ? (
             <>No Open gaps across the plan. <Link href="/?place=gaps" className="underline">Review Evidence Inventory</Link> to check gap assessments or add a gap.</>
           ) : (

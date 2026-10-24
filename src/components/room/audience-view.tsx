@@ -153,14 +153,14 @@ export function AudienceView({ workspaceKey, initialState }: { workspaceKey: str
         );
       })}
       {ended ? (
-        <div className="absolute inset-0 grid place-items-center bg-black text-[13px] text-white/70" data-testid="audience-ended">
+        <div className="absolute inset-0 grid place-items-center bg-black text-body text-white/70" data-testid="audience-ended">
           End of slide show.
         </div>
       ) : null}
       <button
         type="button"
         onClick={() => void document.documentElement.requestFullscreen?.().catch(() => undefined)}
-        className="absolute right-3 top-3 inline-flex items-center gap-1.5 rounded-md border border-border bg-background/80 px-2 py-1 text-[12px] text-muted-foreground opacity-0 transition-opacity hover:opacity-100 focus-visible:opacity-100"
+        className="absolute right-3 top-3 inline-flex items-center gap-1.5 rounded-md border border-border bg-background/80 px-2 py-1 text-callout text-muted-foreground opacity-0 transition-opacity hover:opacity-100 focus-visible:opacity-100"
         title="Full screen (F)"
       >
         <Maximize className="size-3.5" aria-hidden /> Full screen

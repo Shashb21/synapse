@@ -55,7 +55,7 @@ export function WorkspaceSettings({
   return (
     <div className="grid gap-6">
       <section aria-labelledby="ws-name" className="grid gap-2">
-        <h2 id="ws-name" className="text-[13px] font-semibold text-foreground">
+        <h2 id="ws-name" className="text-body font-semibold text-foreground">
           Name
         </h2>
         {owner ? (
@@ -72,7 +72,7 @@ export function WorkspaceSettings({
               });
             }}
           >
-            <label className="grid min-w-56 flex-1 gap-1 text-[12px] text-muted-foreground">
+            <label className="grid min-w-56 flex-1 gap-1 text-callout text-muted-foreground">
               Workspace name
               <Input value={name} maxLength={80} onChange={(event) => setName(event.target.value)} />
             </label>
@@ -82,11 +82,11 @@ export function WorkspaceSettings({
             </Button>
           </form>
         ) : (
-          <p className="text-[13px] text-foreground">
-            {savedName} <span className="text-[11px] text-muted-foreground">(only the owner can rename it)</span>
+          <p className="text-body text-foreground">
+            {savedName} <span className="text-caption text-muted-foreground">(only the owner can rename it)</span>
           </p>
         )}
-        <p className="flex items-center gap-2 text-[11px] text-muted-foreground">
+        <p className="flex items-center gap-2 text-caption text-muted-foreground">
           Created {formatCreated(workspace.created_at)}
           {!owner && workspace.demo ? <DemoBadge /> : null}
         </p>
@@ -95,7 +95,7 @@ export function WorkspaceSettings({
       {owner ? <WorkspaceContents workspaceId={workspace.id} demo={workspace.demo} isCurrent={isCurrent} /> : null}
 
       <section aria-labelledby="ws-members" className="grid gap-2">
-        <h2 id="ws-members" className="text-[13px] font-semibold text-foreground">
+        <h2 id="ws-members" className="text-body font-semibold text-foreground">
           Members
         </h2>
         <ul className="grid gap-1" aria-label="Members">
@@ -105,7 +105,7 @@ export function WorkspaceSettings({
               data-testid="member-row"
               className="flex flex-wrap items-center gap-2 border border-border bg-card px-3 py-2 rounded-lg"
             >
-              <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
+              <span className="min-w-0 flex-1 truncate text-body text-foreground">
                 {member.principal}
                 {member.principal === me ? <span className="text-muted-foreground"> (you)</span> : null}
               </span>
@@ -153,7 +153,7 @@ export function WorkspaceSettings({
             });
           }}
         >
-          <label className="grid min-w-56 flex-1 gap-1 text-[12px] text-muted-foreground">
+          <label className="grid min-w-56 flex-1 gap-1 text-callout text-muted-foreground">
             Invite by email
             <Input
               type="email"
@@ -168,18 +168,18 @@ export function WorkspaceSettings({
             Invite
           </Button>
         </form>
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-caption text-muted-foreground">
           Invited people see this workspace the next time they sign in with that email address.
         </p>
       </section>
 
       {notice ? (
-        <p role="status" className="text-[12px] text-emerald-700 dark:text-emerald-300">
+        <p role="status" className="text-callout text-known-foreground">
           {notice}
         </p>
       ) : null}
       {error ? (
-        <p role="alert" className="text-[12px] text-destructive">
+        <p role="alert" className="text-callout text-destructive">
           {error}
         </p>
       ) : null}

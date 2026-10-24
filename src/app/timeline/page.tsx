@@ -85,7 +85,7 @@ export default async function TimelinePage({ searchParams }: { searchParams: Pro
           drag, add and sequence activities by hand; click an activity for its full record,
           export the chart as an image, and save the version you stand behind.
         </PageIntro>
-        <div className="flex flex-wrap gap-3 text-[12px] text-muted-foreground">
+        <div className="flex flex-wrap gap-3 text-callout text-muted-foreground">
           {history.some((entry) => entry.status === "final") ? (
             <Link href="/plan/final" className="no-underline hover:underline" data-testid="open-final-plan">
               Open the complete final plan →

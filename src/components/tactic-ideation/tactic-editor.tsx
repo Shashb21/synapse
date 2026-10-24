@@ -18,8 +18,8 @@ import {
 } from "@/lib/iegp/enums";
 import { postJson } from "@/lib/post-json";
 
-const FIELD = "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-[12px] text-foreground";
-const LABEL = "grid gap-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground";
+const FIELD = "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-callout text-foreground";
+const LABEL = "grid gap-1 text-caption font-semibold text-muted-foreground";
 
 /** The plain fields that go through `modify_tactic`; status has its own lock. */
 const TEXT_FIELDS = ["name", "type", "evidence_question", "population", "intervention", "comparator", "outcomes", "study_design", "data_source", "geography", "start_date", "evidence_available", "budget", "owner", "function"] as const;
@@ -140,7 +140,7 @@ export function TacticEditor({
 
   return (
     <form onSubmit={submit} onChange={() => onDirtyChange?.(true)} className="flex min-h-full flex-col" aria-label={`Edit ${tactic.name}`}>
-      <p className="text-[12px] text-muted-foreground">Every change needs a rationale and is kept on the edit record. The tactic evidence question is separate from each gap’s Evidence needed.</p>
+      <p className="text-callout text-muted-foreground">Every change needs a rationale and is kept on the edit record. The tactic evidence question is separate from each gap’s Evidence needed.</p>
       <div className="grid flex-1 gap-3 px-4 py-3">
         <label className={LABEL}>
           Tactic name
@@ -176,7 +176,7 @@ export function TacticEditor({
             required
             rows={3}
             defaultValue={tactic.evidence_question}
-            className="w-full resize-none rounded-lg border border-input bg-card px-2.5 py-1.5 text-[12px] font-normal normal-case tracking-normal text-foreground"
+            className="w-full resize-none rounded-lg border border-input bg-card px-2.5 py-1.5 text-callout font-normal normal-case tracking-normal text-foreground"
           />
         </label>
         <details>
@@ -223,11 +223,11 @@ export function TacticEditor({
             name="rationale"
             rows={2}
             placeholder="What changed and why — stored with the edit"
-            className="w-full resize-none rounded-lg border border-input bg-card px-2.5 py-1.5 text-[12px] font-normal normal-case tracking-normal text-foreground"
+            className="w-full resize-none rounded-lg border border-input bg-card px-2.5 py-1.5 text-callout font-normal normal-case tracking-normal text-foreground"
           />
         </label>
         {error ? (
-          <p role="alert" className="text-[12px] text-destructive">
+          <p role="alert" className="text-callout text-destructive">
             {error}
           </p>
         ) : null}

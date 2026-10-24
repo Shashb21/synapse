@@ -64,7 +64,7 @@ export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["curr
     <div
       data-app-chrome
       data-testid="demo-reset-bar"
-      className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-amber-500/30 bg-amber-500/5 px-4 py-1 text-[11px] text-muted-foreground sm:px-6"
+      className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-unknown/40 bg-unknown/5 px-4 py-1 text-caption text-muted-foreground sm:px-6"
     >
       <DemoBadge testId="demo-bar-badge" />
       <span>
@@ -94,7 +94,7 @@ export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["curr
       <a
         href="/api/demo/files"
         download
-        className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-foreground underline-offset-2 hover:underline"
+        className="ml-auto inline-flex items-center gap-1 text-caption font-medium text-foreground underline-offset-2 hover:underline"
       >
         <Download className="size-3" aria-hidden />
         Download demo files
@@ -122,7 +122,7 @@ export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["curr
               </DialogDescription>
             </DialogHeader>
             {error ? (
-              <p role="alert" className="text-[12px] text-destructive">
+              <p role="alert" className="text-callout text-destructive">
                 {error}
               </p>
             ) : null}

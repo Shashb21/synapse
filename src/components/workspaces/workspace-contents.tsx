@@ -76,11 +76,11 @@ export function WorkspaceContents({
 
   return (
     <section aria-labelledby="ws-contents" className="grid gap-2">
-      <h2 id="ws-contents" className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
+      <h2 id="ws-contents" className="flex items-center gap-2 text-body font-semibold text-foreground">
         Contents
         {demo ? <DemoBadge testId="settings-demo-badge" /> : null}
       </h2>
-      <p className="text-[12px] text-muted-foreground">
+      <p className="text-callout text-muted-foreground">
         {demo
           ? "This workspace holds the Velmara demo data, for trying Synapse out."
           : "This workspace holds your own plan. Load the Velmara demo to try Synapse with worked data."}
@@ -112,7 +112,7 @@ export function WorkspaceContents({
                 <DialogDescription>{COPY[action].body}</DialogDescription>
               </DialogHeader>
               {error ? (
-                <p role="alert" className="text-[12px] text-destructive">
+                <p role="alert" className="text-callout text-destructive">
                   {error}
                 </p>
               ) : null}
@@ -134,12 +134,12 @@ export function WorkspaceContents({
         ))}
       </div>
       {notice ? (
-        <p role="status" className="text-[12px] text-emerald-600 dark:text-emerald-300">
+        <p role="status" className="text-callout text-known-foreground">
           {notice}
         </p>
       ) : null}
       {error && open === null ? (
-        <p role="alert" className="text-[12px] text-destructive">
+        <p role="alert" className="text-callout text-destructive">
           {error}
         </p>
       ) : null}

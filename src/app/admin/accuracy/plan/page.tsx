@@ -69,13 +69,13 @@ export default async function AccuracyPlanPage({
       </PageIntro>
 
       {loadError ? (
-        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
+        <p className="mb-4 border border-destructive/40 bg-card p-2 text-callout text-destructive rounded-lg">
           {loadError}
         </p>
       ) : null}
 
       {!workspaceId ? (
-        <p className="text-[12px] text-muted-foreground">
+        <p className="text-callout text-muted-foreground">
           Open from{" "}
           <Link href="/admin/accuracy" className="underline-offset-2 hover:underline">
             Workspaces
@@ -86,7 +86,7 @@ export default async function AccuracyPlanPage({
         <UnknownWorkspaceNotice workspaceId={workspaceId} />
       ) : (
         <>
-          <p className="mb-3 text-[12px] text-muted-foreground">
+          <p className="mb-3 text-callout text-muted-foreground">
             Workspace · {active ? workspaceLabel(active) : workspaceId} · {gaps.length} gap(s) · {eligibleCount} high
             open eligible for {aiOn ? "ideate" : "a proposed tactic"} · edit proposed tactics (name, type, design, dates) on the{" "}
             <Link
@@ -106,7 +106,7 @@ export default async function AccuracyPlanPage({
             />
           ) : null}
           {gaps.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">{aiOn ? "No gaps yet — seed gold or extract needs." : "No gaps yet — add them by hand on the Ledger."}</p>
+            <p className="text-callout text-muted-foreground">{aiOn ? "No gaps yet — seed gold or extract needs." : "No gaps yet — add them by hand on the Ledger."}</p>
           ) : (
             <div className="grid gap-2">
               <PlanIdeateAllButton workspaceId={workspaceId} eligibleCount={eligibleCount} />

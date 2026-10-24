@@ -48,7 +48,7 @@ export function CustomTypeFields({
         <button
           type="button"
           onClick={() => { setOn(true); onChange?.(); }}
-          className="justify-self-start rounded-md border border-border bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+          className="justify-self-start rounded-md border border-border bg-muted px-2 py-1 text-caption font-medium text-muted-foreground hover:text-foreground"
         >
           + Custom type
         </button>
@@ -58,7 +58,7 @@ export function CustomTypeFields({
 
   return (
     <fieldset className="grid gap-2 rounded-md border border-primary/30 bg-primary/5 p-2">
-      <legend className="px-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+      <legend className="px-1 text-caption font-semibold text-muted-foreground">
         Custom type
       </legend>
       <input type="hidden" name="custom_type_color" value={color} />
@@ -82,7 +82,7 @@ export function CustomTypeFields({
         <button
           type="button"
           onClick={() => { setOn(false); onChange?.(); }}
-          className="shrink-0 rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-[11px] font-medium text-indigo-800 dark:text-indigo-300"
+          className="shrink-0 rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-caption font-medium text-primary"
         >
           ← Standard type
         </button>
@@ -108,23 +108,23 @@ export function CustomTypeFields({
           value={color}
           onChange={(event) => { setColor(event.target.value.trim()); onChange?.(); }}
           className={cn(
-            "ml-1 h-6 w-20 rounded border bg-card px-1.5 font-mono text-[11px]",
+            "ml-1 h-6 w-20 rounded border bg-card px-1.5 font-mono text-caption",
             validColor ? "border-input" : "border-destructive",
           )}
         />
       </div>
-      {!validColor ? <p className="text-[11px] text-destructive">Use a hex colour like #4f46e5.</p> : null}
+      {!validColor ? <p className="text-caption text-destructive">Use a hex colour like #4f46e5.</p> : null}
       <div className="flex items-center gap-2">
-        <span className="text-[10px] text-muted-foreground">Preview</span>
+        <span className="text-caption text-muted-foreground">Preview</span>
         <span
           data-testid="custom-type-preview"
-          className="inline-flex h-[18px] items-center rounded-sm border-l-[3px] px-1.5 text-[10px] font-semibold"
+          className="inline-flex h-[18px] items-center rounded-sm border-l-[3px] px-1.5 text-caption font-semibold"
           style={validColor ? { borderLeftColor: color, backgroundColor: `${color}1a`, color } : undefined}
         >
           {label.trim() || "Custom"}
         </span>
       </div>
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-caption text-muted-foreground">
         The standard type above still decides how the tactic maps and counts; the custom name and colour are
         what everyone sees.
       </p>

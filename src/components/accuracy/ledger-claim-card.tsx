@@ -173,61 +173,61 @@ export function LedgerClaimCard({
   return (
     <li className="border border-border bg-card p-3 rounded-lg" data-testid={`ledger-claim-${claim.id}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <p className="min-w-0 flex-1 text-[13px] text-foreground">
+        <p className="min-w-0 flex-1 text-body text-foreground">
           {claim.external_id ? (
             <span className="mr-1.5 font-medium text-foreground">{claim.external_id}</span>
           ) : null}
           {claim.statement}
         </p>
-        <span className={`shrink-0 text-[11px] ${validationTone(claim)}`}>{validationLabel(claim)}</span>
+        <span className={`shrink-0 text-caption ${validationTone(claim)}`}>{validationLabel(claim)}</span>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <Badge variant="outline" className="text-[10px]">
+        <Badge variant="outline" className="text-caption">
           {claim.source_badge}
         </Badge>
         {humanEdited ? (
           <Badge
             variant="outline"
-            className="border-foreground/60 text-[10px]"
+            className="border-foreground/60 text-caption"
             title={`Human-locked: ${claim.human_locked?.join(", ")}`}
           >
             Human-edited · locked
           </Badge>
         ) : null}
         {claim.chapter_label ? (
-          <Badge variant="secondary" className="text-[10px]">
+          <Badge variant="secondary" className="text-caption">
             {claim.chapter_label}
           </Badge>
         ) : null}
         {claim.si_label ? (
-          <Badge variant="secondary" className="text-[10px]">
+          <Badge variant="secondary" className="text-caption">
             {claim.si_label}
           </Badge>
         ) : null}
         {!claim.chapter_label && !claim.si_label ? (
-          <Badge variant="secondary" className="text-[10px]">
+          <Badge variant="secondary" className="text-caption">
             {claim.claim_type}
           </Badge>
         ) : null}
         {claim.claim_type === "gap" && claim.computed_status ? (
-          <Badge variant="outline" className="text-[10px]">
+          <Badge variant="outline" className="text-caption">
             {claim.status_override ? `derived ${claim.computed_status}` : claim.computed_status}
           </Badge>
         ) : null}
         {claim.claim_type === "gap" && claim.status_override ? (
-          <Badge variant="default" className="text-[10px]">
+          <Badge variant="default" className="text-caption">
             override · {claim.status_override}
           </Badge>
         ) : null}
-        <span className="text-[11px] text-muted-foreground">{claim.id}</span>
+        <span className="text-caption text-muted-foreground">{claim.id}</span>
       </div>
       {claim.validation_rationale ? (
-        <p className="mt-2 text-[11px] text-muted-foreground">
+        <p className="mt-2 text-caption text-muted-foreground">
           Last rationale: {claim.validation_rationale}
         </p>
       ) : null}
       {claim.last_edit ? (
-        <p className="mt-1 text-[11px] text-muted-foreground">
+        <p className="mt-1 text-caption text-muted-foreground">
           Last edit by {claim.last_edit.by} · {claim.last_edit.at.slice(0, 16).replace("T", " ")} —{" "}
           {claim.last_edit.rationale}
         </p>
@@ -235,7 +235,7 @@ export function LedgerClaimCard({
 
       {claim.merge_proposal ? (
         <div className="mt-3 grid gap-2 border border-dashed border-border p-2" data-testid="merge-proposal">
-          <p className="text-[11px] text-foreground">
+          <p className="text-caption text-foreground">
             Model proposes this duplicates{" "}
             <span className="font-medium">
               {claim.merge_proposal.survivor_statement ?? claim.merge_proposal.survivor_id}
@@ -251,7 +251,7 @@ export function LedgerClaimCard({
             onChange={(e) => setProposalRationale(e.target.value)}
             rows={2}
             placeholder="Rationale to confirm or dismiss the merge (required)"
-            className="text-[12px]"
+            className="text-callout"
           />
           <div className="flex flex-wrap gap-2">
             <Button
@@ -332,17 +332,17 @@ export function LedgerClaimCard({
             disabled={pending !== null}
             idPrefix={`edit-${claim.id}`}
           />
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             Edit rationale (required)
             <Textarea
               value={editRationale}
               onChange={(e) => setEditRationale(e.target.value)}
               rows={2}
               placeholder="Why this change — kept in the audit trail"
-              className="text-[12px]"
+              className="text-callout"
             />
           </label>
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             Changed fields become human-locked: later extract / merge / status runs will not
             overwrite them.
           </p>
@@ -356,12 +356,12 @@ export function LedgerClaimCard({
 
       {panel === "merge" ? (
         <div className="mt-3 grid gap-2 border-t border-border pt-3">
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             Merge this {kind} into (survivor)
             <select
               value={mergeTarget}
               onChange={(e) => setMergeTarget(e.target.value)}
-              className="h-8 rounded-md border border-border bg-background px-2 text-[12px] text-foreground"
+              className="h-8 rounded-md border border-border bg-background px-2 text-callout text-foreground"
             >
               <option value="">Choose a claim…</option>
               {mergeTargets.map((row) => (
@@ -376,7 +376,7 @@ export function LedgerClaimCard({
             onChange={(e) => setMergeRationale(e.target.value)}
             rows={2}
             placeholder="Why these are the same item (required)"
-            className="text-[12px]"
+            className="text-callout"
           />
           <div>
             <Button
@@ -402,14 +402,14 @@ export function LedgerClaimCard({
 
       {!claim.validated || claim.status === "rejected" ? (
         <div className="mt-3 grid gap-2">
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             Rationale (required)
             <Textarea
               value={rationale}
               onChange={(event) => setRationale(event.target.value)}
               rows={2}
               placeholder="Why validate or reject this claim"
-              className="text-[12px]"
+              className="text-callout"
             />
           </label>
           <div className="flex flex-wrap gap-2">
@@ -433,14 +433,14 @@ export function LedgerClaimCard({
         </div>
       ) : (
         <div className="mt-3 grid gap-2">
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             Re-validate / reject with rationale
             <Textarea
               value={rationale}
               onChange={(event) => setRationale(event.target.value)}
               rows={2}
               placeholder="Why change this decision"
-              className="text-[12px]"
+              className="text-callout"
             />
           </label>
           <div className="flex flex-wrap gap-2">
@@ -456,7 +456,7 @@ export function LedgerClaimCard({
         </div>
       )}
       {error ? (
-        <p className="mt-2 text-[11px] text-destructive" role="alert">
+        <p className="mt-2 text-caption text-destructive" role="alert">
           {error}
         </p>
       ) : null}

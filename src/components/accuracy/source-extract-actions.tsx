@@ -10,7 +10,7 @@ export function ExtractKeyGateBanner({ gate }: { gate: LiveExtractGate }) {
   if (gate.ready && gate.stub) return null;
   if (gate.ready) {
     return (
-      <p className="mb-3 text-[12px] text-muted-foreground" data-testid="extract-key-gate">
+      <p className="mb-3 text-callout text-muted-foreground" data-testid="extract-key-gate">
         Live extract will use {gate.provider_label} (server API key).
       </p>
     );
@@ -21,14 +21,14 @@ export function ExtractKeyGateBanner({ gate }: { gate: LiveExtractGate }) {
       data-testid="extract-key-gate"
       role="status"
     >
-      <p className="text-[13px] text-foreground">{gate.message}</p>
-      <p className="mt-1 text-[12px] text-muted-foreground">
+      <p className="text-body text-foreground">{gate.message}</p>
+      <p className="mt-1 text-callout text-muted-foreground">
         Grok is the default route; Claude is the one-click alternate. Parsing uses the parse route
         in the control panel.
       </p>
       <Link
         href={gate.connect_path}
-        className="mt-2 inline-block text-[12px] text-foreground underline-offset-2 hover:underline"
+        className="mt-2 inline-block text-callout text-foreground underline-offset-2 hover:underline"
       >
         Check provider key status in /admin/control →
       </Link>
@@ -95,7 +95,7 @@ export function SourceExtractActions({
 
   if (blockCount < 1) {
     return (
-      <p className="mt-2 text-[11px] text-muted-foreground">
+      <p className="mt-2 text-caption text-muted-foreground">
         No parse blocks — re-upload or seed before extracting.
       </p>
     );
@@ -108,7 +108,7 @@ export function SourceExtractActions({
           type="button"
           disabled={pending || !extractReady}
           onClick={() => runExtract(["need", "inventory"])}
-          className="border border-foreground bg-foreground px-2 py-1 text-[11px] text-background disabled:opacity-50"
+          className="border border-foreground bg-foreground px-2 py-1 text-caption text-background disabled:opacity-50"
         >
           {pending ? "Extracting…" : "Extract needs + inventory"}
         </button>
@@ -116,7 +116,7 @@ export function SourceExtractActions({
           type="button"
           disabled={pending || !extractReady}
           onClick={() => runExtract(["need"])}
-          className="border border-border px-2 py-1 text-[11px] text-foreground disabled:opacity-50 hover:bg-muted/40"
+          className="border border-border px-2 py-1 text-caption text-foreground disabled:opacity-50 hover:bg-muted/40"
         >
           Needs only
         </button>
@@ -124,19 +124,19 @@ export function SourceExtractActions({
           type="button"
           disabled={pending || !extractReady}
           onClick={() => runExtract(["inventory"])}
-          className="border border-border px-2 py-1 text-[11px] text-foreground disabled:opacity-50 hover:bg-muted/40"
+          className="border border-border px-2 py-1 text-caption text-foreground disabled:opacity-50 hover:bg-muted/40"
         >
           Inventory only
         </button>
         <Link
           href={`/admin/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}
-          className="px-1 text-[11px] text-foreground underline-offset-2 hover:underline"
+          className="px-1 text-caption text-foreground underline-offset-2 hover:underline"
         >
           Ledger →
         </Link>
       </div>
       {error ? (
-        <p className="text-[11px] text-destructive" data-testid="extract-outcome">
+        <p className="text-caption text-destructive" data-testid="extract-outcome">
           {error}
           {connectPath ? (
             <>
@@ -149,7 +149,7 @@ export function SourceExtractActions({
         </p>
       ) : null}
       {summary ? (
-        <p className="text-[11px] text-muted-foreground" data-testid="extract-outcome">
+        <p className="text-caption text-muted-foreground" data-testid="extract-outcome">
           {summary}
         </p>
       ) : null}

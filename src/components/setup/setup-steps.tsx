@@ -52,10 +52,10 @@ function Section({ title, intro, children, id }: { title: string; intro: string;
       className="grid gap-5 rounded-lg border border-border bg-gradient-to-br from-card/80 via-card/40 to-transparent p-5"
     >
       <header className="grid gap-1">
-        <h2 id={`setup-${id}-title`} className="text-[13px] font-semibold text-foreground">
+        <h2 id={`setup-${id}-title`} className="text-body font-semibold text-foreground">
           {title}
         </h2>
-        <p className="max-w-2xl text-[12px] leading-relaxed text-muted-foreground">{intro}</p>
+        <p className="max-w-2xl text-callout leading-relaxed text-muted-foreground">{intro}</p>
       </header>
       {children}
     </section>
@@ -227,7 +227,7 @@ export function ObjectivesStep({ form, set, errors }: StepProps) {
               hint="Optional shared evidence deadline. Leave blank if unknown."
             />
             {objectiveDateWarnings(item).map(warning => (
-              <p key={warning} role="status" className="text-[12px] text-amber-700 dark:text-amber-300 md:col-span-2">{warning}</p>
+              <p key={warning} role="status" className="text-callout text-unknown-foreground md:col-span-2">{warning}</p>
             ))}
             <ChoiceField
               label="Strategic importance (1–5)"
@@ -353,7 +353,7 @@ export function StakeholdersStep({ form, set, errors }: StepProps) {
         ))}
       </datalist>
       {missing.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-1 text-caption text-muted-foreground">
           <span>Quick add:</span>
           {missing.map((f) => (
             <button
@@ -396,7 +396,7 @@ export function SettingsStep({ form, set }: StepProps) {
 function Row({ label, value }: { label: string; value: ReactNode }) {
   const empty = value === "" || value === null || value === undefined || (Array.isArray(value) && value.length === 0);
   return (
-    <div className="grid grid-cols-[150px_1fr] gap-2 py-1 text-[12px]">
+    <div className="grid grid-cols-[150px_1fr] gap-2 py-1 text-callout">
       <dt className="text-muted-foreground">{label}</dt>
       <dd className={cn("min-w-0 break-words text-foreground", empty && "text-muted-foreground/70")}>{empty ? "—" : value}</dd>
     </div>
@@ -418,13 +418,13 @@ export function SetupSummary({
   const block = (section: SetupSection, title: string, rows: ReactNode) => (
     <div key={section} className="grid content-start gap-1 rounded-md border border-border bg-card p-4" data-testid={`setup-summary-${section}`}>
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-[12px] font-semibold text-foreground">{title}</h3>
-        <button type="button" className="text-[11px] text-[var(--chart-1)] hover:underline" onClick={() => onEdit(section)}>
+        <h3 className="text-callout font-semibold text-foreground">{title}</h3>
+        <button type="button" className="text-caption text-[var(--chart-1)] hover:underline" onClick={() => onEdit(section)}>
           Edit
         </button>
       </div>
       {issues[section]?.length ? (
-        <ul className="grid gap-0.5 text-[11px] text-destructive">
+        <ul className="grid gap-0.5 text-caption text-destructive">
           {issues[section]!.map((message) => (
             <li key={message}>{message}</li>
           ))}

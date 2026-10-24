@@ -72,17 +72,17 @@ export default async function AccuracyRunsPage({
       </PageIntro>
 
       {loadError ? (
-        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
+        <p className="mb-4 border border-destructive/40 bg-card p-2 text-callout text-destructive rounded-lg">
           {loadError}
         </p>
       ) : null}
 
       <section className="mb-6 grid gap-2" aria-labelledby="workspace-picker">
-        <h2 id="workspace-picker" className="text-[13px] font-semibold text-foreground">
+        <h2 id="workspace-picker" className="text-body font-semibold text-foreground">
           Workspace
         </h2>
         {workspaces.length === 0 ? (
-          <p className="text-[12px] text-muted-foreground">
+          <p className="text-callout text-muted-foreground">
             No workspaces yet.{" "}
             <Link href="/admin/accuracy" className="text-foreground underline-offset-2 hover:underline">
               See workspaces
@@ -95,7 +95,7 @@ export default async function AccuracyRunsPage({
               <li key={workspace.id}>
                 <Link
                   href={`/admin/accuracy/runs?workspace_id=${encodeURIComponent(workspace.id)}`}
-                  className={`inline-flex rounded-md border px-2 py-1 text-[12px] no-underline ${
+                  className={`inline-flex rounded-md border px-2 py-1 text-callout no-underline ${
                     workspace.id === workspaceId
                       ? "border-foreground bg-card text-foreground"
                       : "border-border text-muted-foreground hover:text-foreground"
@@ -117,10 +117,10 @@ export default async function AccuracyRunsPage({
 
       <section className="grid gap-2" aria-labelledby="recent-runs">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 id="recent-runs" className="text-[13px] font-semibold text-foreground">
+          <h2 id="recent-runs" className="text-body font-semibold text-foreground">
             Recent runs
             {activeWorkspace ? (
-              <span className="ml-2 text-[12px] font-normal text-muted-foreground">
+              <span className="ml-2 text-callout font-normal text-muted-foreground">
                 · {activeWorkspace.name}
                 {planLabel ? ` · ${planLabel}` : ""}
               </span>
@@ -129,9 +129,9 @@ export default async function AccuracyRunsPage({
           {activeWorkspace ? <SweepStaleRunsButton workspaceId={workspaceId} /> : null}
         </div>
         {!workspaceId ? (
-          <p className="text-[12px] text-muted-foreground">Select a workspace to list runs.</p>
+          <p className="text-callout text-muted-foreground">Select a workspace to list runs.</p>
         ) : unknownWorkspace ? null : runs.length === 0 ? (
-          <p className="text-[12px] text-muted-foreground">Nothing has run in this workspace yet.</p>
+          <p className="text-callout text-muted-foreground">Nothing has run in this workspace yet.</p>
         ) : (
           <ul className="grid gap-2">
             {runs.map((run) => {
@@ -139,19 +139,19 @@ export default async function AccuracyRunsPage({
               return (
                 <li key={run.id} className="border border-border bg-card p-3 rounded-lg">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <p className="text-[13px] text-foreground">
+                    <p className="text-body text-foreground">
                       {run.call_kind} · {run.module_id} v{run.module_version}
                       {run.agent_role !== "none" ? ` · ${run.agent_role}` : ""}
                     </p>
-                    <span className={`text-[11px] ${statusTone(run.status)}`}>
+                    <span className={`text-caption ${statusTone(run.status)}`}>
                       {run.status}
                       {run.duration_ms === null ? "" : ` · ${run.duration_ms} ms`}
                     </span>
                   </div>
-                  <p className="mt-1 text-[12px] text-muted-foreground">
+                  <p className="mt-1 text-callout text-muted-foreground">
                     {run.summary ?? run.error ?? "no summary"}
                   </p>
-                  <p className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                  <p className="mt-1 flex flex-wrap items-center gap-2 text-caption text-muted-foreground">
                     <span>{run.started_at.slice(0, 16).replace("T", " ")}</span>
                     <span>·</span>
                     <span>{run.actor_name}</span>
@@ -170,7 +170,7 @@ export default async function AccuracyRunsPage({
                       const name = "name" in score ? String(score.name) : `eval-${index}`;
                       const value = "value" in score ? String(score.value) : "—";
                       return (
-                        <Badge key={`${run.id}-${name}`} variant="secondary" className="text-[10px]">
+                        <Badge key={`${run.id}-${name}`} variant="secondary" className="text-caption">
                           {name} {value}
                         </Badge>
                       );

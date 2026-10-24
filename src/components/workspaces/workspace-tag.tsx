@@ -64,16 +64,16 @@ export function WorkspaceTag({ tag, dense }: { tag: WorkspaceTagModel; dense?: b
         >
           <span
             aria-hidden
-            className="flex size-5 shrink-0 items-center justify-center rounded bg-primary/80 text-[11px] font-semibold text-primary-foreground"
+            className="flex size-5 shrink-0 items-center justify-center rounded bg-primary/80 text-caption font-semibold text-primary-foreground"
           >
             {initial}
           </span>
           <span className={cn("min-w-0 flex-1", dense && "opacity-0 transition-opacity group-data-[open=true]/rail:opacity-100 group-has-[:focus-visible]/rail:opacity-100")}>
-            <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-sidebar-foreground/60">
+            <span className="flex items-center gap-1.5 text-caption text-sidebar-foreground/60">
               Workspace
               {tag.current.demo ? <DemoBadge testId="workspace-tag-demo" /> : null}
             </span>
-            <span className="block truncate text-[12px] font-medium" data-testid="workspace-tag-name">
+            <span className="block truncate text-callout font-medium" data-testid="workspace-tag-name">
               {tag.current.name}
             </span>
           </span>
@@ -92,7 +92,7 @@ export function WorkspaceTag({ tag, dense }: { tag: WorkspaceTagModel; dense?: b
                 <FolderKanban aria-hidden />
                 <span className="min-w-0 flex-1 truncate">{ws.name}</span>
                 {ws.demo ? <DemoBadge /> : null}
-                <span className="text-[10px] text-muted-foreground">{WORKSPACE_ROLE_LABELS[ws.role]}</span>
+                <span className="text-caption text-muted-foreground">{WORKSPACE_ROLE_LABELS[ws.role]}</span>
                 {pending === ws.id ? (
                   <Loader2 className="animate-spin" aria-hidden />
                 ) : ws.id === tag.current.id ? (
@@ -142,7 +142,7 @@ export function WorkspaceTag({ tag, dense }: { tag: WorkspaceTagModel; dense?: b
         </DropdownMenuContent>
       </DropdownMenu>
       {error ? (
-        <p role="alert" className="text-[11px] text-destructive">
+        <p role="alert" className="text-caption text-destructive">
           {error}
         </p>
       ) : null}

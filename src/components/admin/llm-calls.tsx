@@ -14,11 +14,11 @@ function tokens(value: number | null | undefined): string {
 /** A run's model calls in one line: how many, tokens in and out, estimated cost. */
 export function LlmTotalsLine({ calls }: { calls: Pick<LlmCallRecord, "usage" | "cost_usd">[] }) {
   if (calls.length === 0) {
-    return <p className="mt-2 text-[12px] text-muted-foreground">No model calls in this run.</p>;
+    return <p className="mt-2 text-callout text-muted-foreground">No model calls in this run.</p>;
   }
   const totals = totalsOf(calls);
   return (
-    <dl className="mt-2 grid gap-1 text-[12px] text-muted-foreground sm:grid-cols-4">
+    <dl className="mt-2 grid gap-1 text-callout text-muted-foreground sm:grid-cols-4">
       <div>
         <dt>Calls</dt>
         <dd className="text-foreground">{totals.calls}</dd>
@@ -42,11 +42,11 @@ export function LlmTotalsLine({ calls }: { calls: Pick<LlmCallRecord, "usage" | 
 function Text({ label, value }: { label: string; value: string | null }) {
   return (
     <details className="mt-2">
-      <summary className="cursor-pointer text-[12px] text-muted-foreground">
+      <summary className="cursor-pointer text-callout text-muted-foreground">
         {label}
         {value === null ? "" : ` · ${value.length.toLocaleString("en-US")} characters`}
       </summary>
-      <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-background p-2 text-[12px] leading-5 text-foreground">
+      <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-background p-2 text-callout leading-5 text-foreground">
         {value ?? "No reply."}
       </pre>
     </details>
@@ -61,10 +61,10 @@ export function LlmCallList({ calls }: { calls: LlmCallRecord[] }) {
   if (calls.length === 0) return null;
   return (
     <section className="mt-6 grid gap-2" aria-labelledby="llm-calls-heading" data-testid="llm-calls">
-      <h2 id="llm-calls-heading" className="text-[13px] font-semibold text-foreground">
+      <h2 id="llm-calls-heading" className="text-body font-semibold text-foreground">
         Model calls
       </h2>
-      <p className="text-[12px] text-muted-foreground">
+      <p className="text-callout text-muted-foreground">
         Each call as sent and received. Secrets are removed before a prompt is stored; cost is an estimate from the
         price table.
       </p>
@@ -72,23 +72,23 @@ export function LlmCallList({ calls }: { calls: LlmCallRecord[] }) {
         {calls.map((call) => (
           <li key={call.id} id={call.id} className="rounded-lg border border-border bg-card p-3" data-testid="llm-call">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h3 className="text-[13px] text-foreground">
+              <h3 className="text-body text-foreground">
                 {call.purpose}
                 {call.attempt > 1 ? ` · attempt ${call.attempt}` : ""}
               </h3>
-              <span className={call.status === "error" ? "text-[12px] text-destructive" : "text-[12px] text-muted-foreground"}>
+              <span className={call.status === "error" ? "text-callout text-destructive" : "text-callout text-muted-foreground"}>
                 {call.status === "error" ? "failed" : "ok"} · {call.latency_ms.toLocaleString("en-US")} ms
               </span>
             </div>
-            <p className="mt-1 text-[12px] text-muted-foreground">
+            <p className="mt-1 text-callout text-muted-foreground">
               {call.provider_id} · {call.model} · {call.params.temperature === null ? "temperature not sent" : `temperature ${call.params.temperature}`} · max {tokens(call.params.max_tokens)} tokens
             </p>
-            <p className="mt-1 text-[12px] text-muted-foreground">
+            <p className="mt-1 text-callout text-muted-foreground">
               Tokens in {tokens(call.usage?.input_tokens)} · out {tokens(call.usage?.output_tokens)}
               {call.usage?.reasoning_tokens ? ` (reasoning ${tokens(call.usage.reasoning_tokens)})` : ""} · est. cost{" "}
               {formatCost(call.cost_usd, call.cost_usd === null ? 1 : 0)}
             </p>
-            {call.error ? <p className="mt-1 text-[12px] text-destructive">{call.error}</p> : null}
+            {call.error ? <p className="mt-1 text-callout text-destructive">{call.error}</p> : null}
             <Text label="System prompt" value={call.system_prompt} />
             <Text label="User prompt" value={call.user_prompt} />
             <Text label="Reply" value={call.reply} />

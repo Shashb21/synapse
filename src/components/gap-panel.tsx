@@ -122,7 +122,7 @@ function GapPanelRecord({ gapId, priorityEditor, refreshVersion }: { gapId: stri
         {record.needs.length ? <ul className="grid gap-2">{record.needs.map(({ need, source, role }) => <li key={need.id}>
           <p>{need.statement}</p>
           {source ? <Link href={`/sources/${encodeURIComponent(source.id)}`}>{source.title}</Link> : <p>Source not recorded</p>}
-          <p className="text-[11px] text-muted-foreground">{role}</p>
+          <p className="text-caption text-muted-foreground">{role}</p>
         </li>)}</ul> : <p>No constituent needs yet.</p>}
       </section>
       <GapCoverageContext record={record} />

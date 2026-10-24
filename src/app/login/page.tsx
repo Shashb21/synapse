@@ -26,14 +26,14 @@ export default async function LoginPage({
     <main className="flex min-h-dvh items-center justify-center bg-background px-4 py-10">
       <div className="w-full max-w-sm">
         <div className="mb-6 text-center">
-          <BrandMark className="mx-auto size-9 rounded-lg text-[15px]" />
+          <BrandMark className="mx-auto size-9 rounded-lg text-headline" />
           <h1 className="mt-3 text-base font-bold tracking-tight text-foreground">Synapse IEGP</h1>
-          <p className="mt-1.5 text-[12px] leading-5 text-muted-foreground">
+          <p className="mt-1.5 text-callout leading-5 text-muted-foreground">
             Plan integrated evidence generation with your team. Sign in to open your workspaces.
           </p>
         </div>
         <section className="border border-border bg-card p-5 rounded-lg" aria-labelledby="sign-in">
-          <h2 id="sign-in" className="mb-4 text-[13px] font-semibold text-foreground">
+          <h2 id="sign-in" className="mb-4 text-body font-semibold text-foreground">
             Sign in
           </h2>
           <LoginPanel

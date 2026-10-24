@@ -108,12 +108,12 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
   return (
     <>
       {params.signed_in ? (
-        <p className="mb-4 border border-[var(--known)]/40 bg-card p-2 text-[12px] text-foreground rounded-lg">
+        <p className="mb-4 border border-[var(--known)]/40 bg-card p-2 text-callout text-foreground rounded-lg">
           Signed in as {params.signed_in}.
         </p>
       ) : null}
       {params.sign_in_error ? (
-        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
+        <p className="mb-4 border border-destructive/40 bg-card p-2 text-callout text-destructive rounded-lg">
           Sign-in failed: {params.sign_in_error}
         </p>
       ) : null}

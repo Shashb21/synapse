@@ -1,9 +1,9 @@
 import { DOMAIN_LABELS, EVIDENCE_DOMAINS } from "@/lib/iegp/enums";
 
-const INPUT = "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-[12px] text-foreground";
-const AREA = "w-full rounded-lg border border-input bg-card px-2.5 py-2 text-[12px] text-foreground";
-const LABEL = "grid gap-1 text-[11px] font-medium text-muted-foreground";
-const HINT = "text-[10.5px] font-normal leading-4 text-muted-foreground/90";
+const INPUT = "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-callout text-foreground";
+const AREA = "w-full rounded-lg border border-input bg-card px-2.5 py-2 text-callout text-foreground";
+const LABEL = "grid gap-1 text-caption font-medium text-muted-foreground";
+const HINT = "text-caption font-normal leading-4 text-muted-foreground/90";
 
 /**
  * Everything a gap carries, entered when it is created (owner feedback, KAN-52): title,

@@ -80,7 +80,7 @@ export function LedgerNewClaimForm({
   return (
     <section className="mb-6 grid gap-2 border border-border bg-card p-3 rounded-lg" aria-labelledby="new-claim">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id="new-claim" className="text-[12px] font-semibold text-foreground">
+        <h2 id="new-claim" className="text-callout font-semibold text-foreground">
           {aiOn ? "New claim (manual entry)" : "Add gaps and tactics"}
         </h2>
         <div className="flex flex-wrap gap-2">
@@ -101,16 +101,16 @@ export function LedgerNewClaimForm({
         </div>
       </div>
       {!aiOn ? (
-        <p className="text-[11px] text-muted-foreground" data-testid="new-claim-ai-off">
+        <p className="text-caption text-muted-foreground" data-testid="new-claim-ai-off">
           AI is off, so nothing is uploaded or extracted. Type each evidence gap and each tactic
           here; every entry is a draft until you validate it below.
         </p>
       ) : null}
-      {message ? <p className="text-[11px] text-[var(--known-foreground)]">{message}</p> : null}
+      {message ? <p className="text-caption text-[var(--known-foreground)]">{message}</p> : null}
       {open ? (
         <form onSubmit={submit} className="grid gap-2" data-testid="new-claim-form">
           <fieldset className="flex flex-wrap gap-2">
-            <legend className="mb-1 text-[11px] text-muted-foreground">Type</legend>
+            <legend className="mb-1 text-caption text-muted-foreground">Type</legend>
             {(["gap", "tactic"] as const).map((option) => (
               <Button
                 key={option}
@@ -131,18 +131,18 @@ export function LedgerNewClaimForm({
             disabled={pending}
             idPrefix="new-claim"
           />
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             Rationale (required)
             <Textarea
               value={rationale}
               onChange={(e) => setRationale(e.target.value)}
               rows={2}
               placeholder="Where this comes from / why it belongs in the plan"
-              className="text-[12px]"
+              className="text-callout"
             />
           </label>
           {error ? (
-            <p className="text-[11px] text-destructive" role="alert">
+            <p className="text-caption text-destructive" role="alert">
               {error}
             </p>
           ) : null}

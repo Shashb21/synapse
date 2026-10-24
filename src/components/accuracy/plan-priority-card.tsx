@@ -58,7 +58,7 @@ export function PlanIdeateAllButton({
   if (eligibleCount < 1) return null;
   if (!aiOn) {
     return (
-      <p className="mb-3 text-[12px] text-muted-foreground" data-testid="plan-ideate-ai-off">
+      <p className="mb-3 text-callout text-muted-foreground" data-testid="plan-ideate-ai-off">
         AI is off — no LLM ideation. Write proposed tactics by hand with &ldquo;Save manual
         proposal&rdquo; on each high open gap below.
       </p>
@@ -85,12 +85,12 @@ export function PlanIdeateAllButton({
         type="button"
         disabled={pending}
         onClick={run}
-        className="w-fit border border-foreground bg-foreground px-3 py-1.5 text-[11px] text-background disabled:opacity-50"
+        className="w-fit border border-foreground bg-foreground px-3 py-1.5 text-caption text-background disabled:opacity-50"
       >
         {pending ? "Ideating…" : `Run LLM ideate (${eligibleCount} high open gap${eligibleCount === 1 ? "" : "s"})`}
       </button>
-      {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
-      {msg ? <p className="text-[12px] text-muted-foreground">{msg}</p> : null}
+      {error ? <p className="text-callout text-destructive">{error}</p> : null}
+      {msg ? <p className="text-callout text-muted-foreground">{msg}</p> : null}
     </div>
   );
 }
@@ -202,18 +202,18 @@ export function PlanPriorityCard({
   return (
     <article className="border border-border bg-card p-3 rounded-lg">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <p className="text-[13px] text-foreground">{statement}</p>
-        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+        <p className="text-body text-foreground">{statement}</p>
+        <span className="text-caption text-muted-foreground">
           {validated ? "validated" : "unvalidated"}
         </span>
       </div>
-      <p className="mt-1 font-mono text-[10px] text-muted-foreground">{claimId}</p>
+      <p className="mt-1 font-mono text-caption text-muted-foreground">{claimId}</p>
       <input
         value={priorityRationale}
         onChange={(e) => setPriorityRationale(e.target.value)}
         placeholder="Why this priority band (required, then pick a band)"
         aria-label="Priority rationale"
-        className="mt-2 w-full border border-border bg-background px-2 py-1.5 text-[12px]"
+        className="mt-2 w-full border border-border bg-background px-2 py-1.5 text-callout"
       />
       <div className="mt-2 flex flex-wrap gap-2">
         {(["high", "medium", "low"] as const).map((bandOption) => (
@@ -222,7 +222,7 @@ export function PlanPriorityCard({
             type="button"
             disabled={pending}
             onClick={() => save(bandOption)}
-            className={`border px-2 py-1 text-[11px] capitalize ${
+            className={`border px-2 py-1 text-caption capitalize ${
               value === bandOption
                 ? "border-foreground bg-foreground text-background"
                 : "border-border text-foreground hover:bg-muted/40"
@@ -237,7 +237,7 @@ export function PlanPriorityCard({
         <form onSubmit={ideateManual} className="mt-3 grid gap-2 border-t border-border pt-3">
           {aiOn ? (
             <>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-caption text-muted-foreground">
                 High + validated + open — run live LLM ideation (origin: ideated, status: proposed
                 until you validate). Inventory tactics stay on extract.
               </p>
@@ -245,13 +245,13 @@ export function PlanPriorityCard({
                 type="button"
                 disabled={pending}
                 onClick={runLlm}
-                className="w-fit border border-foreground bg-foreground px-3 py-1.5 text-[11px] text-background disabled:opacity-50"
+                className="w-fit border border-foreground bg-foreground px-3 py-1.5 text-caption text-background disabled:opacity-50"
               >
                 {pending ? "Working…" : "Run LLM ideate"}
               </button>
             </>
           ) : (
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-caption text-muted-foreground">
               High + validated + open — AI is off, so propose a tactic by hand: title (8+
               characters) and rationale, then save (status: proposed until you validate).
             </p>
@@ -261,7 +261,7 @@ export function PlanPriorityCard({
             onChange={(e) => setIdeateTitle(e.target.value)}
             placeholder={aiOn ? "Optional title hint, or submit as a manual proposal" : "Proposed tactic title"}
             minLength={8}
-            className="border border-border bg-background px-2 py-1.5 text-[12px]"
+            className="border border-border bg-background px-2 py-1.5 text-callout"
           />
           <input
             value={ideateRationale}
@@ -270,15 +270,15 @@ export function PlanPriorityCard({
               aiOn ? "Optional rationale (required to save a manual proposal)" : "Rationale (required)"
             }
             minLength={3}
-            className="border border-border bg-background px-2 py-1.5 text-[12px]"
+            className="border border-border bg-background px-2 py-1.5 text-callout"
           />
           <div className="grid gap-2 sm:grid-cols-3">
-            <label className="grid gap-1 text-[11px] text-muted-foreground">
+            <label className="grid gap-1 text-caption text-muted-foreground">
               Type (optional)
               <select
                 value={ideateType}
                 onChange={(e) => setIdeateType(e.target.value)}
-                className="border border-border bg-background px-2 py-1.5 text-[12px] text-foreground"
+                className="border border-border bg-background px-2 py-1.5 text-callout text-foreground"
               >
                 <option value="">—</option>
                 {TACTIC_TYPES.map((type) => (
@@ -288,41 +288,41 @@ export function PlanPriorityCard({
                 ))}
               </select>
             </label>
-            <label className="grid gap-1 text-[11px] text-muted-foreground">
+            <label className="grid gap-1 text-caption text-muted-foreground">
               Start (optional)
               <input
                 type="date"
                 value={ideateStart}
                 onChange={(e) => setIdeateStart(e.target.value)}
-                className="border border-border bg-background px-2 py-1.5 text-[12px]"
+                className="border border-border bg-background px-2 py-1.5 text-callout"
               />
             </label>
-            <label className="grid gap-1 text-[11px] text-muted-foreground">
+            <label className="grid gap-1 text-caption text-muted-foreground">
               End (optional)
               <input
                 type="date"
                 value={ideateEnd}
                 onChange={(e) => setIdeateEnd(e.target.value)}
-                className="border border-border bg-background px-2 py-1.5 text-[12px]"
+                className="border border-border bg-background px-2 py-1.5 text-callout"
               />
             </label>
           </div>
           <button
             type="submit"
             disabled={pending || ideateTitle.trim().length < 8 || ideateRationale.trim().length < 3}
-            className="w-fit border border-border px-3 py-1.5 text-[11px] text-foreground disabled:opacity-50 hover:bg-muted/40"
+            className="w-fit border border-border px-3 py-1.5 text-caption text-foreground disabled:opacity-50 hover:bg-muted/40"
           >
             {pending ? "Working…" : "Save manual proposal"}
           </button>
         </form>
       ) : (
-        <p className="mt-2 text-[11px] text-muted-foreground">
+        <p className="mt-2 text-caption text-muted-foreground">
           Ideation unlocks when this gap is validated, open, and set to high.
         </p>
       )}
 
-      {error ? <p className="mt-2 text-[12px] text-destructive">{error}</p> : null}
-      {ideateMsg ? <p className="mt-2 text-[12px] text-muted-foreground">{ideateMsg}</p> : null}
+      {error ? <p className="mt-2 text-callout text-destructive">{error}</p> : null}
+      {ideateMsg ? <p className="mt-2 text-callout text-muted-foreground">{ideateMsg}</p> : null}
     </article>
   );
 }

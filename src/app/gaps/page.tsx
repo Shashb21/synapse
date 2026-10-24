@@ -18,7 +18,7 @@ export default async function GapsPage() {
         Split or rewrite Partial gaps before prioritization.
       </PageIntro>
       {state.gaps.length === 0 ? (
-        <p className="text-[12px] text-muted-foreground">
+        <p className="text-callout text-muted-foreground">
           {ai ? (
             "No gaps yet. Ingest a source on Upload — extracted gaps land here already mapped."
           ) : (
@@ -45,12 +45,12 @@ export default async function GapsPage() {
               <div className="flex flex-wrap items-center gap-2">
                 <GapBadge status={displayedGapStatus(g)} />
                 {g.parked_at ? <ParkedFlag reason={g.parked_reason} /> : null}
-                <span className="text-[12px] text-muted-foreground">
+                <span className="text-callout text-muted-foreground">
                   {DOMAIN_LABELS[g.domain]}
                 </span>
               </div>
-              <p className="mt-2 text-[13px] leading-5 text-foreground">{g.name}</p>
-              <p className="mt-2 text-[12px] text-muted-foreground">
+              <p className="mt-2 text-body leading-5 text-foreground">{g.name}</p>
+              <p className="mt-2 text-callout text-muted-foreground">
                 {needCount} needs · {tacticCount} tactic mappings
                 {g.parent_gap_id ? " · leftover of parent" : ""}
               </p>

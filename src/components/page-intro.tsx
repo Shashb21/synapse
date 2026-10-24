@@ -11,7 +11,7 @@ export function PageIntro({
   return (
     <div className="mb-4">
       {kicker ? (
-        <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{kicker}</p>
+        <p className="mb-0.5 text-caption font-semibold text-muted-foreground">{kicker}</p>
       ) : null}
       <h1 className="break-words text-xl font-bold leading-tight tracking-tight sm:text-2xl text-foreground">{title}</h1>
       {children ? (

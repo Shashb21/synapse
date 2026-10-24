@@ -49,7 +49,7 @@ export default async function AccuracyWorkspacesPage({
       </PageIntro>
 
       {loadError ? (
-        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
+        <p className="mb-4 border border-destructive/40 bg-card p-2 text-callout text-destructive rounded-lg">
           {loadError}
         </p>
       ) : null}
@@ -60,15 +60,15 @@ export default async function AccuracyWorkspacesPage({
           aria-labelledby="manual-start"
           data-testid="accuracy-manual-start"
         >
-          <h2 id="manual-start" className="text-[13px] font-semibold text-foreground">
+          <h2 id="manual-start" className="text-body font-semibold text-foreground">
             Add gaps and tactics
           </h2>
-          <p className="text-[12px] text-muted-foreground">
+          <p className="text-callout text-muted-foreground">
             AI is off: everything is entered by hand. Choose a workspace, add its evidence gaps and
             tactics, then validate, decide coverage, set priority and schedule dates.
           </p>
           {openWorkspaces.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">
+            <p className="text-callout text-muted-foreground">
               No workspaces yet — create one below, then add gaps and tactics.
             </p>
           ) : (
@@ -78,17 +78,17 @@ export default async function AccuracyWorkspacesPage({
                   key={workspace.id}
                   className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2 first:border-t-0 first:pt-0"
                 >
-                  <span className="text-[13px] text-foreground">{workspace.name}</span>
+                  <span className="text-body text-foreground">{workspace.name}</span>
                   <span className="flex flex-wrap gap-2">
                     <Link
                       href={addHref(workspace.id, "gap")}
-                      className="border border-foreground bg-foreground px-3 py-1 text-[12px] text-background no-underline"
+                      className="border border-foreground bg-foreground px-3 py-1 text-callout text-background no-underline"
                     >
                       Add gaps
                     </Link>
                     <Link
                       href={addHref(workspace.id, "tactic")}
-                      className="border border-foreground bg-foreground px-3 py-1 text-[12px] text-background no-underline"
+                      className="border border-foreground bg-foreground px-3 py-1 text-callout text-background no-underline"
                     >
                       Add tactics
                     </Link>
@@ -107,18 +107,18 @@ export default async function AccuracyWorkspacesPage({
 
       <section className="grid gap-2" aria-labelledby="workspace-list">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 id="workspace-list" className="text-[13px] font-semibold text-foreground">
+          <h2 id="workspace-list" className="text-body font-semibold text-foreground">
             Registered workspaces
           </h2>
           <Link
             href={includeArchived ? "/admin/accuracy" : "/admin/accuracy?include_archived=1"}
-            className="text-[12px] text-muted-foreground underline-offset-2 hover:underline"
+            className="text-callout text-muted-foreground underline-offset-2 hover:underline"
           >
             {includeArchived ? "Hide archived" : "Show archived"}
           </Link>
         </div>
         {workspaces.length === 0 ? (
-          <p className="text-[12px] text-muted-foreground">
+          <p className="text-callout text-muted-foreground">
             No workspaces yet. Seed from gold or create one above.
           </p>
         ) : (
@@ -126,20 +126,20 @@ export default async function AccuracyWorkspacesPage({
             {workspaces.map((workspace) => (
               <li key={workspace.id} className="border border-border bg-card p-3 rounded-lg">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <p className="text-[12px] font-semibold text-foreground">
+                  <p className="text-callout font-semibold text-foreground">
                     {workspace.name}
                     {workspacePlanLabel(workspace) ? (
-                      <span className="ml-2 text-[11px] font-normal text-muted-foreground">
+                      <span className="ml-2 text-caption font-normal text-muted-foreground">
                         {workspacePlanLabel(workspace)}
                       </span>
                     ) : null}
                   </p>
-                  <span className="text-[11px] text-muted-foreground">
+                  <span className="text-caption text-muted-foreground">
                     {workspace.slug}
                     {workspace.archived_at ? " · archived" : ""}
                   </span>
                 </div>
-                <p className="mt-1 text-[11px] text-muted-foreground">
+                <p className="mt-1 text-caption text-muted-foreground">
                   {workspace.id} · org {workspace.org_id}
                 </p>
                 <p className="mt-2 flex flex-wrap gap-3">
@@ -147,13 +147,13 @@ export default async function AccuracyWorkspacesPage({
                     <>
                       <Link
                         href={addHref(workspace.id, "gap")}
-                        className="text-[12px] font-medium text-foreground underline-offset-2 hover:underline"
+                        className="text-callout font-medium text-foreground underline-offset-2 hover:underline"
                       >
                         Add gaps
                       </Link>
                       <Link
                         href={addHref(workspace.id, "tactic")}
-                        className="text-[12px] font-medium text-foreground underline-offset-2 hover:underline"
+                        className="text-callout font-medium text-foreground underline-offset-2 hover:underline"
                       >
                         Add tactics
                       </Link>
@@ -161,55 +161,55 @@ export default async function AccuracyWorkspacesPage({
                   ) : null}
                   <Link
                     href={`/admin/accuracy/sources?workspace_id=${encodeURIComponent(workspace.id)}`}
-                    className="text-[12px] text-foreground underline-offset-2 hover:underline"
+                    className="text-callout text-foreground underline-offset-2 hover:underline"
                   >
                     Sources
                   </Link>
                   <Link
                     href={`/admin/accuracy/review?workspace_id=${encodeURIComponent(workspace.id)}`}
-                    className="text-[12px] text-foreground underline-offset-2 hover:underline"
+                    className="text-callout text-foreground underline-offset-2 hover:underline"
                   >
                     Review
                   </Link>
                   <Link
                     href={`/admin/accuracy/ledger?workspace_id=${encodeURIComponent(workspace.id)}`}
-                    className="text-[12px] text-foreground underline-offset-2 hover:underline"
+                    className="text-callout text-foreground underline-offset-2 hover:underline"
                   >
                     Ledger
                   </Link>
                   <Link
                     href={`/admin/accuracy/coverage?workspace_id=${encodeURIComponent(workspace.id)}`}
-                    className="text-[12px] text-foreground underline-offset-2 hover:underline"
+                    className="text-callout text-foreground underline-offset-2 hover:underline"
                   >
                     Coverage
                   </Link>
                   <Link
                     href={`/admin/accuracy/workshop?workspace_id=${encodeURIComponent(workspace.id)}`}
-                    className="text-[12px] text-foreground underline-offset-2 hover:underline"
+                    className="text-callout text-foreground underline-offset-2 hover:underline"
                   >
                     Workshop
                   </Link>
                   <Link
                     href={`/admin/accuracy/plan?workspace_id=${encodeURIComponent(workspace.id)}`}
-                    className="text-[12px] text-foreground underline-offset-2 hover:underline"
+                    className="text-callout text-foreground underline-offset-2 hover:underline"
                   >
                     Plan
                   </Link>
                   <Link
                     href={`/admin/accuracy/timeline?workspace_id=${encodeURIComponent(workspace.id)}`}
-                    className="text-[12px] text-foreground underline-offset-2 hover:underline"
+                    className="text-callout text-foreground underline-offset-2 hover:underline"
                   >
                     Timeline
                   </Link>
                   <Link
                     href={`/admin/accuracy/audit?workspace_id=${encodeURIComponent(workspace.id)}`}
-                    className="text-[12px] text-foreground underline-offset-2 hover:underline"
+                    className="text-callout text-foreground underline-offset-2 hover:underline"
                   >
                     Audit
                   </Link>
                   <Link
                     href={`/admin/accuracy/runs?workspace_id=${encodeURIComponent(workspace.id)}`}
-                    className="text-[12px] text-foreground underline-offset-2 hover:underline"
+                    className="text-callout text-foreground underline-offset-2 hover:underline"
                   >
                     Runs
                   </Link>
@@ -224,7 +224,7 @@ export default async function AccuracyWorkspacesPage({
           </ul>
         )}
         {includeArchived && archivedCount === 0 ? (
-          <p className="text-[12px] text-muted-foreground">No archived workspaces.</p>
+          <p className="text-callout text-muted-foreground">No archived workspaces.</p>
         ) : null}
       </section>
     </AccuracyAppShell>

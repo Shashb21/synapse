@@ -99,7 +99,7 @@ function NavButton({
   return (
     <Link href={href} className={className} onClick={onNavigate}>
       <Icon className="size-4 shrink-0" aria-hidden />
-      <span className={cn("min-w-0 flex-1 truncate text-[13px]", dense && "hidden md:inline")}>
+      <span className={cn("min-w-0 flex-1 truncate text-body", dense && "hidden md:inline")}>
         {item.label}
       </span>
     </Link>
@@ -147,13 +147,13 @@ function AccuracyChromeInner({
       <aside className="sticky top-0 z-20 flex h-dvh w-12 shrink-0 flex-col border-r border-sidebar-border bg-sidebar py-3 md:w-60 md:px-2">
         <Link
           href="/admin/accuracy"
-          className="mb-1 hidden px-2 text-[12px] font-semibold text-sidebar-foreground no-underline md:block"
+          className="mb-1 hidden px-2 text-callout font-semibold text-sidebar-foreground no-underline md:block"
         >
           Accuracy lab
         </Link>
         {planStatus ? (
           <p
-            className="mb-1 hidden px-2 text-[11px] font-medium text-sidebar-foreground md:block"
+            className="mb-1 hidden px-2 text-caption font-medium text-sidebar-foreground md:block"
             role="status"
             aria-label={planStatus}
             data-plan-label={planLabel}
@@ -161,12 +161,12 @@ function AccuracyChromeInner({
             {planLabel}
           </p>
         ) : null}
-        <p className="mb-4 hidden px-2 text-[11px] text-muted-foreground md:block">
+        <p className="mb-4 hidden px-2 text-caption text-muted-foreground md:block">
           {chromeStackCaption(planLabel)}
         </p>
         <Link
           href="/admin/accuracy"
-          className="mb-3 flex items-center justify-center text-[11px] font-medium text-sidebar-foreground no-underline md:hidden"
+          className="mb-3 flex items-center justify-center text-caption font-medium text-sidebar-foreground no-underline md:hidden"
           aria-label="Accuracy"
         >
           A
@@ -184,7 +184,7 @@ function AccuracyChromeInner({
           <div className="mt-auto border-t border-sidebar-border pt-3">
             <Link
               href="/admin/control"
-              className="flex h-8 items-center gap-2 rounded-md px-2 text-[12px] text-sidebar-foreground/70 no-underline hover:bg-sidebar-accent/70 hover:text-sidebar-foreground"
+              className="flex h-8 items-center gap-2 rounded-md px-2 text-callout text-sidebar-foreground/70 no-underline hover:bg-sidebar-accent/70 hover:text-sidebar-foreground"
             >
               <span className="hidden md:inline">Admin control panel</span>
               <span className="md:hidden">Admin</span>
@@ -202,7 +202,7 @@ function AccuracyChromeInner({
             </SheetTrigger>
             <SheetContent side="left" className="w-64 bg-sidebar p-3">
               <SheetHeader className="px-1 pb-2">
-                <SheetTitle className="text-[13px]">Accuracy lab</SheetTitle>
+                <SheetTitle className="text-body">Accuracy lab</SheetTitle>
               </SheetHeader>
               <div className="grid gap-0.5" onClick={() => setOpen(false)}>
                 {NAV.map((item) => (
@@ -217,10 +217,10 @@ function AccuracyChromeInner({
               </div>
             </SheetContent>
           </Sheet>
-          <p className="text-[12px] font-semibold text-foreground">{current}</p>
+          <p className="text-callout font-semibold text-foreground">{current}</p>
           {planStatus ? (
             <span
-              className="ml-auto text-[11px] text-muted-foreground"
+              className="ml-auto text-caption text-muted-foreground"
               role="status"
               aria-label={planStatus}
               data-plan-label={planLabel}
@@ -245,7 +245,7 @@ export function AccuracyChrome({
   planLabel?: PlanLabel | null;
 }) {
   return (
-    <Suspense fallback={<div className="min-h-full bg-background p-4 text-[12px] text-muted-foreground">Loading…</div>}>
+    <Suspense fallback={<div className="min-h-full bg-background p-4 text-callout text-muted-foreground">Loading…</div>}>
       <AccuracyChromeInner active={active} planLabel={planLabel}>
         {children}
       </AccuracyChromeInner>

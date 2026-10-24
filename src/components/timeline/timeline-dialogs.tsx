@@ -177,7 +177,7 @@ export function ConflictList({ conflicts }: { conflicts: DependencyConflict[] })
   return (
     <ul className="grid gap-1">
       {conflicts.map((conflict) => (
-        <li key={`${conflict.predecessor_id}->${conflict.successor_id}`} className="text-[11px] text-foreground">
+        <li key={`${conflict.predecessor_id}->${conflict.successor_id}`} className="text-caption text-foreground">
           <span className="font-medium">{conflict.successor_name}</span> starts {conflict.successor_start}, before{" "}
           <span className="font-medium">{conflict.predecessor_name}</span> ends {conflict.predecessor_end}.
         </li>
@@ -262,37 +262,37 @@ export function DragRescheduleDialog({
           </DialogHeader>
           <div className="grid gap-3 py-3">
             <div className="grid grid-cols-2 gap-2">
-              <label className="grid gap-1 text-[12px] text-muted-foreground">
+              <label className="grid gap-1 text-callout text-muted-foreground">
                 Start
                 <Input type="date" name="start_date" value={start} onChange={(event) => setStart(event.target.value)} />
               </label>
-              <label className="grid gap-1 text-[12px] text-muted-foreground">
+              <label className="grid gap-1 text-callout text-muted-foreground">
                 End
                 <Input type="date" name="end_date" value={end} onChange={(event) => setEnd(event.target.value)} />
               </label>
             </div>
             {conflicts.length > 0 ? (
               <div role="alert" className="grid gap-1 border border-destructive/50 bg-destructive/10 p-2">
-                <p className="flex items-center gap-1 text-[12px] font-medium text-destructive">
+                <p className="flex items-center gap-1 text-callout font-medium text-destructive">
                   <AlertTriangle className="size-3.5" /> This breaks a dependency
                 </p>
                 <ConflictList conflicts={conflicts} />
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-caption text-muted-foreground">
                   You can still save; nothing else is moved automatically.
                 </p>
               </div>
             ) : null}
-            <label className="grid gap-1 text-[12px] text-muted-foreground">
+            <label className="grid gap-1 text-callout text-muted-foreground">
               Rationale (required)
               <Textarea name="rationale" rows={2} value={rationale} onChange={(event) => setRationale(event.target.value)} />
             </label>
             {!identity.signed_in ? (
-              <label className="grid gap-1 text-[12px] text-muted-foreground">
+              <label className="grid gap-1 text-callout text-muted-foreground">
                 Name
                 <Input value={actorName} placeholder="Your name" onChange={(event) => setActorName(event.target.value)} />
               </label>
             ) : null}
-            {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+            {error ? <p className="text-callout text-destructive">{error}</p> : null}
           </div>
           <DialogFooter>
             <Button type="button" size="sm" variant="outline" onClick={onClose}>
@@ -417,9 +417,9 @@ export function ActivitySheetEditor({
     });
   }
 
-  const label = "grid gap-1 text-[12px] font-medium text-foreground";
+  const label = "grid gap-1 text-callout font-medium text-foreground";
   const select =
-    "h-8 w-full rounded-lg border border-input bg-transparent px-2 text-[13px] outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+    "h-8 w-full rounded-lg border border-input bg-transparent px-2 text-body outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
   return (
     <form
       aria-label={`Edit ${activity.tactic_name}`}
@@ -432,7 +432,7 @@ export function ActivitySheetEditor({
     >
       {canEditDetails ? (
         <fieldset className="grid gap-3">
-          <legend className="mb-1 text-[12px] font-medium text-foreground">Details</legend>
+          <legend className="mb-1 text-callout font-medium text-foreground">Details</legend>
           <label className={label}>
             Activity name
             <Input name="name" defaultValue={activity.tactic_name} required />
@@ -459,7 +459,7 @@ export function ActivitySheetEditor({
       ) : null}
 
       <fieldset className="grid gap-3">
-        <legend className="mb-1 text-[12px] font-medium text-foreground">Schedule</legend>
+        <legend className="mb-1 text-callout font-medium text-foreground">Schedule</legend>
         <div className="grid grid-cols-2 gap-2">
           <label className={label}>
             Start
@@ -503,7 +503,7 @@ export function ActivitySheetEditor({
         <Textarea name="rationale" rows={2} placeholder="Stored with the edit" />
       </label>
       {error ? (
-        <p role="alert" className="text-[12px] text-destructive">
+        <p role="alert" className="text-callout text-destructive">
           {error}
         </p>
       ) : null}

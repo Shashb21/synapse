@@ -212,7 +212,7 @@ export function WorkshopStage({
     <div className="flex min-h-dvh flex-col bg-background text-foreground">
       <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border px-6 py-5 sm:px-10">
         <div>
-          <p className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             Synapse · Accuracy
           </p>
           <h1 className="mt-1 text-4xl font-medium tracking-tight sm:text-5xl">Workshop</h1>
@@ -227,7 +227,7 @@ export function WorkshopStage({
             type="button"
             disabled={pending}
             onClick={() => void switchScene("gaps")}
-            className={`border px-3 py-2 text-[13px] ${
+            className={`border px-3 py-2 text-body ${
               scene === "gaps"
                 ? "border-foreground bg-foreground text-background"
                 : "border-border text-foreground"
@@ -239,7 +239,7 @@ export function WorkshopStage({
             type="button"
             disabled={pending}
             onClick={() => void switchScene("prioritize")}
-            className={`border px-3 py-2 text-[13px] ${
+            className={`border px-3 py-2 text-body ${
               scene === "prioritize"
                 ? "border-foreground bg-foreground text-background"
                 : "border-border text-foreground"
@@ -249,20 +249,20 @@ export function WorkshopStage({
           </button>
           <Link
             href={`/admin/accuracy/w/${encodeURIComponent(workspaceSlug)}/workshop`}
-            className="border border-border px-3 py-2 text-[12px] text-muted-foreground no-underline"
+            className="border border-border px-3 py-2 text-callout text-muted-foreground no-underline"
           >
             /w/{workspaceSlug}
           </Link>
           <Link
             href={exitHref}
-            className="border border-foreground px-3 py-2 text-[13px] text-foreground no-underline"
+            className="border border-foreground px-3 py-2 text-body text-foreground no-underline"
           >
             Exit to operator
           </Link>
         </div>
       </header>
 
-      <p className="px-6 pt-4 text-[13px] text-muted-foreground sm:px-10">
+      <p className="px-6 pt-4 text-body text-muted-foreground sm:px-10">
         {scene === "gaps"
           ? "Boards are facilitator tags — not chapter or SI. Click a gap for mark addressed, remap, park, or split."
           : "Open gaps only. Set High / Medium / Low with a rationale. Ideation stays high-only after bands lock."}
@@ -275,13 +275,13 @@ export function WorkshopStage({
             value={tagLabel}
             onChange={(event) => setTagLabel(event.target.value)}
             placeholder="New facilitator board"
-            className="min-w-56 border border-border bg-transparent px-3 py-2 text-[13px]"
+            className="min-w-56 border border-border bg-transparent px-3 py-2 text-body"
             aria-label="New facilitator tag"
           />
           <button
             type="submit"
             disabled={pending}
-            className="border border-border px-3 py-2 text-[13px] text-foreground"
+            className="border border-border px-3 py-2 text-body text-foreground"
           >
             Add board
           </button>
@@ -289,7 +289,7 @@ export function WorkshopStage({
       ) : null}
 
       {error && !selectedId ? (
-        <p className="px-6 pt-3 text-[13px] text-destructive sm:px-10">{error}</p>
+        <p className="px-6 pt-3 text-body text-destructive sm:px-10">{error}</p>
       ) : null}
 
       <nav aria-label="Workshop boards" className="flex gap-2 overflow-x-auto px-6 pt-6 sm:px-10">
@@ -308,7 +308,7 @@ export function WorkshopStage({
             }`}
           >
             <span className="block text-xl font-medium">{board.label}</span>
-            <span className="text-[12px]">
+            <span className="text-callout">
               {board.gaps.length} gap{board.gaps.length === 1 ? "" : "s"}
             </span>
           </button>
@@ -333,7 +333,7 @@ export function WorkshopStage({
                   className="w-full border border-border bg-card px-5 py-6 text-left hover:border-foreground rounded-lg"
                 >
                   <p className="text-2xl leading-snug sm:text-3xl">{gap.statement}</p>
-                  <p className="mt-3 flex flex-wrap gap-4 text-[13px]">
+                  <p className="mt-3 flex flex-wrap gap-4 text-body">
                     <span className={statusClass(gap.coverage_status, gap.parked)}>
                       {statusLabel(gap.coverage_status, gap.parked)}
                     </span>
@@ -357,13 +357,13 @@ export function WorkshopStage({
           aria-labelledby="workshop-gap-title"
         >
           <div className="max-h-[90dvh] w-full max-w-3xl overflow-y-auto border border-border bg-card p-6 sm:p-8 rounded-lg">
-            <p className="text-[11px] uppercase tracking-[0.24em] text-muted-foreground">
+            <p className="text-caption text-muted-foreground">
               Adapt · rationale required
             </p>
             <h3 id="workshop-gap-title" className="mt-2 text-3xl leading-snug">
               {selectedView.statement}
             </h3>
-            <p className={`mt-2 text-[13px] ${statusClass(selectedView.coverage_status, selectedView.parked)}`}>
+            <p className={`mt-2 text-body ${statusClass(selectedView.coverage_status, selectedView.parked)}`}>
               {statusLabel(selectedView.coverage_status, selectedView.parked)}
               {selectedView.priority ? ` · ${selectedView.priority}` : ""}
             </p>
@@ -382,7 +382,7 @@ export function WorkshopStage({
                   key={kind}
                   type="button"
                   onClick={() => setMenuKind(kind)}
-                  className={`border px-3 py-2 text-[13px] ${
+                  className={`border px-3 py-2 text-body ${
                     menuKind === kind
                       ? "border-foreground bg-foreground text-background"
                       : "border-border text-foreground"
@@ -394,10 +394,10 @@ export function WorkshopStage({
             </div>
 
             {scene === "gaps" ? (
-              <label className="mt-5 grid gap-1 text-[13px] text-muted-foreground">
+              <label className="mt-5 grid gap-1 text-body text-muted-foreground">
                 Move to board
                 <select
-                  className="border border-border bg-background px-3 py-2 text-[13px] text-foreground"
+                  className="border border-border bg-background px-3 py-2 text-body text-foreground"
                   value={
                     snapshot.payload.facilitator_tags.assignments[selected.id] ?? UNASSIGNED_BOARD_ID
                   }
@@ -414,17 +414,17 @@ export function WorkshopStage({
             ) : null}
 
             {menuKind === "split" ? (
-              <p className="mt-5 text-[15px] text-muted-foreground">
+              <p className="mt-5 text-headline text-muted-foreground">
                 Partial residuals stay on Coverage for split or rewrite. Workshop does not silently
                 rewrite the ledger.
               </p>
             ) : null}
 
             {menuKind === "mark_addressed" || menuKind === "remap" ? (
-              <label className="mt-5 grid gap-1 text-[13px] text-muted-foreground">
+              <label className="mt-5 grid gap-1 text-body text-muted-foreground">
                 Tactic in this freeze
                 <select
-                  className="border border-border bg-background px-3 py-2 text-[13px] text-foreground"
+                  className="border border-border bg-background px-3 py-2 text-body text-foreground"
                   value={tacticId}
                   onChange={(event) => setTacticId(event.target.value)}
                 >
@@ -439,10 +439,10 @@ export function WorkshopStage({
             ) : null}
 
             {menuKind === "remap" ? (
-              <label className="mt-4 grid gap-1 text-[13px] text-muted-foreground">
+              <label className="mt-4 grid gap-1 text-body text-muted-foreground">
                 Coverage overall
                 <select
-                  className="border border-border bg-background px-3 py-2 text-[13px] text-foreground"
+                  className="border border-border bg-background px-3 py-2 text-body text-foreground"
                   value={overall}
                   onChange={(event) => setOverall(event.target.value as CoverageOverallWrite)}
                 >
@@ -461,7 +461,7 @@ export function WorkshopStage({
                     key={band}
                     type="button"
                     onClick={() => setPriority(band)}
-                    className={`border px-3 py-2 text-[13px] capitalize ${
+                    className={`border px-3 py-2 text-body capitalize ${
                       priority === band
                         ? "border-foreground bg-foreground text-background"
                         : "border-border"
@@ -474,25 +474,25 @@ export function WorkshopStage({
             ) : null}
 
             {menuKind !== "split" ? (
-              <label className="mt-5 grid gap-1 text-[13px] text-muted-foreground">
+              <label className="mt-5 grid gap-1 text-body text-muted-foreground">
                 Rationale (required)
                 <textarea
                   value={rationale}
                   onChange={(event) => setRationale(event.target.value)}
                   rows={3}
-                  className="border border-border bg-transparent px-3 py-2 text-[15px] text-foreground"
+                  className="border border-border bg-transparent px-3 py-2 text-headline text-foreground"
                   placeholder="Why this decision — hillclimb needs the before/after"
                 />
               </label>
             ) : null}
 
-            {error ? <p className="mt-3 text-[13px] text-destructive">{error}</p> : null}
+            {error ? <p className="mt-3 text-body text-destructive">{error}</p> : null}
 
             <div className="mt-6 flex flex-wrap gap-2">
               {menuKind === "split" ? (
                 <Link
                   href={splitHref}
-                  className="border border-foreground bg-foreground px-4 py-2 text-[13px] text-background no-underline"
+                  className="border border-foreground bg-foreground px-4 py-2 text-body text-background no-underline"
                 >
                   Open Coverage
                 </Link>
@@ -501,7 +501,7 @@ export function WorkshopStage({
                   type="button"
                   disabled={pending}
                   onClick={() => void runAction()}
-                  className="border border-foreground bg-foreground px-4 py-2 text-[13px] text-background disabled:opacity-50"
+                  className="border border-foreground bg-foreground px-4 py-2 text-body text-background disabled:opacity-50"
                 >
                   {pending ? "Writing…" : "Commit with rationale"}
                 </button>
@@ -509,7 +509,7 @@ export function WorkshopStage({
               <button
                 type="button"
                 onClick={() => setSelectedId(null)}
-                className="border border-border px-4 py-2 text-[13px]"
+                className="border border-border px-4 py-2 text-body"
               >
                 Close
               </button>

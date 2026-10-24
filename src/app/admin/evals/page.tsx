@@ -42,19 +42,19 @@ export default async function EvalsPage() {
       </PageIntro>
       <AdminWorkspaceBar workspace={workspace} path="/admin/evals" />
       {state.sources.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground">
+        <p className="text-body text-muted-foreground">
           No sources ingested. engineMaySetStatus(addressed) = {String(engineMaySetStatus("validated_addressed"))}{" "}
           (must be true — the engine computes Addressed when evidence fully closes).
         </p>
       ) : (
       <>
       {noGold ? (
-        <p className="mb-4 border border-border bg-card p-3 text-[13px] text-muted-foreground rounded-lg" data-testid="evals-no-gold">
+        <p className="mb-4 border border-border bg-card p-3 text-body text-muted-foreground rounded-lg" data-testid="evals-no-gold">
           There is no gold set to score against in this workspace, so need recall, precision and the composite
           are not scored. Add gold needs to score what S2 committed.
         </p>
       ) : metrics.scored ? null : (
-        <p className="mb-4 border border-border bg-card p-3 text-[13px] text-muted-foreground rounded-lg" data-testid="evals-no-must-find">
+        <p className="mb-4 border border-border bg-card p-3 text-body text-muted-foreground rounded-lg" data-testid="evals-no-must-find">
           No gold need is marked must-find, so need recall and the composite are not scored.
         </p>
       )}
@@ -66,16 +66,16 @@ export default async function EvalsPage() {
         <Metric label="Coverage gold exact" value={`${cov.exact}/${state.gold_coverages.length}`} />
         <Metric label="Computed addressed (no override)" value={String(autoClose.length)} />
       </div>
-      <p className="mb-4 text-[13px] text-muted-foreground">
+      <p className="mb-4 text-body text-muted-foreground">
         engineMaySetStatus(addressed) = {String(engineMaySetStatus("validated_addressed"))} (must be
         true). Computed addressed without override: {autoClose.length === 0 ? "none" : autoClose.map((g) => g.id).join(", ")}.
       </p>
-      <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Committed needs (S2 gap extraction)</h2>
+      <h2 className="mb-2 text-caption font-semibold text-muted-foreground">Committed needs (S2 gap extraction)</h2>
       <div className="grid gap-2">
         {extracted.map((row) => {
           const pair = pairs.find((p) => p.extract_id === row.id);
           return (
-            <p key={row.id} className="border border-border bg-card p-3 text-[12px] rounded-lg">
+            <p key={row.id} className="border border-border bg-card p-3 text-callout rounded-lg">
               <span className="text-muted-foreground">{pair?.kind ?? "—"} · {row.source_id}</span>
               <br />
               {row.statement}
@@ -97,7 +97,7 @@ function score(value: number | null): string {
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="border border-border bg-card p-4 rounded-lg">
-      <p className="text-[11px] text-muted-foreground">{label}</p>
+      <p className="text-caption text-muted-foreground">{label}</p>
       <p className="mt-1 text-lg text-foreground">{value}</p>
     </div>
   );

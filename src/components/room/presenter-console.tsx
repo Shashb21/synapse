@@ -73,7 +73,7 @@ function SlideTimer() {
   const clock = now ? new Date(now).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "--:--";
 
   return (
-    <div className="flex items-center gap-1.5 text-[13px] tabular-nums" aria-label="Timer">
+    <div className="flex items-center gap-1.5 text-body tabular-nums" aria-label="Timer">
       <span data-testid="room-timer" className="min-w-[4.5ch] font-medium text-foreground">
         {formatElapsed(elapsed)}
       </span>
@@ -372,10 +372,10 @@ export function PresenterConsole({
     >
       <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-4 py-2">
         <div className="flex items-baseline gap-2">
-          <Link href="/" className="text-[12px] font-semibold text-foreground no-underline" title="Back to Prep">
+          <Link href="/" className="text-callout font-semibold text-foreground no-underline" title="Back to Prep">
             Synapse IEGP
           </Link>
-          <span className="text-[12px] text-muted-foreground">
+          <span className="text-callout text-muted-foreground">
             Room · Presenter view{workspaceName ? ` · ${workspaceName}` : ""}
           </span>
         </div>
@@ -399,20 +399,20 @@ export function PresenterConsole({
       </header>
 
       {syncError ? (
-        <p role="alert" className="border-b border-border bg-destructive/10 px-4 py-1 text-[12px] text-destructive">
+        <p role="alert" className="border-b border-border bg-destructive/10 px-4 py-1 text-callout text-destructive">
           {syncError} Audience windows in this browser still follow; a projector on another machine will not.
         </p>
       ) : null}
 
       <div className={cn("min-h-0 flex-1 flex-col lg:flex-row", tab === "present" ? "flex" : "hidden")}>
         <section className="flex min-h-0 min-w-0 flex-1 flex-col p-3" aria-label="Current slide">
-          <div className="mb-2 flex items-center justify-between gap-2 text-[12px]">
+          <div className="mb-2 flex items-center justify-between gap-2 text-callout">
             <p>
               <span className="text-muted-foreground">Slide </span>
               <span data-testid="room-slide-position" className="font-medium">
                 {index + 1} / {ROOM_SLIDES.length}
               </span>
-              <span className="ml-2 text-[13px] font-semibold" data-testid="room-slide-title">
+              <span className="ml-2 text-body font-semibold" data-testid="room-slide-title">
                 {slide.title}
               </span>
               {location !== slide.href ? (
@@ -436,13 +436,13 @@ export function PresenterConsole({
 
         <aside className="flex w-full shrink-0 flex-col gap-3 overflow-y-auto border-t border-border p-3 lg:w-[360px] lg:border-l lg:border-t-0">
           <div>
-            <p className="mb-1 text-[12px] text-muted-foreground">
+            <p className="mb-1 text-callout text-muted-foreground">
               Next{next ? `: ${next.title}` : ""}
             </p>
             {next ? (
               <SlidePreview href={next.href} rev={previewRev} title={next.title} />
             ) : (
-              <div className="grid aspect-[16/10] place-items-center border border-border bg-card text-[12px] text-muted-foreground rounded-lg">
+              <div className="grid aspect-[16/10] place-items-center border border-border bg-card text-callout text-muted-foreground rounded-lg">
                 End of slides
               </div>
             )}
@@ -457,7 +457,7 @@ export function PresenterConsole({
             </Button>
           </div>
 
-          <label className="flex min-h-0 flex-1 flex-col gap-1 text-[12px] text-muted-foreground">
+          <label className="flex min-h-0 flex-1 flex-col gap-1 text-callout text-muted-foreground">
             <span className="flex items-center justify-between">
               <span>Speaker notes · {slide.title}</span>
               <span data-testid="room-notes-status" aria-live="polite">
@@ -471,10 +471,10 @@ export function PresenterConsole({
               onChange={(event) => onNotesChange(event.target.value)}
               onBlur={() => void flushNote()}
               placeholder="Only you see these. Saved for this workspace."
-              className="min-h-40 flex-1 resize-none rounded-lg border border-input bg-transparent p-2.5 text-[13px] leading-6 text-foreground outline-none focus-visible:border-ring"
+              className="min-h-40 flex-1 resize-none rounded-lg border border-input bg-transparent p-2.5 text-body leading-6 text-foreground outline-none focus-visible:border-ring"
             />
           </label>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             → / Space / PageDown next · ← / PageUp previous · Esc ends the show
           </p>
         </aside>
@@ -484,20 +484,20 @@ export function PresenterConsole({
         <div className="mx-auto max-w-3xl">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h2 className="text-[13px] font-semibold">Breakout groups</h2>
-              <p className="text-[12px] text-muted-foreground">
+              <h2 className="text-body font-semibold">Breakout groups</h2>
+              <p className="text-callout text-muted-foreground">
                 Open each group&apos;s room in its own window — one per screen.
               </p>
             </div>
             <Link
               href="/breakouts"
-              className="inline-flex h-8 items-center rounded-lg border border-input px-2.5 text-[13px] text-foreground no-underline"
+              className="inline-flex h-8 items-center rounded-lg border border-input px-2.5 text-body text-foreground no-underline"
             >
               Manage breakout groups
             </Link>
           </div>
           {breakouts.length === 0 ? (
-            <p className="text-[13px] text-muted-foreground">
+            <p className="text-body text-muted-foreground">
               No breakout groups yet. Create them on{" "}
               <Link href="/breakouts" className="text-foreground">
                 Breakout groups
@@ -509,9 +509,9 @@ export function PresenterConsole({
               {breakouts.map((group) => (
                 <li key={group.id} className="flex flex-wrap items-center justify-between gap-2 border border-border bg-card p-3 rounded-lg">
                   <div>
-                    <p className="text-[13px] font-medium">{group.name}</p>
-                    {group.note ? <p className="text-[12px] text-muted-foreground">{group.note}</p> : null}
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-body font-medium">{group.name}</p>
+                    {group.note ? <p className="text-callout text-muted-foreground">{group.note}</p> : null}
+                    <p className="text-caption text-muted-foreground">
                       {group.gapCount} gap{group.gapCount === 1 ? "" : "s"}
                     </p>
                   </div>
@@ -519,7 +519,7 @@ export function PresenterConsole({
                     href={`/breakouts/${group.id}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex h-8 items-center rounded-lg border border-input px-2.5 text-[13px] text-foreground no-underline"
+                    className="inline-flex h-8 items-center rounded-lg border border-input px-2.5 text-body text-foreground no-underline"
                   >
                     Open room ↗
                   </Link>
@@ -543,7 +543,7 @@ export function PresenterConsole({
               goTo(item.id);
             }}
             className={cn(
-              "flex shrink-0 items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-[12px]",
+              "flex shrink-0 items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-callout",
               item.id === slideId
                 ? "border-primary bg-primary/10 text-foreground"
                 : "border-border text-muted-foreground hover:text-foreground",

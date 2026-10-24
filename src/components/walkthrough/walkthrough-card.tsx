@@ -40,11 +40,11 @@ export function WalkthroughCard({
     >
       <header className="flex items-start justify-between gap-2">
         <div className="grid gap-0.5">
-          <p className="flex items-center gap-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+          <p className="flex items-center gap-1 text-caption text-muted-foreground">
             {ai ? <Sparkles className="size-3" aria-hidden /> : <Hand className="size-3" aria-hidden />}
             Walkthrough · {step + 1} of {TOUR_STEPS.length} · {current.place}
           </p>
-          <h2 id="walkthrough-title" className="text-[13px] font-medium">
+          <h2 id="walkthrough-title" className="text-body font-medium">
             {current.title}
           </h2>
         </div>
@@ -57,9 +57,9 @@ export function WalkthroughCard({
           <X className="size-4" aria-hidden />
         </button>
       </header>
-      <p className="text-[12px] leading-relaxed text-muted-foreground">{ai ? current.ai : current.manual}</p>
+      <p className="text-callout leading-relaxed text-muted-foreground">{ai ? current.ai : current.manual}</p>
       {onPage && !highlighted ? (
-        <p className="text-[11px] text-muted-foreground/80">This control appears once the stage has something to show.</p>
+        <p className="text-caption text-muted-foreground/80">This control appears once the stage has something to show.</p>
       ) : null}
       <ol className="flex gap-1" aria-label="Tour progress">
         {TOUR_STEPS.map((item, index) => (

@@ -25,13 +25,13 @@ export default async function CatalogPage() {
       </PageIntro>
 
       <section className="mb-8 grid gap-2" aria-labelledby="modules">
-        <h2 id="modules" className="text-[13px] font-semibold text-foreground">
+        <h2 id="modules" className="text-body font-semibold text-foreground">
           Modules ({all.length})
         </h2>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] border-collapse text-[12px]">
+          <table className="w-full min-w-[640px] border-collapse text-callout">
             <thead>
-              <tr className="border-b border-border text-left text-[11px] text-muted-foreground">
+              <tr className="border-b border-border text-left text-caption text-muted-foreground">
                 <th className="py-1 pr-3 font-normal">Stage</th>
                 <th className="py-1 pr-3 font-normal">Module</th>
                 <th className="py-1 pr-3 font-normal">Version</th>
@@ -48,7 +48,7 @@ export default async function CatalogPage() {
                   <td className="py-1.5 pr-3 text-foreground">{manifest.id}</td>
                   <td className="py-1.5 pr-3 text-muted-foreground">v{manifest.version}</td>
                   <td className="py-1.5 pr-3">
-                    <Badge variant="outline" className="text-[10px]">
+                    <Badge variant="outline" className="text-caption">
                       {manifest.agentic ? (manifest.ai_optional ? "agentic · AI optional" : "agentic") : "mechanical"}
                     </Badge>
                   </td>
@@ -61,13 +61,13 @@ export default async function CatalogPage() {
       </section>
 
       <section className="grid gap-2" aria-labelledby="prompts">
-        <h2 id="prompts" className="text-[13px] font-semibold text-foreground">
+        <h2 id="prompts" className="text-body font-semibold text-foreground">
           Prompt variants
         </h2>
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-caption text-muted-foreground">
           Hillclimb stages: {HILLCLIMB_STAGES.join(", ")}. Sweeps run from Runs &amp; traces.
         </p>
-        <ul className="grid gap-1 text-[12px]" aria-label="Prompt versions by stage">
+        <ul className="grid gap-1 text-callout" aria-label="Prompt versions by stage">
           {HILLCLIMB_STAGES.map((stage) => (
             <li key={stage} className="text-foreground">
               {stage} · {STAGES[stage].title}:{" "}
@@ -81,14 +81,14 @@ export default async function CatalogPage() {
           ))}
         </ul>
         {/* One instruction per version; the wording targets S2's gaps, and S3 reuses it (KAN-63). */}
-        <h3 className="mt-2 text-[12px] font-semibold text-foreground">
+        <h3 className="mt-2 text-callout font-semibold text-foreground">
           S2 · {STAGES.S2.title}: variant instructions
         </h3>
         <ul className="grid gap-2">
           {promptVersionsFor("S2").map((version) => (
             <li key={version} className="border border-border bg-card p-2 rounded-lg">
-              <p className="text-[12px] text-foreground">{version}</p>
-              <p className="mt-1 text-[11px] text-muted-foreground">
+              <p className="text-callout text-foreground">{version}</p>
+              <p className="mt-1 text-caption text-muted-foreground">
                 {promptVariantInstruction(version) || "The baseline prompt, unchanged."}
               </p>
             </li>

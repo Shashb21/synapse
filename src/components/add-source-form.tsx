@@ -14,8 +14,8 @@ import {
 import { MAX_UPLOAD_BYTES, TOO_LARGE, UPLOAD_ACCEPT, UPLOAD_FORMATS_LABEL, uploadKindOf } from "@/lib/ingest/upload-formats";
 import { postIngest } from "@/lib/ingest/post-ingest";
 
-const FIELD = "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-[12px] text-foreground";
-const LABEL = "grid gap-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground";
+const FIELD = "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-callout text-foreground";
+const LABEL = "grid gap-1 text-caption font-semibold text-muted-foreground";
 
 /** A file's bytes as base64, via a data URL so a large file never goes through a spread. */
 function readBase64(file: File): Promise<string> {
@@ -117,10 +117,10 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
 
   return (
     <section aria-labelledby="add-source" className="rounded-lg border border-border bg-card p-4">
-      <h2 id="add-source" className="text-[13px] font-semibold text-foreground">
+      <h2 id="add-source" className="text-body font-semibold text-foreground">
         Add a source
       </h2>
-      <p className="mt-1 max-w-3xl text-[12px] leading-5 text-muted-foreground">
+      <p className="mt-1 max-w-3xl text-callout leading-5 text-muted-foreground">
         Upload a {UPLOAD_FORMATS_LABEL} file, or paste text: interview notes, a literature review, a plan excerpt. Synapse reads it and
         pulls out the evidence gaps and existing tactics it mentions; you review every one on Evidence Inventory.
         {demoFiles ? " The demo files above can be downloaded and added here too." : ""}
@@ -137,12 +137,12 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
           />
           <label
             htmlFor={fileId}
-            className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-[12px] font-medium text-foreground hover:bg-muted peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2"
+            className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-callout font-medium text-foreground hover:bg-muted peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2"
           >
             <Upload className="size-3.5" aria-hidden />
             Choose file
           </label>
-          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground" data-testid="chosen-file">
+          <span className="inline-flex items-center gap-1 text-caption text-muted-foreground" data-testid="chosen-file">
             {fileName ? (
               <>
                 <FileText className="size-3.5" aria-hidden /> {fileName}
@@ -187,7 +187,7 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
         </div>
         {binary ? (
           // A PDF or Office file has no text to preview here: S1 extracts it on upload.
-          <p className="flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground" data-testid="binary-file">
+          <p className="flex flex-wrap items-center gap-2 text-callout text-muted-foreground" data-testid="binary-file">
             {fileName} will be parsed on upload.
             <button type="button" onClick={clearFile} className="font-medium text-foreground underline">
               Remove file and paste text instead
@@ -203,13 +203,13 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
               value={text}
               onChange={(event) => setText(event.target.value)}
               placeholder="Paste the notes or document text here, or choose a file above."
-              className="w-full rounded-lg border border-input bg-card px-2.5 py-2 text-[12px] font-normal normal-case tracking-normal text-foreground"
+              className="w-full rounded-lg border border-input bg-card px-2.5 py-2 text-callout font-normal normal-case tracking-normal text-foreground"
             />
           </label>
         )}
         {error ? (
           <div className="grid gap-2">
-            <p role="alert" className="text-[12px] text-destructive">
+            <p role="alert" className="text-callout text-destructive">
               {error}
             </p>
             {mappingFailed ? (
@@ -224,9 +224,9 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
             ) : null}
           </div>
         ) : null}
-        {pending ? <p role="status" className="text-[12px] text-muted-foreground">{progress}</p> : null}
+        {pending ? <p role="status" className="text-callout text-muted-foreground">{progress}</p> : null}
         {done ? (
-          <p role="status" className="text-[12px] text-[var(--known-foreground)]">
+          <p role="status" className="text-callout text-[var(--known-foreground)]">
             {done}
           </p>
         ) : null}

@@ -65,7 +65,7 @@ export function GapProposalGroupCard({
         <div className="flex flex-wrap items-center gap-1.5">
           {group.band ? (
             <span
-              className="rounded-4xl border px-1.5 py-px text-[10px] font-medium"
+              className="rounded-4xl border px-1.5 py-px text-caption font-medium"
               style={{
                 borderColor: "var(--chart-5)",
                 color: "var(--chart-5)",
@@ -76,22 +76,22 @@ export function GapProposalGroupCard({
               {group.needs_priority_review ? " · needs priority review" : group.band_validated ? " · priority validated" : " · priority not validated"}
             </span>
           ) : null}
-          <span className="rounded-4xl border border-border px-1.5 py-px text-[10px] text-muted-foreground">
+          <span className="rounded-4xl border border-border px-1.5 py-px text-caption text-muted-foreground">
             {group.domain_label}
           </span>
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-caption text-muted-foreground">
             {plural(group.mapped_tactic_count, "mapped tactic")}
           </span>
         </div>
-        {group.record_available === false ? <p className="text-[13px]">{group.gap_name} · Gap record unavailable</p> : <GapRecordLink
+        {group.record_available === false ? <p className="text-body">{group.gap_name} · Gap record unavailable</p> : <GapRecordLink
           gapId={group.gap_id}
-          className="text-[13px] leading-5 text-foreground no-underline hover:underline"
+          className="text-body leading-5 text-foreground no-underline hover:underline"
         >
           {group.gap_name}
         </GapRecordLink>}
-        <p className="text-[12px] text-muted-foreground">{group.eligible === false ? `Existing options and planned work${group.evidence_status ? ` · ${group.evidence_status}` : ""}. New AI ideation requires a validated High/Open priority. Medium and Low gaps use the manual or library route on the gap.` : "Current High/Open ideation"}</p>
-        <p className="max-w-3xl text-[12px] leading-4 text-muted-foreground">{group.statement}</p>
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-callout text-muted-foreground">{group.eligible === false ? `Existing options and planned work${group.evidence_status ? ` · ${group.evidence_status}` : ""}. New AI ideation requires a validated High/Open priority. Medium and Low gaps use the manual or library route on the gap.` : "Current High/Open ideation"}</p>
+        <p className="max-w-3xl text-callout leading-4 text-muted-foreground">{group.statement}</p>
+        <p className="text-caption text-muted-foreground">
           {plural(group.proposals.length, "proposal")} · {open} awaiting a decision · {accepted} accepted
         </p>
         {mayIdeate ? (

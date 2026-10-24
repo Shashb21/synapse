@@ -39,13 +39,13 @@ function seatsLabel(customer: Customer): string {
 function ErrorNote({ error, testId }: { error: string | null; testId: string }) {
   if (!error) return null;
   return (
-    <p role="alert" data-testid={testId} className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
+    <p role="alert" data-testid={testId} className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-callout text-destructive">
       {error}
     </p>
   );
 }
 
-const fieldLabel = "grid gap-1 text-[11px] text-muted-foreground";
+const fieldLabel = "grid gap-1 text-caption text-muted-foreground";
 
 /** Create a customer: name, email domains, seats sold. */
 function CreateCustomerForm({ onCreated }: { onCreated: (customer: Customer) => void }) {
@@ -98,7 +98,7 @@ function CreateCustomerForm({ onCreated }: { onCreated: (customer: Customer) => 
           Create customer
         </Button>
       </div>
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-caption text-muted-foreground">
         With domains set, only emails on them can hold a seat. Leave empty to allow any domain.
       </p>
       <ErrorNote error={error} testId="create-customer-error" />
@@ -194,12 +194,12 @@ function CustomerPanel({
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h2 id="customer-heading" className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
+          <h2 id="customer-heading" className="flex items-center gap-2 text-body font-semibold text-foreground">
             <Building2 className="size-4 text-muted-foreground" aria-hidden />
             {customer.name}
             {customer.active ? null : <Badge variant="secondary">Inactive</Badge>}
           </h2>
-          <p className="mt-1 text-[12px] text-muted-foreground" data-testid="customer-seat-summary">
+          <p className="mt-1 text-callout text-muted-foreground" data-testid="customer-seat-summary">
             {customer.seats_used} of {customer.seats} seats assigned · {remaining} remaining
           </p>
         </div>
@@ -229,7 +229,7 @@ function CustomerPanel({
             Seats sold
             <Input type="number" min={0} step={1} value={seatCount} required onChange={(e) => setSeatCount(e.target.value)} />
           </label>
-          <label className="flex h-8 items-center gap-1.5 text-[12px] text-foreground">
+          <label className="flex h-8 items-center gap-1.5 text-callout text-foreground">
             <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
             Active
           </label>
@@ -239,7 +239,7 @@ function CustomerPanel({
           </Button>
         </div>
         {!active && customer.active ? (
-          <p className="text-[11px] text-muted-foreground">Saving as inactive signs every seat holder out at once.</p>
+          <p className="text-caption text-muted-foreground">Saving as inactive signs every seat holder out at once.</p>
         ) : null}
         <ErrorNote error={editError} testId="edit-customer-error" />
       </form>
@@ -266,7 +266,7 @@ function CustomerPanel({
             {busy === "assign" ? <Loader2 className="size-4 animate-spin" /> : <UserPlus className="size-4" aria-hidden />}
             Assign seats
           </Button>
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-caption text-muted-foreground">
             {remaining} seat{remaining === 1 ? "" : "s"} remaining. All or nothing: nothing is assigned if they don&apos;t all
             fit.
           </span>
@@ -275,14 +275,14 @@ function CustomerPanel({
       </form>
 
       {notice ? (
-        <p role="status" data-testid="customer-notice" className="text-[12px] text-foreground">
+        <p role="status" data-testid="customer-notice" className="text-callout text-foreground">
           {notice}
         </p>
       ) : null}
 
       <div className="overflow-x-auto border border-border">
-        <table className="w-full min-w-[560px] text-left text-[12px]" aria-label="Seats">
-          <thead className="bg-muted/40 text-[11px] text-muted-foreground">
+        <table className="w-full min-w-[560px] text-left text-callout" aria-label="Seats">
+          <thead className="bg-muted/40 text-caption text-muted-foreground">
             <tr>
               <th className="px-3 py-2 font-medium">Email</th>
               <th className="px-3 py-2 font-medium">Assigned by</th>
@@ -386,14 +386,14 @@ export function AdminCustomers({ initialCustomers, maxBulk }: { initialCustomers
       />
       <ErrorNote error={error} testId="customers-error" />
       {notice ? (
-        <p role="status" data-testid="customers-notice" className="text-[12px] text-foreground">
+        <p role="status" data-testid="customers-notice" className="text-callout text-foreground">
           {notice}
         </p>
       ) : null}
 
       <div className="overflow-x-auto border border-border">
-        <table className="w-full min-w-[640px] text-left text-[12px]" aria-label="Customers">
-          <thead className="bg-muted/40 text-[11px] text-muted-foreground">
+        <table className="w-full min-w-[640px] text-left text-callout" aria-label="Customers">
+          <thead className="bg-muted/40 text-caption text-muted-foreground">
             <tr>
               <th className="px-3 py-2 font-medium">Customer</th>
               <th className="px-3 py-2 font-medium">Email domains</th>
@@ -443,7 +443,7 @@ export function AdminCustomers({ initialCustomers, maxBulk }: { initialCustomers
                         data-testid="confirm-delete-customer"
                         className="flex flex-wrap items-center gap-1"
                       >
-                        <span className="text-[11px] text-foreground">
+                        <span className="text-caption text-foreground">
                           Delete {customer.name} and its {customer.seats_used} assigned seat{customer.seats_used === 1 ? "" : "s"}? Seat
                           holders are signed out at once.
                         </span>

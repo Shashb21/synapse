@@ -21,10 +21,10 @@ export default async function ModuleVersionsPage() {
       <div className="grid gap-2 md:grid-cols-2">
         {wiring.map((row) => (
           <article key={row.stage} className="grid gap-2 border border-border bg-card p-3 rounded-lg" data-testid={`module-${row.stage}`}>
-            <h2 className="text-[12px] font-semibold text-foreground">
+            <h2 className="text-callout font-semibold text-foreground">
               {row.stage} · {STAGES[row.stage].title}
             </h2>
-            <dl className="grid gap-1 text-[11px] text-muted-foreground">
+            <dl className="grid gap-1 text-caption text-muted-foreground">
               <div className="flex justify-between gap-2">
                 <dt>Active</dt>
                 <dd className="truncate text-foreground">

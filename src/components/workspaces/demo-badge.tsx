@@ -7,7 +7,7 @@ export function DemoBadge({ testId = "demo-badge" }: { testId?: string }) {
       variant="outline"
       data-testid={testId}
       title="This workspace holds demo data (Velmara)"
-      className="h-4 border-amber-500/60 px-1.5 text-[10px] font-medium normal-case tracking-normal text-amber-600 dark:text-amber-300"
+      className="h-4 border-unknown/40 px-1.5 text-caption font-medium normal-case tracking-normal text-unknown-foreground"
     >
       Demo
     </Badge>

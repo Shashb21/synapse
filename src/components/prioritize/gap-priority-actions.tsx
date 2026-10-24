@@ -19,9 +19,9 @@ export function GapPriorityActions({ gap, xAxis, yAxis, identity, mayPrioritize 
   const band = gap.band ?? gap.suggested_band;
   const point = typeof gap.axis_scores?.[xAxis.id] === "number" && typeof gap.axis_scores?.[yAxis.id] === "number";
   return <section className="mb-5 grid gap-2" aria-label="Priority actions">
-      <h3 className="text-[14px] font-medium text-foreground">3. Validate priority</h3>
-      <p className="text-[12px] leading-5 text-muted-foreground">Save scores as a draft while reviewing placement. Validate priority with your reason when you are ready; it applies across all settings.</p>
-      <p role="status" aria-atomic="true" className="text-[12px] text-foreground">{saved}</p>
+      <h3 className="text-body font-medium text-foreground">3. Validate priority</h3>
+      <p className="text-callout leading-5 text-muted-foreground">Save scores as a draft while reviewing placement. Validate priority with your reason when you are ready; it applies across all settings.</p>
+      <p role="status" aria-atomic="true" className="text-callout text-foreground">{saved}</p>
       <div className="flex flex-wrap gap-2">
       {ai && band && mayPrioritize && !gap.validated && !gap.needs_review && !gap.human_band && !gap.human_axes?.length && gap.support_status === "supported" ? (
         <ActionDialog onOpenChange={(open) => { if (open) setSaved(null); }} protectUnsavedChanges endpoint="/api/plan"

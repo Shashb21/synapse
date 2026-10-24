@@ -15,8 +15,8 @@ import { gapNumberLabel } from "@/lib/iegp/gap-number";
 import { AiOnly } from "@/components/platform/ai-status";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 
-const HEADING = "mb-2 text-[12px] font-semibold uppercase tracking-[0.08em] text-muted-foreground";
-const CARD = "rounded-lg border border-border bg-card p-3 text-[13px]";
+const HEADING = "mb-2 text-callout font-semibold text-muted-foreground";
+const CARD = "rounded-lg border border-border bg-card p-3 text-body";
 
 function when(at: string | null | undefined): string {
   return at ? at.replace("T", " ").slice(0, 16) : "—";
@@ -53,7 +53,7 @@ export function GapCoverageContext({ record }: { record: GapRecord }) {
     <p className="mb-2 text-muted-foreground">{GAP_STATUS_DEFINITIONS[coverage_status.shown]}</p>
     <GapStatusDisagreement computedStatus={coverage_status.computed} override={gap.status_override} />
 
-    <p className="text-[12px] font-medium text-muted-foreground">Evidence assessment confirmation</p>
+    <p className="text-callout font-medium text-muted-foreground">Evidence assessment confirmation</p>
     {confirmation.confirmed && confirmation.by ? (
       <p className="mt-1">
         Confirmed by <span className="font-medium">{confirmation.by.name}</span>
@@ -68,7 +68,7 @@ export function GapCoverageContext({ record }: { record: GapRecord }) {
       <p className="mt-1 text-muted-foreground">Not confirmed yet. Confirm evidence assessment with your reason.</p>
     )}
     {origin ? (
-      <p className="mt-2 text-[12px] text-muted-foreground">
+      <p className="mt-2 text-callout text-muted-foreground">
         Taken from <GapLink gap={origin} /> by an accepted split suggestion.
       </p>
     ) : null}
@@ -95,7 +95,7 @@ export function GapConfirmationAndObjective({
     <div className="mb-4 grid gap-3 sm:grid-cols-2" data-testid="gap-confirmation">
       <GapCoverageContext record={record} />
       <div className={CARD} data-testid="gap-objective">
-        <p className="text-[12px] font-medium text-muted-foreground">Objective it serves</p>
+        <p className="text-callout font-medium text-muted-foreground">Objective it serves</p>
         <p className="mt-1">{objective ? `${objective.id} · ${objective.name}` : "No objective linked yet."}</p>
         {gap.retired || objectives.length === 0 ? null : (
           <div className="mt-2">
@@ -132,7 +132,7 @@ export function NeedProvenance({ entry }: { entry: GapRecord["needs"][number] })
   const { need, candidate, block } = entry;
   if (!need.run_id && !candidate && !block) return null;
   return (
-    <p className="mt-1 text-[11px] text-muted-foreground" data-testid="need-provenance">
+    <p className="mt-1 text-caption text-muted-foreground" data-testid="need-provenance">
       {block ? `From “${block.heading || block.location}”` : null}
       {block && (need.run_id || candidate) ? " · " : null}
       {need.run_id ? (
@@ -167,7 +167,7 @@ export function GapRecordSections({ record, axes = [], tacticsUnlocked = false, 
           />
           {priority?.suggested_band && (priority.run_id || priority.suggested_rationale) ? (
             <AiOnly section="prioritization">
-              <p className="mt-2 text-[12px] text-muted-foreground">
+              <p className="mt-2 text-callout text-muted-foreground">
                 Model suggested {priority.suggested_band}: {priority.suggested_rationale || "Reason not recorded"}
               </p>
               <SuggestionReferences key={`${record.gap.id}-${priority.version}`} gapId={record.gap.id} version={priority.version ?? null} references={priority.suggested_references} />
@@ -206,14 +206,14 @@ export function GapRecordSections({ record, axes = [], tacticsUnlocked = false, 
           <p className={`${CARD} text-muted-foreground`}>No tactic ideas for this gap yet.</p>
         ) : record.options ? (
           <>
-            <p className="mb-2 text-[12px] text-muted-foreground">{ideas.filter(idea => idea.status === "accepted").length} accepted · {ideas.filter(idea => idea.status === "rejected").length} rejected · {ideas.filter(idea => idea.status === "proposed").length} proposed</p>
+            <p className="mb-2 text-callout text-muted-foreground">{ideas.filter(idea => idea.status === "accepted").length} accepted · {ideas.filter(idea => idea.status === "rejected").length} rejected · {ideas.filter(idea => idea.status === "proposed").length} proposed</p>
             <div className="grid gap-2">{record.options.map(option => <ProposalCard key={option.id} proposal={option} mayIdeate={false} readOnly identity={{ signed_in: false, actor_name: "", actor_function: "medical_affairs" }} />)}</div>
           </>
         ) : (
           <ul className="grid gap-2">
             {ideas.map((idea) => (
               <li key={idea.id} className={CARD}>
-                <p className="text-[12px] text-muted-foreground">
+                <p className="text-callout text-muted-foreground">
                   {idea.status} · {idea.type.replace(/_/g, " ")}
                   {idea.tactic_id ? ` · became ${idea.tactic_id}` : null}
                 </p>
@@ -250,7 +250,7 @@ export function GapRecordSections({ record, axes = [], tacticsUnlocked = false, 
           <ul className="grid gap-2">
             {pending_suggestions.map((row) => (
               <li key={row.id} className={CARD}>
-                <p className="text-[12px] text-muted-foreground">Overlapping source waiting on a decision on Gaps</p>
+                <p className="text-callout text-muted-foreground">Overlapping source waiting on a decision on Gaps</p>
                 <p className="mt-1">{row.name}</p>
               </li>
             ))}

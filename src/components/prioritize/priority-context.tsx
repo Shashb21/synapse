@@ -17,7 +17,7 @@ export function EvidenceDecisionContext({ statement, objective }: {
 }) {
   return (
     <div className="grid gap-2">
-      <dl className="grid min-w-0 gap-3 text-[13px] sm:grid-cols-2">
+      <dl className="grid min-w-0 gap-3 text-body sm:grid-cols-2">
         {[
           ["Evidence needed", statement],
           ["Objective", objective?.name],
@@ -31,7 +31,7 @@ export function EvidenceDecisionContext({ statement, objective }: {
           </div>
         ))}
       </dl>
-      {objective ? objectiveDateWarnings(objective).map(warning => <p key={warning} role="status" className="text-[12px] text-amber-700 dark:text-amber-300">{warning}</p>) : null}
+      {objective ? objectiveDateWarnings(objective).map(warning => <p key={warning} role="status" className="text-callout text-unknown-foreground">{warning}</p>) : null}
     </div>
   );
 }
@@ -68,7 +68,7 @@ export function PriorityJudgementDetails({ priority, axes }: {
   axes: PriorityAxis[];
 }) {
   return (
-    <div className="grid gap-2 text-[13px]">
+    <div className="grid gap-2 text-body">
       <p>Priority applies across all settings</p>
       {priority?.needs_review ? <p role="status">Needs priority review · Review changed context and revalidate priority{priority.review_reason ? `: ${priority.review_reason}` : ""}</p> : null}
       <p>
@@ -92,7 +92,7 @@ export function PriorityJudgementDetails({ priority, axes }: {
           <dd className="break-words">{priority?.rationale?.trim() || "Reason not recorded"}</dd>
         </div>
       </dl>
-      <p className="text-[12px] text-muted-foreground">
+      <p className="text-callout text-muted-foreground">
         Priority validation accepts this judgement. Evidence coverage review and Open, Partial or Addressed evidence status are separate.
         {" "}Unknown context does not block priority validation.
       </p>

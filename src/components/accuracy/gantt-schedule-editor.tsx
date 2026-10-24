@@ -103,19 +103,19 @@ export function GanttScheduleEditor({
         onChange={(e) => setRationale(e.target.value)}
         rows={2}
         placeholder="Why these dates / dependencies (required)"
-        className="text-[12px]"
+        className="text-callout"
       />
       {tactic.dates_locked ? (
-        <p className="text-[10px] text-muted-foreground">
+        <p className="text-caption text-muted-foreground">
           Dates are human-entered and pinned (continuity does not shift them).
         </p>
       ) : null}
       {error ? (
-        <p className="text-[11px] text-destructive" role="alert">
+        <p className="text-caption text-destructive" role="alert">
           {error}
         </p>
       ) : null}
-      {message ? <p className="text-[11px] text-[var(--known-foreground)]">{message}</p> : null}
+      {message ? <p className="text-caption text-[var(--known-foreground)]">{message}</p> : null}
       <div>
         <Button size="sm" disabled={pending} onClick={() => void save()}>
           {pending ? "Saving…" : "Save schedule"}

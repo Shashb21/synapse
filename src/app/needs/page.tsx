@@ -45,11 +45,11 @@ export default async function NeedsPage() {
           const rows = state.needs.filter((n) => n.status === status);
           return (
             <section key={status}>
-              <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              <h2 className="mb-2 text-caption font-semibold text-muted-foreground">
                 {status} ({rows.length})
               </h2>
               {rows.length === 0 ? (
-                <p className="mb-4 text-[12px] text-muted-foreground">
+                <p className="mb-4 text-callout text-muted-foreground">
                   {status === "candidate"
                     ? ai
                       ? "Empty. Upload a source to extract candidate needs, or add one by hand on a gap."
@@ -66,10 +66,10 @@ export default async function NeedsPage() {
                       <div className="flex flex-wrap items-center gap-1.5">
                         <Badge variant="outline">{DOMAIN_LABELS[n.domain]}</Badge>
                         <Badge variant="outline">{FUNCTION_LABELS[n.stakeholder]}</Badge>
-                        <span className="text-[11px] text-muted-foreground">{n.id}</span>
+                        <span className="text-caption text-muted-foreground">{n.id}</span>
                       </div>
-                      <p className="mt-3 text-[13px] leading-5 text-foreground">{n.statement}</p>
-                      <p className="mt-2 text-[12px] text-muted-foreground">
+                      <p className="mt-3 text-body leading-5 text-foreground">{n.statement}</p>
+                      <p className="mt-2 text-callout text-muted-foreground">
                         “{n.source_quote}” · {source?.title}
                         {n.population ? ` · ${n.population}` : ""}
                         {n.comparator ? ` · vs ${n.comparator}` : ""}
@@ -86,7 +86,7 @@ export default async function NeedsPage() {
                               <li key={l.gap_id} className="flex flex-wrap items-center gap-2">
                                 <Link
                                   href={`/gaps/${l.gap_id}`}
-                                  className="text-[12px] text-muted-foreground"
+                                  className="text-callout text-muted-foreground"
                                 >
                                   {gap?.name ?? l.gap_id} ({l.role})
                                 </Link>
@@ -147,7 +147,7 @@ export default async function NeedsPage() {
                               action="lock_need"
                               extra={{ need_id: n.id, status: "accepted" }}
                             >
-                              <label className="grid gap-1 text-[12px] text-muted-foreground">
+                              <label className="grid gap-1 text-callout text-muted-foreground">
                                 Gap
                                 <select
                                   name="gap_id"
@@ -188,27 +188,27 @@ export default async function NeedsPage() {
         {/* With AI off nothing new is rejected; the list shows only if earlier runs left some. */}
         {ai || rejected.length > 0 ? (
         <section>
-          <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+          <h2 className="mb-2 text-caption font-semibold text-muted-foreground">
             Rejected by the AI ({pendingRejected.length})
           </h2>
-          <p className="mb-3 text-[12px] leading-5 text-muted-foreground">
+          <p className="mb-3 text-callout leading-5 text-muted-foreground">
             Gap candidates the AI rejected while extracting gaps. If the AI was wrong, promote one: it becomes a
             gap you created, with its source quote as the first need.
           </p>
           {pendingRejected.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">None.</p>
+            <p className="text-callout text-muted-foreground">None.</p>
           ) : (
             <div className="grid gap-3">
               {pendingRejected.map((row) => {
                 const source = state.sources.find((s) => s.id === row.source_id);
                 return (
                   <article key={row.id} className="border border-border bg-card p-4 rounded-lg">
-                    <p className="text-[13px] text-foreground">{row.name}</p>
-                    <p className="mt-1 text-[12px] leading-5 text-foreground">{row.statement}</p>
-                    <p className="mt-1 text-[12px] text-muted-foreground">
+                    <p className="text-body text-foreground">{row.name}</p>
+                    <p className="mt-1 text-callout leading-5 text-foreground">{row.statement}</p>
+                    <p className="mt-1 text-callout text-muted-foreground">
                       “{row.source_quote}” · {source?.title ?? row.source_id}
                     </p>
-                    <p className="mt-1 text-[11px] text-muted-foreground">
+                    <p className="mt-1 text-caption text-muted-foreground">
                       AI reason: {row.critic_note} · score {row.score}
                     </p>
                     <div className="mt-2">
@@ -238,7 +238,7 @@ export default async function NeedsPage() {
             </div>
           )}
           {promotedRejected.length > 0 ? (
-            <p className="mt-3 text-[12px] text-muted-foreground">
+            <p className="mt-3 text-callout text-muted-foreground">
               Promoted by hand:{" "}
               {promotedRejected.map((row, index) => (
                 <span key={row.id}>

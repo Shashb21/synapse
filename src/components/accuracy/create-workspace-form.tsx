@@ -39,21 +39,21 @@ export function CreateWorkspaceForm() {
 
   return (
     <form onSubmit={onSubmit} className="grid gap-3 border border-border bg-card p-3 rounded-lg">
-      <h3 className="text-[12px] font-semibold text-foreground">Create workspace</h3>
-      <label className="grid gap-1 text-[12px]">
+      <h3 className="text-callout font-semibold text-foreground">Create workspace</h3>
+      <label className="grid gap-1 text-callout">
         <span className="text-muted-foreground">Name</span>
         <input
-          className="border border-border bg-background px-2 py-1.5 text-[13px]"
+          className="border border-border bg-background px-2 py-1.5 text-body"
           value={name}
           onChange={(e) => onNameChange(e.target.value)}
           required
           minLength={2}
         />
       </label>
-      <label className="grid gap-1 text-[12px]">
+      <label className="grid gap-1 text-callout">
         <span className="text-muted-foreground">Slug</span>
         <input
-          className="border border-border bg-background px-2 py-1.5 font-mono text-[12px]"
+          className="border border-border bg-background px-2 py-1.5 font-mono text-callout"
           value={slug}
           onChange={(e) => setSlug(slugify(e.target.value))}
           pattern="[a-z0-9-]+"
@@ -61,10 +61,10 @@ export function CreateWorkspaceForm() {
           minLength={2}
         />
       </label>
-      <label className="grid gap-1 text-[12px]">
+      <label className="grid gap-1 text-callout">
         <span className="text-muted-foreground">Plan label</span>
         <select
-          className="border border-border bg-background px-2 py-1.5 text-[13px]"
+          className="border border-border bg-background px-2 py-1.5 text-body"
           value={planLabel}
           onChange={(e) => setPlanLabel(e.target.value === "IEP" ? "IEP" : "IEGP")}
         >
@@ -72,11 +72,11 @@ export function CreateWorkspaceForm() {
           <option value="IEP">IEP</option>
         </select>
       </label>
-      {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+      {error ? <p className="text-callout text-destructive">{error}</p> : null}
       <button
         type="submit"
         disabled={pending}
-        className="w-fit border border-foreground bg-foreground px-3 py-1.5 text-[12px] text-background disabled:opacity-50"
+        className="w-fit border border-foreground bg-foreground px-3 py-1.5 text-callout text-background disabled:opacity-50"
       >
         {pending ? "Creating…" : "Create workspace"}
       </button>

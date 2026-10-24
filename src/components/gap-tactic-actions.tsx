@@ -31,7 +31,7 @@ export function RecordMissedFields({ prefix = false }: { prefix?: boolean }) {
   const question = prefix ? "tactic_evidence_question" : "evidence_question";
   return (
     <>
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
+      <label className="grid gap-1 text-callout text-muted-foreground">
         Tactic name
         <input
           name={name}
@@ -40,7 +40,7 @@ export function RecordMissedFields({ prefix = false }: { prefix?: boolean }) {
           className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
         />
       </label>
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
+      <label className="grid gap-1 text-callout text-muted-foreground">
         Type
         <select
           name={type}
@@ -58,7 +58,7 @@ export function RecordMissedFields({ prefix = false }: { prefix?: boolean }) {
           ))}
         </select>
       </label>
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
+      <label className="grid gap-1 text-callout text-muted-foreground">
         Status
         <select
           name={status}
@@ -76,7 +76,7 @@ export function RecordMissedFields({ prefix = false }: { prefix?: boolean }) {
           ))}
         </select>
       </label>
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
+      <label className="grid gap-1 text-callout text-muted-foreground">
         Evidence question
         <input
           name={question}
@@ -85,7 +85,7 @@ export function RecordMissedFields({ prefix = false }: { prefix?: boolean }) {
           className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
         />
       </label>
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
+      <label className="grid gap-1 text-callout text-muted-foreground">
         Why this was missed (optional)
         <select
           name="catch_up_reason"
@@ -122,11 +122,11 @@ const DETAIL_FIELDS: { name: string; label: string; placeholder: string }[] = [
 export function TacticDetailFields() {
   return (
     <details className="grid gap-2">
-      <summary className="cursor-pointer text-[12px] text-muted-foreground">
+      <summary className="cursor-pointer text-callout text-muted-foreground">
         Details (optional — population, design, data source, geography, owner)
       </summary>
       <div className="mt-2 grid gap-2">
-        <label className="grid gap-1 text-[12px] text-muted-foreground">
+        <label className="grid gap-1 text-callout text-muted-foreground">
           Description
           <textarea
             name="description"
@@ -135,7 +135,7 @@ export function TacticDetailFields() {
           />
         </label>
         {DETAIL_FIELDS.map((field) => (
-          <label key={field.name} className="grid gap-1 text-[12px] text-muted-foreground">
+          <label key={field.name} className="grid gap-1 text-callout text-muted-foreground">
             {field.label}
             <input
               name={field.name}
@@ -144,7 +144,7 @@ export function TacticDetailFields() {
             />
           </label>
         ))}
-        <label className="grid gap-1 text-[12px] text-muted-foreground">
+        <label className="grid gap-1 text-callout text-muted-foreground">
           Owner function
           <select
             name="function"
@@ -187,7 +187,7 @@ export function MapExistingTactic({
       description="Attach a library tactic onto this gap. The tactic is not copied."
       note={{ label: "Reason (required)", required: true }}
     >
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
+      <label className="grid gap-1 text-callout text-muted-foreground">
         From tactic library
         <select
           name="tactic_id"
@@ -201,7 +201,7 @@ export function MapExistingTactic({
           ))}
         </select>
       </label>
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
+      <label className="grid gap-1 text-callout text-muted-foreground">
         How well it covers this gap
         <select
           name="overall"
@@ -215,7 +215,7 @@ export function MapExistingTactic({
             </option>
           ))}
         </select>
-        <span className="text-[11px] text-muted-foreground/80">
+        <span className="text-caption text-muted-foreground/80">
           A planned, ongoing or completed tactic that is not assessed leaves the gap Partially Addressed.
           {ai ? "Re-run mapping can assess it, or set it here or later on the gap page." : "Set it here or later on the gap page."}
         </span>

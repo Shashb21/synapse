@@ -34,8 +34,8 @@ export type ThemePreview = {
   buckets: { label: string; count: number; unassigned: number }[];
 };
 
-const FIELD = "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-[12px] text-foreground";
-const LABEL = "grid gap-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground";
+const FIELD = "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-callout text-foreground";
+const LABEL = "grid gap-1 text-caption font-semibold text-muted-foreground";
 
 async function post(body: Record<string, unknown>): Promise<string | null> {
   const res = await postJson("/api/iegp", body);
@@ -115,7 +115,7 @@ function NewGroupDialog({ gaps, themes }: { gaps: BreakoutGapRow[]; themes: Them
             <input value={note} onChange={(event) => setNote(event.target.value)} placeholder="The question this group answers" className={FIELD} />
           </label>
           <div className="grid gap-2 rounded-md border border-dashed border-border p-2">
-            <p className="text-[11px] text-muted-foreground">Start with the gaps of one theme (optional)</p>
+            <p className="text-caption text-muted-foreground">Start with the gaps of one theme (optional)</p>
             <div className="grid gap-2 sm:grid-cols-2">
               <label className={LABEL}>
                 Theme
@@ -148,11 +148,11 @@ function NewGroupDialog({ gaps, themes }: { gaps: BreakoutGapRow[]; themes: Them
               </label>
             </div>
             {starting.length > 0 ? (
-              <p className="text-[11px] text-foreground">Starts with {starting.length} gap{starting.length === 1 ? "" : "s"}.</p>
+              <p className="text-caption text-foreground">Starts with {starting.length} gap{starting.length === 1 ? "" : "s"}.</p>
             ) : null}
           </div>
           {error ? (
-            <p role="alert" className="text-[12px] text-destructive">
+            <p role="alert" className="text-callout text-destructive">
               {error}
             </p>
           ) : null}
@@ -215,7 +215,7 @@ function GroupByThemeDialog({ themes }: { themes: ThemePreview[] }) {
                 aria-checked={theme === row.theme}
                 onClick={() => setTheme(row.theme)}
                 className={cn(
-                  "rounded-md border px-2.5 py-1 text-[11px] font-medium",
+                  "rounded-md border px-2.5 py-1 text-caption font-medium",
                   theme === row.theme ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background text-muted-foreground",
                 )}
               >
@@ -223,20 +223,20 @@ function GroupByThemeDialog({ themes }: { themes: ThemePreview[] }) {
               </button>
             ))}
           </div>
-          <label className="flex items-center gap-2 text-[12px] text-foreground">
+          <label className="flex items-center gap-2 text-callout text-foreground">
             <input type="checkbox" checked={onlyUnassigned} onChange={(event) => setOnlyUnassigned(event.target.checked)} />
             Only gaps not in a group yet
           </label>
           <div>
-            <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+            <p className="mb-1 text-caption font-semibold text-muted-foreground">
               Groups to create ({preview.length})
             </p>
             {preview.length === 0 ? (
-              <p className="text-[12px] text-muted-foreground">Nothing to group for this theme.</p>
+              <p className="text-callout text-muted-foreground">Nothing to group for this theme.</p>
             ) : (
               <ul className="grid max-h-56 gap-1 overflow-y-auto" aria-label="Groups to create">
                 {preview.map((bucket) => (
-                  <li key={bucket.label} className="flex items-center justify-between rounded-md border border-border px-2.5 py-1.5 text-[12px]">
+                  <li key={bucket.label} className="flex items-center justify-between rounded-md border border-border px-2.5 py-1.5 text-callout">
                     <span className="text-foreground">{bucket.label}</span>
                     <span className="text-muted-foreground">
                       {onlyUnassigned ? bucket.unassigned : bucket.count} gap
@@ -248,7 +248,7 @@ function GroupByThemeDialog({ themes }: { themes: ThemePreview[] }) {
             )}
           </div>
           {error ? (
-            <p role="alert" className="text-[12px] text-destructive">
+            <p role="alert" className="text-callout text-destructive">
               {error}
             </p>
           ) : null}
@@ -320,7 +320,7 @@ function AssignSelect({ gap, groups }: { gap: BreakoutGapRow; groups: BreakoutGr
         setPending(false);
         router.refresh();
       }}
-      className="h-7 max-w-[12rem] rounded-md border border-input bg-card px-2 text-[11px] text-foreground"
+      className="h-7 max-w-[12rem] rounded-md border border-input bg-card px-2 text-caption text-foreground"
     >
       <option value="">{pending ? "Adding…" : "Add to group…"}</option>
       {groups.map((group) => (
@@ -351,7 +351,7 @@ export function BreakoutsOverview({
       <div className="flex flex-wrap items-center gap-2">
         <NewGroupDialog gaps={gaps} themes={themes} />
         <GroupByThemeDialog themes={themes} />
-        <p className="ml-auto text-[11px] text-muted-foreground">
+        <p className="ml-auto text-caption text-muted-foreground">
           {groups.length} group{groups.length === 1 ? "" : "s"} · {assignedCount} of {gaps.length} gaps in a group
         </p>
       </div>
@@ -359,8 +359,8 @@ export function BreakoutsOverview({
       {groups.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border bg-card p-8 text-center">
           <Users className="mx-auto size-5 text-muted-foreground" aria-hidden />
-          <p className="mt-2 text-[12px] text-foreground">No breakout groups yet.</p>
-          <p className="mt-1 text-[11px] text-muted-foreground">
+          <p className="mt-2 text-callout text-foreground">No breakout groups yet.</p>
+          <p className="mt-1 text-caption text-muted-foreground">
             Create one, or group the {gaps.length} gap{gaps.length === 1 ? "" : "s"} by theme in one step.
           </p>
         </div>
@@ -376,26 +376,26 @@ export function BreakoutsOverview({
               <li key={group.id} className="grid content-start gap-2 rounded-lg border border-border bg-card p-4" data-testid="breakout-group">
                 <div className="flex items-start gap-2">
                   <div className="min-w-0 flex-1">
-                    <h2 className="truncate text-[13px] font-semibold text-foreground">{group.name}</h2>
-                    {group.note ? <p className="text-[11px] leading-4 text-muted-foreground">{group.note}</p> : null}
+                    <h2 className="truncate text-body font-semibold text-foreground">{group.name}</h2>
+                    {group.note ? <p className="text-caption leading-4 text-muted-foreground">{group.note}</p> : null}
                   </div>
-                  <span className="rounded-full bg-primary/10 px-2 py-px text-[10px] font-medium text-indigo-800 dark:text-indigo-300">
+                  <span className="rounded-full bg-primary/10 px-2 py-px text-caption font-medium text-primary">
                     {members.length} gap{members.length === 1 ? "" : "s"}
                   </span>
                 </div>
                 {domains.length > 0 ? (
                   <div className="flex flex-wrap gap-1">
                     {domains.slice(0, 4).map((domain) => (
-                      <span key={domain} className="rounded-sm bg-muted px-1.5 py-px text-[10px] text-muted-foreground">
+                      <span key={domain} className="rounded-sm bg-muted px-1.5 py-px text-caption text-muted-foreground">
                         {domain}
                       </span>
                     ))}
                   </div>
                 ) : null}
-                <ul className="grid gap-0.5 text-[11px] text-foreground">
+                <ul className="grid gap-0.5 text-caption text-foreground">
                   {members.slice(0, 3).map((gap) => (
                     <li key={gap.id} className="truncate">
-                      <span className="font-mono text-[10px] text-primary">{gap.id}</span> {gap.name}
+                      <span className="font-mono text-caption text-primary">{gap.id}</span> {gap.name}
                     </li>
                   ))}
                   {members.length > 3 ? <li className="text-muted-foreground">+ {members.length - 3} more</li> : null}
@@ -404,7 +404,7 @@ export function BreakoutsOverview({
                 <div className="mt-1 flex flex-wrap items-center gap-1.5">
                   <Link
                     href={`/breakouts/${group.id}`}
-                    className="inline-flex h-8 items-center rounded-lg bg-primary px-2.5 text-[12px] font-medium text-primary-foreground no-underline hover:bg-primary/80"
+                    className="inline-flex h-8 items-center rounded-lg bg-primary px-2.5 text-callout font-medium text-primary-foreground no-underline hover:bg-primary/80"
                   >
                     Open group
                   </Link>
@@ -414,7 +414,7 @@ export function BreakoutsOverview({
                     rel="noopener noreferrer"
                     aria-label={`Open ${group.name} in a new window`}
                     title="Open in a new window, for another screen or consultant"
-                    className="inline-flex h-8 items-center gap-1 rounded-lg border border-border bg-card px-2.5 text-[12px] text-foreground no-underline hover:bg-muted"
+                    className="inline-flex h-8 items-center gap-1 rounded-lg border border-border bg-card px-2.5 text-callout text-foreground no-underline hover:bg-muted"
                   >
                     <ExternalLink className="size-3.5" /> New window
                   </Link>
@@ -429,18 +429,18 @@ export function BreakoutsOverview({
       )}
 
       <section aria-labelledby="unassigned-gaps" className="rounded-lg border border-border bg-card p-4">
-        <h2 id="unassigned-gaps" className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        <h2 id="unassigned-gaps" className="text-caption font-semibold text-muted-foreground">
           Not in a group yet ({unassigned.length})
         </h2>
         {unassigned.length === 0 ? (
-          <p className="mt-2 text-[12px] text-muted-foreground">Every gap is in a group.</p>
+          <p className="mt-2 text-callout text-muted-foreground">Every gap is in a group.</p>
         ) : (
           <ul className="mt-2 grid gap-1" aria-label="Gaps not in a group">
             {unassigned.map((gap) => (
               <li key={gap.id} className="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-1.5">
-                <span className="font-mono text-[10px] text-primary">{gap.id}</span>
-                <span className="min-w-0 flex-1 truncate text-[12px] text-foreground">{gap.name}</span>
-                <span className="text-[10px] text-muted-foreground">{gap.domain}</span>
+                <span className="font-mono text-caption text-primary">{gap.id}</span>
+                <span className="min-w-0 flex-1 truncate text-callout text-foreground">{gap.name}</span>
+                <span className="text-caption text-muted-foreground">{gap.domain}</span>
                 <AssignSelect gap={gap} groups={groups} />
               </li>
             ))}

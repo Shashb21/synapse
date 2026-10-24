@@ -33,23 +33,49 @@ function BadgeHelp({ help, children }: { help: string; children: ReactNode }) {
   );
 }
 
+type Tone = "positive" | "caution" | "neutral" | "draft" | "muted" | "negative";
+
+/**
+ * Status as a dot and a word (KAN-158): calmer than filled pills, and the word
+ * carries the meaning so colour is never the only signal. Open is the normal
+ * starting state, so it is a hollow ring, not an alarm.
+ */
+export function StatusDot({ tone, children, className }: { tone: Tone; children: ReactNode; className?: string }) {
+  const dot =
+    tone === "positive"
+      ? "bg-known"
+      : tone === "caution"
+        ? "bg-unknown"
+        : tone === "negative"
+          ? "bg-destructive"
+          : tone === "draft"
+            ? "border border-dashed border-muted-foreground"
+            : tone === "muted"
+              ? "bg-muted-foreground/50"
+              : "border-[1.5px] border-muted-foreground";
+  return (
+    <span
+      data-slot="status"
+      className={`inline-flex max-w-full items-center gap-1.5 text-callout font-medium whitespace-nowrap ${tone === "muted" ? "text-muted-foreground" : "text-foreground"} ${className ?? ""}`}
+    >
+      <span aria-hidden className={`size-2 shrink-0 rounded-full ${dot}`} />
+      {children}
+    </span>
+  );
+}
+
+const GAP_TONES: Record<GapStatus, Tone> = {
+  candidate: "draft",
+  validated_addressed: "positive",
+  validated_partial: "caution",
+  validated_open: "neutral",
+  excluded: "muted",
+};
+
 export function GapBadge({ status }: { status: GapStatus }) {
-  const tone =
-    // Figma design (KAN-8): addressed emerald, partial amber, open rose.
-    status === "validated_addressed"
-      ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
-      : status === "validated_open"
-        ? "border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300"
-        : status === "validated_partial"
-          ? "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
-          : status === "excluded"
-            ? "bg-zinc-500/20 text-zinc-600 dark:text-zinc-400"
-            : "bg-violet-500/15 text-violet-700 dark:text-violet-300";
   return (
     <BadgeHelp help={GAP_STATUS_DEFINITIONS[status]}>
-      <Badge variant="outline" className={tone}>
-        {GAP_STATUS_LABELS[status]}
-      </Badge>
+      <StatusDot tone={GAP_TONES[status]}>{GAP_STATUS_LABELS[status]}</StatusDot>
     </BadgeHelp>
   );
 }
@@ -67,9 +93,7 @@ export function ParkedFlag({ reason }: { reason?: string | null }) {
           : "Parked — set aside as not a real gap. Hidden from Prioritize and Tactics until unparked."
       }
     >
-      <Badge variant="outline" className="bg-fuchsia-500/15 text-fuchsia-300">
-        Parked
-      </Badge>
+      <StatusDot tone="muted">Parked</StatusDot>
     </BadgeHelp>
   );
 }
@@ -93,12 +117,7 @@ export function TacticBadge({ status }: { status: TacticStatus }) {
 }
 
 export function TacticReviewBadge({ status }: { status: TacticReviewStatus }) {
-  const tone =
-    status === "accepted"
-      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-      : status === "rejected"
-        ? "bg-zinc-500/20 text-zinc-600 dark:text-zinc-400"
-        : "bg-violet-500/15 text-violet-700 dark:text-violet-300";
+  const tone: Tone = status === "accepted" ? "positive" : status === "rejected" ? "muted" : "draft";
   const help =
     status === "accepted"
       ? "This tactic is in the living plan."
@@ -107,19 +126,17 @@ export function TacticReviewBadge({ status }: { status: TacticReviewStatus }) {
         : "This tactic has not been taken into the living plan.";
   return (
     <BadgeHelp help={help}>
-      <Badge variant="outline" className={tone}>
-        {TACTIC_REVIEW_LABELS[status]}
-      </Badge>
+      <StatusDot tone={tone}>{TACTIC_REVIEW_LABELS[status]}</StatusDot>
     </BadgeHelp>
   );
 }
 
 export function LockMeta({ lock }: { lock: Lock }) {
   if (!lock.locked) {
-    return <span className="text-[11px] text-amber-700 dark:text-amber-300">Unlocked — human gate open</span>;
+    return <span className="text-caption text-unknown-foreground">Awaiting human lock</span>;
   }
   return (
-    <span className="text-[11px] text-muted-foreground">
+    <span className="text-caption text-muted-foreground">
       Locked by {lock.actor_name} ({lock.actor_function?.replaceAll("_", " ")})
       {lock.locked_at ? ` · ${lock.locked_at.slice(0, 10)}` : ""}
     </span>
@@ -135,12 +152,7 @@ export function NeedsReviewFlag({ needsReview }: { needsReview: boolean }) {
   if (!needsReview) return null;
   return (
     <BadgeHelp help="Something this coverage depends on changed: the gap’s wording was merged with a new source, or another gap that uses this tactic changed its coverage. Confirm or edit this gap’s own coverage.">
-      <Badge
-        variant="outline"
-        className="h-auto max-w-full whitespace-normal border-amber-500/40 bg-amber-500/15 text-left text-amber-700 dark:text-amber-200"
-      >
-        Review coverage
-      </Badge>
+      <StatusDot tone="caution">Review coverage</StatusDot>
     </BadgeHelp>
   );
 }

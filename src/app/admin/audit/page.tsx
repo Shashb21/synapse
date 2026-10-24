@@ -23,7 +23,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   ai: "AI",
 };
 
-const INPUT = "h-8 rounded-lg border border-input bg-transparent px-2.5 text-[13px] text-foreground";
+const INPUT = "h-8 rounded-lg border border-input bg-transparent px-2.5 text-body text-foreground";
 
 function queryFor(filter: AuditFilter, extra: Record<string, string> = {}): string {
   const params = new URLSearchParams();
@@ -82,7 +82,7 @@ export default async function AuditPage({
       </PageIntro>
 
       <form method="get" className="mb-4 grid gap-2 rounded-lg border border-border bg-card p-3 sm:grid-cols-3 lg:grid-cols-5" aria-label="Filter the audit log">
-        <label className="grid gap-1 text-[12px] text-muted-foreground">
+        <label className="grid gap-1 text-callout text-muted-foreground">
           Category
           <select name="category" defaultValue={filter.category ?? ""} className={INPUT}>
             <option value="">All</option>
@@ -93,49 +93,49 @@ export default async function AuditPage({
             ))}
           </select>
         </label>
-        <label className="grid gap-1 text-[12px] text-muted-foreground">
+        <label className="grid gap-1 text-callout text-muted-foreground">
           Action contains
           <input name="action" defaultValue={filter.action ?? ""} placeholder="e.g. set_role" className={INPUT} />
         </label>
-        <label className="grid gap-1 text-[12px] text-muted-foreground">
+        <label className="grid gap-1 text-callout text-muted-foreground">
           Who (email or name)
           <input name="actor" defaultValue={filter.actor ?? ""} className={INPUT} />
         </label>
-        <label className="grid gap-1 text-[12px] text-muted-foreground">
+        <label className="grid gap-1 text-callout text-muted-foreground">
           Workspace id
           <input name="workspace_id" defaultValue={filter.workspace_id ?? ""} className={INPUT} />
         </label>
-        <label className="grid gap-1 text-[12px] text-muted-foreground">
+        <label className="grid gap-1 text-callout text-muted-foreground">
           Entity type
           <input name="entity_type" defaultValue={filter.entity_type ?? ""} placeholder="e.g. user, route" className={INPUT} />
         </label>
-        <label className="grid gap-1 text-[12px] text-muted-foreground">
+        <label className="grid gap-1 text-callout text-muted-foreground">
           Entity id
           <input name="entity_id" defaultValue={filter.entity_id ?? ""} className={INPUT} />
         </label>
-        <label className="grid gap-1 text-[12px] text-muted-foreground">
+        <label className="grid gap-1 text-callout text-muted-foreground">
           Request id
           <input name="request_id" defaultValue={filter.request_id ?? ""} className={INPUT} />
         </label>
-        <label className="grid gap-1 text-[12px] text-muted-foreground">
+        <label className="grid gap-1 text-callout text-muted-foreground">
           From
           <input type="date" name="from" defaultValue={filter.from ?? ""} className={INPUT} />
         </label>
-        <label className="grid gap-1 text-[12px] text-muted-foreground">
+        <label className="grid gap-1 text-callout text-muted-foreground">
           To
           <input type="date" name="to" defaultValue={filter.to ?? ""} className={INPUT} />
         </label>
         <div className="flex items-end gap-2">
-          <button type="submit" className="h-8 rounded-lg bg-primary px-3 text-[13px] font-medium text-primary-foreground">
+          <button type="submit" className="h-8 rounded-lg bg-primary px-3 text-body font-medium text-primary-foreground">
             Filter
           </button>
-          <Link href="/admin/audit" className="text-[12px] text-muted-foreground underline-offset-2 hover:underline">
+          <Link href="/admin/audit" className="text-callout text-muted-foreground underline-offset-2 hover:underline">
             Clear
           </Link>
         </div>
       </form>
 
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-[12px] text-muted-foreground">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-callout text-muted-foreground">
         <p>
           {total === 0 ? "No events match." : `${total.toLocaleString("en-GB")} ${total === 1 ? "event" : "events"}, newest first.`}
         </p>
@@ -155,8 +155,8 @@ export default async function AuditPage({
           return (
             <li key={event.id} className="rounded-lg border border-border bg-card">
               <details>
-                <summary className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 p-3 text-[13px]">
-                  <span className="font-mono text-[12px] text-muted-foreground">{formatAt(event.at)}</span>
+                <summary className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 p-3 text-body">
+                  <span className="font-mono text-callout text-muted-foreground">{formatAt(event.at)}</span>
                   <Badge variant="outline">{CATEGORY_LABELS[event.category] ?? event.category}</Badge>
                   <span className="font-medium text-foreground">{event.action}</span>
                   {event.entity_type ? (
@@ -170,7 +170,7 @@ export default async function AuditPage({
                     {event.actor_role ? ` · ${event.actor_role}` : ""}
                   </span>
                 </summary>
-                <div className="grid gap-3 border-t border-border p-3 text-[12px]">
+                <div className="grid gap-3 border-t border-border p-3 text-callout">
                   {event.rationale ? (
                     <p>
                       <span className="text-muted-foreground">Why: </span>
@@ -191,10 +191,10 @@ export default async function AuditPage({
                           <tr key={row.field} className="align-top">
                             <td className="py-1 pr-2 font-mono">{row.field}</td>
                             <td className="py-1 pr-2">
-                              <pre className="whitespace-pre-wrap break-words font-mono text-[11px]">{show(row.before)}</pre>
+                              <pre className="whitespace-pre-wrap break-words font-mono text-caption">{show(row.before)}</pre>
                             </td>
                             <td className="py-1">
-                              <pre className="whitespace-pre-wrap break-words font-mono text-[11px]">{show(row.after)}</pre>
+                              <pre className="whitespace-pre-wrap break-words font-mono text-caption">{show(row.after)}</pre>
                             </td>
                           </tr>
                         ))}
@@ -204,7 +204,7 @@ export default async function AuditPage({
                     <p className="text-muted-foreground">No before/after values for this event.</p>
                   )}
                   {event.meta ? (
-                    <pre className="whitespace-pre-wrap break-words rounded-md bg-muted/40 p-2 font-mono text-[11px]">{show(event.meta)}</pre>
+                    <pre className="whitespace-pre-wrap break-words rounded-md bg-muted/40 p-2 font-mono text-caption">{show(event.meta)}</pre>
                   ) : null}
                   <dl className="grid gap-x-4 gap-y-1 text-muted-foreground sm:grid-cols-2">
                     <div>
@@ -256,7 +256,7 @@ export default async function AuditPage({
       </ol>
 
       {pages > 1 ? (
-        <nav className="mt-4 flex items-center justify-between text-[12px]" aria-label="Audit log pages">
+        <nav className="mt-4 flex items-center justify-between text-callout" aria-label="Audit log pages">
           {page > 1 ? (
             <Link href={`/admin/audit${queryFor(filter, { page: String(page - 1) })}`} className="underline-offset-2 hover:underline">
               Newer

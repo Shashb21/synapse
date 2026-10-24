@@ -44,20 +44,20 @@ export function ChangePasswordForm({ minLength }: { minLength: number }) {
       }}
     >
       {error ? (
-        <p role="alert" className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
+        <p role="alert" className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-callout text-destructive">
           {error}
         </p>
       ) : null}
       {done ? (
-        <p role="status" data-testid="password-changed" className="border border-border px-3 py-2 text-[12px] text-foreground">
+        <p role="status" data-testid="password-changed" className="border border-border px-3 py-2 text-callout text-foreground">
           Password changed. Your other sessions have been signed out.
         </p>
       ) : null}
-      <label className="grid gap-1 text-[11px] text-muted-foreground">
+      <label className="grid gap-1 text-caption text-muted-foreground">
         Current password
         <Input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
       </label>
-      <div className="grid gap-1 text-[11px] text-muted-foreground">
+      <div className="grid gap-1 text-caption text-muted-foreground">
         <label className="grid gap-1">
           New password
           <Input
@@ -70,7 +70,7 @@ export function ChangePasswordForm({ minLength }: { minLength: number }) {
         </label>
         <span id="new-password-hint">At least {minLength} characters. Not your email, not a common password.</span>
       </div>
-      <label className="grid gap-1 text-[11px] text-muted-foreground">
+      <label className="grid gap-1 text-caption text-muted-foreground">
         Confirm new password
         <Input
           type="password"

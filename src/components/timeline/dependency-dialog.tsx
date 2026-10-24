@@ -114,12 +114,12 @@ export function DependencyDialog({
           </DialogHeader>
           <div className="grid gap-3 py-3">
             {others.length === 0 ? (
-              <p className="text-[12px] text-muted-foreground">No other dated activity to wait on.</p>
+              <p className="text-callout text-muted-foreground">No other dated activity to wait on.</p>
             ) : (
               <ul className="grid max-h-64 gap-2 overflow-y-auto">
                 {others.map((row) => (
                   <li key={row.id} className="grid gap-1">
-                    <label className="flex items-start gap-2 text-[12px] text-foreground">
+                    <label className="flex items-start gap-2 text-callout text-foreground">
                       <input
                         type="checkbox"
                         className="mt-0.5"
@@ -145,7 +145,7 @@ export function DependencyDialog({
                 ))}
               </ul>
             )}
-            <label className="grid gap-1 text-[12px] text-muted-foreground">
+            <label className="grid gap-1 text-callout text-muted-foreground">
               Rationale (required)
               <Textarea
                 name="rationale"
@@ -157,11 +157,11 @@ export function DependencyDialog({
             </label>
             {!identity.signed_in ? (
               <div className="grid gap-2 border-t border-border pt-3">
-                <label className="grid gap-1 text-[12px] text-muted-foreground">
+                <label className="grid gap-1 text-callout text-muted-foreground">
                   Name
                   <Input value={actorName} placeholder="Your name" onChange={(event) => setActorName(event.target.value)} />
                 </label>
-                <label className="grid gap-1 text-[12px] text-muted-foreground">
+                <label className="grid gap-1 text-callout text-muted-foreground">
                   Function
                   <select
                     className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
@@ -177,7 +177,7 @@ export function DependencyDialog({
                 </label>
               </div>
             ) : null}
-            {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+            {error ? <p className="text-callout text-destructive">{error}</p> : null}
           </div>
           <DialogFooter>
             <Button type="submit" size="sm" disabled={pending}>

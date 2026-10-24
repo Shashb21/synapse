@@ -32,7 +32,7 @@ export default async function SdlcPage({
             key={s.slug}
             href={`/admin/sdlc?spec=${s.slug}`}
             aria-current={s.slug === active.slug ? "page" : undefined}
-            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] no-underline ${
+            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-callout no-underline ${
               s.slug === active.slug
                 ? "bg-muted text-foreground"
                 : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"

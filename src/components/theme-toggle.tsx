@@ -45,7 +45,7 @@ export function ThemeToggle({ className, compact, labelClassName }: { className?
       title={label}
       onClick={toggle}
       className={cn(
-        "flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-md px-[11px] text-[11px] text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        "flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-md px-[11px] text-caption text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         compact ? "h-8 w-8 justify-center" : "h-8",
         className,
       )}

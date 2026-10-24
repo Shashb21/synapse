@@ -42,7 +42,7 @@ export function AiToggle({ enabled, actorName }: { enabled: boolean; actorName: 
           }`}
         />
       </button>
-      {error ? <p className="text-[11px] text-destructive">{error}</p> : null}
+      {error ? <p className="text-caption text-destructive">{error}</p> : null}
     </div>
   );
 }

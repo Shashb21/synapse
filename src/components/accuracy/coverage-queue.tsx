@@ -103,13 +103,13 @@ export function CoverageQueue({
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[12px] text-muted-foreground">{progressLabel}</p>
+        <p className="text-callout text-muted-foreground">{progressLabel}</p>
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
             disabled={!current || index === 0}
             onClick={goPrev}
-            className="border border-border px-2 py-1 text-[11px] text-foreground disabled:opacity-40 hover:bg-muted/40"
+            className="border border-border px-2 py-1 text-caption text-foreground disabled:opacity-40 hover:bg-muted/40"
           >
             Previous
           </button>
@@ -117,7 +117,7 @@ export function CoverageQueue({
             type="button"
             disabled={!current || index + 1 >= undecided.length}
             onClick={goNext}
-            className="border border-border px-2 py-1 text-[11px] text-foreground disabled:opacity-40 hover:bg-muted/40"
+            className="border border-border px-2 py-1 text-caption text-foreground disabled:opacity-40 hover:bg-muted/40"
           >
             Skip / next
           </button>
@@ -126,7 +126,7 @@ export function CoverageQueue({
               type="button"
               disabled={!current || assistPending}
               onClick={requestAssist}
-              className="border border-border bg-muted/30 px-2 py-1 text-[11px] text-foreground disabled:opacity-40 hover:bg-muted/50"
+              className="border border-border bg-muted/30 px-2 py-1 text-caption text-foreground disabled:opacity-40 hover:bg-muted/50"
             >
               {assistPending ? "Suggesting…" : "Suggest with LLM"}
             </button>
@@ -134,14 +134,14 @@ export function CoverageQueue({
         </div>
       </div>
       {!aiOn ? (
-        <p className="text-[11px] text-muted-foreground" data-testid="coverage-ai-off">
+        <p className="text-caption text-muted-foreground" data-testid="coverage-ai-off">
           AI is off — no suggestions. Pick an overall and write the rationale yourself below.
         </p>
       ) : null}
 
-      {assistError ? <p className="text-[12px] text-destructive">{assistError}</p> : null}
+      {assistError ? <p className="text-callout text-destructive">{assistError}</p> : null}
       {suggestion && current ? (
-        <p className="border border-border/60 bg-muted/20 px-2 py-1.5 text-[11px] text-muted-foreground">
+        <p className="border border-border/60 bg-muted/20 px-2 py-1.5 text-caption text-muted-foreground">
           Assist ({assistMode ?? "—"}) · {suggestion.schema_overall} → {suggestion.overall} · conf{" "}
           {suggestion.confidence.toFixed(2)}
           {suggestion.quote_block_ids.length
@@ -162,7 +162,7 @@ export function CoverageQueue({
           }}
         />
       ) : (
-        <p className="text-[12px] text-muted-foreground">
+        <p className="text-callout text-muted-foreground">
           {aiOn
             ? "Queue clear. Revisit decided pairs below, or extract more claims on Sources / Ledger."
             : "Queue clear. Revisit decided pairs below, or add more gaps and tactics on the Ledger."}
@@ -174,7 +174,7 @@ export function CoverageQueue({
           <button
             type="button"
             onClick={() => setShowDecided((v) => !v)}
-            className="justify-self-start text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+            className="justify-self-start text-caption text-muted-foreground underline-offset-2 hover:underline"
           >
             {showDecided ? "Hide" : "Show"} {decided.length} decided pair(s)
           </button>

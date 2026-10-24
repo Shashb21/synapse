@@ -26,7 +26,7 @@ export function RelationshipFit({ fit, tacticName }: { fit: RelationshipFitModel
     fit.source_changed ? "Requirement sources changed" : null,
   ].filter(Boolean).join("; ") || "No recorded freshness warning";
   return (
-    <details className="mt-3 rounded-md border border-border text-[12px]" data-testid="relationship-fit">
+    <details className="mt-3 rounded-md border border-border text-callout" data-testid="relationship-fit">
       <summary className="cursor-pointer px-3 py-2 font-medium text-foreground focus-visible:outline-2 focus-visible:outline-ring">
         Fit to this gap <span className="font-normal text-muted-foreground">· {tacticName}</span>
       </summary>
@@ -62,7 +62,7 @@ export function RelationshipFit({ fit, tacticName }: { fit: RelationshipFitModel
           </p>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-[12px]">
+          <table className="w-full text-left text-callout">
             <caption className="pb-2 text-left font-medium text-foreground">Documented fit by requirement</caption>
             <thead><tr className="text-muted-foreground">
               <th scope="col" className="py-1 pr-3 font-medium">Requirement</th>

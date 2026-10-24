@@ -49,16 +49,16 @@ export function SeedFromGoldForm() {
 
   return (
     <form onSubmit={onSubmit} className="grid gap-3 border border-border bg-card p-3 rounded-lg">
-      <h3 className="text-[12px] font-semibold text-foreground">Seed from BeOne reference gold</h3>
-      <p className="text-[12px] text-muted-foreground">
+      <h3 className="text-callout font-semibold text-foreground">Seed from BeOne reference gold</h3>
+      <p className="text-callout text-muted-foreground">
         {aiOn
           ? "Creates a workspace, loads gold gap/tactic statements, and has the parse route’s LLM parse the reference source when present."
           : "Creates a workspace and loads the gold gap/tactic statements as drafts to review by hand. AI is off, so the reference source is not parsed."}
       </p>
-      <label className="grid gap-1 text-[12px]">
+      <label className="grid gap-1 text-callout">
         <span className="text-muted-foreground">Reference pack</span>
         <select
-          className="border border-border bg-background px-2 py-1.5 text-[13px]"
+          className="border border-border bg-background px-2 py-1.5 text-body"
           value={packId}
           onChange={(e) => setPackId(e.target.value)}
         >
@@ -69,12 +69,12 @@ export function SeedFromGoldForm() {
           ))}
         </select>
       </label>
-      {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
-      {summary ? <p className="text-[12px] text-muted-foreground">{summary}</p> : null}
+      {error ? <p className="text-callout text-destructive">{error}</p> : null}
+      {summary ? <p className="text-callout text-muted-foreground">{summary}</p> : null}
       <button
         type="submit"
         disabled={pending}
-        className="w-fit border border-foreground bg-foreground px-3 py-1.5 text-[12px] text-background disabled:opacity-50"
+        className="w-fit border border-foreground bg-foreground px-3 py-1.5 text-callout text-background disabled:opacity-50"
       >
         {pending ? "Seeding…" : "Seed workspace from gold"}
       </button>

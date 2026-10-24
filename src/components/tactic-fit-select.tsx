@@ -15,7 +15,7 @@ export function TacticFitSelect({ tactics, previews }: {
   const fit = selected ? previews?.[selected.id] : undefined;
   return (
     <div>
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
+      <label className="grid gap-1 text-callout text-muted-foreground">
         From tactic library
         <select name="tactic_id" required value={selected?.id ?? ""}
           onChange={event => setSelectedId(event.target.value)}

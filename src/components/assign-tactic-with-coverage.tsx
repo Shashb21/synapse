@@ -105,7 +105,7 @@ export function AssignTacticWithCoverage({ gapId, availableTactics, mappedTactic
               <TacticFitSelect tactics={unmapped} previews={previews} />
               <p className="text-xs text-muted-foreground">Link as unassessed keeps coverage unknown, including when the requirement basis is unresolved.</p>
               {assessing ? <>
-                <label className="grid gap-1 text-[12px] text-muted-foreground">
+                <label className="grid gap-1 text-callout text-muted-foreground">
                   Overall coverage
                   <select aria-label="Overall coverage" ref={verdictRef} name="overall" required defaultValue="" className={SELECT}>
                     <option value="" disabled>Choose a verdict</option>
@@ -114,8 +114,8 @@ export function AssignTacticWithCoverage({ gapId, availableTactics, mappedTactic
                 </label>
                 <p className="text-xs text-muted-foreground">Confirming overall coverage does not confirm individual dimensions. Full confirmation needs a reviewed basis and Yes for every required dimension.</p>
                 <fieldset className="grid grid-cols-2 gap-2">
-                  <legend className="mb-1 text-[12px] text-muted-foreground">Dimensions (optional)</legend>
-                  {COVERAGE_DIMENSIONS.map(dimension => <label key={dimension} className="grid gap-1 text-[11px] text-muted-foreground">
+                  <legend className="mb-1 text-callout text-muted-foreground">Dimensions (optional)</legend>
+                  {COVERAGE_DIMENSIONS.map(dimension => <label key={dimension} className="grid gap-1 text-caption text-muted-foreground">
                     {DIMENSION_LABELS[dimension]}
                     <select aria-label={DIMENSION_LABELS[dimension]} name={`dim_${dimension}`} defaultValue="" className={SELECT}>
                       <option value="">unknown</option>
@@ -124,12 +124,12 @@ export function AssignTacticWithCoverage({ gapId, availableTactics, mappedTactic
                   </label>)}
                 </fieldset>
               </> : null}
-              <label className="grid gap-1 text-[12px] text-muted-foreground">
+              <label className="grid gap-1 text-callout text-muted-foreground">
                 Rationale (required)
                 <textarea name="rationale" required minLength={3} placeholder={assessing ? "Why this tactic covers the gap this much" : "Why this tactic should be linked for later assessment"} className="min-h-16 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm" />
               </label>
             </fieldset>
-            {error ? <p ref={errorRef} tabIndex={-1} role="alert" className="text-[12px] text-destructive">{error}</p> : null}
+            {error ? <p ref={errorRef} tabIndex={-1} role="alert" className="text-callout text-destructive">{error}</p> : null}
             {pending || refreshing ? <p role="status">{refreshing ? "Updating…" : "Saving…"}</p> : null}
           </div>
           <DialogFooter>
@@ -157,7 +157,7 @@ export function UnassignTactic({ gapId, tacticId, expectedRelationship }: { gapI
       confirmLabel="Remove mapping"
       description="Unmaps this tactic from this gap and records it as rejected, so a later AI mapping run does not map it again. You can map it again by hand."
     >
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
+      <label className="grid gap-1 text-callout text-muted-foreground">
         Rationale (required)
         <textarea
           name="rationale"

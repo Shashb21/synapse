@@ -135,7 +135,7 @@ export default async function GapDetailPage({
             note={{ label: "Reason (required)", required: true }} confirmLabel="Confirm evidence assessment" variant="default" />
         ) : null}
         {mapped && !gap.status_override ? (
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-caption text-muted-foreground">
             Engine computed {GAP_STATUS_LABELS[computed]}
           </span>
         ) : (
@@ -150,7 +150,7 @@ export default async function GapDetailPage({
       <div className="mb-4 border border-border bg-card p-3 rounded-lg">
         <EvidenceDecisionContext statement={gap.statement} objective={record.objective} />
         {(gap.related_gap_ids ?? []).length > 0 ? (
-          <p className="mt-2 text-[12px] text-muted-foreground" data-testid="related-gaps">
+          <p className="mt-2 text-callout text-muted-foreground" data-testid="related-gaps">
             Related:{" "}
             {(gap.related_gap_ids ?? []).map((id, index) => {
               const related = state.gaps.find((row) => row.id === id);
@@ -166,7 +166,7 @@ export default async function GapDetailPage({
           </p>
         ) : null}
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <span className="text-[11px] text-muted-foreground">{DOMAIN_LABELS[gap.domain]}</span>
+          <span className="text-caption text-muted-foreground">{DOMAIN_LABELS[gap.domain]}</span>
           {gap.retired ? null : (
             <ActionDialog
               endpoint="/api/iegp"
@@ -205,8 +205,8 @@ export default async function GapDetailPage({
         identity={identity}
       />
       <section className="mb-8">
-        <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Constituent needs — sources</h2>
-        <p className="mb-3 text-[12px] leading-5 text-muted-foreground">
+        <h2 className="mb-2 text-caption font-semibold text-muted-foreground">Constituent needs — sources</h2>
+        <p className="mb-3 text-callout leading-5 text-muted-foreground">
           Where this gap comes from. Constituent needs are the sourced statements extracted from
           documents or interviews. If the same gap was identified in several sources, every source
           is listed. Role is primary or supporting. If the AI joined a need onto the wrong gap,
@@ -240,18 +240,18 @@ export default async function GapDetailPage({
         )}
         <div className="grid gap-2">
           {needs.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">No constituent needs yet.</p>
+            <p className="text-callout text-muted-foreground">No constituent needs yet.</p>
           ) : (
             needs.map(({ need, link }) => {
               const source = state.sources.find((s) => s.id === need.source_id);
               return (
-                <div key={need.id} className="border border-border bg-card p-3 text-[13px] rounded-lg">
-                  <span className="text-[11px] capitalize text-muted-foreground">
+                <div key={need.id} className="border border-border bg-card p-3 text-body rounded-lg">
+                  <span className="text-caption capitalize text-muted-foreground">
                     {link.role} · {source?.title || need.source_id} · {need.id}
                   </span>
                   <p className="mt-1">{need.statement}</p>
                   {need.source_quote && need.source_quote !== need.statement ? (
-                    <p className="mt-1 text-[12px] text-muted-foreground" title={need.source_quote}>
+                    <p className="mt-1 text-callout text-muted-foreground" title={need.source_quote}>
                       “{need.source_quote.length > 400 ? `${need.source_quote.slice(0, 397)}…` : need.source_quote}”
                     </p>
                   ) : null}
@@ -312,10 +312,10 @@ export default async function GapDetailPage({
 
       <section className="mb-8" id="gap-tactic-mappings">
         <span id="mapped-tactics" />
-        <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        <h2 className="mb-2 text-caption font-semibold text-muted-foreground">
           Tactic mappings (many-to-many, dimensional)
         </h2>
-        <p className="mb-3 text-[12px] text-muted-foreground">
+        <p className="mb-3 text-callout text-muted-foreground">
           Each row shows the recorded coverage verdict (from AI mapping or a person) and its ten
           dimensions. A tactic existing is not coverage. A publication existing is not coverage.
         </p>
@@ -345,7 +345,7 @@ export default async function GapDetailPage({
           return (
             <article key={c.id} className="mb-4 border border-border bg-card p-4 rounded-lg">
               <div className="flex flex-wrap items-center gap-2">
-                <TacticRecordLink tacticId={c.tactic_id} className="text-[13px] text-foreground">
+                <TacticRecordLink tacticId={c.tactic_id} className="text-body text-foreground">
                   {tactic?.name}
                 </TacticRecordLink>
                 <CoverageBadge overall={c.overall} />
@@ -359,10 +359,10 @@ export default async function GapDetailPage({
               {relationship?.fit ? (
                 <RelationshipFit fit={relationship.fit} tacticName={relationship.expansion?.scope.name ?? tactic?.name ?? c.tactic_id} />
               ) : null}
-              {review.legacy_unsupported_full ? <p className="mt-3 text-sm text-amber-700 dark:text-amber-400">Historical Full needs review: no confirmed requirement basis was recorded. It does not provide verified current Full coverage.</p> : null}
+              {review.legacy_unsupported_full ? <p className="mt-3 text-sm text-unknown-foreground">Historical Full needs review: no confirmed requirement basis was recorded. It does not provide verified current Full coverage.</p> : null}
               {siblings.length > 0 ? (
-                <div className="mt-3 border border-amber-500/30 bg-amber-500/10 p-3">
-                  <p className="text-[12px] text-foreground">
+                <div className="mt-3 border border-unknown/40 bg-unknown/10 p-3">
+                  <p className="text-callout text-foreground">
                     Also mapped on {siblings.length} other gap{siblings.length === 1 ? "" : "s"}.
                     Coverage values stay per gap — changing this row flags siblings for review
                     without copying yes/partial/no.
@@ -372,7 +372,7 @@ export default async function GapDetailPage({
                       <li key={sibling.id}>
                         <Link
                           href={`/gaps/${sibling.id}`}
-                          className="text-[12px] text-foreground no-underline hover:underline"
+                          className="text-callout text-foreground no-underline hover:underline"
                         >
                           {sibling.name}
                         </Link>
@@ -383,7 +383,7 @@ export default async function GapDetailPage({
               ) : null}
               {c.needs_review ? (
                 <div className="mt-3 border border-border bg-card p-3 rounded-lg">
-                  <p className="mb-2 text-[12px] text-muted-foreground">
+                  <p className="mb-2 text-callout text-muted-foreground">
                     Another live gap that uses this tactic changed a dimension or overall. Confirm
                     or edit this gap&apos;s own coverage. Status is not auto-flipped until you do.
                   </p>
@@ -397,9 +397,9 @@ export default async function GapDetailPage({
                   />
                 </div>
               ) : null}
-              <p className="mt-2 text-[12px] text-muted-foreground">{c.overall_rationale}</p>
+              <p className="mt-2 text-callout text-muted-foreground">{c.overall_rationale}</p>
               <div className="mt-3 overflow-x-auto">
-                <table className="w-full text-left text-[12px]">
+                <table className="w-full text-left text-callout">
                   <thead>
                     <tr className="text-muted-foreground">
                       <th className="py-1 font-medium">Dimension</th>
@@ -414,7 +414,7 @@ export default async function GapDetailPage({
                         <tr key={dim} className="border-t border-border">
                           <td className="py-2 pr-3">
                             <div>{DIMENSION_LABELS[dim]}</div>
-                            <div className="text-[11px] text-muted-foreground">
+                            <div className="text-caption text-muted-foreground">
                               {DIMENSION_QUESTIONS[dim]}
                             </div>
                           </td>
@@ -427,7 +427,7 @@ export default async function GapDetailPage({
                               confirmLabel="Change dimension"
                               description="This records who changed coverage and flags other gaps that use this tactic. Dimension values are not copied across gaps."
                             >
-                              <label className="grid gap-1 text-[12px] text-muted-foreground">
+                              <label className="grid gap-1 text-callout text-muted-foreground">
                                 Value
                                 <select
                                   name="value"
@@ -442,11 +442,11 @@ export default async function GapDetailPage({
                                 </select>
                               </label>
                               {cell.rationale ? (
-                                <p className="text-[11px] text-muted-foreground">
+                                <p className="text-caption text-muted-foreground">
                                   Current rationale: {cell.rationale}
                                 </p>
                               ) : null}
-                              <label className="grid gap-1 text-[12px] text-muted-foreground">
+                              <label className="grid gap-1 text-callout text-muted-foreground">
                                 Your rationale (required)
                                 <textarea
                                   name="rationale"
@@ -472,7 +472,7 @@ export default async function GapDetailPage({
                   confirmLabel="Change overall coverage"
                   description="This records who changed coverage and flags other gaps that use this tactic. Overall values stay per gap."
                 >
-                  <label className="grid gap-1 text-[12px] text-muted-foreground">
+                  <label className="grid gap-1 text-callout text-muted-foreground">
                     Overall
                     <select
                       name="overall"
@@ -487,11 +487,11 @@ export default async function GapDetailPage({
                     </select>
                   </label>
                   {c.overall_rationale ? (
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-caption text-muted-foreground">
                       Current rationale: {c.overall_rationale}
                     </p>
                   ) : null}
-                  <label className="grid gap-1 text-[12px] text-muted-foreground">
+                  <label className="grid gap-1 text-callout text-muted-foreground">
                     Your rationale (required)
                     <textarea
                       name="rationale"
@@ -509,7 +509,7 @@ export default async function GapDetailPage({
       </section>
 
       {parent ? (
-        <p className="mb-6 text-[12px] text-muted-foreground">
+        <p className="mb-6 text-callout text-muted-foreground">
           Leftover of{" "}
           <Link href={`/gaps/${parent.id}`} className="text-foreground no-underline hover:underline">
             {parent.statement}
@@ -519,13 +519,13 @@ export default async function GapDetailPage({
 
       {children.length > 0 ? (
         <section className="mb-8">
-          <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Leftover child gaps</h2>
+          <h2 className="mb-2 text-caption font-semibold text-muted-foreground">Leftover child gaps</h2>
           <div className="grid gap-2">
             {children.map((child) => (
               <Link
                 key={child.id}
                 href={`/gaps/${child.id}`}
-                className="border border-border bg-card p-3 text-[13px] no-underline rounded-lg"
+                className="border border-border bg-card p-3 text-body no-underline rounded-lg"
               >
                 {child.name}
               </Link>
@@ -536,10 +536,10 @@ export default async function GapDetailPage({
 
       {shown === "validated_partial" ? (
         <section className="mb-8 border border-border bg-card p-4 rounded-lg">
-          <h2 className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Leftover (right side of split)</h2>
+          <h2 className="text-caption font-semibold text-muted-foreground">Leftover (right side of split)</h2>
           {leftover ? (
             <>
-              <p className="mt-2 text-[13px] text-foreground">{leftover.statement}</p>
+              <p className="mt-2 text-body text-foreground">{leftover.statement}</p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <ActionDialog
                   endpoint="/api/iegp"
@@ -576,7 +576,7 @@ export default async function GapDetailPage({
             </>
           ) : (
             <>
-              <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
+              <p className="mt-2 text-callout leading-5 text-muted-foreground">
                 {ai ? (
                   <>
                     No leftover drafted. Open Partially Addressed and use &ldquo;Suggest a split&rdquo; to
@@ -617,12 +617,12 @@ export default async function GapDetailPage({
 
       {record.versions.length > 0 ? (
         <section className="mb-8">
-          <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Version history</h2>
+          <h2 className="mb-2 text-caption font-semibold text-muted-foreground">Version history</h2>
           <ul className="grid gap-2">
             {record.versions
               .map((row) => (
-                <li key={row.id} className="border border-border bg-card p-3 text-[13px] rounded-lg">
-                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                <li key={row.id} className="border border-border bg-card p-3 text-body rounded-lg">
+                  <p className="text-caption text-muted-foreground">
                     {row.event} · {row.retired_gap_id} · {row.at.slice(0, 10)} · {row.actor_name}
                   </p>
                   <p className="mt-1">{row.name}</p>
@@ -643,11 +643,11 @@ export default async function GapDetailPage({
           data-testid="gap-excluded"
         >
           <div>
-            <p className="text-[12px] text-foreground">
+            <p className="text-callout text-foreground">
               Excluded
               {gap.exclusion_reason ? `: ${EXCLUSION_LABELS[gap.exclusion_reason as keyof typeof EXCLUSION_LABELS] ?? gap.exclusion_reason}` : ""}
             </p>
-            <p className="mt-1 text-[11px] text-muted-foreground">
+            <p className="mt-1 text-caption text-muted-foreground">
               {gap.status_lock.actor_name ? `By ${gap.status_lock.actor_name}. ` : ""}
               {gap.status_lock.note ? `“${gap.status_lock.note}” ` : ""}
               Out of Prioritize and Tactics. Restore it to bring it back as an unconfirmed gap.
@@ -658,12 +658,12 @@ export default async function GapDetailPage({
       ) : null}
 
       {gap.retired || gap.status === "excluded" ? null : gap.parked_at ? (
-        <section className="mb-8 flex flex-wrap items-center justify-between gap-3 border border-fuchsia-500/30 bg-fuchsia-500/10 p-4">
+        <section className="mb-8 flex flex-wrap items-center justify-between gap-3 border border-primary/40 bg-primary/10 p-4">
           <div>
-            <p className="text-[12px] text-foreground">
+            <p className="text-callout text-foreground">
               Parked{gap.parked_reason ? `: ${gap.parked_reason}` : ""}
             </p>
-            <p className="mt-1 text-[11px] text-muted-foreground">
+            <p className="mt-1 text-caption text-muted-foreground">
               Hidden from Prioritize and Tactics mapping while parked. Unpark to bring it back.
             </p>
           </div>
@@ -671,7 +671,7 @@ export default async function GapDetailPage({
         </section>
       ) : (
         <section className="mb-8 flex flex-wrap items-center gap-3 border border-border bg-card p-4 rounded-lg">
-          <p className="flex-1 text-[12px] text-muted-foreground">
+          <p className="flex-1 text-callout text-muted-foreground">
             Not sure this is a real gap yet? Park it instead of excluding it — parked gaps stay
             listed but drop out of Prioritize and Tactics until you unpark them.
           </p>
@@ -682,7 +682,7 @@ export default async function GapDetailPage({
             confirmLabel="Park"
             description="Set this gap aside if you don't think it's a real evidence gap. A reason is required. Parked gaps can be unparked later."
           >
-            <label className="grid gap-1 text-[12px] text-muted-foreground">
+            <label className="grid gap-1 text-callout text-muted-foreground">
               Reason
               <Textarea name="reason" rows={2} required />
             </label>
@@ -699,7 +699,7 @@ export default async function GapDetailPage({
           description="Takes the gap out of Prioritize and Tactics. It stays listed under Set aside on Gaps and can be restored."
           note={{ label: "Rationale (required)", required: true }}
         >
-          <label className="grid gap-1 text-[12px] text-muted-foreground">
+          <label className="grid gap-1 text-callout text-muted-foreground">
             Exclusion reason
             <select
               name="exclusion_reason"

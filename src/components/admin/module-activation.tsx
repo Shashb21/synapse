@@ -38,14 +38,14 @@ export function ModuleActivation({
   }
 
   if (options.length < 2) {
-    return <span className="text-[11px] text-muted-foreground">Only one version registered.</span>;
+    return <span className="text-caption text-muted-foreground">Only one version registered.</span>;
   }
   return (
     <div className="grid gap-1">
-      <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+      <label className="flex items-center gap-2 text-caption text-muted-foreground">
         Active version
         <select
-          className="h-7 rounded-md border border-border bg-background px-1 text-[12px] text-foreground"
+          className="h-7 rounded-md border border-border bg-background px-1 text-callout text-foreground"
           value={activeId ?? ""}
           disabled={busy}
           aria-label={`Active module for ${stage}`}
@@ -59,7 +59,7 @@ export function ModuleActivation({
         </select>
       </label>
       {error ? (
-        <p role="alert" className="text-[11px] text-destructive">
+        <p role="alert" className="text-caption text-destructive">
           {error}
         </p>
       ) : null}

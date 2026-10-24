@@ -28,7 +28,7 @@ export default async function AdminWorkspacePage({ searchParams }: { searchParam
         changes what the console reads and runs; nobody is added to the workspace, and the app keeps its own
         selection.
       </PageIntro>
-      <p className="mb-4 text-[13px] text-muted-foreground" data-testid="admin-workspace-current">
+      <p className="mb-4 text-body text-muted-foreground" data-testid="admin-workspace-current">
         Working in <span className="font-medium text-foreground">{current.name}</span> ({SOURCE_COPY[current.source]}).{" "}
         <Link href={next} className="text-foreground underline-offset-2 hover:underline">
           Back

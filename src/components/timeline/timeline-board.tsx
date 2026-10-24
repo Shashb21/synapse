@@ -96,7 +96,7 @@ export function AnchoredLayoutButton({ label, identity }: { label: string; ident
   const [anchor, setAnchor] = useState(() => new Date().toISOString().slice(0, 10));
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
-      <label className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+      <label className="inline-flex items-center gap-1 text-caption text-muted-foreground">
         Plan starts
         <input
           type="date"
@@ -104,7 +104,7 @@ export function AnchoredLayoutButton({ label, identity }: { label: string; ident
           onChange={(event) => setAnchor(event.target.value)}
           title="Model start estimates count from this date"
           data-testid="timeline-anchor"
-          className="h-7 rounded-md border border-input bg-transparent px-1.5 text-[11px] text-foreground"
+          className="h-7 rounded-md border border-input bg-transparent px-1.5 text-caption text-foreground"
         />
       </label>
       <RunStageButton
@@ -221,24 +221,24 @@ export function TimelineBoard({
     <div className="grid gap-4">
       <section className="flex flex-wrap items-start justify-between gap-3 border border-border bg-card p-3 rounded-lg">
         <div className="min-w-0">
-          <p className="text-[12px] text-foreground">
+          <p className="text-callout text-foreground">
             {plan ? (
               <>
-                Saved v{plan.version} · <span className="uppercase">{plan.status}</span> by {plan.saved_by} ·{" "}
+                Saved v{plan.version} · <span className="">{plan.status}</span> by {plan.saved_by} ·{" "}
                 {plan.saved_at.slice(0, 16).replace("T", " ")}
               </>
             ) : (
               "Not saved yet. Save the plan as final when the bands, tactics and dates are the ones you stand behind."
             )}
           </p>
-          {plan?.note ? <p className="mt-1 text-[11px] text-muted-foreground">“{plan.note}”</p> : null}
-          <p className="mt-1 text-[11px] text-muted-foreground">
+          {plan?.note ? <p className="mt-1 text-caption text-muted-foreground">“{plan.note}”</p> : null}
+          <p className="mt-1 text-caption text-muted-foreground">
             {plural(model.activities.length, "activity", "activities")} · {model.window.start} → {model.window.end} ·{" "}
             {plural(model.window.months, "month")}
             {stale ? " · the live plan has changed since the last save" : ""}
           </p>
           {history.length > 1 ? (
-            <p className="mt-1 text-[11px] text-muted-foreground">
+            <p className="mt-1 text-caption text-muted-foreground">
               History: {history.map((entry) => `v${entry.version} ${entry.status}`).join(", ")}
             </p>
           ) : null}
@@ -262,11 +262,11 @@ export function TimelineBoard({
             disabledReason={model.activities.length === 0 ? "Nothing to export yet." : undefined}
           />
           {!viewingVersion && history.length > 0 ? (
-            <label className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+            <label className="inline-flex items-center gap-1 text-caption text-muted-foreground">
               Show
               <select
                 aria-label="Show a saved version"
-                className="h-7 rounded-md border border-input bg-transparent px-1.5 text-[11px] text-foreground"
+                className="h-7 rounded-md border border-input bg-transparent px-1.5 text-caption text-foreground"
                 defaultValue=""
                 onChange={(event) => {
                   if (event.target.value) window.location.assign(`/timeline?version=${event.target.value}`);
@@ -293,7 +293,7 @@ export function TimelineBoard({
             />
           ) : null}
           {canSaveFinal && model.pending.length > 0 ? (
-            <p className="max-w-56 text-[11px] text-muted-foreground">
+            <p className="max-w-56 text-caption text-muted-foreground">
               {plural(model.pending.length, "activity", "activities")} not dated yet.{" "}
               {ai
                 ? "Date them by hand or rebuild before saving as final."
@@ -306,7 +306,7 @@ export function TimelineBoard({
             </Button>
           ) : null}
           {canSaveFinal && model.activities.length === 0 ? (
-            <p className="max-w-56 text-[11px] text-muted-foreground">
+            <p className="max-w-56 text-caption text-muted-foreground">
               Nothing to save yet: date at least one activity first.
             </p>
           ) : canSaveFinal ? (
@@ -334,7 +334,7 @@ export function TimelineBoard({
               ]}
             />
           ) : (
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-caption text-muted-foreground">
               {canReschedule
                 ? "Your role may export but not save the plan as final."
                 : "Read-only: your role may view and export the timeline, not edit it."}
@@ -344,7 +344,7 @@ export function TimelineBoard({
       </section>
 
       {viewingVersion ? (
-        <section role="status" className="border border-primary/40 bg-primary/5 p-3 rounded-lg text-[12px] text-foreground">
+        <section role="status" className="border border-primary/40 bg-primary/5 p-3 rounded-lg text-callout text-foreground">
           Viewing saved v{viewingVersion.version} ({viewingVersion.status}), read-only. Export stamps this version and its
           fingerprint {stamp.code}.{" "}
           <a href="/timeline" className="underline">Back to the current plan</a>
@@ -352,13 +352,13 @@ export function TimelineBoard({
       ) : null}
 
       {!viewingVersion && issues.length + gapBlockers.length > 0 ? (
-        <details className="grid gap-1 border border-amber-500/50 bg-amber-50 p-3 rounded-lg dark:bg-amber-950/30" data-testid="final-save-checklist">
-          <summary className="cursor-pointer text-[12px] font-semibold text-foreground focus-visible:outline-2 focus-visible:outline-ring">
-            <AlertTriangle className="inline size-4 text-amber-600" aria-hidden /> Before this can be saved as final (
+        <details className="grid gap-1 border border-unknown/40 bg-unknown/10 p-3 rounded-lg" data-testid="final-save-checklist">
+          <summary className="cursor-pointer text-callout font-semibold text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+            <AlertTriangle className="inline size-4 text-unknown-foreground" aria-hidden /> Before this can be saved as final (
             {plural(issues.length + gapBlockers.length, "item")})
             <span className="ml-2 font-normal">A draft can still be saved. Expand to review blockers.</span>
           </summary>
-          <ul className="mt-2 grid gap-0.5 text-[11px] text-muted-foreground">
+          <ul className="mt-2 grid gap-0.5 text-caption text-muted-foreground">
             {gapBlockers.map((blocker, index) => (
               <li key={`${blocker.issue}:${blocker.gap_id ?? index}`} data-testid="final-gap-blocker">
                 {blocker.gap_id && blocker.issue !== "foreign_reference" ? (
@@ -382,7 +382,7 @@ export function TimelineBoard({
       ) : null}
 
       {model.cancelled?.length ? (
-        <p className="text-[11px] text-muted-foreground" data-testid="cancelled-count">
+        <p className="text-caption text-muted-foreground" data-testid="cancelled-count">
           {plural(model.cancelled.length, "cancelled tactic")} not in the plan:{" "}
           {model.cancelled.map((row) => row.tactic_name).join(", ")}.
         </p>
@@ -390,12 +390,12 @@ export function TimelineBoard({
 
       {view.conflicts.length > 0 ? (
         <section role="alert" className="grid gap-1 border border-destructive/50 bg-destructive/10 p-3">
-          <h2 className="flex items-center gap-1 text-[12px] font-semibold text-destructive">
+          <h2 className="flex items-center gap-1 text-callout font-semibold text-destructive">
             <AlertTriangle className="size-4" /> {view.conflicts.length} broken dependenc
             {view.conflicts.length === 1 ? "y" : "ies"}
           </h2>
           <ConflictList conflicts={view.conflicts} />
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             A successor starts before the activity it waits on ends. Nothing is shifted automatically: move a bar or
             edit its dependencies.
           </p>
@@ -417,9 +417,9 @@ export function TimelineBoard({
             aria-pressed={showDependencies}
             onClick={() => setShowDependencies((on) => !on)}
             className={cn(
-              "rounded-md border px-2.5 py-1 text-[11px] font-medium",
+              "rounded-md border px-2.5 py-1 text-caption font-medium",
               showDependencies
-                ? "border-primary/40 bg-primary/10 text-indigo-800 dark:text-indigo-300"
+                ? "border-primary/40 bg-primary/10 text-primary "
                 : "border-border bg-background text-muted-foreground",
             )}
           >
@@ -441,7 +441,7 @@ export function TimelineBoard({
                 aria-pressed={priorityFilter === option.id}
                 onClick={() => setPriorityFilter(option.id)}
                 className={cn(
-                  "rounded-md border px-2.5 py-1 text-[11px] font-medium",
+                  "rounded-md border px-2.5 py-1 text-caption font-medium",
                   priorityFilter === option.id
                     ? "border-primary bg-primary text-primary-foreground"
                     : "border-border bg-background text-muted-foreground hover:text-foreground",
@@ -455,7 +455,7 @@ export function TimelineBoard({
             <>
               <span className="h-5 w-px bg-border" aria-hidden />
               <div role="group" aria-label="Setting" className="flex flex-wrap items-center gap-1">
-                <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Setting</span>
+                <span className="text-caption font-semibold text-muted-foreground">Setting</span>
                 {[null, ...settingTags].map((tag) => (
                   <button
                     key={tag ?? "all"}
@@ -463,7 +463,7 @@ export function TimelineBoard({
                     aria-pressed={setting === tag}
                     onClick={() => setSetting(tag === setting ? null : tag)}
                     className={cn(
-                      "rounded-md border px-2 py-1 text-[11px] font-medium",
+                      "rounded-md border px-2 py-1 text-caption font-medium",
                       setting === tag
                         ? tag === null
                           ? "border-foreground bg-foreground text-background"
@@ -506,7 +506,7 @@ export function TimelineBoard({
         </>
       )}
       {canReschedule && hasRows ? (
-        <p className="-mt-2 text-[11px] text-muted-foreground">
+        <p className="-mt-2 text-caption text-muted-foreground">
           Open an activity to review its dates, then use Edit. In the chart, drag a bar to move it or either end to resize it; from the keyboard, focus a bar and press Enter.
         </p>
       ) : null}
@@ -523,11 +523,11 @@ export function TimelineBoard({
 
       {model.removed.length > 0 ? (
         <section className="border border-border bg-card p-3 rounded-lg">
-          <h2 className="text-[12px] font-semibold text-foreground">Removed by hand</h2>
+          <h2 className="text-callout font-semibold text-foreground">Removed by hand</h2>
           <ul className="mt-2 grid gap-2">
             {model.removed.map((row) => (
               <li key={row.activity_id} className="flex flex-wrap items-center justify-between gap-2">
-                <span className="min-w-0 text-[11px] text-muted-foreground">
+                <span className="min-w-0 text-caption text-muted-foreground">
                   <span className="text-foreground">{row.tactic_name}</span> — “{row.reason}”
                 </span>
                 {canReschedule ? (
@@ -556,8 +556,8 @@ export function TimelineBoard({
           {selected ? (
             <>
               <SheetHeader>
-                <SheetTitle className="text-[15px]">{selected.tactic_name}</SheetTitle>
-                <SheetDescription className="text-[12px]">
+                <SheetTitle className="text-headline">{selected.tactic_name}</SheetTitle>
+                <SheetDescription className="text-callout">
                   {tacticTypeLabel({ type: selected.tactic_type, custom_type: selected.tactic_custom_type })} ·{" "}
                   {selected.tactic_status.replaceAll("_", " ")}
                   {selected.expansion_id ? ` · Expansion of ${selected.parent_tactic_name}` : ""}
@@ -576,7 +576,7 @@ export function TimelineBoard({
               ) : (
               <div className="grid gap-4 px-4 pb-6">
                 <div className="flex flex-wrap gap-1">
-                  <Badge variant="outline" className="text-[10px]">
+                  <Badge variant="outline" className="text-caption">
                     {selected.band === "addressed"
                       ? "Addressed evidence"
                       : selected.band === "unprioritized"
@@ -584,17 +584,17 @@ export function TimelineBoard({
                         : `${selected.band} priority`}
                   </Badge>
                   {selected.meta.inclusion && selected.meta.inclusion !== "committed" ? (
-                    <Badge variant="outline" className="text-[10px]" data-testid="inclusion-badge">
+                    <Badge variant="outline" className="text-caption" data-testid="inclusion-badge">
                       {INCLUSION_LABELS[selected.meta.inclusion]}
                     </Badge>
                   ) : null}
                   {datedSelection && estimatedFields(datedSelection.meta.schedule_basis).length > 0 ? (
-                    <Badge variant="outline" className="border-amber-500 text-[10px] text-amber-700" data-testid="estimate-badge">
+                    <Badge variant="outline" className="border-unknown text-caption text-unknown-foreground" data-testid="estimate-badge">
                       {datedSelection.meta.estimate_stale ? "Estimate — out of date" : "Estimate"}
                     </Badge>
                   ) : null}
                   {selected.meta.counts_toward_addressing ? (
-                    <Badge variant="secondary" className="text-[10px]">
+                    <Badge variant="secondary" className="text-caption">
                       counts toward addressing
                     </Badge>
                   ) : selected.expansion_id ? <span className="text-xs text-muted-foreground">Not counting toward addressing</span> : null}
@@ -602,7 +602,7 @@ export function TimelineBoard({
                 {selected.expansion_id && selected.expansion_version && canEditDetails ? <ActionDialog endpoint="/api/plan" payload={{action: "set_expansion_status", expansion_id: selected.expansion_id, expected_version: selected.expansion_version}} label="Change expansion status" title={`Status for ${selected.tactic_name}`} description="Change only this expansion. Coverage still needs its own review." confirmLabel="Save status" identity={identity} fields={[{name: "status", label: "Status", type: "select", defaultValue: selected.tactic_status, options: ["proposed", "planned", "ongoing", "completed", "cancelled"].map(value => ({value, label: value}))}]} /> : null}
 
                 <section>
-                  <dl className="grid gap-1 text-[12px] text-muted-foreground">
+                  <dl className="grid gap-1 text-callout text-muted-foreground">
                     <Row label="Objective" value={selected.meta.objective || "Not recorded"} />
                     <Row label="Outputs" value={selected.meta.outputs || "Not recorded"} />
                     <Row label="Owner" value={selected.meta.owner || "Not recorded"} />
@@ -610,10 +610,10 @@ export function TimelineBoard({
                 </section>
 
                 <section>
-                  <h3 className="text-[12px] font-medium text-foreground">Evidence gaps it answers</h3>
+                  <h3 className="text-callout font-medium text-foreground">Evidence gaps it answers</h3>
                   <ul className="mt-1 grid gap-1">
                     {selected.gap_ids.map((gapId, index) => (
-                      <li key={gapId} className="text-[12px] text-muted-foreground">
+                      <li key={gapId} className="text-callout text-muted-foreground">
                         <span className="text-foreground">{selected.gap_names[index] ?? gapId}</span>
                         {gapDomains[gapId]
                           ? ` · ${DOMAIN_LABELS[gapDomains[gapId] as EvidenceDomain] ?? gapDomains[gapId]}`
@@ -626,8 +626,8 @@ export function TimelineBoard({
 
                 {datedSelection ? (
                 <section>
-                  <h3 className="text-[12px] font-medium text-foreground">Timing</h3>
-                  <dl className="mt-1 grid gap-1 text-[12px] text-muted-foreground">
+                  <h3 className="text-callout font-medium text-foreground">Timing</h3>
+                  <dl className="mt-1 grid gap-1 text-callout text-muted-foreground">
                     <Row label="Start" value={`${datedSelection.start_date} · ${BASIS_LABELS[datedSelection.meta.schedule_basis.start]}`} />
                     <Row label="End" value={`${datedSelection.end_date} · ${BASIS_LABELS[datedSelection.meta.schedule_basis.end]}`} />
                     <Row
@@ -653,8 +653,8 @@ export function TimelineBoard({
                     {datedSelection.meta.manual ? <Row label="Added" value="by hand" /> : null}
                   </dl>
                   {estimatedFields(datedSelection.meta.schedule_basis).length > 0 ? (
-                    <div className="mt-2 grid gap-1 border border-amber-500/50 bg-amber-50 p-2 dark:bg-amber-950/30">
-                      <p className="text-[11px] text-foreground">
+                    <div className="mt-2 grid gap-1 border border-unknown/40 bg-unknown/10 p-2">
+                      <p className="text-caption text-foreground">
                         {datedSelection.meta.estimate_stale
                           ? "These dates were estimated by the model before the tactic or its design changed. Check them."
                           : "The model estimated these dates. They are not from a source or a person until you accept or edit them."}
@@ -674,10 +674,10 @@ export function TimelineBoard({
                   ) : null}
                   {(datedSelection.meta.proposed_dependencies ?? []).length > 0 ? (
                     <div className="mt-2 grid gap-1 border border-border p-2" data-testid="proposed-dependencies">
-                      <p className="text-[11px] font-medium text-foreground">Proposed by the model — not yet a dependency</p>
+                      <p className="text-caption font-medium text-foreground">Proposed by the model — not yet a dependency</p>
                       <ul className="grid gap-1">
                         {datedSelection.meta.proposed_dependencies.map((proposal) => (
-                          <li key={proposal.id} className="grid gap-1 text-[11px] text-muted-foreground">
+                          <li key={proposal.id} className="grid gap-1 text-caption text-muted-foreground">
                             <span>
                               Waits on <span className="text-foreground">{nameOf.get(proposal.id) ?? proposal.id}</span>: {proposal.reason}
                             </span>
@@ -708,28 +708,28 @@ export function TimelineBoard({
                   ) : null}
                   {selectedConflicts.length > 0 ? (
                     <div role="alert" className="mt-2 grid gap-1 border border-destructive/50 bg-destructive/10 p-2">
-                      <p className="flex items-center gap-1 text-[11px] font-medium text-destructive">
+                      <p className="flex items-center gap-1 text-caption font-medium text-destructive">
                         <AlertTriangle className="size-3.5" /> Broken dependency
                       </p>
                       <ConflictList conflicts={selectedConflicts} />
                     </div>
                   ) : null}
                   {datedSelection.meta.dependency_note ? (
-                    <p className="mt-1 text-[11px] text-[var(--opportunity)]">{datedSelection.meta.dependency_note}</p>
+                    <p className="mt-1 text-caption text-[var(--opportunity)]">{datedSelection.meta.dependency_note}</p>
                   ) : null}
                   {datedSelection.meta.schedule_rationale ? (
-                    <p className="mt-1 text-[11px] text-muted-foreground">
+                    <p className="mt-1 text-caption text-muted-foreground">
                       Why these dates ({datedSelection.meta.rationale_locked ? "written by hand" : "model or design"}):{" "}
                       {datedSelection.meta.schedule_rationale}
                     </p>
                   ) : null}
                 </section>
 
-                ) : <p className="text-[12px] text-muted-foreground">Unscheduled. {pendingReason(pendingSelection!.reason, ai)}</p>}
+                ) : <p className="text-callout text-muted-foreground">Unscheduled. {pendingReason(pendingSelection!.reason, ai)}</p>}
 
                 <section>
-                  <h3 className="text-[12px] font-medium text-foreground">Design</h3>
-                  <dl className="mt-1 grid gap-1 text-[12px] text-muted-foreground">
+                  <h3 className="text-callout font-medium text-foreground">Design</h3>
+                  <dl className="mt-1 grid gap-1 text-callout text-muted-foreground">
                     <Row label="Evidence question" value={selected.meta.evidence_question} />
                     <Row label="Population" value={selected.meta.population} />
                     {selected.expansion_scope ? <>
@@ -745,15 +745,15 @@ export function TimelineBoard({
                     <Row label="Budget" value={selected.meta.budget || "—"} />
                     <Row label="Owner" value={`${selected.meta.owner} · ${FUNCTION_LABELS[selected.meta.function as ActorFunction] ?? selected.meta.function}`} />
                   </dl>
-                  <p className="mt-2 text-[11px] text-muted-foreground">
+                  <p className="mt-2 text-caption text-muted-foreground">
                     {TACTIC_STATUS_HELPERS[selected.tactic_status as TacticStatus]}
                   </p>
                 </section>
 
                 {selected.meta.priority_rationale ? (
                   <section>
-                    <h3 className="text-[12px] font-medium text-foreground">Why this priority</h3>
-                    <p className="mt-1 text-[12px] text-muted-foreground">
+                    <h3 className="text-callout font-medium text-foreground">Why this priority</h3>
+                    <p className="mt-1 text-callout text-muted-foreground">
                       “{selected.meta.priority_rationale}”
                     </p>
                   </section>
@@ -817,14 +817,14 @@ function EmptyTimeline({
 }) {
   return (
     <section className="border border-border bg-card p-4 rounded-lg">
-      <h2 className="text-[12px] font-semibold text-foreground">No activities to plot yet</h2>
-      <p className="mt-1 text-[12px] text-muted-foreground">
+      <h2 className="text-callout font-semibold text-foreground">No activities to plot yet</h2>
+      <p className="mt-1 text-callout text-muted-foreground">
         {ai
           ? "The timeline is built from validated state: gaps mapped to tactics, with priority bands. Upload sources, confirm evidence assessments and review tactic mappings in Evidence Inventory, then validate priorities in the Prioritization Matrix before building the Gantt Timeline."
           : "The timeline is built from validated state: gaps mapped to tactics, with validated priority bands. Add gaps and tactics by hand, review their mappings in Evidence Inventory, validate priorities in the Prioritization Matrix, then lay out dates here or add an activity by hand."}
       </p>
       {unscheduled.length > 0 ? (
-        <p className="mt-2 text-[12px] text-muted-foreground">
+        <p className="mt-2 text-callout text-muted-foreground">
           {unscheduled.length === 1 ? "1 open gap has" : `${unscheduled.length} open gaps have`} no tactic yet, so there is nothing to schedule for{" "}
           {unscheduled.length === 1 ? "it" : "them"}.
         </p>

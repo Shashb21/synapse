@@ -80,7 +80,7 @@ export default async function AccuracyReviewPage({
       </PageIntro>
 
       {loadError ? (
-        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
+        <p className="mb-4 border border-destructive/40 bg-card p-2 text-callout text-destructive rounded-lg">
           {loadError}
         </p>
       ) : null}
@@ -93,10 +93,10 @@ export default async function AccuracyReviewPage({
           aria-labelledby="review-ai-off"
           data-testid="review-ai-off"
         >
-          <h2 id="review-ai-off" className="text-[13px] font-semibold text-foreground">
+          <h2 id="review-ai-off" className="text-body font-semibold text-foreground">
             AI is off — the completeness audit is an AI step
           </h2>
-          <p className="text-[12px] text-muted-foreground">
+          <p className="text-callout text-muted-foreground">
             No audit runs and no miss flags are raised while AI is off (an admin can turn AI on
             in the control panel). Add any missing gaps or tactics by hand on the{" "}
             <Link
@@ -107,16 +107,16 @@ export default async function AccuracyReviewPage({
             </Link>
             .
           </p>
-          <p className="text-[12px] text-muted-foreground">
+          <p className="text-callout text-muted-foreground">
             Workspace · {active ? workspaceLabel(active) : workspaceId}
           </p>
         </section>
       ) : !workspaceId ? (
         <section className="grid gap-2" aria-labelledby="review-empty">
-          <h2 id="review-empty" className="text-[13px] font-semibold text-foreground">
+          <h2 id="review-empty" className="text-body font-semibold text-foreground">
             Choose a workspace
           </h2>
-          <p className="text-[12px] text-muted-foreground">
+          <p className="text-callout text-muted-foreground">
             Open from{" "}
             <Link href="/admin/accuracy" className="underline-offset-2 hover:underline">
               Workspaces
@@ -129,7 +129,7 @@ export default async function AccuracyReviewPage({
                 <li key={workspace.id}>
                   <Link
                     href={`/admin/accuracy/review?workspace_id=${encodeURIComponent(workspace.id)}`}
-                    className="inline-flex rounded-md border border-border px-2 py-1 text-[12px] text-muted-foreground no-underline hover:text-foreground"
+                    className="inline-flex rounded-md border border-border px-2 py-1 text-callout text-muted-foreground no-underline hover:text-foreground"
                   >
                     {workspace.name}
                   </Link>
@@ -140,13 +140,13 @@ export default async function AccuracyReviewPage({
         </section>
       ) : (
         <>
-          <p className="mb-3 text-[12px] text-muted-foreground">
+          <p className="mb-3 text-callout text-muted-foreground">
             Workspace · {active ? workspaceLabel(active) : workspaceId} · {scanned} block(s) scanned · {openCount} open
             miss flag(s)
             {skippedNoise > 0 ? ` · ${skippedNoise} judged not a miss by the model critic` : ""}
           </p>
           {scanned === 0 ? (
-            <p className="text-[12px] text-muted-foreground">
+            <p className="text-callout text-muted-foreground">
               No parse blocks yet. Upload or seed a source on{" "}
               <Link
                 href={`/admin/accuracy/sources?workspace_id=${encodeURIComponent(workspaceId)}`}

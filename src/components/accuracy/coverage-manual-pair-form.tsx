@@ -16,7 +16,7 @@ const OVERALLS = [
 ] as const;
 
 const selectClass =
-  "h-8 w-full rounded-md border border-border bg-background px-2 text-[12px] text-foreground";
+  "h-8 w-full rounded-md border border-border bg-background px-2 text-callout text-foreground";
 
 /** Decide coverage for ANY gap↔tactic pair — not only the queue's suggested pairs. */
 export function CoverageManualPairForm({
@@ -74,17 +74,17 @@ export function CoverageManualPairForm({
   return (
     <section className="mb-4 grid gap-2 border border-border bg-card p-3 rounded-lg" aria-labelledby="manual-pair">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id="manual-pair" className="text-[12px] font-semibold text-foreground">
+        <h2 id="manual-pair" className="text-callout font-semibold text-foreground">
           Decide any pair
         </h2>
         <Button size="sm" variant={open ? "default" : "outline"} onClick={() => setOpen(!open)}>
           {open ? "Close" : "Pick a pair"}
         </Button>
       </div>
-      {message ? <p className="text-[11px] text-[var(--known-foreground)]">{message}</p> : null}
+      {message ? <p className="text-caption text-[var(--known-foreground)]">{message}</p> : null}
       {open ? (
         <form onSubmit={submit} className="grid gap-2" data-testid="coverage-manual-pair">
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             Gap
             <select value={gapId} onChange={(e) => setGapId(e.target.value)} className={selectClass}>
               <option value="">Choose a gap…</option>
@@ -95,7 +95,7 @@ export function CoverageManualPairForm({
               ))}
             </select>
           </label>
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             Tactic
             <select
               value={tacticId}
@@ -111,7 +111,7 @@ export function CoverageManualPairForm({
             </select>
           </label>
           <fieldset className="flex flex-wrap gap-2">
-            <legend className="mb-1 text-[11px] text-muted-foreground">Overall</legend>
+            <legend className="mb-1 text-caption text-muted-foreground">Overall</legend>
             {OVERALLS.map((row) => (
               <Button
                 key={row.value}
@@ -129,10 +129,10 @@ export function CoverageManualPairForm({
             onChange={(e) => setRationale(e.target.value)}
             rows={2}
             placeholder="Why this coverage decision (required)"
-            className="text-[12px]"
+            className="text-callout"
           />
           {error ? (
-            <p className="text-[11px] text-destructive" role="alert">
+            <p className="text-caption text-destructive" role="alert">
               {error}
             </p>
           ) : null}

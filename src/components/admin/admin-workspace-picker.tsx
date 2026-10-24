@@ -73,19 +73,19 @@ export function AdminWorkspacePicker({
   }
 
   if (workspaces.length === 0) {
-    return <p className="text-[13px] text-muted-foreground">There are no workspaces yet.</p>;
+    return <p className="text-body text-muted-foreground">There are no workspaces yet.</p>;
   }
 
   return (
     <div className="grid gap-3">
       {error ? (
-        <p role="alert" data-testid="admin-workspace-error" className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive rounded-lg">
+        <p role="alert" data-testid="admin-workspace-error" className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-callout text-destructive rounded-lg">
           {error}
         </p>
       ) : null}
       <div className="overflow-x-auto border border-border bg-card rounded-lg">
-        <table className="w-full text-[13px]" data-testid="admin-workspace-list">
-          <thead className="text-[11px] text-muted-foreground">
+        <table className="w-full text-body" data-testid="admin-workspace-list">
+          <thead className="text-caption text-muted-foreground">
             <tr className="border-b border-border">
               <th className="px-3 py-2 text-left font-normal">Workspace</th>
               <th className="px-3 py-2 text-left font-normal">Id</th>
@@ -103,16 +103,16 @@ export function AdminWorkspacePicker({
                   <td className="px-3 py-2">
                     <span className="font-medium">{workspace.name}</span>
                     {workspace.demo ? (
-                      <Badge variant="secondary" className="ml-2 text-[10px]">
+                      <Badge variant="secondary" className="ml-2 text-caption">
                         Demo
                       </Badge>
                     ) : null}
                   </td>
-                  <td className="px-3 py-2 font-mono text-[12px] text-muted-foreground">{workspace.id}</td>
+                  <td className="px-3 py-2 font-mono text-callout text-muted-foreground">{workspace.id}</td>
                   <td className="px-3 py-2 text-muted-foreground">{workspace.created_by}</td>
                   <td className="px-3 py-2 text-right">{workspace.member_count}</td>
                   <td className="px-3 py-2">
-                    <label className="inline-flex items-center gap-1.5 text-[12px]">
+                    <label className="inline-flex items-center gap-1.5 text-callout">
                       <input
                         type="checkbox"
                         data-testid={`demo-mode-${workspace.id}`}
@@ -127,7 +127,7 @@ export function AdminWorkspacePicker({
                   </td>
                   <td className="px-3 py-2 text-right">
                     {current ? (
-                      <span className="inline-flex items-center gap-1 text-[12px] text-[var(--known-foreground)]">
+                      <span className="inline-flex items-center gap-1 text-callout text-[var(--known-foreground)]">
                         <Check className="size-3.5" aria-hidden />
                         Working here
                       </span>

@@ -51,16 +51,16 @@ export function RoutingPanel({
   return (
     <section className="grid gap-3" aria-labelledby="routing">
       <div>
-        <h2 id="routing" className="text-[13px] font-semibold text-foreground">
+        <h2 id="routing" className="text-body font-semibold text-foreground">
           Per-stage routing
         </h2>
-        <p className="mt-1 text-[12px] text-muted-foreground">
+        <p className="mt-1 text-callout text-muted-foreground">
           Each stage resolves its own provider, model and parameters. Agentic stages need a
           provider whose API key is set in the server environment, or the run blocks with a link
           back here.
         </p>
         {ai ? null : (
-          <p className="mt-1 text-[12px] text-[var(--unknown-foreground)]" data-testid="routing-ai-off">
+          <p className="mt-1 text-callout text-[var(--unknown-foreground)]" data-testid="routing-ai-off">
             AI is off, so these routes are not used. You can still edit them; they take effect when
             an admin turns AI back on.
           </p>
@@ -154,28 +154,28 @@ function StageRouteCard({
     <article className="grid gap-2 border border-border bg-card p-3 rounded-lg">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="text-[12px] font-semibold text-foreground">{route.stage_title}</h3>
-          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+          <h3 className="text-callout font-semibold text-foreground">{route.stage_title}</h3>
+          <p className="mt-0.5 truncate text-caption text-muted-foreground">
             {route.module_id ?? "no module registered"}
             {route.module_version ? ` · v${route.module_version}` : ""}
           </p>
         </div>
-        <Badge variant="outline" className="text-[10px]">
+        <Badge variant="outline" className="text-caption">
           {route.agentic ? "agentic" : "mechanical"}
         </Badge>
       </div>
 
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-caption text-muted-foreground">
         Resolves to <span className="text-foreground">{route.resolved_label}</span>
         {route.degraded_reason ? ` · ${route.degraded_reason}` : ""}
       </p>
 
       {route.agentic ? (
         <div className="grid gap-2 sm:grid-cols-2">
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             Provider
             <select
-              className="h-8 rounded-lg border border-input bg-transparent px-2 text-[12px] text-foreground"
+              className="h-8 rounded-lg border border-input bg-transparent px-2 text-callout text-foreground"
               value={providerId}
               disabled={!canRoute}
               onChange={(event) => {
@@ -192,10 +192,10 @@ function StageRouteCard({
               ))}
             </select>
           </label>
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             Model
             <select
-              className="h-8 rounded-lg border border-input bg-transparent px-2 text-[12px] text-foreground"
+              className="h-8 rounded-lg border border-input bg-transparent px-2 text-callout text-foreground"
               value={model}
               disabled={!canRoute}
               onChange={(event) => setModel(event.target.value)}
@@ -207,7 +207,7 @@ function StageRouteCard({
               ))}
             </select>
           </label>
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             Temperature (0 to 2)
             <Input
               value={temperature}
@@ -217,7 +217,7 @@ function StageRouteCard({
               onChange={(event) => setTemperature(event.target.value)}
             />
           </label>
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             Max tokens (1 to 200,000)
             <Input
               value={maxTokens}
@@ -227,7 +227,7 @@ function StageRouteCard({
               onChange={(event) => setMaxTokens(event.target.value)}
             />
           </label>
-          <label className="grid gap-1 text-[11px] text-muted-foreground sm:col-span-2">
+          <label className="grid gap-1 text-caption text-muted-foreground sm:col-span-2">
             Fallbacks, in order
             <Input
               value={fallbacks}
@@ -242,16 +242,16 @@ function StageRouteCard({
           </label>
         </div>
       ) : (
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-caption text-muted-foreground">
           This stage does not call a model, so it has no route to configure.
         </p>
       )}
 
       {route.available_modules.length > 1 ? (
-        <label className="grid gap-1 text-[11px] text-muted-foreground">
+        <label className="grid gap-1 text-caption text-muted-foreground">
           Active implementation
           <select
-            className="h-8 rounded-lg border border-input bg-transparent px-2 text-[12px] text-foreground"
+            className="h-8 rounded-lg border border-input bg-transparent px-2 text-callout text-foreground"
             value={route.module_id ?? ""}
             disabled={!canActivate}
             onChange={(event) => void activate(event.target.value)}
@@ -272,11 +272,11 @@ function StageRouteCard({
             Save route
           </Button>
         ) : null}
-        <span className="text-[11px] text-muted-foreground">
+        <span className="text-caption text-muted-foreground">
           {saved ? "Saved." : `Last set by ${route.updated_by}`}
         </span>
       </div>
-      {error ? <p className="text-[11px] text-destructive">{error}</p> : null}
+      {error ? <p className="text-caption text-destructive">{error}</p> : null}
     </article>
   );
 }

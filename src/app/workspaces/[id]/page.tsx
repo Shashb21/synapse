@@ -24,7 +24,7 @@ export default async function WorkspaceSettingsPage({ params }: { params: Promis
 
   return (
     <WorkspacesFrame person={{ name: session.actor.name, email: session.email }}>
-      <Link href="/workspaces" className="text-[12px] text-muted-foreground no-underline hover:text-foreground">
+      <Link href="/workspaces" className="text-callout text-muted-foreground no-underline hover:text-foreground">
         ← All workspaces
       </Link>
       <h1 className="mb-6 mt-2 text-base font-bold tracking-tight text-foreground">{workspace.name}</h1>

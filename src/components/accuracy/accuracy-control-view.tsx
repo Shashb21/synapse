@@ -47,10 +47,10 @@ export async function AccuracyControlView() {
         aria-labelledby="ai-switch-state"
         data-testid="accuracy-ai-switch-state"
       >
-        <h2 id="ai-switch-state" className="text-[13px] font-semibold text-foreground">
+        <h2 id="ai-switch-state" className="text-body font-semibold text-foreground">
           AI switch · {ai.enabled ? "on" : "off"}
         </h2>
-        <p className="text-[12px] text-muted-foreground">
+        <p className="text-callout text-muted-foreground">
           {ai.enabled
             ? "Models run on the routes below (parse, extract, audit, coverage assist, ideate)."
             : "AI is off: no route below is called. Every accuracy step is done by hand — add gaps and tactics on the Ledger, decide coverage, set priority and dates yourself."}
@@ -59,7 +59,7 @@ export async function AccuracyControlView() {
           {ai.rationale ? ` — “${ai.rationale}”` : ""}
           {ai.updated_by || ai.updated_at ? "." : ""}
         </p>
-        <p className="text-[12px]">
+        <p className="text-callout">
           <Link href="/admin/control" className="text-foreground underline-offset-2 hover:underline">
             Change the AI switch in the control panel →
           </Link>
@@ -77,15 +77,15 @@ export async function AccuracyControlView() {
         canRoute={can(identity.role, "configure_routing")}
       />
       <section className="grid gap-2" aria-labelledby="live-prices">
-        <h2 id="live-prices" className="text-[13px] font-semibold text-foreground">
+        <h2 id="live-prices" className="text-body font-semibold text-foreground">
           Live price table
         </h2>
-        <p className="text-[12px] text-muted-foreground">
+        <p className="text-callout text-muted-foreground">
           USD per 1M tokens used for run estimates. Provider calls do not return billing; Audit shows
           the rollup of these estimates.
         </p>
         <div className="overflow-x-auto border border-border">
-          <table className="w-full text-left text-[12px]">
+          <table className="w-full text-left text-callout">
             <thead className="bg-card text-muted-foreground">
               <tr>
                 <th className="px-2 py-1.5 font-medium">Provider</th>
@@ -99,7 +99,7 @@ export async function AccuracyControlView() {
               {listModelPrices().map((row) => (
                 <tr key={`${row.provider_id}:${row.model}`} className="border-t border-border">
                   <td className="px-2 py-1.5">{row.provider_id}</td>
-                  <td className="px-2 py-1.5 font-mono text-[11px]">{row.model}</td>
+                  <td className="px-2 py-1.5 font-mono text-caption">{row.model}</td>
                   <td className="px-2 py-1.5">${row.input_per_million.toFixed(2)}</td>
                   <td className="px-2 py-1.5">${row.output_per_million.toFixed(2)}</td>
                   <td className="px-2 py-1.5 text-muted-foreground">{row.updated_at}</td>

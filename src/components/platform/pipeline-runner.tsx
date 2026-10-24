@@ -87,7 +87,7 @@ function Chain({
           {steps.map((step) => {
             const status = state[step.stage]?.status ?? "idle";
             return (
-              <li key={step.stage} className="flex items-start gap-2 text-[11px]">
+              <li key={step.stage} className="flex items-start gap-2 text-caption">
                 {status === "running" ? (
                   <Loader2 className="mt-0.5 size-3 animate-spin text-muted-foreground" aria-hidden />
                 ) : status === "ok" ? (
@@ -184,9 +184,9 @@ function UploadForm({ demoOptions, identity, target = CUSTOMER_STAGE_TARGET }: U
   return (
     <div className="grid gap-3">
       <fieldset className="grid gap-1">
-        <legend className="text-[11px] text-muted-foreground">Demo pack</legend>
+        <legend className="text-caption text-muted-foreground">Demo pack</legend>
         {demoOptions.map((option) => (
-          <label key={option.id} className="flex items-center gap-2 text-[12px] text-foreground">
+          <label key={option.id} className="flex items-center gap-2 text-callout text-foreground">
             <input
               type="checkbox"
               checked={picked.includes(option.id)}
@@ -197,22 +197,22 @@ function UploadForm({ demoOptions, identity, target = CUSTOMER_STAGE_TARGET }: U
               }
             />
             <span className="min-w-0 truncate">{option.title}</span>
-            <span className="text-[11px] text-muted-foreground">{option.filename}</span>
+            <span className="text-caption text-muted-foreground">{option.filename}</span>
           </label>
         ))}
       </fieldset>
 
       <div className="grid gap-2 border-t border-border pt-3">
-        <p className="text-[11px] text-muted-foreground">Or paste a source</p>
+        <p className="text-caption text-muted-foreground">Or paste a source</p>
         <div className="grid gap-2 sm:grid-cols-2">
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             Title
             <Input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Advisory board notes" />
           </label>
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
+          <label className="grid gap-1 text-caption text-muted-foreground">
             Source type
             <select
-              className="h-8 rounded-lg border border-input bg-transparent px-2 text-[12px] text-foreground"
+              className="h-8 rounded-lg border border-input bg-transparent px-2 text-callout text-foreground"
               value={sourceType}
               onChange={(event) => setSourceType(event.target.value as SourceType)}
             >
@@ -236,8 +236,8 @@ function UploadForm({ demoOptions, identity, target = CUSTOMER_STAGE_TARGET }: U
           Upload only
         </Button>
       </div>
-      {message ? <p className="text-[11px] text-muted-foreground">{message}</p> : null}
-      {error ? <p className="text-[11px] text-destructive">{error}</p> : null}
+      {message ? <p className="text-caption text-muted-foreground">{message}</p> : null}
+      {error ? <p className="text-caption text-destructive">{error}</p> : null}
     </div>
   );
 }

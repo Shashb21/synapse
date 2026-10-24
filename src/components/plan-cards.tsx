@@ -105,7 +105,7 @@ export function AssignTacticButton({
 function CreateTacticFields({ inUse = [] }: { inUse?: CustomTacticType[] }) {
   return (
     <>
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
+      <label className="grid gap-1 text-callout text-muted-foreground">
         Tactic name (required)
         <input
           name="name"
@@ -131,7 +131,7 @@ function CreateTacticFields({ inUse = [] }: { inUse?: CustomTacticType[] }) {
         ))}
       </select>
       <CustomTypeFields inUse={inUse} />
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
+      <label className="grid gap-1 text-callout text-muted-foreground">
         Evidence question (required)
         <input
           name="evidence_question"
@@ -140,7 +140,7 @@ function CreateTacticFields({ inUse = [] }: { inUse?: CustomTacticType[] }) {
           className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
         />
       </label>
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
+      <label className="grid gap-1 text-callout text-muted-foreground">
         Status
         <select
           name="status"
@@ -153,12 +153,12 @@ function CreateTacticFields({ inUse = [] }: { inUse?: CustomTacticType[] }) {
             </option>
           ))}
         </select>
-        <span className="text-[11px] text-muted-foreground/80">
+        <span className="text-caption text-muted-foreground/80">
           Pick Planned, Ongoing or Completed for a real study you already have.
         </span>
       </label>
       <div className="grid grid-cols-2 gap-2">
-        <label className="grid gap-1 text-[12px] text-muted-foreground">
+        <label className="grid gap-1 text-callout text-muted-foreground">
           Start date (optional)
           <input
             name="start_date"
@@ -166,7 +166,7 @@ function CreateTacticFields({ inUse = [] }: { inUse?: CustomTacticType[] }) {
             className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
           />
         </label>
-        <label className="grid gap-1 text-[12px] text-muted-foreground">
+        <label className="grid gap-1 text-callout text-muted-foreground">
           Evidence available (optional)
           <input
             name="evidence_available"
@@ -197,7 +197,7 @@ export function AddTacticsButton({
       variant={variant}
       description="Record a study or programme you already have. Map it onto gaps on Gaps. Proposed new tactics are ideated on Tactics after Prioritize."
     >
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
+      <label className="grid gap-1 text-callout text-muted-foreground">
         Tactic name (required)
         <input
           name="name"
@@ -223,7 +223,7 @@ export function AddTacticsButton({
         ))}
       </select>
       <CustomTypeFields inUse={inUse} />
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
+      <label className="grid gap-1 text-callout text-muted-foreground">
         Status
         <select
           name="status"
@@ -241,7 +241,7 @@ export function AddTacticsButton({
           ))}
         </select>
       </label>
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
+      <label className="grid gap-1 text-callout text-muted-foreground">
         Evidence question (required)
         <input
           name="evidence_question"
@@ -264,25 +264,25 @@ export function ManualStart({ gapCount, tacticCount }: { gapCount: number; tacti
     <section aria-labelledby="manual-start" className="grid gap-4">
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="border border-border bg-card p-4 rounded-lg">
-          <h2 id="manual-start" className="text-[13px] font-semibold text-foreground">
+          <h2 id="manual-start" className="text-body font-semibold text-foreground">
             Gaps
           </h2>
-          <p className="mt-1 mb-3 text-[12px] text-muted-foreground">
+          <p className="mt-1 mb-3 text-callout text-muted-foreground">
             Type each evidence gap: what is missing and its domain.{" "}
             {gapCount > 0 ? `${gapCount} so far.` : "None yet."}
           </p>
           <CreateGapButton label="Add gaps" variant="default" />
         </div>
         <div className="border border-border bg-card p-4 rounded-lg">
-          <h2 className="text-[13px] font-semibold text-foreground">Tactics</h2>
-          <p className="mt-1 mb-3 text-[12px] text-muted-foreground">
+          <h2 className="text-body font-semibold text-foreground">Tactics</h2>
+          <p className="mt-1 mb-3 text-callout text-muted-foreground">
             Record the studies and programmes you already have.{" "}
             {tacticCount > 0 ? `${tacticCount} in the library.` : "None yet."}
           </p>
           <AddTacticsButton variant="default" />
         </div>
       </div>
-      <p className="text-[12px] text-muted-foreground">
+      <p className="text-callout text-muted-foreground">
         Then map tactics onto gaps and confirm each gap on{" "}
         <Link href="/?place=gaps" className="text-foreground">
           Gaps
@@ -310,10 +310,10 @@ export function ManualStartAlongsideUpload({ gapCount, tacticCount }: { gapCount
       className="mb-8 flex flex-wrap items-center gap-3 border border-border bg-card p-4 rounded-lg"
     >
       <div className="min-w-0 flex-1">
-        <h2 id="manual-start-ai-on" className="text-[13px] font-semibold text-foreground">
+        <h2 id="manual-start-ai-on" className="text-body font-semibold text-foreground">
           Start by hand
         </h2>
-        <p className="mt-1 text-[12px] text-muted-foreground">
+        <p className="mt-1 text-callout text-muted-foreground">
           You don&apos;t have to upload first. Type the gaps you know and record the studies you
           already have; anything you ingest later joins them.{" "}
           {gapCount > 0 || tacticCount > 0
@@ -343,16 +343,16 @@ function GapTacticsBlock({
   const unmapped = availableTactics.filter((t) => !tactics.some((mapped) => mapped.id === t.id));
   return (
     <div className="mt-3">
-      <h3 className="text-[11px] uppercase tracking-wide text-muted-foreground">Tactics</h3>
+      <h3 className="text-caption text-muted-foreground">Tactics</h3>
       {tactics.length === 0 ? (
-        <p className="mt-1 text-[12px] text-muted-foreground">None</p>
+        <p className="mt-1 text-callout text-muted-foreground">None</p>
       ) : (
         <ul className="mt-1 grid gap-1.5">
           {tactics.map((tactic) => (
             <li key={tactic.expansion_id ?? tactic.id}>
               <Link
                 href={`/tactics/${tactic.id}`}
-                className="flex flex-wrap items-center gap-1.5 text-[12px] text-foreground no-underline hover:underline"
+                className="flex flex-wrap items-center gap-1.5 text-callout text-foreground no-underline hover:underline"
               >
                 <span>{tactic.name}</span>
                 <TacticBadge status={tactic.status} />
@@ -367,7 +367,7 @@ function GapTacticsBlock({
         {unmapped.length > 0 ? (
           <AssignTacticButton gapId={gapId} tactics={unmapped} expectedRelationships={expectedRelationships} label="Assign tactic" />
         ) : availableTactics.length === 0 ? (
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             Tactic library is empty. Create a tactic on Gaps or Tactics, or add one on the first screen.
           </p>
         ) : null}
@@ -396,7 +396,7 @@ export function GapPlanCard({
       <GapStatusDisagreement computedStatus={card.computed_status} override={card.status_override} />
       <GapRecordLink
         gapId={card.gap_id}
-        className="mt-2 block text-[13px] leading-5 text-foreground no-underline hover:underline"
+        className="mt-2 block text-body leading-5 text-foreground no-underline hover:underline"
       >
         {card.gap_name}
       </GapRecordLink>

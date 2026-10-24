@@ -99,7 +99,7 @@ export function ManualSourceForm({
   }
 
   return (
-    <div className="grid gap-3 text-[12px]" data-testid="manual-source-form">
+    <div className="grid gap-3 text-callout" data-testid="manual-source-form">
       <div className="grid gap-2 sm:grid-cols-3">
         {fields.map((field) => (
           <label key={field.name} className="grid gap-1 text-muted-foreground">
@@ -154,7 +154,7 @@ export function ManualSourceForm({
         <ol className="grid gap-2">
           {blocks.map((block, index) => (
             <li key={block.key} className="grid gap-1 border border-border/60 bg-card p-2 rounded-lg">
-              <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-2 text-caption text-muted-foreground">
                 <span>Block {index + 1} · human-entered</span>
                 <Input
                   className="h-7 max-w-56"
@@ -164,7 +164,7 @@ export function ManualSourceForm({
                 />
                 {kindOptions ? (
                   <select
-                    className="h-7 rounded-lg border border-input bg-transparent px-2 text-[12px] text-foreground"
+                    className="h-7 rounded-lg border border-input bg-transparent px-2 text-callout text-foreground"
                     value={block.kind}
                     onChange={(e) => update(block.key, { kind: e.target.value })}
                   >
