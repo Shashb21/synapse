@@ -74,3 +74,21 @@ describe('S9 proposal rationale evidence', () => {
         }
     });
 });
+
+describe('S9 reuse replay identity', () => {
+    const fields = {...newFields, proposal_kind:'reuse', target_tactic_id:'TAC-existing'};
+    const example = {...newExample, ai_output:fields};
+    it('scores the existing target explicitly and penalizes a replacement identity or new-work kind', () => {
+        const exact = scoreDecisionReplay(example,replayNew(fields));
+        expect(exact.reason).toBeNull();
+        expect(exact.metrics.every(metric=>metric.value===1)).toBe(true);
+        const changed = scoreDecisionReplay(example,replayNew({...fields,proposal_kind:'new',target_tactic_id:'TAC-another'}));
+        expect(changed.metrics.find(metric=>metric.name==='proposal_kind_agreement')?.value).toBe(0);
+        expect(changed.metrics.find(metric=>metric.name==='target_tactic_id_agreement')?.value).toBe(0);
+    });
+    it('excludes reuse evidence whose original target identity was not saved', () => {
+        const score = scoreDecisionReplay({...example,ai_output:{...fields,target_tactic_id:undefined}},replayNew(fields));
+        expect(score.metrics).toEqual([]);
+        expect(score.reason).toMatch(/reuse target identity/i);
+    });
+});

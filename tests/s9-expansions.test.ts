@@ -8,7 +8,7 @@ import * as core from '@/lib/iegp/schema';
 import { db, wipePlatform } from '@/modules/kernel/db';
 import { createGap, createProposedTactic, loadState, resetDemoSetup, assignTacticToGap } from '@/lib/iegp/store';
 import { validatePlacement } from '@/modules/stages/s8-prioritization/module';
-import { ideationModule, addIdeationProposal, decideIdeationProposal, editIdeationProposal, listIdeationProposals, restoreIdeationProposal } from '@/modules/stages/s9-ideation/module';
+import { ideationModule, addIdeationProposal, decideIdeationProposal, editIdeationProposal, listIdeationProposals, restoreIdeationProposal, acceptedIdeationContexts } from '@/modules/stages/s9-ideation/module';
 const actor = { name: 'Expansion reviewer', function: 'medical_affairs' as const };
 const scope = { name: 'Elderly analysis', evidence_question: 'What is safety in 75+?', population: 'Age 75+', outcomes: 'AESI', geography: '', data_cut: 'Locked trial data', analysis: 'Post-hoc subgroup', instrument: '', study_design: 'Retrospective subgroup analysis', gap_coverage: 'Estimates elderly safety', cost_effort: 'Two analyst months', timing: '3 months analysis + 1 month review', feasibility_risks: 'Small subgroup; descriptive', post_hoc: true, prospective_enrolment: false, protocol_amendment: false, start_date: null, evidence_available: null };
 let gapId: string, targetId: string;
@@ -25,7 +25,7 @@ describe('S9 expansion source gate', () => {
         const proposal = await add();
         const before = await loadState();
         expect(proposal).toMatchObject({ proposal_kind: 'expansion', target_tactic_id: targetId, tactic_id: null, expansion_id: null });
-        await editIdeationProposal({ id: proposal.id, fields: { expansion_scope: { ...scope, cost_effort: 'One analyst month' } }, rationale: 'Refined budget', actor });
+        await editIdeationProposal({ id: proposal.id, fields: { expansion_scope: { ...scope, cost_effort: 'One analyst month' }, conditions: ['Confirm subgroup data access'] }, rationale: 'Refined budget', actor });
         const results = await Promise.allSettled([1, 2].map(() => decideIdeationProposal({ id: proposal.id, decision: 'accept', rationale: 'Suitable existing data', actor })));
         expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(1);
         const after = await loadState();
@@ -38,6 +38,7 @@ describe('S9 expansion source gate', () => {
         expect(fromGap).toHaveLength(1);
         expect(fromTactic.map(entry => entry.id)).toEqual(fromGap.map(entry => entry.id));
         expect((await listIdeationProposals()).find(p => p.id === proposal.id)).toMatchObject({ status: 'accepted', tactic_id: targetId, expansion_id: after.expansions[0].id });
+        expect(acceptedIdeationContexts(await listIdeationProposals())).toMatchObject([{ proposal_id: proposal.id, expansion_id: after.expansions[0].id, conditions: ['Confirm subgroup data access'] }]);
     });
     it('preserves edited child design, reconciles one-sided fields and rejects conflicting edits', async()=>{
         const p=await add();

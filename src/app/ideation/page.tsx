@@ -1,4 +1,8 @@
 import Link from "next/link";
+import { IdeationBrief, IdeationOutcome } from "@/components/ideation/evidence-context";
+import { buildIdeationGapBrief, type IdeationGapBrief } from "@/modules/stages/s9-ideation/context";
+import { buildTacticLibrary } from "@/lib/iegp/engine";
+import { ReuseIdeaDialog } from "@/components/ideation/gap-proposal-group";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { RunStageButton } from "@/components/platform/run-stage-button";
 import {
@@ -13,18 +17,19 @@ import { loadState } from "@/lib/iegp/store";
 import { can } from "@/modules/auth/roles";
 import { sessionContext } from "@/modules/auth/session";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
-import { BAND_RANK, ideationBandOrder, listIdeationProposals } from "@/modules/stages/s9-ideation/module";
+import { BAND_RANK, listIdeationGapOutcomes, ideationBandOrder, listIdeationProposals } from "@/modules/stages/s9-ideation/module";
 import { aiSectionEnabled } from "@/modules/kernel/ai-switch";
 
 export const dynamic = "force-dynamic";
 
 export default async function IdeationPage() {
-  const [state, placements, proposals, session, ai] = await Promise.all([
+  const [state, placements, proposals, session, ai, outcomes] = await Promise.all([
     loadState(),
     listPlacements(),
     listIdeationProposals(),
     sessionContext(),
     aiSectionEnabled("ideation").catch(() => false),
+    listIdeationGapOutcomes(),
   ]);
 
   const identity = {
@@ -43,8 +48,9 @@ export default async function IdeationPage() {
   const rankOf = (gapId: string) => bandOrder.get(gapId) ?? BAND_RANK.low + 1;
   const BAND_NAMES = ["High", "Medium", "Low"] as const;
 
+  const reuseTargets = buildTacticLibrary(state);
   const groups: GapProposalGroup[] = [];
-  const withoutProposal: { gap_id: string; gap_name: string; domain_label: string; band_label: string }[] = [];
+  const withoutProposal: { gap_id: string; gap_name: string; domain_label: string; band_label: string; brief: IdeationGapBrief }[] = [];
 
   for (const gap of openGaps) {
     const placement = placements.find((row) => row.gap_id === gap.id);
@@ -57,11 +63,15 @@ export default async function IdeationPage() {
           gap_name: gap.name,
           domain_label: DOMAIN_LABELS[gap.domain],
           band_label: BAND_NAMES[rank]!,
+          brief: buildIdeationGapBrief(state, gap.id, placements),
         });
       }
       continue;
     }
     groups.push({
+      brief: buildIdeationGapBrief(state, gap.id, placements),
+      outcome: outcomes.find(row => row.gap_id === gap.id),
+      reuseTargets,
       gap_id: gap.id,
       gap_name: gap.name,
       statement: gap.statement,
@@ -85,6 +95,9 @@ export default async function IdeationPage() {
     const gap = state.gaps.find((row) => row.id === gapId);
     const placement = placements.find(row => row.gap_id === gapId);
     groups.push({
+      brief: gap ? buildIdeationGapBrief(state, gapId, placements) : undefined,
+      outcome: outcomes.find(row => row.gap_id === gapId),
+      reuseTargets,
       gap_id: gapId,
       gap_name: gap?.name ?? gapId,
       statement: gap?.statement ?? "This gap is no longer a live Open gap.",
@@ -181,9 +194,12 @@ export default async function IdeationPage() {
                   <p className="text-[10px] text-muted-foreground">
                     {gap.band_label} priority · {gap.domain_label}
                   </p>
+                  <IdeationBrief brief={gap.brief} />
+                  <IdeationOutcome outcome={outcomes.find(row => row.gap_id === gap.gap_id)} />
                   {mayIdeate ? (
                     <div className="mt-1">
                       <AddIdeaDialog gapId={gap.gap_id} gapName={gap.gap_name} identity={identity} />
+                      <ReuseIdeaDialog gapId={gap.gap_id} gapName={gap.gap_name} identity={identity} targets={reuseTargets} />
                     </div>
                   ) : null}
                 </li>

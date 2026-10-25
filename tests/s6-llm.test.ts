@@ -10,6 +10,7 @@ import {
   createProposedTactic,
   loadState,
   lockTactic,
+  lockCoverageOverall,
   resetDemoSetup,
   syncComputedGapStatuses,
   persistState,
@@ -91,6 +92,19 @@ async function makePartialGap() {
     actor_function: ACTOR.function,
   });
   await lockTactic({ note: "The reviewer confirmed resources for this tactic lifecycle", tactic_id: tacticId, status: "planned", actor_name: ACTOR.name, actor_function: ACTOR.function });
+  // The proposed tactic already has an unassessed relationship to this gap.
+  // A human Partial assessment, rather than the planned lifecycle, makes the
+  // fixture eligible for the S6 partial-gap workflow.
+  const coverage = (await loadState()).coverages.find(
+    (row) => row.gap_id === gapId && row.tactic_id === tacticId,
+  )!;
+  await lockCoverageOverall({
+    coverage_id: coverage.id,
+    overall: "partial",
+    rationale: "The reviewed chart review covers population evidence but not its comparator.",
+    actor_name: ACTOR.name,
+    actor_function: ACTOR.function,
+  });
   await syncComputedGapStatuses(gapId);
   const gap = (await loadState()).gaps.find((row) => row.id === gapId)!;
   expect(displayedGapStatus(gap)).toBe("validated_partial");

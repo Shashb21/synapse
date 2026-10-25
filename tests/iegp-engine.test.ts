@@ -156,10 +156,11 @@ describe("IEGP engine", () => {
     expect(computeGapStatus([supportedFull], [planned])).toBe("validated_addressed");
     // A model verdict of Full that no human has locked stays Partial.
     expect(computeGapStatus([cov("full", {})], [planned])).toBe("validated_partial");
-    // Partial, limited or not-yet-assessed coverage is Partial.
+    // Recorded partial and limited verdicts establish some contribution.
     expect(computeGapStatus([cov("partial", {})], [planned])).toBe("validated_partial");
     expect(computeGapStatus([cov("limited", {})], [planned])).toBe("validated_partial");
-    expect(computeGapStatus([cov("unassessed", {})], [planned])).toBe("validated_partial");
+    // A relationship awaiting assessment cannot establish contribution.
+    expect(computeGapStatus([cov("unassessed", {})], [planned])).toBe("validated_open");
     // Not relevant is no coverage at all.
     expect(computeGapStatus([cov("not_relevant", {})], [planned])).toBe("validated_open");
     expect(computeGapStatus([], [planned])).toBe("validated_open");

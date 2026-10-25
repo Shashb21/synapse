@@ -3,9 +3,10 @@ import type { ActionField } from "@/components/platform/action-dialog";
 import { TACTIC_TYPES, TACTIC_TYPE_LABELS, type TacticType } from "@/lib/iegp/enums";
 
 export type ProposalFieldDefaults = {
-  proposal_kind?: "new" | "expansion";
+  proposal_kind?: "new" | "expansion" | "reuse";
   expansion_scope?: ExpansionScope | null;
   comparative_rationale?: string;
+  conditions?: string[];
   name?: string;
   type?: string;
   evidence_question?: string;
@@ -51,7 +52,7 @@ export function proposalFields(defaults: ProposalFieldDefaults = {}): ActionFiel
     },
     {
       name: "idea_rationale",
-      label: "Why this closes the gap",
+      label: "Expected contribution toward the gap",
       type: "textarea",
       defaultValue: defaults.rationale ?? "",
       hint: "Left empty on a new idea, your edit rationale below is used.",
@@ -81,9 +82,8 @@ export function proposalFields(defaults: ProposalFieldDefaults = {}): ActionFiel
       defaultValue: design.timing_rationale ?? "",
     },
   ];
-  if (defaults.proposal_kind === "expansion" || defaults.comparative_rationale?.trim()) {
-    fields.push({name:"comparative_rationale",label:"Comparison of expansion and new tactic",type:"textarea",defaultValue:defaults.comparative_rationale ?? "",required:true});
-  }
+  fields.push({name:"comparative_rationale",label:"Relevant alternatives (optional)",type:"textarea",defaultValue:defaults.comparative_rationale ?? "",required:defaults.proposal_kind === "expansion",hint:"For expansion, explain why added work is preferable. A three-route comparison is not required."});
+  fields.push({name:"conditions",label:"Uncertainties and required checks (optional)",type:"textarea",defaultValue:(defaults.conditions ?? []).join("\n"),serialize:"lines",hint:"One unresolved check per line. These stay visible after acceptance."});
   if (defaults.proposal_kind === "expansion" && defaults.expansion_scope) {
     for (const [key,value] of Object.entries(defaults.expansion_scope)) {
       const label = `Added scope: ${key.replaceAll("_", " ")}`;

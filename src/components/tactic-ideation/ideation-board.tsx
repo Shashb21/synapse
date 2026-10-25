@@ -1,10 +1,13 @@
 "use client";
 
+import { AcceptedIdeationContext, IdeationBrief, IdeationOutcome, type AcceptedContext } from "@/components/ideation/evidence-context";
+import type { IdeationGapBrief } from "@/modules/stages/s9-ideation/context";
+import type { IdeationGapOutcome } from "@/modules/stages/s9-ideation/recommendation-contract";
 import { RelationshipFit } from "@/components/relationship-fit";
 import Link from "next/link";
 import { GapRecordLink } from "@/components/gap-panel";
 import { useMemo, useRef, useState } from "react";
-import { AddIdeaDialog } from "@/components/ideation/gap-proposal-group";
+import { AddIdeaDialog, ReuseIdeaDialog } from "@/components/ideation/gap-proposal-group";
 import { ProposalCard, type ProposalCardModel } from "@/components/ideation/proposal-card";
 import { AssignTacticButton, CustomTacticButton, CreateTacticButton } from "@/components/plan-cards";
 import type { ActionIdentity } from "@/components/platform/action-dialog";
@@ -57,7 +60,7 @@ function StatusChip({ status }: { status: string }) {
   );
 }
 
-function LinkedTacticRow({ tactic, onEdit }: { tactic: PlanTactic; onEdit?: () => void }) {
+function LinkedTacticRow({ tactic, onEdit, acceptedContexts = [], gapId }: { tactic: PlanTactic; onEdit?: () => void; acceptedContexts?: AcceptedContext[]; gapId?: string }) {
   const className =
     "flex w-full flex-wrap items-center gap-2 rounded-md border border-border px-3 py-1.5 text-left text-foreground no-underline hover:bg-muted/60";
   const body = (
@@ -99,6 +102,7 @@ function LinkedTacticRow({ tactic, onEdit }: { tactic: PlanTactic; onEdit?: () =
         </p> : null}
         <p>Evidence availability: {tactic.fit?.contribution.evidence_available ? `Recorded date ${tactic.fit.contribution.evidence_available}` : "Not documented"}. Delivery of evidence has not been verified by this view.</p>
       </div>
+      <AcceptedIdeationContext contexts={acceptedContexts} tacticId={tactic.id} expansionId={tactic.expansion_id} gapId={gapId} />
       {tactic.fit ? <RelationshipFit fit={tactic.fit} tacticName={tactic.name} /> : null}
     </li>
   );
@@ -112,9 +116,12 @@ function GapIdeationCard({
   library,
   identity,
   mayIdeate,
-  onEditTactic,
+  onEditTactic, brief, outcome, acceptedContexts,
 }: {
   card: OpenGapCard;
+  brief?: IdeationGapBrief;
+  outcome?: IdeationGapOutcome;
+  acceptedContexts?: AcceptedContext[];
   expanded: boolean;
   onToggle: () => void;
   suggestions: ProposalCardModel[];
@@ -182,6 +189,10 @@ function GapIdeationCard({
             </div>
           </div>
 
+          {brief ? <IdeationBrief brief={brief} /> : null}
+          <IdeationOutcome outcome={outcome} />
+          {mayIdeate ? <div className="flex flex-wrap gap-2"><AddIdeaDialog gapId={card.gap_id} gapName={card.gap_name} identity={identity} /><ReuseIdeaDialog gapId={card.gap_id} gapName={card.gap_name} identity={identity} targets={library} /></div> : null}
+
           <section aria-label={`Linked tactics for ${card.gap_name}`}>
             <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
               Linked tactics
@@ -196,6 +207,7 @@ function GapIdeationCard({
                   <LinkedTacticRow
                     key={`${tactic.id}::${tactic.expansion_id ?? "parent"}`}
                     tactic={tactic}
+                    acceptedContexts={acceptedContexts} gapId={card.gap_id}
                     onEdit={!tactic.expansion_id && onEditTactic ? () => void onEditTactic(tactic.id) : undefined}
                   />
                 ))}
@@ -229,11 +241,6 @@ function GapIdeationCard({
                   ))}
                 </div>
               )}
-              {mayIdeate ? (
-                <div className="mt-2">
-                  <AddIdeaDialog gapId={card.gap_id} gapName={card.gap_name} identity={identity} />
-                </div>
-              ) : null}
             </section>
           ) : null}
         </div>
@@ -371,9 +378,12 @@ export function IdeationBoard({
   library,
   identity,
   mayIdeate,
-  tactics = {},
+  tactics = {}, briefs = {}, outcomes = [], acceptedContexts = [],
 }: {
   gaps: OpenGapCard[];
+  briefs?: Record<string, IdeationGapBrief>;
+  outcomes?: IdeationGapOutcome[];
+  acceptedContexts?: AcceptedContext[];
   retainedGaps?: RetainedTacticGap[];
   proposals: ProposalCardModel[];
   library: TacticLibraryItem[];
@@ -490,6 +500,7 @@ export function IdeationBoard({
           <GapIdeationCard
             key={card.gap_id}
             card={card}
+            brief={briefs[card.gap_id]} outcome={outcomes.find(row => row.gap_id === card.gap_id)} acceptedContexts={acceptedContexts}
             expanded={expanded.has(card.gap_id)}
             onToggle={() => toggle(card.gap_id)}
             suggestions={options(card.gap_id)}
@@ -524,7 +535,7 @@ export function IdeationBoard({
           <p className="mt-1">{planningLabel(gap.tactics)}</p>
           <p className="text-muted-foreground">{gap.option_count} option{gap.option_count === 1 ? "" : "s"} · {gap.tactic_count} linked tactic{gap.tactic_count === 1 ? "" : "s"}</p>
           {gap.tactics.length ? <ul className="mt-2 grid gap-2" aria-label={`Linked tactics for ${gap.gap_name}`}>
-            {gap.tactics.map(tactic => <LinkedTacticRow key={`${tactic.id}::${tactic.expansion_id ?? "parent"}`} tactic={tactic} onEdit={!tactic.expansion_id && canEdit ? () => void openEditor(tactic.id) : undefined} />)}
+            {gap.tactics.map(tactic => <LinkedTacticRow key={`${tactic.id}::${tactic.expansion_id ?? "parent"}`} tactic={tactic} acceptedContexts={acceptedContexts} gapId={gap.gap_id} onEdit={!tactic.expansion_id && canEdit ? () => void openEditor(tactic.id) : undefined} />)}
           </ul> : null}
         </li>)}</ul> : <p className="text-[12px] text-muted-foreground">{retainedGaps.length ? "No existing work matches the current filters." : "No prior work outside current eligible ideation yet. Existing options are shown with their eligible gap above."}</p>}
       </section>

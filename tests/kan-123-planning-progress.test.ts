@@ -13,7 +13,7 @@ import { loadTacticIdeation, type RetainedTacticGap } from "@/components/tactic-
 const mocks = vi.hoisted(() => ({ loadState: vi.fn(), placements: vi.fn(), proposals: vi.fn() }));
 vi.mock("@/lib/iegp/store", () => ({ loadState: mocks.loadState }));
 vi.mock("@/modules/stages/s8-prioritization/module", () => ({ listPlacements: mocks.placements }));
-vi.mock("@/modules/stages/s9-ideation/module", () => ({ listIdeationProposals: mocks.proposals, ideationBandOrder: () => new Set() }));
+vi.mock("@/modules/stages/s9-ideation/module", () => ({ listIdeationProposals: mocks.proposals, listIdeationGapOutcomes: async () => [], acceptedIdeationContexts: () => [], ideationBandOrder: () => new Set() }));
 vi.mock("@/modules/auth/session", () => ({ sessionContext: async () => ({ signed_in: true, actor: { name: "Reviewer", function: "medical_affairs" }, role: "medical_affairs" }) }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }), usePathname: () => "/", useSearchParams: () => new URLSearchParams() }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { recordDecisionExample, type DecisionExampleDraft, type DecisionOutcome } from "@/modules/kernel/decision-examples";
 import type { GapSuggestion, TacticSuggestion } from "./types";
 
@@ -82,11 +83,11 @@ export function captureGapSuggestionDecision(args: Origin & {
 
 /** Accept, edit-and-accept or reject on an S9 idea the model wrote. */
 export function captureProposalDecision(args: Origin & {
-  proposal: { id: string; slot_id?: string | null; name: string; type: string; evidence_question: string; rationale: string; design?: unknown; proposal_kind?: "new" | "expansion"; target_tactic_id?: string | null; expansion_scope?: unknown; comparative_rationale?: string };
+  proposal: { id: string; slot_id?: string | null; name: string; type: string; evidence_question: string; rationale: string; design?: unknown; recommendation?: unknown; supporting_context_basis?: string; proposal_kind?: "new" | "expansion" | "reuse"; target_tactic_id?: string | null; expansion_scope?: unknown; comparative_rationale?: string };
   gap: GapText | null;
   decision: "accept" | "reject";
   /** The idea as accepted, when the person changed it first. */
-  final?: { name: string; type: string; evidence_question: string; rationale: string; design?: unknown; proposal_kind?: "new" | "expansion"; target_tactic_id?: string | null; expansion_scope?: unknown; comparative_rationale?: string } | null;
+  final?: { name: string; type: string; evidence_question: string; rationale: string; design?: unknown; recommendation?: unknown; supporting_context_basis?: string; proposal_kind?: "new" | "expansion" | "reuse"; target_tactic_id?: string | null; expansion_scope?: unknown; comparative_rationale?: string } | null;
   rationale: string;
   workspace_id?: string;
 }) {
@@ -98,6 +99,7 @@ export function captureProposalDecision(args: Origin & {
         !same(args.final.type, proposal.type) ||
         !same(args.final.evidence_question, proposal.evidence_question) ||
         !same(args.final.rationale, proposal.rationale) ||
+        !isDeepStrictEqual(args.final.recommendation ?? null, proposal.recommendation ?? null) ||
         JSON.stringify(args.final.design ?? null) !== JSON.stringify(proposal.design ?? null) ||
         JSON.stringify(args.final.expansion_scope ?? null) !== JSON.stringify(proposal.expansion_scope ?? null) ||
         args.final.comparative_rationale !== proposal.comparative_rationale);
@@ -111,7 +113,9 @@ export function captureProposalDecision(args: Origin & {
       ai_output: {
         proposal_kind: proposal.proposal_kind ?? "new",
         ...(proposal.comparative_rationale !== undefined ? { comparative_rationale: proposal.comparative_rationale } : {}),
-        ...(proposal.proposal_kind === "expansion" ? { target_tactic_id: proposal.target_tactic_id, expansion_scope: proposal.expansion_scope } : {}),
+        ...(proposal.proposal_kind !== undefined && proposal.proposal_kind !== "new" ? { target_tactic_id: proposal.target_tactic_id, expansion_scope: proposal.expansion_scope } : {}),
+        recommendation: proposal.recommendation,
+        supporting_context_basis: proposal.supporting_context_basis,
         name: proposal.name,
         type: proposal.type,
         evidence_question: proposal.evidence_question,

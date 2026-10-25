@@ -97,10 +97,10 @@ describe("human validation survives a model re-run (syncComputedGapStatuses)", (
     expect(audit.length).toBeGreaterThan(0);
   });
 
-  it("a person's own mapping edit still recomputes the status", async () => {
+  it("a person's own assessed mapping edit still recomputes the status", async () => {
     const { gapId, tacticIds } = await workspace(1);
     await validateGap({ gap_id: gapId, ...HUMAN, note: "Checked." });
-    await assignTacticToGap({ gap_id: gapId, tactic_id: tacticIds[0]!, ...HUMAN, note: "Mine.", human: true });
+    await assignTacticToGap({ gap_id: gapId, tactic_id: tacticIds[0]!, ...HUMAN, note: "Mine.", human: true, coverage: "partial" });
     const gap = await gapOf(gapId);
     expect(gap.status).toBe("validated_partial");
     expect(gap.status_override).toBeNull();

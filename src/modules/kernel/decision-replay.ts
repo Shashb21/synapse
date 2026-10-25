@@ -120,13 +120,17 @@ export function scoreDecisionReplay(example: DecisionExample, output: unknown): 
                 return excluded('Proposal target lacks required rationale evidence.');
             metric('rationale_literal_agreement', evidenceHash(target.rationale) === evidenceHash(actual.rationale ?? null));
             const kind = target.proposal_kind ?? 'new';
-            if (!['new', 'expansion'].includes(String(kind))) return excluded('Unknown proposal kind.');
+            if (!['new', 'expansion', 'reuse'].includes(String(kind))) return excluded('Unknown proposal kind.');
             // Missing old comparison evidence is excluded, never filled from final values.
             if (typeof example.ai_output.comparative_rationale !== 'string' || !example.ai_output.comparative_rationale.trim())
                 return excluded(example.ai_output.proposal_kind == null ? 'Legacy original proposal lacks a saved comparison; replay evidence is ineligible.' : 'Original proposal lacks required comparison.');
             if (typeof target.comparative_rationale !== 'string' || !target.comparative_rationale.trim()) return excluded('Proposal target lacks required comparison.');
             metric('proposal_kind_agreement', kind === (actual.proposal_kind ?? 'new'));
             metric('comparative_rationale_literal_agreement', evidenceHash(target.comparative_rationale) === evidenceHash(actual.comparative_rationale ?? null));
+            if (kind === 'reuse') {
+                if (typeof target.target_tactic_id !== 'string' || !target.target_tactic_id) return excluded('Reuse target identity is missing.');
+                metric('target_tactic_id_agreement', target.target_tactic_id === actual.target_tactic_id);
+            }
             if (kind === 'expansion') {
                 const scope = expansionScopeSchema.safeParse(target.expansion_scope);
                 if (!scope.success || typeof target.target_tactic_id !== 'string' || !target.target_tactic_id) return excluded('Expansion target lacks complete target, scope or comparison.');

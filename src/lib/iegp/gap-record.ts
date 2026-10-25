@@ -161,7 +161,11 @@ export async function gapRecord(gapId: string, preloaded?: IegpState): Promise<G
     mapping_rejections: state.mapping_suggestions.filter((m) => m.gap_id === gap.id && m.status === "rejected"),
     priority: priority ? { ...priority, suggested_references: inspectJudgementReferences(state, [gap.id], priority.suggested_references).map(({ entity_type, entity_id, reason }) => ({ entity_type, entity_id, reason })) } : null,
     ideas,
-    options: ideas.map(row => ideationProposalReadback(row, state)),
+    options: ideas.map(row => ideationProposalReadback(row, state, priority ? [{
+      ...priority,
+      band: priority.band as "high" | "medium" | "low" | "defer" | null,
+      axis_scores: (priority.axis_scores ?? {}) as Record<string, number>,
+    }] : [])),
     timeline,
     breakout_groups: state.breakout_groups.filter((g) => groupIds.has(g.id)),
     pending_suggestions: state.gap_suggestions.filter((row) => row.gap_id === gap.id && row.status === "pending"),

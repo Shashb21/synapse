@@ -71,3 +71,19 @@ _Avoid_: Gap summary when referring to the complete assessment basis
 **Possible discrepancy**:
 A source-backed claim that may conflict with a current gap requirement, tactic design or relationship assessment and requires human review. Raising a discrepancy does not establish that the incoming claim is correct or replace the existing judgement.
 _Avoid_: Accepted correction when referring only to a detected possible conflict
+
+**Remaining evidence need**:
+The parts of a gap's evidence requirements still unanswered after considering the applicable recorded assessments of existing evidence and tactics together.
+_Avoid_: Unanswered requirements for a tactic when referring to the gap's overall remaining need
+
+**Tactic reuse**:
+Use of existing evidence or an already planned output without adding work to the tactic. A planned output is not evidence already delivered.
+_Avoid_: Expansion when no additional work is proposed
+
+**Tactic expansion**:
+Additional work within an existing tactic, including a new analysis of existing data.
+_Avoid_: Reuse when additional analytical or evidence-generating work is required
+
+**New tactic**:
+A separate evidence-generating activity rather than additional work within an existing tactic.
+_Avoid_: Expansion when referring to a separate activity
