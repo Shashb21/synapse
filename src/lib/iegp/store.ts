@@ -4160,6 +4160,11 @@ async function syncSetupObjectives(state: IegpState, ctx: PlanningContext, args:
   const listed = ctx.objectives.filter(objective => objective.name);
   // An unfinished draft with no list must not remove an existing plan's objectives.
   if (listed.length === 0) return parsePlanningContext({ objectives: state.objectives }).objectives;
+  // Only the locked, persisted objective list establishes first creation.
+  // Earlier draft saves may already have a saved_at without any objectives.
+  const initialCreation = state.objectives.length === 0;
+  const suppliedReason = args.reason?.trim() ?? "";
+  const creationReason = suppliedReason.length >= 3 ? suppliedReason : "Created initial objective during product setup.";
   const existing = new Map(state.objectives.map(objective => [objective.id, objective]));
   const seen = new Set<string>();
   for (const objective of listed) {
@@ -4183,7 +4188,7 @@ async function syncSetupObjectives(state: IegpState, ctx: PlanningContext, args:
     const fields = OBJECTIVE_FIELDS.filter(field => (old?.[field] ?? null) !== row[field]);
     const id = old?.id ?? newId("OBJ");
     if (fields.length) {
-      const reason = requireRationale(args.reason);
+      const reason = initialCreation && !old ? creationReason : requireRationale(args.reason);
       if (old) await db().update(t.objectives).set(row).where(eq(t.objectives.id, id));
       else await db().insert(t.objectives).values({ id, ...row });
       let contextEvent: string | null = null;

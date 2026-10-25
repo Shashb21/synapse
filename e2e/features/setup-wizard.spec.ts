@@ -73,6 +73,13 @@ test.describe.serial("IEGP setup wizard", () => {
     await page.getByLabel(/Planning cycle end/).fill("2027-12-31");
     await continueTo(page, "setup-step-objectives");
 
+    // Continue has saved the pre-objective draft. Reloading must still allow
+    // first creation without asking for a revision reason. Leave ?new=1,
+    // which intentionally opens the welcome step, before reloading the draft.
+    await page.goto("/setup");
+    await page.reload();
+    await expect(page.getByTestId("setup-step-objectives")).toBeVisible();
+
     // Objectives & key decisions
     await page.getByRole("button", { name: /add objective/i }).click();
     await page.getByLabel(/^Objective 1/).fill("Win HTA in EU5");
@@ -80,7 +87,17 @@ test.describe.serial("IEGP setup wizard", () => {
     await page.keyboard.press("Space");
     await page.getByLabel(/Key decision/).fill("EU5 HTA filing");
     await page.getByLabel(/Decision date/).fill("2028-03-01");
-    await page.getByLabel("Reason for objective changes").fill("Record the initial HTA objective");
+    await expect(page.getByLabel("Reason for objective changes")).toHaveCount(0);
+    await continueTo(page, "setup-step-landscape");
+
+    // The server response becomes the baseline immediately: a second edit
+    // requires a reason even while this setup is still incomplete.
+    await page.getByRole("button", { name: /Objectives & decisions$/ }).click();
+    await page.getByLabel(/Key decision/).fill("EU5 HTA committee filing");
+    await expect(page.getByLabel("Reason for objective changes")).toBeVisible();
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(page.getByTestId("setup-wizard").getByRole("alert")).toContainText("meaningful reason");
+    await page.getByLabel("Reason for objective changes").fill("The committee confirmed the filing scope");
     await continueTo(page, "setup-step-landscape");
 
     // Evidence landscape
@@ -119,11 +136,18 @@ test.describe.serial("IEGP setup wizard", () => {
     await page.getByRole("button", { name: /^continue$/i }).click();
     const review = page.getByTestId("setup-step-review");
     await expect(review).toBeVisible();
-    for (const text of [ASSET, "Immunology", "US, Japan", "J. Park", "EU5 HTA filing", "NICE", "HEOR (L. Chen)", "1L, Perioperative"]) {
+    for (const text of [ASSET, "Immunology", "US, Japan", "J. Park", "EU5 HTA committee filing", "NICE", "HEOR (L. Chen)", "1L, Perioperative"]) {
       await expect(review).toContainText(text);
     }
 
+    // Finishing persists the complete setup before starting the tour. Wait for
+    // that save itself so a slow database cannot look like failed navigation.
+    const completedSetup = page.waitForResponse(
+      (res) => res.url().endsWith("/api/iegp") && res.request().method() === "POST" && (res.request().postData() ?? "").includes("save_product_setup"),
+    );
     await page.getByRole("button", { name: /finish & start walkthrough/i }).click();
+    const completedResponse = await completedSetup;
+    expect(completedResponse.ok(), await completedResponse.text()).toBeTruthy();
     await expect(page).toHaveURL(/place=gaps/);
     const tour = page.getByTestId("walkthrough");
     await expect(tour).toBeVisible();
