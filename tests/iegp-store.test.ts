@@ -509,7 +509,7 @@ describe("IEGP postgres store", () => {
     ).rejects.toThrow(/cannot stay/i);
   });
 
-  it("computes Open for proposed-only joins and Partial for planned evidence; override requires a reason; cancel does not save", async () => {
+  it("keeps unassessed joins Open; an explicit Partial assessment enables the partial-gap workflow", async () => {
     await resetDemoSetup();
     const gapId = await createGap({
       statement: "White-space leftover after mapping",
@@ -545,7 +545,22 @@ describe("IEGP postgres store", () => {
       actor_name: "A. Rao",
       actor_function: "heor",
     });
-    const partial = (await loadState()).gaps.find((g) => g.id === gapId)!;
+    // Planning does not itself assess whether this tactic covers the gap.
+    // The automatic relationship must remain Open until a person records it.
+    let state = await loadState();
+    expect(state.gaps.find((g) => g.id === gapId)?.status).toBe("validated_open");
+    const coverage = state.coverages.find(
+      (row) => row.gap_id === gapId && row.tactic_id === tacticId,
+    )!;
+    await lockCoverageOverall({
+      coverage_id: coverage.id,
+      overall: "partial",
+      rationale: "The planned review covers only the observed community outcome slice.",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    state = await loadState();
+    const partial = state.gaps.find((g) => g.id === gapId)!;
     expect(partial.status).toBe("validated_partial");
     expect(partial.computed_status).toBe("validated_partial");
 

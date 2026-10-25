@@ -4,6 +4,7 @@ import { AppShell, PageIntro } from "@/components/app-shell";
 import { planHistory, planVersion } from "@/modules/stages/s10-timeline/module";
 import { finalPlanView, type FinalPlanView } from "@/modules/stages/s10-timeline/final-view";
 import type { FinalPackage, TacticEvidenceState } from "@/modules/stages/s10-timeline/final-package";
+import { AcceptedIdeationContext } from "@/components/ideation/evidence-context";
 
 export const dynamic = "force-dynamic";
 
@@ -124,6 +125,19 @@ function CompletePlan({ view }: { view: Extract<FinalPlanView, { kind: "complete
                   Answers: {tactic.gap_ids.map((id) => gapName.get(id) ?? id).join("; ")}
                 </p>
               ) : null}
+              <AcceptedIdeationContext contexts={pkg.accepted_ideation_context ?? []} tacticId={tactic.id} expansionId={null} />
+              {tactic.expansions.map((expansion) => (
+                <section key={expansion.id} className="mt-2 border-l-2 border-border pl-3" aria-label={`Expansion ${expansion.name}`}>
+                  <p className="text-[12px] font-medium text-foreground">
+                    Expansion: {expansion.name} · {expansion.status}
+                  </p>
+                  <AcceptedIdeationContext
+                    contexts={pkg.accepted_ideation_context ?? []}
+                    tacticId={tactic.id}
+                    expansionId={expansion.id}
+                  />
+                </section>
+              ))}
             </li>
           ))}
         </ul>

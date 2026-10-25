@@ -1,5 +1,6 @@
 "use client";
 
+import { AcceptedIdeationContext } from "@/components/ideation/evidence-context";
 import { useImperativeHandle, useState, type RefObject } from "react";
 import Link from "next/link";
 import { SourceClaimReviewContent } from "./source-claim-review-content";
@@ -32,6 +33,7 @@ export function TacticRecordContent({ record, identity = { signed_in: true, acto
   return <div className="grid min-w-0 gap-4" data-testid="tactic-record-content">
     <h2 className="font-medium">{tactic.name}</h2>
     <p>{tactic.description}</p>
+    <AcceptedIdeationContext contexts={record.accepted_ideation_context ?? []} tacticId={tactic.id} />
     <div className="flex flex-wrap items-center gap-2"><TacticBadge status={tactic.status} /><span>Review: {tactic.review_status}</span><LockMeta lock={tactic.lock} /></div>
       <dl className="mb-6 grid gap-2 text-[13px] sm:grid-cols-2">
         <Item k="Type" v={tacticTypeLabel(tactic)} />
@@ -75,6 +77,7 @@ export function TacticRecordContent({ record, identity = { signed_in: true, acto
         <h2 className="mb-2 text-sm font-semibold">Expansions</h2>
         {expansions.map((child) => <div id={child.id} key={child.id} className="mb-4 border-t border-border pt-3">
           <h3 className="text-sm font-medium">{child.scope.name}</h3>
+          <AcceptedIdeationContext contexts={record.accepted_ideation_context ?? []} tacticId={tactic.id} expansionId={child.id} />
           <p className="mb-2 text-[13px]">{child.status} · {["planned", "ongoing", "completed"].includes(child.status) ? "Eligible for coverage review" : "Does not count toward coverage"}</p>
           <dl className="mb-3 grid gap-2 text-[13px] sm:grid-cols-2">
             <Item k="Added question" v={child.scope.evidence_question} />

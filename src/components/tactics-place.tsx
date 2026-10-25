@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { TacticIdeationData } from "@/components/tactic-ideation/data";
 import { StepWaiting } from "@/components/step-waiting";
 import type { ActionIdentity } from "@/components/platform/action-dialog";
 import type { RetainedTacticGap } from "@/components/tactic-ideation/data";
@@ -24,9 +25,13 @@ export function TacticsPlace({
   identity = NO_IDENTITY,
   mayIdeate = false,
   tactics = {},
+  briefs = {}, outcomes = [], acceptedContexts = [],
 }: {
   /** False until Prioritize is finished. The place still shows; the banner says what it waits on. */
   ready: boolean;
+  briefs?: TacticIdeationData["briefs"];
+  outcomes?: TacticIdeationData["outcomes"];
+  acceptedContexts?: TacticIdeationData["acceptedContexts"];
   highGaps: OpenGapCard[];
   retainedGaps?: RetainedTacticGap[];
   otherCount?: number;
@@ -48,6 +53,7 @@ export function TacticsPlace({
       ) : null}
       <IdeationBoard
         gaps={highGaps}
+        briefs={briefs} outcomes={outcomes} acceptedContexts={acceptedContexts}
         retainedGaps={retainedGaps}
         proposals={proposals}
         library={availableTactics}

@@ -8,6 +8,7 @@ import type { IegpState, Tactic } from "@/lib/iegp/types";
 import type { PlacementRecord } from "@/modules/stages/s8-prioritization/module";
 import type { StoredAxes } from "@/modules/stages/s8-prioritization/axes";
 import type { TimelineModel } from "./build";
+import { acceptedIdeationContexts, listIdeationProposals } from "@/modules/stages/s9-ideation/module";
 
 /**
  * The complete final IEGP (KAN-86): the Evidence Gap Inventory, the Evidence
@@ -111,6 +112,8 @@ export type FinalPackage = {
   };
   evidence_gap_inventory: FrozenGap[];
   evidence_tactics: FrozenTactic[];
+  /** Accepted ideation reasoning frozen alongside the final package. */
+  accepted_ideation_context: ReturnType<typeof acceptedIdeationContexts>;
   prioritisation: {
     axes: { id: string; label: string }[];
     x_axis: string;
@@ -244,9 +247,14 @@ export async function buildFinalPackage(inputs: PackageInputs): Promise<FinalPac
     if (record) records.push(record);
   }
   const ideas = await db().select().from(t.ideationProposals);
+  // Only a new proposal creates a tactic. Reuse and expansion identify existing
+  // work, so they must never overwrite that work's recorded provenance.
   const ideationTacticIds = new Set(
-    ideas.filter((row) => ACCEPTED_IDEA.has(row.status) && row.tactic_id).map((row) => row.tactic_id!),
+    ideas.filter((row) => ACCEPTED_IDEA.has(row.status) && row.proposal_kind === "new" && row.tactic_id).map((row) => row.tactic_id!),
   );
+  // Use the strict proposal reader shared by live review surfaces. This keeps
+  // historical snapshots valid without a second, weaker JSON parser here.
+  const accepted_ideation_context = acceptedIdeationContexts(await listIdeationProposals());
   const objectivesById = new Map(state.objectives.map((o) => [o.id, o]));
   const gapsByTactic = new Map<string, Set<string>>();
   for (const c of state.coverages) {
@@ -334,6 +342,7 @@ export async function buildFinalPackage(inputs: PackageInputs): Promise<FinalPac
     },
     evidence_gap_inventory: records.map((record) => frozenGap(record, placementByGap.get(record.gap.id))),
     evidence_tactics: tactics,
+    accepted_ideation_context,
     prioritisation: {
       axes: inputs.axes.axes.map((axis) => ({ id: axis.id, label: axis.label })),
       x_axis: inputs.axes.x_axis,

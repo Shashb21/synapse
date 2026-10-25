@@ -1,3 +1,4 @@
+import { ideationRecommendationSchema } from "@/modules/stages/s9-ideation/recommendation-contract";
 import { expansionScopeSchema } from "@/lib/iegp/tactic-expansions";
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -14,6 +15,8 @@ import {
 import { loadAxes, saveScopeAxes } from "@/modules/stages/s8-prioritization/axes";
 import { setGapMetadata, setGapSettings } from "@/lib/iegp/store";
 import {
+  acceptedIdeationContexts,
+  listIdeationGapOutcomes,
   addIdeationProposal,
   decideIdeationProposal,
   editIdeationProposal,
@@ -52,7 +55,7 @@ export async function GET() {
   } catch (error) {
     return apiErrorResponse(error);
   }
-  const [placements, axes, proposals, timeline, plan, history, state, tactic_suggestions] = await Promise.all([
+  const [placements, axes, proposals, timeline, plan, history, state, tactic_suggestions, ideation_gap_outcomes] = await Promise.all([
     listPlacements(),
     loadAxes(),
     listIdeationProposals(),
@@ -61,6 +64,7 @@ export async function GET() {
     planHistory(5),
     loadState(),
     listTacticSuggestions(),
+    listIdeationGapOutcomes(),
   ]);
   // The gap-grouped view the /timeline page draws (KAN-25).
   const timeline_view = gapTimelineView({ model: timeline, state, placements });
@@ -68,7 +72,7 @@ export async function GET() {
   const timeline_issues = planIssues(timeline);
   const final_blockers = await finalPlanBlockers();
   const priority_context_versions = Object.fromEntries(state.gaps.map(gap => [gap.id, gap.priority_context_version ?? null]));
-  return NextResponse.json({ placements, priority_context_versions, axes, proposals, timeline, timeline_view, timeline_issues, final_blockers, plan, history, tactic_suggestions });
+  return NextResponse.json({ placements, priority_context_versions, axes, proposals, accepted_ideation_context: acceptedIdeationContexts(proposals), ideation_gap_outcomes, timeline, timeline_view, timeline_issues, final_blockers, plan, history, tactic_suggestions });
 }
 
 const bandSchema = z.enum(["high", "medium", "low", "defer"]);
@@ -102,7 +106,9 @@ const PROPOSAL_TEXT_FIELDS = [
 /** The idea fields present on the request; absent ones are left as they are. */
 function proposalFieldsOf(body: Record<string, unknown>): ProposalFields {
   const fields: ProposalFields = {};
-  if (body.proposal_kind !== undefined) fields.proposal_kind = field(z.enum(["new", "expansion"]), body.proposal_kind, "proposal_kind");
+  if (body.recommendation !== undefined) fields.recommendation = field(ideationRecommendationSchema, body.recommendation, "recommendation");
+  if (body.conditions !== undefined) fields.conditions = field(z.array(z.string().trim().min(1)), body.conditions, "conditions");
+  if (body.proposal_kind !== undefined) fields.proposal_kind = field(z.enum(["new", "expansion", "reuse"]), body.proposal_kind, "proposal_kind");
   if (body.target_tactic_id !== undefined) fields.target_tactic_id = field(z.string().trim().min(1).nullable(), body.target_tactic_id, "target_tactic_id");
   if (body.expansion_scope !== undefined) fields.expansion_scope = field(expansionScopeSchema, body.expansion_scope, "expansion_scope");
   if (body.comparative_rationale !== undefined) fields.comparative_rationale = field(z.string(), body.comparative_rationale, "comparative_rationale");
@@ -290,6 +296,7 @@ export async function POST(request: Request) {
           id: String(body.id ?? ""),
           expected_version: typeof body.expected_version === "string" ? body.expected_version : "",
           decision: field(decisionSchema, body.decision, "decision"),
+          reviewed_context_basis: body.reviewed_context_basis === undefined ? undefined : field(z.string().regex(/^[a-f0-9]{64}$/), body.reviewed_context_basis, "reviewed_context_basis"),
           judgement_origin: body.judgement_origin === undefined ? undefined : field(z.enum(["model", "manual"]), body.judgement_origin, "judgement_origin"),
           rationale,
           actor: identity.actor,
@@ -325,12 +332,7 @@ export async function POST(request: Request) {
         const fields = proposalFieldsOf(body);
         const proposal = await addIdeationProposal({
           gap_id: String(body.gap_id ?? ""),
-          fields: {
-            ...fields,
-            name: fields.name ?? "",
-            type: fields.type ?? "",
-            evidence_question: fields.evidence_question ?? "",
-          },
+          fields,
           rationale,
           actor: identity.actor,
         });

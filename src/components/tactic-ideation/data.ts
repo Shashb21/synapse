@@ -1,4 +1,7 @@
 /** Read current ideation eligibility and retained mapped work without changing assessments. */
+import { buildIdeationGapBrief, type IdeationGapBrief } from "@/modules/stages/s9-ideation/context";
+import type { IdeationGapOutcome } from "@/modules/stages/s9-ideation/recommendation-contract";
+import type { AcceptedContext } from "@/components/ideation/evidence-context";
 import { tacticEditVersion } from "@/lib/iegp/tactic-edit-version";
 import type { ActionIdentity } from "@/components/platform/action-dialog";
 import type { ProposalCardModel } from "@/components/ideation/proposal-card";
@@ -8,7 +11,7 @@ import type { TacticEditModel } from "@/components/tactic-ideation/tactic-panel"
 import { can } from "@/modules/auth/roles";
 import { sessionContext } from "@/modules/auth/session";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
-import { ideationBandOrder, listIdeationProposals } from "@/modules/stages/s9-ideation/module";
+import { acceptedIdeationContexts, listIdeationGapOutcomes, ideationBandOrder, listIdeationProposals } from "@/modules/stages/s9-ideation/module";
 
 /** Read-only discovery; actions keep using the shared record's responsible editors. */
 export type RetainedTacticGap = {
@@ -28,6 +31,9 @@ export type RetainedTacticGap = {
 export type TacticIdeationData = {
   /** Current High/Open eligibility. Existing work is listed separately. */
   highGaps: OpenGapCard[];
+  briefs: Record<string, IdeationGapBrief>;
+  outcomes: IdeationGapOutcome[];
+  acceptedContexts: AcceptedContext[];
   retainedGaps: RetainedTacticGap[];
   /** Open gaps left out: validated Medium or Low, or not validated yet. Defer is out of this cycle. */
   otherCount: number;
@@ -40,11 +46,12 @@ export type TacticIdeationData = {
 
 /** Load current eligibility and retained relationship facts from their existing sources. */
 export async function loadTacticIdeation(openGaps: OpenGapCard[]): Promise<TacticIdeationData> {
-  const [placements, proposals, session, state] = await Promise.all([
+  const [placements, proposals, session, state, outcomes] = await Promise.all([
     listPlacements(),
     listIdeationProposals(),
     sessionContext(),
     loadState(),
+    listIdeationGapOutcomes(),
   ]);
   const byGap = new Map(placements.map((row) => [row.gap_id, row]));
   const eligibleBands = ideationBandOrder(placements);
@@ -72,6 +79,9 @@ export async function loadTacticIdeation(openGaps: OpenGapCard[]): Promise<Tacti
   });
   return {
     highGaps,
+    briefs: Object.fromEntries(highGaps.map(gap => [gap.gap_id, buildIdeationGapBrief(state, gap.gap_id, placements)])),
+    outcomes,
+    acceptedContexts: acceptedIdeationContexts(proposals),
     retainedGaps,
     otherCount,
     proposals: proposals.map((proposal): ProposalCardModel => ({ ...proposal })),

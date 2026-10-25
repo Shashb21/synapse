@@ -68,6 +68,18 @@ async function makePartialGap() {
     actor_name: "A. Rao",
     actor_function: "heor",
   });
+  // Creating the tactic already linked its unassessed coverage row. A planned
+  // tactic alone is not coverage, so a reviewer must assess that existing row.
+  const coverage = (await loadState()).coverages.find(
+    (row) => row.gap_id === gapId && row.tactic_id === tacticId,
+  )!;
+  await lockCoverageOverall({
+    coverage_id: coverage.id,
+    overall: "partial",
+    rationale: "The chart review covers the elderly population but not the comparator.",
+    actor_name: "A. Rao",
+    actor_function: "heor",
+  });
   // Belt-and-suspenders for CI: re-sync after planned lock so displayed status is Partial.
   await syncComputedGapStatuses(gapId);
   const gap = (await loadState()).gaps.find((g) => g.id === gapId)!;

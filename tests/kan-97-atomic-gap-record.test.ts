@@ -13,6 +13,7 @@ import {
   createGap,
   createProposedTactic,
   loadState,
+  lockCoverageOverall,
   lockTactic,
   makeLock,
   modifyGap,
@@ -84,6 +85,17 @@ async function makePartialGap() {
     ...who,
   });
   await lockTactic({ note: "The reviewer confirmed resources for this tactic lifecycle", tactic_id: tacticId, status: "planned", ...who });
+  // The automatic relationship starts unassessed. Make the fixture Partial
+  // only by explicitly recording a human assessment of that same row.
+  const coverage = (await loadState()).coverages.find(
+    (row) => row.gap_id === gapId && row.tactic_id === tacticId,
+  )!;
+  await lockCoverageOverall({
+    coverage_id: coverage.id,
+    overall: "partial",
+    rationale: "The reviewed chart review covers the population but not comparative evidence.",
+    ...who,
+  });
   await syncComputedGapStatuses(gapId);
   const gap = (await loadState()).gaps.find((g) => g.id === gapId)!;
   expect(displayedGapStatus(gap)).toBe("validated_partial");

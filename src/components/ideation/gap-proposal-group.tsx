@@ -1,3 +1,7 @@
+import { IdeationBrief, IdeationOutcome } from "./evidence-context";
+import type { IdeationGapBrief } from "@/modules/stages/s9-ideation/context";
+import type { IdeationGapOutcome } from "@/modules/stages/s9-ideation/recommendation-contract";
+import type { TacticLibraryItem } from "@/lib/iegp/engine";
 import { GapRecordLink } from "@/components/gap-panel";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { proposalFields } from "@/components/ideation/proposal-fields";
@@ -17,6 +21,9 @@ export type GapProposalGroup = {
   record_available?: boolean;
   mapped_tactic_count: number;
   proposals: ProposalCardModel[];
+  brief?: IdeationGapBrief;
+  outcome?: IdeationGapOutcome;
+  reuseTargets?: TacticLibraryItem[];
 };
 
 /** A person writes an idea for the gap with no model run; it is decided like any other. */
@@ -46,6 +53,18 @@ export function AddIdeaDialog({
       size="sm"
     />
   );
+}
+
+/** Select an existing tactic without copying its design or changing its lifecycle. */
+export function ReuseIdeaDialog({gapId, gapName, identity, targets}: {gapId:string;gapName:string;identity:ActionIdentity;targets:TacticLibraryItem[]}) {
+  if (!targets.length) return null;
+  return <ActionDialog protectUnsavedChanges endpoint="/api/plan" payload={{action:"add_proposal",gap_id:gapId,proposal_kind:"reuse"}}
+    label="Reuse existing tactic" title={`Reuse existing tactic for ${gapName}`} description="Select an unchanged existing output. This creates an option for coverage review with no additional work; acceptance preserves its lifecycle, dates and assessments. New analysis requires expansion or a new tactic."
+    identity={identity} confirmLabel="Add reuse option" requireRationale fields={[
+      {name:"target_tactic_id",label:"Existing tactic",type:"select",required:true,placeholder:"Choose a tactic",options:targets.map(target=>({value:target.id,label:`${target.name} · ${target.status}`}))},
+      {name:"comparative_rationale",label:"Why reuse is useful (optional)",type:"textarea"},
+      {name:"conditions",label:"Uncertainties and required checks (optional)",type:"textarea",serialize:"lines",hint:"One unresolved check per line."},
+    ]} size="sm" />;
 }
 
 export function GapProposalGroupCard({
@@ -94,12 +113,15 @@ export function GapProposalGroupCard({
         <p className="text-[11px] text-muted-foreground">
           {plural(group.proposals.length, "proposal")} · {open} awaiting a decision · {accepted} accepted
         </p>
-        {mayIdeate ? (
+        {mayIdeate && group.eligible !== false ? (
           <div>
             <AddIdeaDialog gapId={group.gap_id} gapName={group.gap_name} identity={identity} />
+            <ReuseIdeaDialog gapId={group.gap_id} gapName={group.gap_name} identity={identity} targets={group.reuseTargets ?? []} />
           </div>
         ) : null}
       </header>
+      {group.brief ? <IdeationBrief brief={group.brief} /> : null}
+      <IdeationOutcome outcome={group.outcome} />
       <div className="grid gap-3 lg:grid-cols-2">
         {group.proposals.map((proposal) => (
           <ProposalCard

@@ -135,9 +135,9 @@ export function countingCoverages(
  * Open / Partially Addressed / Addressed read straight off the recorded
  * coverage verdicts (S4's model verdict or a human's locked overall). No
  * weights, fractions or thresholds:
- * - no counting coverage other than "not relevant" → Open;
+ * - no assessed counting coverage other than "not relevant" → Open;
  * - a human-locked "full" coverage → Addressed;
- * - any other counting coverage (partial, limited, or a model "full" a human
+ * - any other assessed counting coverage (partial, limited, or a model "full" a human
  *   has not locked) → Partially Addressed.
  * Proposed tactics do not count. Split leftovers: a confirmed child gap means
  * the parent is the addressed part.
@@ -149,7 +149,7 @@ export function computeGapStatus(
 ): MappedGapStatus {
   if (extras?.hasAcceptedChild) return "validated_addressed";
   const pool = tactics ? countingCoverages(coverages, tactics, extras?.expansions) : coverages.filter((c) => !c.expansion_id);
-  const relevant = pool.filter((c) => c.overall !== "not_relevant");
+  const relevant = pool.filter((c) => c.overall !== "not_relevant" && c.overall !== "unassessed");
   if (relevant.length === 0) return "validated_open";
   if (relevant.some((c) => hasSupportedFullConfirmation(c))) {
     return "validated_addressed";

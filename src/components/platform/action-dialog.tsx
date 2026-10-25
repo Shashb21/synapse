@@ -27,6 +27,8 @@ export type ActionField = {
   placeholder?: string;
   hint?: string;
   required?: boolean;
+  /** Send one trimmed nonempty value per line as a JSON array. */
+  serialize?: "lines";
   /** Checks the typed value before anything is sent; returns the message to show, or null. */
   validate?: (value: string) => string | null;
 };
@@ -137,7 +139,7 @@ export function ActionDialog({
     const typed: Record<string, string> = {};
     for (const field of openedFields) {
       const value = data.get(field.name);
-      if (value !== null) extra[field.name] = field.type === "number" ? Number(value) : String(value);
+      if (value !== null) extra[field.name] = field.serialize === "lines" ? String(value).split(/\r?\n/).map(line => line.trim()).filter(Boolean) : field.type === "number" ? Number(value) : String(value);
       typed[field.name] = String(value ?? "");
       if (field.required && !String(value ?? "").trim()) {
         setInvalidField(field.name);

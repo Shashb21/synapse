@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { freshWorkspace } from "../support/session";
-import { iegpAction, planAction } from "../support/synapse";
+import { coverageOpeningTokens, iegpAction, planAction } from "../support/synapse";
 
 let gapId = "";
 freshWorkspace({ name: "KAN133 shared gap panel", seed: async request => {
@@ -229,7 +229,20 @@ test("dirty keyboard matrix moves retain the proposed move and reason through Es
 test("Partial and unconfirmed panels share coverage context and full-record next steps", async ({ page, request }) => {
   const open = await iegpAction(request, { action: "create_gap", name: "Unconfirmed coverage panel", statement: "Unreviewed evidence need", domain: "unmet_need" });
   const partial = await iegpAction(request, { action: "create_gap", name: "Partial coverage panel", statement: "Some comparative evidence is missing", domain: "unmet_need" });
-  await iegpAction(request, { action: "record_missed_tactic", gap_id: String(partial.id), name: "Existing partial evidence study", rationale: "Record existing work that addresses the studied population", evidence_question: "What evidence is available in the studied population?", type: "chart_review", status: "planned", description: "Existing study addresses part of the population", catch_up_reason: "remembered_while_reviewing" });
+  const tactic = await iegpAction(request, { action: "record_missed_tactic", gap_id: String(partial.id), name: "Existing partial evidence study", rationale: "Record existing work that addresses the studied population", evidence_question: "What evidence is available in the studied population?", type: "chart_review", status: "planned", description: "Existing study addresses part of the population", catch_up_reason: "remembered_while_reviewing" });
+  // Mapping planned work establishes relevance, not a coverage result. Record the
+  // explicit partial assessment that this panel scenario is intended to present.
+  const beforeAssessment = await request.get(`/api/gaps/${partial.id}`).then(response => response.json());
+  expect(beforeAssessment.coverage_status.shown).toBe("validated_open");
+  const coverage = beforeAssessment.coverages.find((row: { tactic_id: string }) => row.tactic_id === tactic.id)!;
+  expect(coverage, "recorded tactic should retain its gap coverage relationship").toBeTruthy();
+  await iegpAction(request, {
+    action: "lock_overall",
+    coverage_id: coverage.id,
+    ...await coverageOpeningTokens(request, String(tactic.id), coverage.id),
+    overall: "partial",
+    rationale: "The existing study addresses only part of the population",
+  });
   for (const [id, name, status, next] of [[String(open.id), "Unconfirmed coverage panel", "Open", "Confirm evidence assessment"], [String(partial.id), "Partial coverage panel", "Partially Addressed", "Resolve — split or rewrite"]]) {
     await page.goto("/?place=gaps");
     await page.getByTestId("gap-row-toggle").filter({ hasText: name }).click();

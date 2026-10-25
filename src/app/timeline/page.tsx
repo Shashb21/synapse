@@ -1,3 +1,4 @@
+import { acceptedIdeationContexts, listIdeationProposals } from "@/modules/stages/s9-ideation/module";
 import "@/modules";
 import Link from "next/link";
 import { BREAKOUTS_ENABLED } from "@/lib/breakouts-enabled";
@@ -45,7 +46,7 @@ function savedModel(snapshot: NonNullable<Awaited<ReturnType<typeof latestPlan>>
 
 export default async function TimelinePage({ searchParams }: { searchParams: Promise<{ version?: string }> }) {
   const { version } = await searchParams;
-  const [liveModel, plan, history, identity, state, placements, gapBlockers] = await Promise.all([
+  const [liveModel, plan, history, identity, state, placements, gapBlockers, proposals] = await Promise.all([
     timelineModel(),
     latestPlan(),
     planHistory(20),
@@ -53,6 +54,7 @@ export default async function TimelinePage({ searchParams }: { searchParams: Pro
     loadState(),
     listPlacements(),
     finalPlanBlockers(),
+    listIdeationProposals(),
   ]);
   const saved = version ? history.find((entry) => String(entry.version) === version) : undefined;
   const model = saved ? savedModel(saved.snapshot) : liveModel;
@@ -101,6 +103,7 @@ export default async function TimelinePage({ searchParams }: { searchParams: Pro
 
       <TimelineBoard
         model={model}
+        acceptedContexts={saved ? saved.snapshot.accepted_ideation_context ?? [] : acceptedIdeationContexts(proposals)}
         view={view}
         today={today}
         identity={{
