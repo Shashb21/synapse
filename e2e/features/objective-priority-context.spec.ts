@@ -6,7 +6,7 @@ test.use({ actionTimeout: 10_000 });
 
 let visibleGap = "", hiddenGap = "", tacticId = "";
 freshWorkspace({ name: "KAN130 shared objective context", seed: async request => {
-  await iegpAction(request, { action: "save_product_setup", mark_complete: true, reason: "Record the initial committee context", context: {
+  await iegpAction(request, { action: "save_product_setup", mark_complete: true, context: {
     asset_name: "Deadline study", therapeutic_area: "Immunology", indications: [{ name: "Psoriasis", status: "current" }],
     lifecycle_stage: "growth", markets: ["US"], plan_owner: "Evidence lead", sponsoring_function: "Medical Affairs",
     stakeholders: [{ function: "HEOR", lead: "Evidence lead" }], treatment_settings: ["1L", "2L"],

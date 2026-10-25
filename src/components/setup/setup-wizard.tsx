@@ -138,6 +138,8 @@ export function SetupWizard({
   const progress = ((index + 1) / steps.length) * 100;
   const objectiveChanges = JSON.stringify(parsed.objectives) !== JSON.stringify(baseline.objectives) ||
     (parsed.objectives.length > 0 && ["lifecycle_stage", "indication", "geography"].some(key => parsed[key as keyof PlanningContext] !== baseline[key as keyof PlanningContext]));
+  // Initial entry has no prior objectives to revise, even after a draft save.
+  const objectiveRevisions = baseline.objectives.length > 0 && objectiveChanges;
   const changedContextIds = new Set(parsed.objectives.filter(objective => {
     const previous = baseline.objectives.find(row => row.id === objective.id);
     return previous && ["key_decision", "decision_date", "evidence_needed_by"].some(key => (objective[key as keyof typeof objective] || "") !== (previous[key as keyof typeof previous] || ""));
@@ -148,7 +150,7 @@ export function SetupWizard({
 
   async function save(markComplete: boolean): Promise<boolean> {
     setError(null);
-    if (objectiveChanges && reason.trim().length < 3) {
+    if (objectiveRevisions && reason.trim().length < 3) {
       setError("Give a meaningful reason for the objective changes. Your answers are still here.");
       return false;
     }
@@ -407,7 +409,7 @@ export function SetupWizard({
         </section>
       ) : null}
 
-      {objectiveChanges ? (
+      {objectiveRevisions ? (
         <section aria-label="Objective change impact" className="grid gap-3 rounded-lg border border-border bg-card p-4">
           <h3 className="text-[13px] font-semibold">Shared objective context</h3>
           {changedContextIds.size ? (
