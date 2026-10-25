@@ -150,3 +150,30 @@ test("shared replacement fixtures bind the selected workspace and preserve expli
   const state = await snapshot(page, a.id);
   expect(state.demo).toBe(true);
 });
+
+test("Upload reset retains its captured workspace on rejection and resets a matching owner target", async ({ page, context }) => {
+  const { a, b } = await seed(page);
+  const beforeA = await snapshot(page, a.id);
+  const beforeB = await snapshot(page, b.id);
+  await selectWorkspace(page.request, a.id);
+  await page.goto("/?place=upload");
+  const dialog = await openDialog(page, "Reset to blank slate");
+  const tabB = await context.newPage();
+  await selectWorkspace(tabB.request, b.id);
+  const rejected = page.waitForResponse(response => response.url().endsWith("/api/iegp"));
+  await dialog.getByRole("button", { name: "Reset", exact: true }).click();
+  const response = await rejected;
+  expect(response.request().postDataJSON()).toMatchObject({ expected_workspace_id: a.id });
+  expect(response.status()).toBe(409);
+  await expect(dialog.getByRole("alert")).toHaveText(RECOVERY);
+  await expect(dialog).toBeVisible();
+  expect(await snapshot(page, b.id)).toEqual(beforeB);
+  expect(await snapshot(page, a.id)).toEqual(beforeA);
+  const accepted = page.waitForResponse(response => response.url().endsWith("/api/iegp"));
+  await dialog.getByRole("button", { name: "Reset", exact: true }).click();
+  expect((await accepted).status()).toBe(200);
+  await expect(dialog).not.toBeVisible();
+  expect((await snapshot(page, a.id)).demo).toBe(false);
+  expect(await snapshot(page, b.id)).toEqual(beforeB);
+  await tabB.close();
+});

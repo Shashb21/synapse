@@ -307,7 +307,7 @@ type PreparedAction = { body: Record<string, string>; identity: CustomerContext 
 /** Parses and authorizes once, retaining the verified target for execution. */
 async function prepareAction(request: Request): Promise<PreparedAction> {
   const body = (await readJsonBody(request)) as Record<string, string>;
-  const identity = await requireCustomerContext({ body });
+  const identity = await requireCustomerContext({ body, readOnly: body.action === "reset" || body.action === "load_demo" });
   if (!identity.anonymous_test && (body.action === "reset" || body.action === "load_demo")) {
     const expected = body.expected_workspace_id;
     if (typeof expected !== "string" || !expected.trim()) {

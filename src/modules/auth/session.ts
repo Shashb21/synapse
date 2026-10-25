@@ -148,18 +148,24 @@ export function recentlyVerifiedSession(id: string): Session | null {
   return entry.session;
 }
 
-export async function currentSession(): Promise<Session | null> {
+/**
+ * Verifies the persisted session and its current account/seat eligibility.
+ * `readOnly` skips lazy schema setup and revocation cleanup for a preflight
+ * that must reject without writes. Missing tables fail closed at the guard.
+ */
+export async function currentSession(options: { readOnly?: boolean } = {}): Promise<Session | null> {
   const jar = await cookies();
   const id = jar.get(SESSION_COOKIE)?.value;
   if (!id) return null;
-  await ensurePlatformSchema();
+  if (!options.readOnly) await ensurePlatformSchema();
   const key = sessionKey(id);
   recentSessions.delete(key);
   const rows = await sharedDb().select().from(t.authSessions).where(eq(t.authSessions.id, key)).limit(1);
   const row = rows[0];
   if (!row) return null;
   const expired = Date.parse(row.expires_at) < Date.now();
-  if (expired || !(await sessionStillAllowed(row))) {
+  if (expired || !(await sessionStillAllowed(row, options))) {
+    if (options.readOnly) return null;
     const gone = await sharedDb().delete(t.authSessions).where(eq(t.authSessions.id, key)).returning({ id: t.authSessions.id });
     // A live session refused mid-way (disabled, seat removed, customer deactivated) is a revocation worth recording.
     if (!expired && gone.length > 0) {
@@ -241,12 +247,12 @@ export class NoSeatError extends Error {
  * a seat on an active customer, or it is a platform admin (OWNER_EMAILS, or an
  * enabled admin account with that email). No verified email, no seat.
  */
-export async function seatAllowsSignIn(email: string | null | undefined): Promise<boolean> {
+export async function seatAllowsSignIn(email: string | null | undefined, options: { readOnly?: boolean } = {}): Promise<boolean> {
   const address = email?.trim().toLowerCase();
   if (!address) return false;
   if (ownerEmails().includes(address)) return true;
-  if (await hasActiveSeat(address)) return true;
-  return isAdminEmail(address);
+  if (await hasActiveSeat(address, options)) return true;
+  return isAdminEmail(address, options);
 }
 
 /**
@@ -257,9 +263,10 @@ export async function seatAllowsSignIn(email: string | null | undefined): Promis
  */
 export async function testSeatPasswordAllowed(
   account: Pick<Account, "email" | "email_verified" | "disabled">,
+  options: { readOnly?: boolean } = {},
 ): Promise<boolean> {
   if (account.disabled || !account.email_verified || !testOnlyAddress(account.email)) return false;
-  return hasActiveSeat(account.email);
+  return hasActiveSeat(account.email, options);
 }
 
 /**
@@ -269,14 +276,14 @@ export async function testSeatPasswordAllowed(
  * need a staff account or a test seat (KAN-59); SSO sessions need a seat (one
  * indexed query).
  */
-async function sessionStillAllowed(row: { provider_id: string; subject: string; email: string | null }): Promise<boolean> {
+async function sessionStillAllowed(row: { provider_id: string; subject: string; email: string | null }, options: { readOnly?: boolean } = {}): Promise<boolean> {
   if (row.provider_id === "demo") return true;
   if (row.provider_id === PASSWORD_PROVIDER) {
-    if (await passwordSessionValid(row.subject)) return true;
-    const account = await getAccount(row.subject);
-    return account ? testSeatPasswordAllowed(account) : false;
+    if (await passwordSessionValid(row.subject, options)) return true;
+    const account = await getAccount(row.subject, options);
+    return account ? testSeatPasswordAllowed(account, options) : false;
   }
-  return seatAllowsSignIn(row.email);
+  return seatAllowsSignIn(row.email, options);
 }
 
 export async function signOut() {

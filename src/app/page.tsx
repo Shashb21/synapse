@@ -15,7 +15,7 @@ import { StepWaiting } from "@/components/step-waiting";
 import { RejectedTactics, SetAsideGaps } from "@/components/restore-actions";
 import { aiSections } from "@/modules/kernel/ai-switch";
 import { noAiSections, type AiSections } from "@/modules/kernel/ai-sections";
-import { currentWorkspaceIsDemo } from "@/modules/workspaces/session";
+import { currentWorkspace } from "@/modules/workspaces/session";
 import { loadState } from "@/lib/iegp/store";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 import {
@@ -94,7 +94,8 @@ export default async function HomePage({
   const sections = await aiSections().catch(() => noAiSections());
   const ai = sections.ingestion;
   // Demo source files are offered only in a workspace that holds the Velmara demo.
-  const demo = await currentWorkspaceIsDemo();
+  const selectedWorkspace = await currentWorkspace().catch(() => null);
+  const demo = selectedWorkspace?.demo === true;
   // With AI off nothing is ingested, so Gaps never waits for a source.
   const gapsUnlocked = gates.gapsUnlocked || !ai;
   const params = await searchParams;
@@ -200,7 +201,7 @@ export default async function HomePage({
       {pane}
       {place === "upload" ? (
         <div className="mt-8">
-          <LockForm label="Reset to blank slate" action="reset" confirmLabel="Reset" />
+          <LockForm label="Reset to blank slate" action="reset" confirmLabel="Reset" extra={{ expected_workspace_id: selectedWorkspace?.id ?? "" }} />
         </div>
       ) : null}
     </AppShell>
