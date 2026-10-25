@@ -1,3 +1,4 @@
+import { acceptedIdeationContexts, listIdeationProposals } from "@/modules/stages/s9-ideation/module";
 import { sourceClaimReviewData } from "./source-review";
 import { coverageReviewVersion, getRequirementBasisReview } from "./requirement-basis";
 import { relationshipFit } from "./engine";
@@ -16,13 +17,15 @@ export async function tacticRecord(id: string, preloaded?: IegpState) {
   if (!tactic) return null;
   const coverages = state.coverages.filter(row => row.tactic_id === id);
   const expansions = state.expansions.filter(row => row.tactic_id === id);
-  const [history, references] = await Promise.all([
+  const [history, references, proposals] = await Promise.all([
     entityHistory([id, ...coverages.map(row => row.id), ...expansions.map(row => row.id)], { since: lastResetAt(state) }),
     listTacticSourceReferences(id),
+    listIdeationProposals(),
   ]);
   const gaps = (ids: string[]) => state.gaps.filter(gap => ids.includes(gap.id)).map(gap => ({ id: gap.id, name: gap.name }));
   return {
     tactic,
+    accepted_ideation_context: acceptedIdeationContexts(proposals).filter(row => row.tactic_id === id),
     source_review: sourceClaimReviewData(state, { tacticId: id }),
     version: tacticEditVersion(tactic),
     custom_types: state.tactics.flatMap(row => row.custom_type ? [row.custom_type] : []),

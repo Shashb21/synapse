@@ -14,7 +14,7 @@ import { prioritizationContextFromState } from "@/lib/iegp/planning-context";
 import { createProposedTactic, loadState } from "@/lib/iegp/store";
 import type { IegpState, Tactic } from "@/lib/iegp/types";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
-import { listIdeationProposals } from "@/modules/stages/s9-ideation/module";
+import { acceptedIdeationContexts, listIdeationProposals } from "@/modules/stages/s9-ideation/module";
 import {
   acceptedDependencies,
   activityId,
@@ -166,7 +166,7 @@ export async function tacticDesigns(): Promise<Map<string, ActivityDesign>> {
   const proposals = await listIdeationProposals();
   const designs = new Map<string, ActivityDesign>();
   for (const proposal of proposals) {
-    if (proposal.status !== "accepted" || !proposal.tactic_id) continue;
+    if (proposal.status !== "accepted" || proposal.proposal_kind === "reuse" || !proposal.tactic_id) continue;
     const design = (proposal.design ?? {}) as Record<string, unknown>;
     const duration = positive(design.duration_months, false);
     const lag = positive(design.readout_lag_months, true);
@@ -1127,6 +1127,8 @@ export type IegpPlanRecord = {
     /** Absent on snapshots saved before KAN-85. */
     cancelled?: TimelineModel["cancelled"];
     problems?: TimelineModel["problems"];
+    /** Accepted ideation checks frozen with this saved plan. Absent on older snapshots. */
+    accepted_ideation_context?: ReturnType<typeof acceptedIdeationContexts>;
     /** planFingerprint of the frozen activities, and its short code stamped on exports (KAN-85). */
     fingerprint?: string;
     fingerprint_code?: string;
@@ -1201,7 +1203,7 @@ export async function savePlan(args: {
   return withWorkspaceTransaction(async () => {
     const schema = await currentSchemaName();
     await db().execute(sql`select pg_advisory_xact_lock(hashtext(${`iegp_plans:${schema}`}))`);
-    const [model, state] = await Promise.all([timelineModel(), loadState()]);
+    const [model, state, proposals] = await Promise.all([timelineModel(), loadState(), listIdeationProposals()]);
     if (args.status === "final" && model.activities.length === 0) {
       throw new Error("There is nothing to save as final yet: date at least one activity on the timeline first.");
     }
@@ -1253,6 +1255,9 @@ export async function savePlan(args: {
       removed: model.removed,
       cancelled: model.cancelled,
       problems: model.problems,
+      // Freeze the exact accepted source context.  Reading current proposal rows
+      // while viewing an old plan would rewrite that plan's historical review.
+      accepted_ideation_context: acceptedIdeationContexts(proposals),
       fingerprint,
       fingerprint_code,
       counts: {

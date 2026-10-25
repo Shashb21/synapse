@@ -84,6 +84,15 @@ function tactic(gap_id: string, name: string, overrides: Record<string, unknown>
     evidence_question: `Question for ${name}`,
     rationale: `Why ${name}`,
     comparative_rationale: "New study adds data unavailable from existing scope; more time/cost but credible quality and feasibility",
+    contract_version: 2,
+    recommendation: {
+      remaining_need: "The supplied gap remains unresolved by the recorded evidence.",
+      incremental_contribution: "Assess the proposed design's additional evidence against confirmed requirements.",
+      alternatives_rationale: "Review existing output and added analysis before commissioning this separate activity.",
+      feasibility: { status: "unknown", required_checks: ["Confirm required data, design compatibility and available resources before proceeding."] },
+      coverage_discrepancy: null,
+      deadline: { status: "unknown", explanation: "Compare the proposed evidence availability with the objective evidence deadline." },
+    },
     population: "Adults on therapy",
     comparator: "Standard of care",
     outcomes: "OS",
@@ -285,13 +294,14 @@ describe("S9 on the model path", () => {
     const {sharedDb}=await import("@/modules/kernel/db"); const {sql}=await import("drizzle-orm");
     const target=await createProposedTactic({name:"Completed baseline trial",type:"phase3_trial",description:"Existing data",evidence_question:"Overall safety",population:"Adults",intervention:"Asset",comparator:"SOC",outcomes:"AE",owner:ACTOR.name,function:ACTOR.function,residual_ids:[],status:"completed",actor_name:ACTOR.name,actor_function:ACTOR.function});
     const scope={name:"Elderly analysis",evidence_question:"Safety in 75+?",population:"Age 75+",outcomes:"AESI",geography:"",data_cut:"Locked data",analysis:"Post-hoc subgroup",instrument:"",study_design:"Retrospective analysis",gap_coverage:"Elderly safety",cost_effort:"Two analyst months",timing:"3 months",feasibility_risks:"Small sample",post_hoc:true,prospective_enrolment:false,protocol_amendment:false,start_date:null,evidence_available:null};
-    const script:Script=call=>call.purpose === "ideation-proposer" ? {tactics:gapsOf(call).map(g=>tactic(g.id,"Baseline expansion",{proposal_kind:"expansion",target_tactic_id:target,expansion_scope:scope}))} : call.purpose === "ideation-critic" ? keepAll(call) : judgeFirst(call,1);
+    const script:Script=call=>call.purpose === "ideation-proposer" ? {tactics:gapsOf(call).map(g=>tactic(g.id,"Baseline expansion",{proposal_kind:"expansion",target_tactic_id:target,expansion_scope:scope}))} : call.purpose === "ideation-critic" ? keepAll(call) : {gaps:judgeFirst(call,1).gaps.map(gap=>({...gap,outcome:{status:"options",explanation:"Candidate expansion available for review."}}))};
     const recorder=new RunRecorder({workspace_id:"default",stage:"S9",module_id:ideationModule.manifest.id,module_version:ideationModule.manifest.version,actor:ACTOR,input:{gap_ids:ids}});
     await openRun(recorder); const {ctx}=context(script); ctx.run=recorder;
     const generated=await ideationModule.run({...input(),dry_run:false},ctx); await closeRun({recorder,status:"ok",output:generated.output,route:ctx.route});
     const p=(await listIdeationProposals()).find(p=>p.target_tactic_id===target && p.gap_id===ids[0])!;
     await decideIdeationProposal({id:p.id,decision:"reject",rationale:"Feasibility pending",actor:ACTOR});
     const rerun=await ideationModule.run(input(),context(script).ctx); expect(rerun.output.proposals.some(p=>p.gap_id===ids[0])).toBe(false);
+    expect(rerun.output.gap_outcomes.find(gap=>gap.gap_id===ids[0])).toMatchObject({status:"no_credible_option",explanation:expect.stringContaining("unresolved")});
     await restoreIdeationProposal({id:p.id,rationale:"New feasibility information",actor:ACTOR});
     const restored=await ideationModule.run(input(),context(script).ctx); expect(restored.output.proposals.some(p=>p.gap_id===ids[0])).toBe(true);
     const editedScope={...scope,cost_effort:"One analyst month"};
@@ -473,6 +483,62 @@ describe("S9 on the model path", () => {
     expect(calls.filter((call) => call.purpose === "ideation-critic").length).toBe(4);
     expect(output.proposals).toHaveLength(2);
   });
+  it("persists reuse recommendation evidence and no-option run outcomes without changing recorded coverage", async () => {
+    // Arrange: use the recorded accepted design unchanged, with explicit unresolved checks.
+    const { RunRecorder, openRun, closeRun } = await import("@/modules/kernel/observability");
+    const { db } = await import("@/modules/kernel/db");
+    const { ideationProposals, moduleRuns } = await import("@/modules/kernel/schema");
+    const { eq } = await import("drizzle-orm");
+    const state = await loadState();
+    const target = state.tactics.find(row => row.id === libraryId)!;
+    const recommendation = {
+      remaining_need: "Recorded partial coverage still needs human review.",
+      incremental_contribution: "Review the unchanged planned output against this gap without additional work.",
+      alternatives_rationale: "Check existing relevant output before adding analysis or commissioning a separate study.",
+      feasibility: { status: "conditional", required_checks: ["Confirm output availability and assess recorded coverage against the gap requirements."] },
+      coverage_discrepancy: "Potential relevance requires review; existing S4 assessments remain authoritative.",
+      deadline: { status: "unknown", explanation: "Output availability against the evidence deadline needs confirmation." },
+    };
+    const generationInput = { ...input(1), gap_ids: [ids[0]!], dry_run: false };
+    const persistedRun = async (noOption: boolean) => {
+      const recorder = new RunRecorder({ workspace_id: "default", stage: "S9", module_id: ideationModule.manifest.id, module_version: ideationModule.manifest.version, actor: ACTOR, input: generationInput });
+      await openRun(recorder);
+      const { ctx } = context(call => {
+        if (call.purpose !== "ideation-proposer") return call.purpose === "ideation-critic" ? keepAll(call) : judgeFirst(call, 1);
+        if (noOption) return { tactics: [], gap_outcomes: [{ gap_id: ids[0]!, status: "no_credible_option", explanation: "The available designs cannot answer the required comparison; confirm compatible comparator data first." }] };
+        return { tactics: gapsOf(call).map(gap => tactic(gap.id, "Review unchanged recorded output", {
+          id: `${gap.id}:proposal:1`, contract_version: 2, proposal_kind: "reuse", target_tactic_id: target.id,
+          type: target.type, evidence_question: target.evidence_question, population: target.population,
+          comparator: target.comparator, outcomes: target.outcomes, data_source: target.data_source, study_design: target.study_design,
+          recommendation,
+        })) };
+      });
+      ctx.run = recorder;
+      ctx.replay = { evaluation: false, input: generationInput, facts: await ideationModule.freeze!(generationInput), module_id: ideationModule.manifest.id, module_version: ideationModule.manifest.version, prompt_version: "base" };
+      const result = await ideationModule.run(generationInput, ctx);
+      await closeRun({ recorder, status: "ok", output: result.output, route: ctx.route });
+      return { recorder, result };
+    };
+
+    // Act: exercise generation and the actual run recorder for both result shapes.
+    const reuse = await persistedRun(false);
+    const noOption = await persistedRun(true);
+
+    // Assert: proposal and immutable baseline retain evidence; no-row outcomes live in run output.
+    const proposals = await db().select().from(ideationProposals);
+    const row = proposals.find(row => (row.design as {run_id?: string}).run_id === reuse.recorder.id)!;
+    expect(row.proposal_kind).toBe("reuse");
+    expect(row.target_tactic_id).toBe(target.id);
+    const basis = reuse.result.output.proposals[0]!.supporting_context_basis;
+    expect(basis).toMatch(/^[a-f0-9]{64}$/);
+    expect(row.design).toMatchObject({ recommendation, supporting_context_basis: basis, original_ai: { proposal_kind: "reuse", target_tactic_id: target.id, recommendation, supporting_context_basis: basis } });
+    const run = (await db().select().from(moduleRuns).where(eq(moduleRuns.id, noOption.recorder.id)))[0]!;
+    expect(run.output).toMatchObject({ proposals: [], gap_outcomes: [{ gap_id: ids[0], status: "no_credible_option", explanation: expect.stringContaining("compatible comparator data") }] });
+    const after = await loadState();
+    expect(after.coverages).toEqual(state.coverages);
+    expect(after.tactics).toEqual(state.tactics);
+  });
+
   it.each(["unchanged", "saved-edit", "inline-edit", "comparison-edit", "missing-comparison", "legacy-missing-comparison"])("retains creation-time AI baseline through the real S9 API flow: %s", async (flow) => {
     const { RunRecorder, openRun, closeRun } = await import("@/modules/kernel/observability");
     const { db, sharedDb } = await import("@/modules/kernel/db");
@@ -489,7 +555,10 @@ describe("S9 on the model path", () => {
     await closeRun({ recorder, status: "ok", output: result.output, route: ctx.route });
     const rows = await db().select().from(ideationProposals);
     const row = rows.find(row => (row.design as { run_id?: string }).run_id === recorder.id)!;
-    const original = { proposal_kind: row.proposal_kind, comparative_rationale: row.comparative_rationale, name: row.name, type: row.type, evidence_question: row.evidence_question, rationale: row.rationale, design: (row.design as { original_ai: { design: unknown } }).original_ai.design };
+    const originalAi = (row.design as { original_ai: { design: unknown; recommendation?: unknown; supporting_context_basis?: unknown } }).original_ai;
+    // The immutable creation baseline includes the reasoning that informed the
+    // original recommendation, not only the tactic design fields.
+    const original = { proposal_kind: row.proposal_kind, comparative_rationale: row.comparative_rationale, name: row.name, type: row.type, evidence_question: row.evidence_question, rationale: row.rationale, design: originalAi.design, recommendation: originalAi.recommendation, supporting_context_basis: originalAi.supporting_context_basis };
     const slot = (row.design as { slot_id: string }).slot_id;
     expect(slot).toBe(`${row.gap_id}:proposal:1`);
     if (flow.includes("missing-comparison")) {

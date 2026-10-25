@@ -1,5 +1,6 @@
 "use client";
 
+import { AcceptedIdeationContext, type AcceptedContext } from "@/components/ideation/evidence-context";
 import { useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -137,9 +138,10 @@ export function TimelineBoard({
   addable = [],
   issues = [],
   gapBlockers = [],
-  viewingVersion = null,
+  viewingVersion = null, acceptedContexts = [],
 }: {
   model: TimelineModel;
+  acceptedContexts?: AcceptedContext[];
   /** The gap-grouped view the chart draws (KAN-25). */
   view: GapTimelineView;
   today: string;
@@ -729,6 +731,7 @@ export function TimelineBoard({
 
                 <section>
                   <h3 className="text-[12px] font-medium text-foreground">Design</h3>
+                  <AcceptedIdeationContext contexts={acceptedContexts} tacticId={selected.tactic_id} expansionId={selected.expansion_id} />
                   <dl className="mt-1 grid gap-1 text-[12px] text-muted-foreground">
                     <Row label="Evidence question" value={selected.meta.evidence_question} />
                     <Row label="Population" value={selected.meta.population} />

@@ -1,8 +1,10 @@
+import { buildIdeationGapBrief, ideationAcceptanceBasis, type IdeationGapBrief } from "./context";
+import { ideationRecommendationSchema, ideationGapOutcomeSchema, type IdeationGapOutcome, type IdeationRecommendation } from "./recommendation-contract";
 import { relationshipVersion } from "@/lib/iegp/relationship-version";
 import { matchesSuppliedJudgementRecords, inspectJudgementReferences, inspectSuppliedJudgementReferences, judgementReferenceSchema, recordedJudgementReferences, suppliedJudgementRecords, suppliedJudgementRecordSchema, type JudgementReference } from "@/lib/iegp/judgement-references";
 import { withRelationshipChange } from "@/lib/iegp/relationship-change";
 import { createHash } from "node:crypto";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import * as t from "@/modules/kernel/schema";
@@ -24,7 +26,7 @@ import {
   type EvidenceDomain,
   type TacticType,
 } from "@/lib/iegp/enums";
-import { appendAudit, insertLibraryTactic, loadState, readState, syncComputedGapStatuses } from "@/lib/iegp/store";
+import { appendAudit, reuseTacticForGap, insertLibraryTactic, loadState, readState, syncComputedGapStatuses } from "@/lib/iegp/store";
 import { prioritizationContextFromState } from "@/lib/iegp/planning-context";
 import { displayedGapStatus, isLiveGap, emptyDimensions, unlocked } from "@/lib/iegp/engine";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
@@ -62,7 +64,9 @@ const inputSchema = z.object({
 
 const proposalSchema = z.object({
   references: z.array(judgementReferenceSchema).default([]),
-  proposal_kind: z.enum(["new", "expansion"]).default("new"),
+  proposal_kind: z.enum(["new", "expansion", "reuse"]).default("new"),
+  recommendation: ideationRecommendationSchema.optional(),
+  supporting_context_basis: z.string().optional(),
   target_tactic_id: z.string().nullable().default(null),
   expansion_scope: expansionScopeSchema.nullable().default(null),
   comparative_rationale: z.string().default(""),
@@ -73,7 +77,7 @@ const proposalSchema = z.object({
   evidence_question: z.string(),
   rationale: z.string(),
   design: designSchema,
-  /** The judge's 0–100 confidence in this idea. */
+  /** Non-probabilistic 0–100 review rating; not a probability of success. */
   score: z.number(),
   critic_note: z.string(),
   /** Why the judge kept or rejected it, and for a kept idea its rank within the gap. */
@@ -87,6 +91,7 @@ const outputSchema = z.object({
   proposals: z.array(proposalSchema),
   rejected: z.array(proposalSchema),
   gaps_considered: z.number(),
+  gap_outcomes: z.array(ideationGapOutcomeSchema).default([]),
   withdrawn: z.array(z.object({ slot_id: z.string(), note: z.string() })).optional(),
 });
 
@@ -96,7 +101,7 @@ export type IdeationOutput = z.infer<typeof outputSchema>;
 type Design = z.infer<typeof designSchema>;
 type Proposal = z.infer<typeof proposalSchema>;
 
-type IdeationGap = { id: string; name: string; statement: string; domain: EvidenceDomain };
+type IdeationGap = { id: string; name: string; statement: string; domain: EvidenceDomain; brief?: IdeationGapBrief; supporting_context_basis?: string };
 
 /** Listing order of the validated bands. Ideation itself serves High only. */
 export const BAND_RANK = { high: 0, medium: 1, low: 2 } as const;
@@ -121,20 +126,20 @@ type LibraryTactic = Tactic & { expansions?: {id:string; status:string; scope:Ex
 
 const DESIGN_FIELDS = `"population":"","comparator":"","outcomes":"","data_source":"","study_design":"","duration_months":0,"readout_lag_months":0,"timing_rationale":""`;
 
-const IDEATION_SYSTEM = `You design evidence tactics that would close a prioritized evidence gap in a pharma Integrated Evidence Generation Plan.
+const IDEATION_SYSTEM = `You recommend options that contribute to the remaining evidence need of a prioritized evidence gap in a pharma Integrated Evidence Generation Plan.
 
-Each tactic must be a runnable study, analysis or publication with a population, comparator, outcomes, a data source and a design. Do not restate the gap. Consider both expanding an existing accepted active tactic and a new tactic. Explicitly compare evidence quality, incremental cost/effort, time and feasibility in comparative_rationale. Do not invent an expansion when no sensible target exists. A new tactic must not duplicate the library. An expansion must add specified scope beyond the parent and any existing child expansions you are given, and retain target_tactic_id; tactic_id is never the target. Completed trials permit only post-hoc analyses using existing data; prospective additions require a credible protocol amendment on an active study or a new study.
+Each tactic must be a runnable study, analysis or publication with a population, comparator, outcomes, a data source and a design. Do not restate the gap. Consider reuse of existing accepted produced or planned output unchanged, expansion of an existing accepted tactic, and new work. Do not force an option for each route. Reuse adds no work; any new analysis of existing data is expansion. Planned output is not delivered evidence. A reuse option must name target_tactic_id and preserve its exact evidence_question, population, comparator, outcomes, data_source and study_design; do not redesign it. Explain relevant alternatives for evidence quality, incremental cost/effort, time and feasibility in comparative_rationale; a blanket three-route comparison is not required. Do not invent an expansion when no sensible target exists. A new tactic must not duplicate the library. An expansion must add specified scope beyond the parent and any existing child expansions you are given, and retain target_tactic_id; tactic_id is never the target. Completed trials permit only post-hoc analyses using existing data; prospective additions require a credible protocol amendment on an active study or a new study.
 
 For an expansion, name, evidence_question, population, outcomes and study_design must exactly match expansion_scope. These are the child design, not the parent. If optional type, comparator or data_source are present in expansion_scope they must match the common design too.
 
 type is one of: ${TACTIC_TYPES.join(", ")}.
-duration_months is how long the tactic runs from start to last data in; readout_lag_months is how long from last data in to a usable readout. Estimate both for this specific design and say why in timing_rationale. Where a design has no comparator, say so in comparator (for example "None — descriptive") rather than leaving it empty.
+duration_months is how long the tactic runs from start to last data in; readout_lag_months is how long from last data in to a usable readout. Estimate both for this specific design and say why in timing_rationale. Where a design has no comparator, say so in comparator (for example "None — descriptive") rather than leaving it empty. For reuse, preserve an empty/unknown recorded field unchanged instead of inventing a value.
 
-Propose candidates_per_gap distinct candidates for every gap you are given; a judge keeps the best. Fill in every field.
+Propose at most candidates_per_gap distinct useful candidates per gap; fewer or none may be appropriate. If no credible option or no timely option exists, return gap_outcomes with gap_id, status (no_credible_option or no_timely_option), and explanation. Preserve the evidence deadline; identify useful longer-term options separately. Fill in every field for returned candidates.
 
 When a gap carries revise requests, answer each one: return that tactic with its id, revised to meet the objection, or set "withdraw":true with a reason when it cannot be rescued.
 
-Return JSON only: {"tactics":[{"id":"","gap_id":"","name":"","type":"","evidence_question":"","rationale":"","proposal_kind":"new","target_tactic_id":null,"expansion_scope":null,"comparative_rationale":"",${DESIGN_FIELDS},"withdraw":false,"withdraw_reason":""}]}`;
+Return JSON only: {"tactics":[{"id":"","gap_id":"","name":"","type":"","evidence_question":"","rationale":"","proposal_kind":"new","target_tactic_id":null,"expansion_scope":null,"comparative_rationale":"","contract_version":2,"recommendation":{},${DESIGN_FIELDS},"withdraw":false,"withdraw_reason":""}],"gap_outcomes":[{"gap_id":"","status":"no_credible_option","explanation":""}]}`;
 
 const SUPPORT_CONTRACT = `Every tactic, critic review and judge decision must include references: [{"entity_type":"gap|objective|source","entity_id":"supplied id","reason":"specific claim supported by this record"}]. Cite at least one supplied record with a nonempty excerpt. Use only supporting_records supplied with the relevant gap. Do not invent references or URLs.`;
 
@@ -142,9 +147,9 @@ const EXPANSION_CONTRACT = `Expansion scope fields (all explicit): name, evidenc
 
 const CRITIC_SYSTEM = `You critique proposed evidence tactics for prioritized evidence gaps in a pharma Integrated Evidence Generation Plan.
 
-For each tactic, judge whether it would actually close its gap: is the design runnable, are the population, comparator and outcomes the right ones for this gap, are the data source, duration and readout lag credible for this design, and does the rationale hold. Compare new and expansion alternatives for quality, time/cost and feasibility. For expansions check added scope, post-hoc/prospective constraints and credible amendments. An expansion with a valid additional scope is not a duplicate of its parent. Check new tactics against the tactic library you are given: if an existing tactic already answers the same evidence question for the same population, set duplicate_of to that tactic's id.
+For each tactic, judge its incremental contribution to the remaining need: is the design runnable, are the population, comparator and outcomes the right ones for this gap, are the data source, duration and readout lag credible for this design, and does the rationale hold. Compare relevant reuse, expansion and new alternatives for quality, time/cost and feasibility. Reuse should request coverage reassessment when unchanged existing output may answer the need; it must not be dropped solely for matching its target. Any added analysis is expansion. For expansions check added scope, post-hoc/prospective constraints and credible amendments. An expansion with a valid additional scope is not a duplicate of its parent. Check new tactics against the tactic library you are given: if a new tactic repeats existing output, identify its id in duplicate_of and request revision to reuse or explain why additional work is needed; matching population/outcomes alone is not proof it answers a comparative need.
 
-verdict is "keep" when the tactic is sound, "revise" when a specific change would make it sound, and "drop" when it duplicates the library or cannot answer the gap. confidence is 0–100 that the tactic belongs in the plan. note is actionable: name the field, what is wrong and what it should become; for "keep" say briefly why it holds. issues is a short list of machine-readable defect tags (for example "comparator", "duration", "duplicate"); empty for "keep".
+verdict is "keep" when the tactic is sound, "revise" when a specific change would make it sound, and "drop" when it cannot credibly contribute. confidence is a non-probabilistic 0–100 review rating, not a probability of success. note is actionable: name the field, what is wrong and what it should become; for "keep" say briefly why it holds. issues is a short list of machine-readable defect tags (for example "comparator", "duration", "duplicate"); empty for "keep".
 
 Review every tactic you are given.
 
@@ -152,11 +157,15 @@ Return JSON only: {"reviews":[{"id":"","verdict":"keep","confidence":0,"note":""
 
 const JUDGE_SYSTEM = `You are the judge for proposed evidence tactics in a pharma Integrated Evidence Generation Plan. The user will review the tactics you keep.
 
-Compare expansion versus new alternatives for evidence quality, incremental cost/effort, timing and feasibility; use the full target library status/design. For each gap, decide for every candidate tactic whether to accept or reject it, using the gap, the design and the critic's last review. Accept at most max_per_gap tactics for a gap, and only tactics you would put in front of the evidence team; accepting fewer, or none, is right when the candidates are weak. Rank the accepted tactics 1, 2, … in order of preference. confidence is 0–100 that the tactic belongs in the plan. reason says why it was kept or rejected, in one or two sentences.
+Compare relevant reuse, expansion and new alternatives by their additional contribution toward the remaining need, evidence quality, incremental cost/effort, timing and feasibility; use the full target library status/design. For each gap, decide for every candidate tactic whether to accept or reject it, using the gap, the design and the critic's last review. Accept at most max_per_gap tactics for a gap, and only tactics you would put in front of the evidence team; accepting fewer, or none, is right when the candidates are weak. Rank the accepted tactics 1, 2, … in order of preference. confidence is a non-probabilistic 0–100 review rating, not a probability of success. reason says why it was kept or rejected, in one or two sentences.
 
-Decide every candidate of every gap you are given.
+Decide every candidate of every gap you are given. Return an outcome object per gap with status options, no_credible_option or no_timely_option and an explicit explanation; if all credible options are late, state that the evidence need remains unresolved by the deadline.
 
-Return JSON only: {"gaps":[{"gap_id":"","decisions":[{"id":"","verdict":"accept","rank":1,"confidence":0,"reason":""}]}]}`;
+Return JSON only: {"gaps":[{"gap_id":"","outcome":{"status":"options","explanation":""},"decisions":[{"id":"","verdict":"accept","rank":1,"confidence":0,"reason":""}]}]}`;
+
+/** Same reasoning safeguards apply during generation, revision, criticism and judgement. */
+const RECOMMENDATION_CONTRACT = `The per-gap brief is sourced context, not a new assessment. S4 recorded coverage remains authoritative: never close the gap or overwrite coverage. Keep missing/conflicting requirements explicit; a planning comparator is not a confirmed requirement. Any suggested requirement requires human confirmation. Separate studies cannot silently become comparative evidence; explain methodological feasibility and comparator availability/design compatibility checks. Surface apparent disagreement with recorded coverage as coverage_discrepancy, preserving the assessment and making the option conditional on review. Judge additional contribution toward the remaining need, not generic scientific plausibility. Unknown feasibility must remain conditional with required checks. Never silently relax evidence_needed_by or imply planned output is available today. Ratings are non-probabilistic review ratings.
+Every currently generated tactic must contain contract_version:2 and recommendation:{remaining_need:"meaningful remaining need",incremental_contribution:"specific added contribution, or review of unchanged output for reuse",alternatives_rationale:"why preferable to relevant alternatives",feasibility:{status:"credible|conditional|infeasible|unknown",required_checks:["specific unresolved checks"]},coverage_discrepancy:null,deadline:{status:"timely|conditional|late|unknown",explanation:"relation to the recorded evidence deadline and limitations"}}. If a discrepancy exists, coverage_discrepancy is an explanation and required_checks must include its review. Conditional/unknown feasibility requires nonempty required_checks. The critic and judge must explicitly assess these fields and preserve unresolved checks; reject or revise unsupported claims rather than filling in missing facts.`;
 
 const REMEDY = "run ideation again or switch the S9 route in /admin/control.";
 
@@ -341,6 +350,15 @@ function stubProposals(args: { gaps: IdeationGap[]; perGap: number }): Proposal[
     for (const entry of [...playbook, ...FALLBACK].slice(0, args.perGap)) {
       out.push({
         proposal_kind: "new", target_tactic_id: null, expansion_scope: null, comparative_rationale: "Test stub: no model comparison.",
+        supporting_context_basis: gap.supporting_context_basis,
+        recommendation: {
+          remaining_need: gap.statement,
+          incremental_contribution: "Test stub: illustrative additional work; no scientific inference was made.",
+          alternatives_rationale: "Test stub: relevant existing output must be reviewed before commissioning additional work.",
+          feasibility: {status: "unknown", required_checks: ["Test stub: confirm requirements, comparator compatibility, data availability and recorded coverage before use."]},
+          coverage_discrepancy: null,
+          deadline: {status: "unknown", explanation: "Test stub: no evidence deadline feasibility judgement was made."},
+        },
         references: [{ entity_type: "gap", entity_id: gap.id, reason: "Test fixture: the supplied gap defines the evidence need; no model was called." }],
         id: `${gap.id}-${entry.type}`,
         gap_id: gap.id,
@@ -384,7 +402,7 @@ function parseTactic(raw: Record<string, unknown>, library: LibraryTactic[], sup
     timing_rationale: text(raw.timing_rationale),
   };
   const empty = Object.entries(fields)
-    .filter(([, value]) => !value)
+    .filter(([key, value]) => !value && !(raw.proposal_kind === "reuse" && ["evidence_question", "population", "comparator", "outcomes", "data_source", "study_design"].includes(key)))
     .map(([key]) => key);
   if (empty.length > 0) problems.push(`missing ${empty.join(", ")}`);
   if (!finite(raw.duration_months) || raw.duration_months <= 0) {
@@ -394,11 +412,19 @@ function parseTactic(raw: Record<string, unknown>, library: LibraryTactic[], sup
     problems.push("readout_lag_months must be zero or a positive number of months");
   }
   if (!text(raw.comparative_rationale)) problems.push("comparative_rationale must explicitly compare expansion and new alternatives for quality, time/cost and feasibility");
+  const recommendationResult = ideationRecommendationSchema.safeParse(raw.recommendation);
+  if (!recommendationResult.success) problems.push("recommendation must explain remaining need, incremental contribution, alternatives, feasibility checks, coverage discrepancy and deadline");
   const kind = raw.proposal_kind;
   let scope: ExpansionScope | null = null;
   const target = typeof raw.target_tactic_id === "string" ? raw.target_tactic_id : null;
   if (raw.target_tactic_id !== null && typeof raw.target_tactic_id !== "string") problems.push("target_tactic_id must explicitly be a string or null");
-  if (kind !== "new" && kind !== "expansion") problems.push("proposal_kind must be new or expansion");
+  if (kind !== "new" && kind !== "expansion" && kind !== "reuse") problems.push("proposal_kind must be new, expansion or reuse");
+  if (kind === "reuse") {
+    const existing = library.find(tactic => tactic.id === target);
+    if (!existing || existing.review_status !== "accepted" || existing.status === "cancelled") problems.push("Reuse requires an existing eligible accepted tactic");
+    if (existing && (type !== existing.type || (["evidence_question", "population", "comparator", "outcomes", "data_source", "study_design"] as const).some(key => fields[key] !== existing[key].trim()))) problems.push("Reuse must preserve the target's recorded design and question unchanged; added analysis or changed scope is expansion");
+    if (raw.expansion_scope !== null) problems.push("Reuse adds no work and cannot carry expansion scope; new analysis is expansion");
+  }
   if (kind === "new" && (raw.target_tactic_id !== null || raw.expansion_scope !== null)) problems.push("New tactics cannot carry expansion target or scope");
   if (kind === "expansion") {
     try {
@@ -412,7 +438,8 @@ function parseTactic(raw: Record<string, unknown>, library: LibraryTactic[], sup
   return {
     tactic: {
       references: references.map(({ entity_type, entity_id, reason }) => ({ entity_type, entity_id, reason })),
-      proposal_kind: kind as "new" | "expansion", target_tactic_id: target, expansion_scope: scope, comparative_rationale: text(raw.comparative_rationale),
+      proposal_kind: kind as "new" | "expansion" | "reuse", target_tactic_id: target, expansion_scope: scope, comparative_rationale: text(raw.comparative_rationale),
+      ...(recommendationResult.success ? { recommendation: recommendationResult.data } : {}),
       name: fields.name,
       type,
       evidence_question: fields.evidence_question,
@@ -462,17 +489,17 @@ async function inBatches<T, R>(items: T[], size: number, ask: (slice: T[]) => Pr
 async function askProposer(
   ctx: ModuleContext,
   args: { gaps: PromptGap[]; perGap: number; hints: string; library: LibraryTactic[]; round: number; plan?: unknown },
-): Promise<Record<string, unknown>[]> {
+): Promise<{ tactics: Record<string, unknown>[]; gap_outcomes: IdeationGapOutcome[] }> {
   const answers = await inBatches(args.gaps, PROPOSER_GAPS_PER_CALL, (gaps) => askProposerOnce(ctx, { ...args, gaps }));
-  return answers.flat();
+  return { tactics: answers.flatMap(answer => answer.tactics), gap_outcomes: answers.flatMap(answer => answer.gap_outcomes) };
 }
 
 async function askProposerOnce(
   ctx: ModuleContext,
   args: { gaps: PromptGap[]; perGap: number; hints: string; library: LibraryTactic[]; round: number; plan?: unknown },
-): Promise<Record<string, unknown>[]> {
+): Promise<{ tactics: Record<string, unknown>[]; gap_outcomes: IdeationGapOutcome[] }> {
   const payload = (await ctx.complete({
-    system: `${IDEATION_SYSTEM}\n${SUPPORT_CONTRACT}\n${EXPANSION_CONTRACT}\nWhen a gap supplies proposal_slots, return each tactic id from that exact list, once only. Keep that id through all revisions. Never invent a different id.`,
+    system: `${IDEATION_SYSTEM}\n${SUPPORT_CONTRACT}\n${EXPANSION_CONTRACT}\n${RECOMMENDATION_CONTRACT}\nWhen a gap supplies proposal_slots, use tactic ids from that exact list, once only. You may leave slots unused when fewer useful options exist. Keep each returned id through all revisions. Never invent a different id.`,
     user: JSON.stringify({
       worked_examples: args.hints || undefined,
       exchange: args.round === 1 ? undefined : `${args.round - 1} of ${PROPOSER_CRITIC_EXCHANGES}`,
@@ -483,10 +510,14 @@ async function askProposerOnce(
       gaps: args.gaps,
     }),
     purpose: "ideation-proposer",
-  })) as { tactics?: unknown };
-  return Array.isArray(payload?.tactics)
-    ? (payload.tactics as unknown[]).filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object")
-    : [];
+  })) as { tactics?: unknown; gap_outcomes?: unknown[] };
+  return {
+    tactics: Array.isArray(payload?.tactics) ? (payload.tactics as unknown[]).filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object") : [],
+    gap_outcomes: (Array.isArray(payload?.gap_outcomes) ? payload.gap_outcomes : []).flatMap(raw => {
+      const parsed = ideationGapOutcomeSchema.safeParse(raw);
+      return parsed.success && args.gaps.some(gap => gap.id === parsed.data.gap_id) ? [parsed.data] : [];
+    }),
+  };
 }
 
 type Review = { references: JudgementReference[]; verdict: Critique["verdict"]; confidence: number; note: string; issues: string[]; duplicate_of: string | null };
@@ -494,6 +525,8 @@ type Decision = { references: JudgementReference[]; verdict: "accept" | "reject"
 
 const promptTactic = (proposal: Proposal) => ({
   references: proposal.references,
+  recommendation: proposal.recommendation,
+  supporting_context_basis: proposal.supporting_context_basis,
   id: proposal.id,
   gap_id: proposal.gap_id,
   name: proposal.name,
@@ -511,7 +544,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
     version: "2.3.0",
     title: "Tactics ideation (proposer → critic → judge)",
     summary:
-      "A model compares new tactics and expansions, timing included, for open gaps whose priority a human validated as High; a model critic challenges them against the gap and the tactic library over three exchanges; a model judge keeps and ranks up to the per-gap cap. Needs a connected LLM.",
+      "A model compares unchanged reuse, expansions and new tactics, including feasibility checks and evidence deadlines, for open gaps whose priority a human validated as High; a model critic challenges them against the gap and the tactic library over three exchanges; a model judge keeps and ranks up to the per-gap cap. Needs a connected LLM.",
     contract: 1,
     agentic: true,
     capabilities: ["llm-proposer", "llm-critic", "llm-judge", "per-gap-cap"],
@@ -541,11 +574,13 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
         name: gap.name,
         statement: gap.statement,
         domain: gap.domain,
+        brief: buildIdeationGapBrief(state, gap.id, placements),
+        supporting_context_basis: ideationAcceptanceBasis(state, gap.id, placements),
       }));
 
     if (gaps.length === 0) {
       return {
-        output: { mode: isTestStub() ? "deterministic" : "llm", proposals: [], rejected: [], gaps_considered: 0 },
+        output: { mode: isTestStub() ? "deterministic" : "llm", proposals: [], rejected: [], gaps_considered: 0, gap_outcomes: [] },
         summary: "No open gaps with human-validated High priority to ideate for",
       };
     }
@@ -560,6 +595,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
     const lastReview = new Map<string, Review>();
     /** The model judge's decisions on the final candidates, set after the last exchange. */
     let judgement: Map<string, Decision> | null = null;
+    const gapOutcomes = new Map<string, IdeationGapOutcome>();
 
     /** Round 1: every gap gets candidates; a gap with any invalid tactic is asked again. */
     const propose = async (hints: string): Promise<Proposal[]> => {
@@ -570,7 +606,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
         describe: describeGap,
         remedy: REMEDY,
         ask: async (missing) => {
-          const rows = await askProposer(ctx, {
+          const answer = await askProposer(ctx, {
             plan: planContext,
             hints,
             perGap: input.per_gap,
@@ -580,7 +616,10 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
           });
           const found = new Map<string, Proposal[]>();
           const bad = new Map<string, string[]>();
-          for (const raw of rows) {
+          for (const outcome of answer.gap_outcomes) {
+            if (missing.includes(outcome.gap_id)) gapOutcomes.set(outcome.gap_id, outcome);
+          }
+          for (const raw of answer.tactics) {
             const gapId = text(raw.gap_id);
             if (!missing.includes(gapId)) continue;
             const parsed = parseTactic(raw, library, supportFor(text(raw.gap_id)));
@@ -597,14 +636,14 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
             nextId += 1;
             found.set(gapId, [
               ...(found.get(gapId) ?? []),
-              { ...parsed.tactic, id: slots ? slotId : `${gapId}-L${nextId}`, gap_id: gapId, score: 0, critic_note: "", judge_note: "", rank: null },
+              { ...parsed.tactic, id: slots ? slotId : `${gapId}-L${nextId}`, gap_id: gapId, supporting_context_basis: gapById.get(gapId)!.supporting_context_basis, score: 0, critic_note: "", judge_note: "", rank: null },
             ]);
           }
           const complete = new Map<string, Proposal[]>();
           for (const id of missing) {
             if (bad.has(id)) problems.set(id, bad.get(id)!);
-            else if (!found.has(id)) problems.set(id, ["no tactic was returned for this gap"]);
-            else if (proposal_slots?.[id] && found.get(id)!.length !== proposal_slots[id].length) problems.set(id, ["Return a proposal for every supplied slot."]);
+            else if (!found.has(id) && gapOutcomes.get(id)?.status !== "options" && gapOutcomes.has(id)) complete.set(id, []);
+            else if (!found.has(id)) problems.set(id, ["Return candidates or an explicit no_credible_option/no_timely_option outcome explaining the unresolved need"]);
             else complete.set(id, found.get(id)!);
           }
           return complete;
@@ -628,7 +667,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
         remedy: REMEDY,
         ask: async (missing) => {
           const targets = missing.map((id) => byId.get(id)!);
-          const rows = await askProposer(ctx, {
+          const answer = await askProposer(ctx, {
             plan: planContext,
             hints,
             perGap: input.per_gap,
@@ -645,8 +684,9 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
                 .map((proposal) => `${proposal.id}: ${problems.get(proposal.id)}`),
             })),
           });
+          for (const outcome of answer.gap_outcomes) gapOutcomes.set(outcome.gap_id, outcome);
           const done = new Map<string, Proposal | "withdrawn">();
-          for (const raw of rows) {
+          for (const raw of answer.tactics) {
             const id = text(raw.id);
             const before = byId.get(id);
             if (!before || !missing.includes(id)) continue;
@@ -688,7 +728,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
           const done = new Map<string, true>();
           await inBatches(missingAll, JUDGE_GAPS_PER_CALL, async (missing) => {
             const payload = (await ctx.complete({
-              system: `${JUDGE_SYSTEM}\n${SUPPORT_CONTRACT}`,
+              system: `${JUDGE_SYSTEM}\n${SUPPORT_CONTRACT}\n${RECOMMENDATION_CONTRACT}`,
               user: JSON.stringify({
                 worked_examples: reviewerHints || undefined,
                 max_per_gap: input.per_gap,
@@ -709,10 +749,11 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
                 })),
               }),
               purpose: "ideation-judge",
-            })) as { gaps?: { gap_id?: unknown; decisions?: unknown }[] };
+            })) as { gaps?: { gap_id?: unknown; decisions?: unknown; outcome?: unknown }[] };
             for (const row of Array.isArray(payload?.gaps) ? payload.gaps : []) {
               const gapId = text(row?.gap_id);
               if (!missing.includes(gapId)) continue;
+              const gapOutcome = ideationGapOutcomeSchema.safeParse(row.outcome && typeof row.outcome === "object" ? { ...row.outcome, gap_id: gapId } : null);
               const ids = candidates.filter((proposal) => proposal.gap_id === gapId).map((proposal) => proposal.id);
               const got = new Map<string, Decision>();
               for (const raw of Array.isArray(row.decisions) ? (row.decisions as Record<string, unknown>[]) : []) {
@@ -741,6 +782,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
                 problems.set(gapId, `An earlier answer accepted ${accepted} tactics; accept at most ${input.per_gap}.`);
                 continue;
               }
+              if (gapOutcome.success) gapOutcomes.set(gapId, gapOutcome.data);
               for (const [id, decision] of got) decisions.set(id, decision);
               done.set(gapId, true);
             }
@@ -789,7 +831,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
             const map = new Map<string, Review>();
             await inBatches(missingAll, CRITIC_TACTICS_PER_CALL, async (missing) => {
               const payload = (await ctx.complete({
-                system: `${CRITIC_SYSTEM}\n${SUPPORT_CONTRACT}\n${EXPANSION_CONTRACT}`,
+                system: `${CRITIC_SYSTEM}\n${SUPPORT_CONTRACT}\n${EXPANSION_CONTRACT}\n${RECOMMENDATION_CONTRACT}`,
                 user: JSON.stringify({
                   worked_examples: reviewerHints || undefined,
                   exchange: `${round} of ${PROPOSER_CRITIC_EXCHANGES}`,
@@ -798,7 +840,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
                   tactics: missing.map((id) => {
                     const proposal = byId.get(id)!;
                     const gap = gapById.get(proposal.gap_id)!;
-                    return { ...promptTactic(proposal), gap: { name: gap.name, statement: gap.statement, domain: gap.domain, supporting_records: supportFor(gap.id) } };
+                    return { ...promptTactic(proposal), gap: { ...gap, supporting_records: supportFor(gap.id) } };
                   }),
                 }),
                 purpose: "ideation-critic",
@@ -907,9 +949,9 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
           type: proposal.type,
           rationale: proposal.rationale,
           evidence_question: proposal.evidence_question,
-          design: { ...proposal.design, write_version: newId("IPV"), supporting_references: proposal.references, supplied_records: supportFor(proposal.gap_id), rank: proposal.rank, origin: "ai", run_id: ctx.run.id,
+          design: { ...proposal.design, recommendation: proposal.recommendation, supporting_context_basis: proposal.supporting_context_basis, write_version: newId("IPV"), supporting_references: proposal.references, supplied_records: supportFor(proposal.gap_id), rank: proposal.rank, origin: "ai", run_id: ctx.run.id,
             slot_id: proposal_slots?.[proposal.gap_id]?.includes(proposal.id) ? proposal.id : null,
-            original_ai: { proposal_kind: proposal.proposal_kind, comparative_rationale: proposal.comparative_rationale, ...(proposal.proposal_kind === "expansion" ? {target_tactic_id: proposal.target_tactic_id, expansion_scope: proposal.expansion_scope} : {}), name: proposal.name, type: proposal.type, rationale: proposal.rationale, evidence_question: proposal.evidence_question, design: proposal.design },
+            original_ai: { recommendation: proposal.recommendation, supporting_context_basis: proposal.supporting_context_basis, proposal_kind: proposal.proposal_kind, comparative_rationale: proposal.comparative_rationale, ...(proposal.proposal_kind !== "new" ? {target_tactic_id: proposal.target_tactic_id, expansion_scope: proposal.expansion_scope} : {}), name: proposal.name, type: proposal.type, rationale: proposal.rationale, evidence_question: proposal.evidence_question, design: proposal.design },
           },
           status: "proposed",
           critic_note: [proposal.critic_note, proposal.judge_note && `Judge: ${proposal.judge_note}`]
@@ -937,6 +979,23 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
         proposals: outcome.accepted,
         rejected: outcome.rejected.map((item) => item.candidate),
         gaps_considered: gaps.length,
+        gap_outcomes: gaps.map(gap => {
+          const accepted = outcome.accepted.filter(proposal => proposal.gap_id === gap.id);
+          const recorded = gapOutcomes.get(gap.id);
+          if (!accepted.length) {
+            if (recorded && recorded.status !== "options") return recorded;
+            return {gap_id: gap.id, status: "no_credible_option" as const, explanation: "No candidate survived final review and rejection-memory checks; the evidence need remains unresolved."};
+          }
+          if (accepted.every(proposal => proposal.recommendation?.deadline.status === "late")) return {
+            gap_id: gap.id, status: "no_timely_option" as const,
+            explanation: recorded?.status === "no_timely_option" ? recorded.explanation : `No accepted option meets the evidence deadline; the need remains unresolved. Longer-term options: ${accepted.map(proposal => proposal.recommendation!.deadline.explanation).join(" ")}`,
+          };
+          if (recorded?.status === "no_timely_option" && !accepted.some(proposal => proposal.recommendation?.deadline.status === "timely")) return recorded;
+          return recorded?.status === "options" ? recorded : {
+            gap_id: gap.id, status: "options" as const,
+            explanation: "Options require human review; recorded coverage remains authoritative.",
+          };
+        }),
         withdrawn: outcome.withdrawn.map(item => ({ slot_id: item.subject, note: item.note })),
       },
       summary: `${plural(outcome.accepted.length, "tactic proposal")} for ${plural(gaps.length, "prioritized gap")}${
@@ -1070,7 +1129,11 @@ type DesignMeta = {
   supporting_references?: JudgementReference[];
   supplied_records?: ReturnType<typeof suppliedJudgementRecords>;
   slot_id?: string | null;
-  original_ai?: { proposal_kind: "new" | "expansion"; target_tactic_id?: string; expansion_scope?: ExpansionScope; comparative_rationale: string; name: string; type: string; rationale: string; evidence_question: string; design: StoredDesign } | null;
+  recommendation?: IdeationRecommendation;
+  conditions?: string[];
+  supporting_context_basis?: string;
+  renewed_review?: { basis: string; actor: string; at: string; rationale: string };
+  original_ai?: { recommendation?: IdeationRecommendation; supporting_context_basis?: string; proposal_kind: "new" | "expansion" | "reuse"; target_tactic_id?: string; expansion_scope?: ExpansionScope; comparative_rationale: string; name: string; type: string; rationale: string; evidence_question: string; design: StoredDesign } | null;
   rank?: number | null;
   run_id?: string | null;
   origin?: "ai" | "human";
@@ -1096,9 +1159,15 @@ function originalProposal(raw: unknown): DesignMeta["original_ai"] {
   // Legacy absent kind is unambiguously new, but a missing historical comparison
   // cannot be recovered from the mutable source row and is ineligible for learning.
   const kind = row.proposal_kind ?? "new";
-  if (!["new", "expansion"].includes(String(kind)) || !text(row.comparative_rationale)) return null;
+  if (!["new", "expansion", "reuse"].includes(String(kind)) || !text(row.comparative_rationale)) return null;
   if (row.proposal_kind === "expansion" && (!expansionScopeSchema.safeParse(row.expansion_scope).success || !text(row.target_tactic_id))) return null;
-  return { proposal_kind: kind as "new" | "expansion", comparative_rationale: text(row.comparative_rationale), ...(kind === "expansion" ? {target_tactic_id: text(row.target_tactic_id), expansion_scope: expansionScopeSchema.parse(row.expansion_scope)} : {}), name: row.name as string, type: row.type as string, rationale: row.rationale as string, evidence_question: row.evidence_question as string, design: design.data };
+  if (kind === "reuse" && !text(row.target_tactic_id)) return null;
+  return { recommendation: ideationRecommendationSchema.safeParse(row.recommendation).data, supporting_context_basis: contextBasis(row.supporting_context_basis), proposal_kind: kind as "new" | "expansion" | "reuse", ...(kind === "reuse" ? { target_tactic_id: text(row.target_tactic_id) } : {}), comparative_rationale: text(row.comparative_rationale), ...(kind === "expansion" ? {target_tactic_id: text(row.target_tactic_id), expansion_scope: expansionScopeSchema.parse(row.expansion_scope)} : {}), name: row.name as string, type: row.type as string, rationale: row.rationale as string, evidence_question: row.evidence_question as string, design: design.data };
+}
+
+/** Accept only versioned semantic basis tokens from stored JSON. */
+function contextBasis(raw: unknown): string | undefined {
+  return typeof raw === "string" && /^[a-f0-9]{64}$/.test(raw) ? raw : undefined;
 }
 
 function splitDesign(raw: unknown): { design: StoredDesign; meta: DesignMeta } {
@@ -1121,6 +1190,10 @@ function splitDesign(raw: unknown): { design: StoredDesign; meta: DesignMeta } {
       supporting_references: z.array(judgementReferenceSchema).safeParse(row.supporting_references).data ?? [],
       supplied_records: z.array(suppliedJudgementRecordSchema).safeParse(row.supplied_records).data ?? [],
       original_ai: originalProposal(row.original_ai),
+      recommendation: ideationRecommendationSchema.safeParse(row.recommendation).data,
+      conditions: z.array(z.string().trim().min(1)).safeParse(row.conditions).data ?? [],
+      supporting_context_basis: contextBasis(row.supporting_context_basis),
+      renewed_review: z.object({ basis: z.string().regex(/^[a-f0-9]{64}$/), actor: z.string(), at: z.string(), rationale: z.string() }).strict().safeParse(row.renewed_review).data,
       slot_id: typeof row.slot_id === "string" ? row.slot_id : null,
       rank: num(row.rank),
       run_id: typeof row.run_id === "string" ? row.run_id : null,
@@ -1148,7 +1221,14 @@ export type IdeationProposalRecord = {
   decided_by: string | null;
   decision_rationale: string | null;
   tactic_id: string | null;
-  proposal_kind: "new" | "expansion";
+  recommendation?: IdeationRecommendation;
+  conditions?: string[];
+  supporting_context_basis?: string;
+  current_context_basis?: string;
+  current_context?: IdeationGapBrief;
+  context_stale?: boolean;
+  renewed_review?: DesignMeta["renewed_review"];
+  proposal_kind: "new" | "expansion" | "reuse";
   target_tactic_id: string | null;
   expansion_id: string | null;
   expansion_scope: ExpansionScope | null;
@@ -1166,13 +1246,18 @@ export type IdeationProposalRecord = {
 export async function listIdeationProposals(): Promise<IdeationProposalRecord[]> {
   await ensurePlatformSchema();
   const rows = await db().select().from(t.ideationProposals).orderBy(desc(t.ideationProposals.created_at));
-  const state = await loadState();
-  return rows.map(row => ideationProposalReadback(row, state));
+  const [state, placements] = await Promise.all([loadState(), listPlacements()]);
+  return rows.map(row => ideationProposalReadback(row, state, placements));
 }
 
 /** Shared, authorised option inspection for review and gap details; never a write snapshot refresh. */
-export function ideationProposalReadback(row: typeof t.ideationProposals.$inferSelect, state: IegpState): IdeationProposalRecord {
+export function ideationProposalReadback(row: typeof t.ideationProposals.$inferSelect, state: IegpState, placements: Parameters<typeof ideationAcceptanceBasis>[2] = []): IdeationProposalRecord {
   const { design, meta } = splitDesign(row.design);
+  // Historical options can outlive their gap; keep their reasoning inspectable.
+  // Acceptance still requires an existing eligible gap through eligibleGap.
+  const gapExists = state.gaps.some(gap => gap.id === row.gap_id);
+  const currentBasis = gapExists ? ideationAcceptanceBasis(state, row.gap_id, placements) : undefined;
+  const currentContext = gapExists ? buildIdeationGapBrief(state, row.gap_id, placements) : undefined;
   return {
     id: row.id,
     version: proposalVersion(row),
@@ -1190,7 +1275,12 @@ export function ideationProposalReadback(row: typeof t.ideationProposals.$inferS
     decided_by: row.decided_by,
     decision_rationale: row.decision_rationale,
     tactic_id: row.tactic_id,
-    proposal_kind: row.proposal_kind as "new" | "expansion", target_tactic_id: row.target_tactic_id, expansion_id: row.expansion_id, expansion_scope: row.expansion_scope as ExpansionScope | null, reviewed_parent: row.reviewed_parent as Tactic | null, comparative_rationale: row.comparative_rationale,
+    recommendation: meta.recommendation, conditions: meta.conditions ?? [], supporting_context_basis: meta.supporting_context_basis,
+    current_context_basis: currentBasis,
+    current_context: currentContext,
+    context_stale: Boolean(row.status === "proposed" && meta.supporting_context_basis && meta.supporting_context_basis !== currentBasis),
+    renewed_review: meta.renewed_review,
+    proposal_kind: row.proposal_kind as "new" | "expansion" | "reuse", target_tactic_id: row.target_tactic_id, expansion_id: row.expansion_id, expansion_scope: row.expansion_scope as ExpansionScope | null, reviewed_parent: row.reviewed_parent as Tactic | null, comparative_rationale: row.comparative_rationale,
     rank: meta.rank ?? null,
     origin: meta.origin ?? "ai",
     edited_by: meta.edited_by ?? null,
@@ -1198,9 +1288,36 @@ export function ideationProposalReadback(row: typeof t.ideationProposals.$inferS
   };
 }
 
+/** Retained accepted-option context, keyed by exact tactic/expansion and source proposal. */
+export function acceptedIdeationContexts(proposals: IdeationProposalRecord[]) {
+  return proposals.filter(proposal => proposal.status === "accepted" && proposal.tactic_id).map(proposal => ({
+    proposal_id: proposal.id, gap_id: proposal.gap_id, tactic_id: proposal.tactic_id!, expansion_id: proposal.expansion_id,
+    proposal_kind: proposal.proposal_kind, recommendation: proposal.recommendation,
+    conditions: [...new Set([...(proposal.conditions ?? []), ...(proposal.recommendation?.feasibility.required_checks ?? [])])],
+    comparative_rationale: proposal.comparative_rationale,
+    ...(proposal.supporting_context_basis ? { supporting_context_basis: proposal.supporting_context_basis } : {}),
+    ...(proposal.renewed_review ? { renewed_review: proposal.renewed_review } : {}),
+  }));
+}
+
+/** Retain each gap's latest successful outcome, including runs with no proposal rows. */
+export async function listIdeationGapOutcomes(): Promise<IdeationGapOutcome[]> {
+  await ensurePlatformSchema();
+  const runs = await db().select({ output: t.moduleRuns.output }).from(t.moduleRuns).where(and(eq(t.moduleRuns.stage, "S9"), eq(t.moduleRuns.module_id, ideationModule.manifest.id), eq(t.moduleRuns.status, "ok"))).orderBy(desc(t.moduleRuns.started_at));
+  const latest = new Map<string, IdeationGapOutcome>();
+  for (const run of runs) {
+    const output = run.output && typeof run.output === "object" ? run.output as Record<string, unknown> : {};
+    const outcomes = z.array(ideationGapOutcomeSchema).safeParse(output.gap_outcomes).data ?? [];
+    for (const outcome of outcomes) if (!latest.has(outcome.gap_id)) latest.set(outcome.gap_id, outcome);
+  }
+  return [...latest.values()];
+}
+
 /** The fields a person may write on an idea, by hand or as an edit. */
 export type ProposalFields = {
-  proposal_kind?: "new" | "expansion";
+  recommendation?: IdeationRecommendation;
+  conditions?: string[];
+  proposal_kind?: "new" | "expansion" | "reuse";
   target_tactic_id?: string | null;
   expansion_scope?: ExpansionScope;
   comparative_rationale?: string;
@@ -1270,6 +1387,13 @@ async function recordById(id: string): Promise<IdeationProposalRecord> {
   const record = (await listIdeationProposals()).find((row) => row.id === id);
   if (!record) throw new Error(`Unknown proposal ${id}`);
   return record;
+}
+
+/** Reuse cannot alter canonical scientific design or add scope. */
+function assertReuseDesign(value: {type: string; evidence_question: string; design: StoredDesign}, target: Tactic | undefined) {
+  if (!target || target.review_status !== "accepted" || target.status === "cancelled") throw new Error("Reuse target not found or no longer eligible.");
+  for (const key of ["type", "evidence_question"] as const) if (value[key] !== target[key]) throw new Error(`Reuse must preserve existing ${key}; added work needs an expansion or new tactic.`);
+  for (const key of ["population", "comparator", "outcomes", "data_source", "study_design"] as const) if (value.design[key] !== target[key]) throw new Error(`Reuse must preserve existing ${key}; added work needs an expansion or new tactic.`);
 }
 
 /** Duplicated representations must describe the same accepted child, never its parent. */
@@ -1381,12 +1505,18 @@ async function editPending(row: ProposalRow, fields: ProposalFields, rationale: 
     }
     else if (fields.expansion_scope)
         throw new Error("New tactics cannot carry expansion scope.");
-    const was = { ...before, ...design, expansion_scope: row.expansion_scope, comparative_rationale: row.comparative_rationale };
-    const now = { ...next, ...next.design, expansion_scope: scope, comparative_rationale: comparison };
+    if (row.proposal_kind === "reuse") {
+      const state = await readState(tx);
+      assertReuseDesign(next, state.tactics.find(tactic => tactic.id === row.target_tactic_id));
+    }
+    const recommendation = fields.recommendation === undefined ? meta.recommendation : ideationRecommendationSchema.parse(fields.recommendation);
+    const conditions = fields.conditions === undefined ? meta.conditions : z.array(z.string().trim().min(1)).parse(fields.conditions);
+    const was = { recommendation: meta.recommendation, conditions: meta.conditions, ...before, ...design, expansion_scope: row.expansion_scope, comparative_rationale: row.comparative_rationale };
+    const now = { recommendation, conditions, ...next, ...next.design, expansion_scope: scope, comparative_rationale: comparison };
     const changed = (Object.keys(now) as (keyof typeof now)[]).filter(key => JSON.stringify(was[key]) !== JSON.stringify(now[key]));
     if (!changed.length)
         return row;
-    const updated = { ...row, ...next, expansion_scope: scope, comparative_rationale: comparison, design: { ...next.design, ...meta, write_version: newId("IPV"), edited_by: actor.name, edited_at: nowIso() } };
+    const updated = { ...row, ...next, expansion_scope: scope, comparative_rationale: comparison, design: { ...next.design, ...meta, recommendation, conditions, write_version: newId("IPV"), edited_by: actor.name, edited_at: nowIso() } };
     await tx.update(t.ideationProposals).set(updated).where(eq(t.ideationProposals.id, row.id));
     await recordEdit({ workspace_id, stage: "S9", entity_type: "ideation_proposal", entity_id: row.id, field: changed.join(","), action: "edit", before: JSON.stringify(was), after: JSON.stringify(now), rationale, actor }, tx);
     return updated;
@@ -1419,7 +1549,7 @@ export async function editIdeationProposal(args: {
  */
 export async function addIdeationProposal(args: {
   gap_id: string;
-  fields: ProposalFields & { name: string; type: string; evidence_question: string };
+  fields: ProposalFields;
   rationale: string;
   actor: Actor;
   workspace_id?: string;
@@ -1428,9 +1558,12 @@ export async function addIdeationProposal(args: {
   const rationale = requireRationale(args.rationale);
   const state = await eligibleGap(args.gap_id);
   const kind = args.fields.proposal_kind ?? "new";
-  const target = kind === "expansion" ? state.tactics.find(t => t.id === args.fields.target_tactic_id) : null;
+  const target = kind !== "new" ? state.tactics.find(t => t.id === args.fields.target_tactic_id) : null;
   let scope = kind === "expansion" ? expansionScopeSchema.parse(args.fields.expansion_scope) : null;
   if (kind === "expansion") validateExpansion(target ?? undefined, scope!, args.fields.comparative_rationale ?? "");
+  else if (kind === "reuse") {
+    if (!target || target.review_status !== "accepted" || target.status === "cancelled" || args.fields.expansion_scope) throw new Error("Reuse requires an accepted eligible target and no added scope.");
+  }
   else if (args.fields.target_tactic_id || args.fields.expansion_scope) throw new Error("New tactics cannot carry expansion target or scope.");
   const empty: StoredDesign = {
     population: "",
@@ -1442,7 +1575,11 @@ export async function addIdeationProposal(args: {
     readout_lag_months: null,
     timing_rationale: "",
   };
-  const next = applyFields({ name: "", type: "", evidence_question: "", rationale, design: empty }, args.fields);
+  const base = kind === "reuse" && target ? { name: target.name, type: target.type, evidence_question: target.evidence_question, rationale, design: { ...empty, population: target.population, comparator: target.comparator, outcomes: target.outcomes, data_source: target.data_source, study_design: target.study_design } } : { name: "", type: "", evidence_question: "", rationale, design: empty };
+  const next = applyFields(base, args.fields);
+  if (kind === "reuse") assertReuseDesign(next, target ?? undefined);
+  const recommendation = args.fields.recommendation === undefined ? undefined : ideationRecommendationSchema.parse(args.fields.recommendation);
+  const conditions = z.array(z.string().trim().min(1)).parse(args.fields.conditions ?? []);
   if (scope) scope = reconcileExpansionDesign(next, scope, args.fields);
   if (kind === "expansion" && (next.design.duration_months === null || next.design.readout_lag_months === null)) throw new Error("Expansion numeric timing is required.");
   if (!next.name) throw new Error("Name is required.");
@@ -1452,7 +1589,8 @@ export async function addIdeationProposal(args: {
   const at = nowIso();
   await db().transaction(async tx => {
     await tx.select().from(core.gaps).where(eq(core.gaps.id, args.gap_id)).for("update");
-    await eligibleGap(args.gap_id, tx);
+    const current = await eligibleGap(args.gap_id, tx);
+    const placements = await tx.select().from(t.priorityPlacements);
     await tx
       .insert(t.ideationProposals)
       .values({
@@ -1463,7 +1601,7 @@ export async function addIdeationProposal(args: {
         type: next.type,
         rationale: next.rationale,
         evidence_question: next.evidence_question,
-        design: { ...next.design, write_version: newId("IPV"), rank: null, origin: "human", edited_by: args.actor.name, edited_at: at },
+        design: { ...next.design, recommendation, conditions, supporting_context_basis: ideationAcceptanceBasis(current, args.gap_id, placements as Parameters<typeof ideationAcceptanceBasis>[2]), write_version: newId("IPV"), rank: null, origin: "human", edited_by: args.actor.name, edited_at: at },
         status: "proposed",
         critic_note: null,
         judge_score: 0,
@@ -1495,6 +1633,7 @@ export async function decideIdeationProposal(args: {
     decision: "accept" | "reject";
     expected_version?: string;
     judgement_origin?: "model" | "manual";
+    reviewed_context_basis?: string;
     rationale: string;
     actor: Actor;
     workspace_id?: string;
@@ -1515,7 +1654,7 @@ export async function decideIdeationProposal(args: {
         const originalMeta = splitDesign(pending.design).meta;
         const original = originalMeta.original_ai;
         // Match the relationship owner's scientific lock order: tactic, then supplied context.
-        if (args.decision === "accept" && pending.proposal_kind === "expansion" && pending.target_tactic_id)
+        if (args.decision === "accept" && pending.proposal_kind !== "new" && pending.target_tactic_id)
             await tx.select().from(core.tactics).where(eq(core.tactics.id, pending.target_tactic_id)).for("update");
         const manual = args.judgement_origin === "manual";
         const references = args.decision === "accept" && originalMeta.origin !== "human" && !manual ? await optionSupport(pending, tx) : [];
@@ -1525,7 +1664,21 @@ export async function decideIdeationProposal(args: {
         if (args.decision === "accept") {
             await tx.select().from(core.gaps).where(eq(core.gaps.id, proposal.gap_id)).for("update");
             state = await eligibleGap(proposal.gap_id, tx);
-            if (proposal.proposal_kind === "expansion") {
+            if (proposal.proposal_kind !== "new" && !state.tactics.some(tactic => tactic.id === proposal.target_tactic_id)) throw new Error("Proposal target not found in this workspace.");
+            const placements = await tx.select().from(t.priorityPlacements).for("update");
+            const currentBasis = ideationAcceptanceBasis(state, proposal.gap_id, placements as Parameters<typeof ideationAcceptanceBasis>[2]);
+            const stale = originalMeta.supporting_context_basis && originalMeta.supporting_context_basis !== currentBasis;
+            if (stale && (!manual || args.reviewed_context_basis !== currentBasis)) throw new Error("Ideation context changed; this proposal is stale. Review the current requirements, coverage, priority and tactic lifecycle, then submit its current review token with a manual judgement.");
+            if (stale) {
+              proposal.design = { ...(proposal.design as Record<string, unknown>), renewed_review: { basis: currentBasis, actor: args.actor.name, at: nowIso(), rationale } };
+              await recordEdit({workspace_id: args.workspace_id, stage: "S9", entity_type: "ideation_proposal", entity_id: proposal.id, field: "renewed_context_review", action: "validate", before: originalMeta.supporting_context_basis!, after: currentBasis, rationale, actor: args.actor}, tx);
+            }
+            if (proposal.proposal_kind === "reuse") {
+                assertReuseDesign({...proposal, design: splitDesign(proposal.design).design}, state.tactics.find(tactic => tactic.id === proposal.target_tactic_id));
+                tactic_id = proposal.target_tactic_id!;
+                await reuseTacticForGap({tactic_id, gap_id: proposal.gap_id, actor_name: args.actor.name, actor_function: args.actor.function, rationale}, tx);
+            }
+            else if (proposal.proposal_kind === "expansion") {
                 const parent = proposal.reviewed_parent as Tactic | null;
                 if (!parent || parent.id !== proposal.target_tactic_id)
                     throw new Error("Reviewed expansion target snapshot is unavailable.");
@@ -1536,7 +1689,7 @@ export async function decideIdeationProposal(args: {
                 assertExpansionDesign({...proposal, design: timing}, scope);
                 const acceptedScope = {...scope, type: proposal.type as TacticType, comparator: timing.comparator, data_source: timing.data_source};
                 validateExpansion(state.tactics.find(t => t.id === proposal.target_tactic_id), scope, proposal.comparative_rationale);
-                const child = await acceptTacticExpansion({ proposal_id: proposal.id, tactic_id: parent.id, gap_id: proposal.gap_id, scope: acceptedScope, expected_tactic_version: tacticVersion(parent), rationale, actor: args.actor }, tx);
+                const child = await acceptTacticExpansion({ proposal_id: proposal.id, tactic_id: parent.id, gap_id: proposal.gap_id, scope: acceptedScope, expected_tactic_version: tacticVersion(stale ? state.tactics.find(tactic => tactic.id === parent.id)! : parent), rationale, actor: args.actor }, tx);
                 tactic_id = child.tactic_id;
                 expansion_id = child.id;
             }
@@ -1555,7 +1708,7 @@ export async function decideIdeationProposal(args: {
     if (result.originalMeta.origin !== "human" && !result.original)
         console.warn("[learning] S9 decision omitted: immutable original AI baseline unavailable", args.id);
     if (result.originalMeta.origin !== "human" && result.original)
-        await captureProposalDecision({ proposal: { id: result.proposal.id, ...result.original, slot_id: result.originalMeta.slot_id }, capture_key: result.edit.id, run_id: result.originalMeta.run_id, actor: args.actor, gap: result.gap ? { name: result.gap.name, statement: result.gap.statement } : null, decision: args.decision, final: args.decision === "accept" ? { name: result.proposal.name, type: result.proposal.type, evidence_question: result.proposal.evidence_question, rationale: result.proposal.rationale, design: splitDesign(result.proposal.design).design, proposal_kind: result.proposal.proposal_kind as "new" | "expansion", comparative_rationale: result.proposal.comparative_rationale, ...(result.proposal.proposal_kind === "expansion" ? { target_tactic_id: result.proposal.target_tactic_id, expansion_scope: result.proposal.expansion_scope } : {}) } : null, rationale, workspace_id: args.workspace_id });
+        await captureProposalDecision({ proposal: { id: result.proposal.id, ...result.original, slot_id: result.originalMeta.slot_id }, capture_key: result.edit.id, run_id: result.originalMeta.run_id, actor: args.actor, gap: result.gap ? { name: result.gap.name, statement: result.gap.statement } : null, decision: args.decision, final: args.decision === "accept" ? { name: result.proposal.name, type: result.proposal.type, evidence_question: result.proposal.evidence_question, rationale: result.proposal.rationale, design: splitDesign(result.proposal.design).design, recommendation: splitDesign(result.proposal.design).meta.recommendation, supporting_context_basis: splitDesign(result.proposal.design).meta.supporting_context_basis, proposal_kind: result.proposal.proposal_kind as "new" | "expansion" | "reuse", comparative_rationale: result.proposal.comparative_rationale, ...(result.proposal.proposal_kind !== "new" ? { target_tactic_id: result.proposal.target_tactic_id, expansion_scope: result.proposal.expansion_scope } : {}) } : null, rationale, workspace_id: args.workspace_id });
     return { tactic_id: result.tactic_id, expansion_id: result.expansion_id };
 }
 

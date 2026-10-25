@@ -1,0 +1,93 @@
+/** AI-off manual review retains conditions and preserves reused work across all responsible views. */
+import { expect, test } from "@playwright/test";
+import { freshWorkspace } from "../support/session";
+import { openIdeationCard } from "../support/ideation";
+import { controlAction, iegpAction, planAction, resetWorkspace, validateBandHigh } from "../support/synapse";
+import type { IdeationProposalRecord } from "../../src/modules/stages/s9-ideation/module";
+
+freshWorkspace({ name: "KAN-122 evidence review", seed: resetWorkspace });
+test.use({ actionTimeout: 15_000 });
+
+test.afterAll(async ({ request }) => {
+  await controlAction(request,{action:"set_ai_enabled",enabled:true,rationale:"Restore test AI setting"});
+});
+
+test("KAN-122 shows AI-off empty context, manual checks, reuse and deliberate renewed acceptance through planning", async ({ page, request }, testInfo) => {
+  test.setTimeout(120_000);
+  const gap = await iegpAction(request, {action:"create_gap",name:"Unresolved comparative evidence",domain:"comparative_effectiveness",statement:"Comparative evidence in older adults remains unknown",rationale:"KAN-122 browser fixture"});
+  await iegpAction(request,{action:"lock_gap",gap_id:gap.id,status:"validated_open",note:"Keep the comparative question open"});
+  await iegpAction(request,{action:"validate_gap",gap_id:gap.id,note:"Human confirms the evidence question"});
+  await validateBandHigh(request,String(gap.id),"Blocks the comparative treatment decision");
+  const target = await iegpAction(request,{action:"record_missed_tactic",name:"Unchanged planned cohort",type:"rwe_study",evidence_question:"Existing descriptive outcomes",status:"planned",rationale:"Existing planned output without added work"});
+  await controlAction(request,{action:"set_ai_enabled",enabled:false,rationale:"Verify manual operation without models"});
+    await page.goto("/tactics");
+    const card = await openIdeationCard(page,String(gap.id));
+    await expect(card.getByRole("region",{name:"Evidence brief"})).toContainText("Blocks the comparative treatment decision");
+    await expect(card.getByRole("region",{name:"Evidence brief"})).toContainText("Unknown — requirement not determined");
+    await expect(card.getByRole("button",{name:"Suggest tactics"})).toHaveCount(0);
+    await card.getByRole("button",{name:"Add idea by hand"}).click();
+    let dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Name (required)",{exact:true}).fill("Conditional new study");
+    await dialog.getByLabel(/^Type \(required\)/).selectOption("rwe_study");
+    await dialog.getByLabel("Evidence question (required)",{exact:true}).fill("Can a new cohort provide comparative evidence?");
+    await dialog.getByLabel("Expected contribution toward the gap").fill("Generate additional comparative evidence if compatible data is available");
+    await dialog.getByLabel("Relevant alternatives (optional)").fill("Existing descriptive output cannot alone establish the required comparison");
+    await dialog.getByLabel("Uncertainties and required checks (optional)").fill("Confirm cohort access\nConfirm compatible comparator");
+    await dialog.getByPlaceholder(/why this decision/i).fill("Additional work remains conditional on data access");
+    await dialog.getByRole("button",{name:"Add idea",exact:true}).click();
+    await expect(dialog).toBeHidden();
+    await expect(card.getByText("Confirm cohort access",{exact:true})).toBeVisible();
+    await expect(card.getByText("Additional contribution: Generate additional comparative evidence if compatible data is available",{exact:true})).toBeVisible();
+    await expect(card.getByText("Relevant alternatives: Existing descriptive output cannot alone establish the required comparison",{exact:true})).toBeVisible();
+    await card.getByRole("button",{name:"Reuse existing tactic for Unresolved comparative evidence",exact:true}).click();
+    dialog = page.getByRole("dialog");
+    await dialog.getByLabel(/^Existing tactic \(required\)/).selectOption(String(target.id));
+    await dialog.getByLabel("Uncertainties and required checks (optional)").fill("Confirm existing output availability");
+    await dialog.getByPlaceholder(/why this decision/i).fill("Review existing output before commissioning more work");
+    await dialog.getByRole("button",{name:"Add reuse option"}).click();
+    await expect(dialog).toBeHidden();
+    // Material lifecycle change makes the saved original basis stale.
+    await iegpAction(request,{action:"modify_tactic",tactic_id:target.id,status:"completed",rationale:"Existing cohort finished; reviewer must inspect current context"});
+    const before = await (await request.get(`/api/tactics/${target.id}`)).json();
+    await page.reload();
+    const reviewedCard = await openIdeationCard(page,String(gap.id));
+    const reuse = reviewedCard.locator("article").filter({has:page.getByRole("heading",{name:"Unchanged planned cohort",exact:true})});
+    await expect(reuse.getByText(/Supporting context changed/)).toBeVisible();
+    await page.screenshot({path:testInfo.outputPath("evidence-review-desktop.png"),fullPage:true});
+    await page.setViewportSize({width:390,height:844});
+    await expect(reviewedCard.getByRole("region",{name:"Evidence brief"}).first()).toBeVisible();
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({path:testInfo.outputPath("evidence-review-mobile.png"),fullPage:true});
+    await page.setViewportSize({width:1280,height:720});
+    await reuse.getByRole("button",{name:"Review current context and accept"}).click();
+    dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText("no new work");
+    await expect(dialog.getByLabel("Decision basis")).toHaveCount(0);
+    await dialog.getByPlaceholder(/why this decision/i).fill("Reviewed completed lifecycle and current unresolved comparator need");
+    await dialog.getByRole("button",{name:"I reviewed current context — accept"}).click();
+    await expect(dialog).toBeHidden();
+    const after = await (await request.get(`/api/tactics/${target.id}`)).json();
+    expect(after.tactic).toEqual(before.tactic);
+    expect(after.expansions).toEqual(before.expansions);
+    expect(after.coverages.filter((row:{gap_id:string})=>row.gap_id===gap.id)).toMatchObject([{overall:"unassessed",needs_review:true}]);
+    await page.goto(`/tactics/${target.id}`);
+    await expect(page.getByRole("region",{name:"Accepted option context"})).toContainText("Confirm existing output availability");
+    await expect(page.getByRole("region",{name:"Accepted option context"})).toContainText("no additional work");
+    const { proposals } = await (await request.get("/api/plan")).json() as {proposals:IdeationProposalRecord[]};
+    expect(proposals.find(row=>row.proposal_kind==="reuse")?.renewed_review?.rationale).toContain("Reviewed completed lifecycle");
+    const manual = proposals.find(row=>row.name==="Conditional new study")!;
+    // The new option also needs renewed review after material context changed.
+    await planAction(request,{action:"decide_proposal",id:manual.id,expected_version:manual.version,decision:"accept",judgement_origin:"manual",reviewed_context_basis:manual.current_context_basis,rationale:"Reviewed changed lifecycle; new study remains conditional"});
+    const latest = await (await request.get("/api/plan")).json();
+    const accepted = latest.proposals.find((row:IdeationProposalRecord)=>row.id===manual.id);
+    await planAction(request,{action:"add_activity",tactic_id:accepted.tactic_id,start_date:"2027-01-01",end_date:"2027-07-01",rationale:"Manual schedule subject to retained feasibility checks"});
+    await page.goto("/timeline");
+    await page.waitForLoadState("networkidle");
+    const activity=page.locator(`g[data-activity-id="ACT-${accepted.tactic_id}"]`).first();
+    await activity.click();
+    await expect(page.getByRole("dialog").getByRole("region",{name:"Accepted option context"})).toContainText("Confirm cohort access");
+    await expect(page.getByRole("dialog").getByRole("region",{name:"Accepted option context"})).toContainText("Confirm compatible comparator");
+    await page.goto("/ideation");
+    await expect(page.getByRole("region",{name:"Evidence brief"}).first()).toBeVisible();
+    await expect(page.getByText("Confirm existing output availability",{exact:true}).first()).toBeVisible();
+});

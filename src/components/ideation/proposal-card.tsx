@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { IdeationBrief, RecommendationReasoning } from "./evidence-context";
 import { TacticRecordLink } from "@/components/tactic-ideation/tactic-panel";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { proposalFields } from "@/components/ideation/proposal-fields";
@@ -62,21 +63,27 @@ export function ProposalCard({
         <span className="rounded-4xl border border-border px-1.5 py-px text-[10px] text-muted-foreground">
           {typeLabel(proposal.type)}
         </span>
-        {proposal.origin === "human" ? (
-          <span className="text-[10px] text-muted-foreground">Written by {proposal.edited_by ?? "a person"}</span>
-        ) : (
-          <span className="text-[10px] text-muted-foreground">
-            Judge {proposal.judge_score}
-            {proposal.rank ? ` · rank ${proposal.rank}` : ""}
-          </span>
-        )}
+        {proposal.origin === "human" ? <span className="text-[10px] text-muted-foreground">Written by {proposal.edited_by ?? "a person"}</span> : null}
         {proposal.origin !== "human" && proposal.edited_by ? (
           <span className="text-[10px] text-muted-foreground">· edited by {proposal.edited_by}</span>
         ) : null}
       </div>
 
-      <p className="text-[12px] font-medium">{proposal.proposal_kind === "expansion" ? `Expand: ${proposal.reviewed_parent?.name ?? proposal.target_tactic_id}` : "New tactic"}</p>
+      <p className="text-[12px] font-medium">{proposal.proposal_kind === "reuse" ? `Reuse existing tactic: ${proposal.reviewed_parent?.name ?? proposal.target_tactic_id}` : proposal.proposal_kind === "expansion" ? `Expand: ${proposal.reviewed_parent?.name ?? proposal.target_tactic_id}` : "New tactic"}</p>
       <h4 className="text-[13px] leading-5 text-foreground">{proposal.name}</h4>
+
+      <RecommendationReasoning
+        recommendation={proposal.recommendation}
+        conditions={proposal.conditions}
+        contribution={proposal.rationale}
+        comparison={proposal.comparative_rationale}
+      />
+      {proposal.origin !== "human" ? <p className="text-[11px] text-muted-foreground">Judge rating {proposal.judge_score}{proposal.rank ? ` · rank ${proposal.rank}` : ""} · model review rating, not a probability of closing the gap.</p> : null}
+      {proposal.context_stale ? <div className="grid gap-2 border-t border-border pt-2 text-[12px]">
+        <p>Supporting context changed. Review the current evidence brief before a renewed manual decision. Original reasoning and previous decisions remain in history.</p>
+        {proposal.current_context ? <IdeationBrief brief={proposal.current_context} /> : <p>Current gap context is unavailable. Acceptance is unavailable.</p>}
+      </div> : null}
+      {proposal.renewed_review ? <p className="text-[12px]">Renewed review by {proposal.renewed_review.actor} on {proposal.renewed_review.at.slice(0, 10)}: {proposal.renewed_review.rationale}</p> : null}
 
       <div className="grid gap-0.5">
         <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Evidence question</p>
@@ -91,7 +98,6 @@ export function ProposalCard({
           </dl>
         </div>
       ) : null}
-      {proposal.comparative_rationale ? <p className="text-[12px]">Comparison: {proposal.comparative_rationale}</p> : null}
       <dl className="grid gap-2 border-t border-border pt-2 sm:grid-cols-2">
         <DesignField label="Population" value={proposal.design.population} />
         <DesignField label="Comparator" value={proposal.design.comparator} />
@@ -143,7 +149,7 @@ export function ProposalCard({
               tacticId={proposal.tactic_id}
               className="text-[11px] text-[color:var(--known-foreground)] no-underline hover:underline"
             >
-              {proposal.expansion_id ? `Expansion ${proposal.expansion_id} on tactic ${proposal.tactic_id}` : `Tactic ${proposal.tactic_id}`}
+              {proposal.proposal_kind === "reuse" ? `Review coverage for existing tactic ${proposal.tactic_id} (no new work)` : proposal.expansion_id ? `Expansion ${proposal.expansion_id} on tactic ${proposal.tactic_id}` : `Tactic ${proposal.tactic_id}`}
             </TacticRecordLink>
           ) : null}
           {proposal.status === "rejected" && mayIdeate && !readOnly ? (
@@ -183,20 +189,20 @@ export function ProposalCard({
                 variant="outline"
                 size="sm"
               />
-              <ActionDialog
+              {(!proposal.context_stale || proposal.current_context_basis) ? <ActionDialog
                 protectUnsavedChanges
                 endpoint="/api/plan"
-                payload={{ action: "decide_proposal", id: proposal.id, expected_version: proposal.version, decision: "accept" }}
-                fields={proposal.origin !== "human" ? [{ name: "judgement_origin", label: "Decision basis", type: "select", defaultValue: "model", options: [{ value: "model", label: "Accept supported model suggestion" }, { value: "manual", label: "Manual judgement with my reason" }] }] : []}
-                label="Accept"
+                payload={{ action: "decide_proposal", id: proposal.id, expected_version: proposal.version, decision: "accept", ...(proposal.context_stale ? {reviewed_context_basis:proposal.current_context_basis,judgement_origin:"manual"} : {}) }}
+                fields={!proposal.context_stale && proposal.origin !== "human" ? [{ name: "judgement_origin", label: "Decision basis", type: "select", defaultValue: "model", options: [{ value: "model", label: "Accept supported model suggestion" }, { value: "manual", label: "Manual judgement with my reason" }] }] : []}
+                label={proposal.context_stale ? "Review current context and accept" : "Accept"}
                 title={`Accept ${proposal.name}`}
-                description={proposal.proposal_kind === "expansion" ? "Accepting creates a proposed expansion on the existing tactic. Its coverage starts unassessed; acceptance does not deliver evidence or automatically make the gap Addressed. Review its own lifecycle and coverage separately." : "Accepting creates a proposed tactic mapped to this gap. Its coverage starts unassessed; acceptance does not deliver evidence or automatically make the gap Addressed. Your reason is stored in history."}
-                confirmLabel="Accept proposal"
+                description={proposal.proposal_kind === "reuse" ? "Accepting adds no new work and preserves the tactic lifecycle, dates and recorded assessments. It requests coverage review on the existing tactic. Ideation does not confirm coverage or deliver evidence. Review the current brief and record your reason." : proposal.proposal_kind === "expansion" ? "Accepting creates a proposed expansion on the existing tactic. Its coverage starts unassessed; acceptance does not deliver evidence or automatically make the gap Addressed. Review its own lifecycle and coverage separately." : "Accepting creates a proposed tactic mapped to this gap. Its coverage starts unassessed; acceptance does not deliver evidence or automatically make the gap Addressed. Your reason is stored in history."}
+                confirmLabel={proposal.context_stale ? "I reviewed current context — accept" : "Accept proposal"}
                 requireRationale
                 identity={identity}
                 variant="default"
                 size="sm"
-              />
+              /> : null}
               <ActionDialog
                 protectUnsavedChanges
                 endpoint="/api/plan"

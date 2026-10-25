@@ -234,6 +234,39 @@ describe("KAN-78 decision capture", () => {
     ]);
   });
 
+  it("retains a recommendation-only correction separately from the original S9 judgement", async () => {
+    const ws = (await createWorkspace({ name: `recommendation-edit-${unique()}`, owner: "learning-test" })).id;
+    const recommendation = {
+      remaining_need: "Comparative outcomes remain unknown",
+      feasibility: { status: "conditional", required_checks: ["Confirm comparator data access"] },
+    };
+    const proposal = { id: `PROP-${unique()}`, name: "MAIC", type: "maic", evidence_question: "q", rationale: "r", recommendation };
+    const final = {
+      ...proposal,
+      recommendation: { ...recommendation, feasibility: { ...recommendation.feasibility, required_checks: ["Confirm comparator data access and compatible follow-up"] } },
+    };
+
+    await captureProposalDecision({ proposal, gap: null, decision: "accept", final, rationale: "Compatibility must be checked", workspace_id: ws });
+
+    const rows = await sharedDb().execute(sql`select outcome, ai_output, final from decision_examples where workspace_id = ${ws} and subject_id = ${proposal.id}`);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ outcome: "edited", ai_output: { recommendation }, final: { recommendation: final.recommendation } });
+    expect(proposal.recommendation.feasibility.required_checks).toEqual(["Confirm comparator data access"]);
+  });
+
+  it("treats reordered recommendation object keys as an unchanged S9 judgement", async () => {
+    const ws = (await createWorkspace({ name: `recommendation-order-${unique()}`, owner: "learning-test" })).id;
+    const recommendation = { remaining_need: "Comparative outcomes remain unknown", feasibility: { status: "conditional", required_checks: ["Confirm data access"] } };
+    const proposal = { id: `PROP-${unique()}`, name: "MAIC", type: "maic", evidence_question: "q", rationale: "r", recommendation };
+    const final = { ...proposal, recommendation: { feasibility: { required_checks: ["Confirm data access"], status: "conditional" }, remaining_need: recommendation.remaining_need } };
+
+    await captureProposalDecision({ proposal, gap: null, decision: "accept", final, rationale: "Agree", workspace_id: ws });
+
+    const rows = await sharedDb().execute(sql`select outcome, ai_output, final from decision_examples where workspace_id = ${ws} and subject_id = ${proposal.id}`);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ outcome: "accepted", ai_output: { recommendation }, final: null });
+  });
+
   it("never fails the person's action when the example cannot be written", async () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     const circular: Record<string, unknown> = {};
