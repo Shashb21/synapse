@@ -131,11 +131,36 @@ export function WorkshopStage({
           scene: next,
         }),
       });
-      const json = res.json as { ok?: boolean; error?: string; snapshot?: WorkshopSnapshotRecord };
-      if (!res.ok || !json.ok || !json.snapshot) {
-        throw new Error(json.error ?? "Could not switch scene");
+      const json = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        snapshot?: WorkshopSnapshotRecord;
+      } | null;
+      const updated = json?.snapshot;
+      const payload = updated?.payload;
+      // Check the containers used by rendering before replacing the current freeze.
+      if (
+        !res.ok || json?.ok !== true ||
+        !updated || typeof updated.id !== "string" || typeof updated.version !== "number" ||
+        !payload || (payload.scene !== "gaps" && payload.scene !== "prioritize") ||
+        !Array.isArray(payload.inventory?.gaps) ||
+        !payload.inventory.gaps.every((gap) => gap && typeof gap.id === "string" &&
+          typeof gap.statement === "string" &&
+          (gap.priority == null || typeof gap.priority === "string")) ||
+        !Array.isArray(payload.inventory?.tactics) ||
+        !payload.inventory.tactics.every((tactic) => tactic && typeof tactic.id === "string" &&
+          typeof tactic.statement === "string") ||
+        !Array.isArray(payload.facilitator_tags?.tags) ||
+        !payload.facilitator_tags.tags.every((tag) => tag && typeof tag.id === "string" &&
+          typeof tag.label === "string") ||
+        !payload.facilitator_tags.assignments || typeof payload.facilitator_tags.assignments !== "object" ||
+        !payload.overlays || typeof payload.overlays !== "object" ||
+        !Object.values(payload.overlays).every((overlay) => overlay && typeof overlay === "object" &&
+          (overlay.priority == null || typeof overlay.priority === "string"))
+      ) {
+        throw new Error(typeof json?.error === "string" ? json.error : "Could not switch scene");
       }
-      setSnapshot(json.snapshot);
+      setSnapshot(updated);
       setBoardIndex(0);
       setSelectedId(null);
     } catch (err) {
