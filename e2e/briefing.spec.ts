@@ -1,8 +1,9 @@
 import { expect, test } from "@playwright/test";
+import { selectedWorkspaceId } from "./support/synapse";
 
 // KAN-27: the actor is the signed-in person, so confirm dialogs ask for no name or function.
 test("lock dialog records the signed-in person, with no name or function fields", async ({ page }) => {
-  const reset = await page.request.post("/api/iegp", { data: { action: "load_demo", scope: "setup" } });
+  const reset = await page.request.post("/api/iegp", { data: { action: "load_demo", scope: "setup", expected_workspace_id: await selectedWorkspaceId(page.request) } });
   expect(reset.ok()).toBeTruthy();
   await page.goto("/?place=upload");
   await page.getByRole("button", { name: /ingest this file/i }).first().click();
