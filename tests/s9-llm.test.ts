@@ -590,7 +590,7 @@ describe("S9 on the model path", () => {
     expect(examples[0].outcome).toBe(flow === "unchanged" ? "accepted" : "edited");
     expect(examples[0].run_id).toBe(recorder.id); expect(examples[0].actor).toEqual(ACTOR);
     if (flow === "comparison-edit") {
-      expect(examples[0].final).toEqual({ ...original, comparative_rationale: humanComparison });
+      expect(examples[0].final).toEqual({ ...original, comparative_rationale: humanComparison, recommendation: { ...(original.recommendation as Record<string, unknown>), alternatives_rationale: humanComparison } });
       const saved = (await db().select().from(ideationProposals)).find(p => p.id === row.id)!;
       expect((saved.design as { original_ai: unknown }).original_ai).toEqual(original);
       expect(saved.design).toMatchObject({ slot_id: slot, run_id: recorder.id });

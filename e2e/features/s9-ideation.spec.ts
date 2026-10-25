@@ -156,20 +156,22 @@ test.describe("S9 tactics ideation", () => {
     await page.goto("/ideation");
     const card = page.locator("article").filter({ has: page.getByRole("heading", { name: proposal.name, exact: true }) }).last();
     await expect(card).toContainText("New tactic");
-    await expect(card).toContainText("Comparison: Test stub: no model comparison.");
+    await expect(card).toContainText("Relevant alternatives");
+    await expect(card).toContainText("Test stub: relevant existing output must be reviewed before commissioning additional work.");
     await card.getByRole("button", { name: `Edit ${proposal.name}`, exact: true }).click();
     const dialog = page.getByRole("dialog");
     const comparison = "A new registry adds unavailable outcomes; recruitment is feasible but costs more than secondary analysis.";
-    await dialog.getByRole("textbox", { name: "Comparison of expansion and new tactic (required)", exact: true }).fill(comparison);
+    await dialog.getByRole("textbox", { name: /^Relevant alternatives \(optional\)/ }).fill(comparison);
     await dialog.getByLabel(/rationale.*required/i).last().fill("Clarified the alternative and feasibility");
     const saveResponse = page.waitForResponse(response => response.url().endsWith("/api/plan") && response.request().method() === "POST");
     await dialog.getByRole("button", { name: "Save edit", exact: true }).click();
     const saved = await saveResponse;
     expect(saved.ok(), await saved.text()).toBe(true);
     await expect(dialog).toBeHidden({ timeout: 30_000 });
-    await expect(card).toContainText(`Comparison: ${comparison}`);
+    await expect(card).toContainText(`Relevant alternatives`);
+    await expect(card).toContainText(comparison);
     await page.reload();
-    await expect(card).toContainText(`Comparison: ${comparison}`);
+    await expect(card).toContainText(comparison);
   });
 
   test("a rejection is recorded with its reason and creates no tactic", async ({ request }) => {

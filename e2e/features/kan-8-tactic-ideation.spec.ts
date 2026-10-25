@@ -185,12 +185,19 @@ test.describe("Retained tactic discovery (KAN-137)", () => {
     await expect(tacticPanel).toBeHidden();
     const planned = await request.get(`/api/tactics/${tacticId}`).then(response => response.json());
     expect(planned.tactic.status).toBe("planned");
-    // Planning preserves a person's earlier Open assessment; explicitly review the new coverage.
-    await page.goto(`/gaps/${gapId}`);
-    await page.getByRole("button", { name: "Change status of this gap (currently Open)", exact: true }).click();
-    const coverageReview = page.getByRole("dialog", { name: "Override gap status", exact: true });
-    await coverageReview.getByRole("button", { name: "Clear override", exact: true }).click();
-    await expect(coverageReview).toBeHidden();
+    // Planned work is relevant but starts unassessed, so it remains Open until
+    // a reviewer records the partial-coverage judgement.
+    const beforeCoverageReview = await request.get(`/api/gaps/${gapId}`).then(response => response.json());
+    expect(beforeCoverageReview.coverage_status.shown).toBe("validated_open");
+    const initialCoverage = beforeCoverageReview.coverages.find((row: { tactic_id: string }) => row.tactic_id === tacticId)!;
+    expect(initialCoverage, "planned tactic should retain its gap coverage relationship").toBeTruthy();
+    await iegpAction(request, {
+      action: "lock_overall",
+      coverage_id: initialCoverage.id,
+      ...await coverageOpeningTokens(request, tacticId, initialCoverage.id),
+      overall: "partial",
+      rationale: "The planned cohort covers only part of the comparator question",
+    });
     await page.goto("/?place=tactics");
     const partial = await request.get(`/api/gaps/${gapId}`).then(response => response.json());
     expect(partial.coverage_status.shown).toBe("validated_partial");
@@ -200,7 +207,7 @@ test.describe("Retained tactic discovery (KAN-137)", () => {
     await expect(existing).toContainText("Partially Addressed");
     await expect(existing).toContainText("Tactic planned");
     await expect(existing).toContainText("Lifecycle: planned");
-    await expect(existing).toContainText("Coverage: Not yet assessed");
+    await expect(existing).toContainText("Coverage: Partial");
     await expect(existing).toContainText("Evidence availability:");
     const trigger = existing.getByRole("link", { name: /Retained comparison evidence/ });
     await trigger.focus();
@@ -245,8 +252,8 @@ test.describe("Retained tactic discovery (KAN-137)", () => {
     await page.setViewportSize({ width: 1280, height: 720 });
 
     // Priority editing serves Open gaps. Reopen through the existing relationship editor first.
-    const initialLink = planned.coverages.find((row: { gap_id: string }) => row.gap_id === gapId);
-    await iegpAction(request, { action: "lock_overall", coverage_id: initialLink.id, expected_relationship: initialLink.relationship_version, expected_version: initialLink.review_version, overall: "not_relevant", rationale: "Review shows this cohort does not cover the remaining comparison" });
+    const currentLink = (await request.get(`/api/gaps/${gapId}`).then(response => response.json())).coverages.find((row: { tactic_id: string }) => row.tactic_id === tacticId)!;
+    await iegpAction(request, { action: "lock_overall", coverage_id: currentLink.id, ...await coverageOpeningTokens(request, tacticId, currentLink.id), overall: "not_relevant", rationale: "Review shows this cohort does not cover the remaining comparison" });
     for (const band of ["medium", "low"] as const) {
       await planAction(request, { action: "set_placement", gap_id: gapId, band, validate: true, rationale: `Review the ${band} priority after initial planning`, reason: "Evidence planning priorities have changed" });
       await page.reload();

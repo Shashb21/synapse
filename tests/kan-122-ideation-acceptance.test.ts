@@ -105,6 +105,15 @@ it('retains optional manual checks through edits and new acceptance',async()=>{
  expect((await listIdeationProposals()).find(r=>r.id===p.id)?.recommendation?.feasibility.required_checks).toEqual(['Confirm comparator compatibility']);
 });
 
+it('preserves structured reasoning for an unchanged comparison and updates it for a changed human alternative',async()=>{
+ const p=await addIdeationProposal({gap_id:gapId,fields:{name:'Generated study',type:'rwe_study',evidence_question:'Safety',recommendation,comparative_rationale:'Legacy generated comparison'},rationale:'Generated proposal',actor});
+ await editIdeationProposal({id:p.id,fields:{name:'Renamed generated study',comparative_rationale:'Legacy generated comparison'},rationale:'Rename only',actor});
+ expect((await listIdeationProposals()).find(row=>row.id===p.id)?.recommendation?.alternatives_rationale).toBe(recommendation.alternatives_rationale);
+ await editIdeationProposal({id:p.id,fields:{comparative_rationale:'Human review found the registry adds unavailable outcomes'},rationale:'Record current alternatives',actor});
+ const edited=(await listIdeationProposals()).find(row=>row.id===p.id)!;
+ expect(edited.recommendation?.alternatives_rationale).toBe('Human review found the registry adds unavailable outcomes');
+});
+
 it('exposes retained accepted conditions through the shared read model and rejects malformed saved recommendation metadata',async()=>{
  const p=await addIdeationProposal({gap_id:gapId,fields:{name:'Conditional study',type:'rwe_study',evidence_question:'Safety',conditions:['Confirm site capacity']},rationale:'Manual conditional plan',actor});
  await editIdeationProposal({id:p.id,fields:{conditions:['Confirm ethics approval'],comparative_rationale:'Prefer prospective data'},rationale:'Review conditions separately',actor});

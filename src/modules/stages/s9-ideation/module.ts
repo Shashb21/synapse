@@ -1509,7 +1509,16 @@ async function editPending(row: ProposalRow, fields: ProposalFields, rationale: 
       const state = await readState(tx);
       assertReuseDesign(next, state.tactics.find(tactic => tactic.id === row.target_tactic_id));
     }
-    const recommendation = fields.recommendation === undefined ? meta.recommendation : ideationRecommendationSchema.parse(fields.recommendation);
+    let recommendation = fields.recommendation === undefined ? meta.recommendation : ideationRecommendationSchema.parse(fields.recommendation);
+    // The visible "Relevant alternatives" reasoning is structured recommendation
+    // metadata. When a person edits that field directly, keep the current record
+    // coherent by updating its rendered structured value too. The immutable AI
+    // baseline remains in the separately recorded original proposal/audit trail.
+    if (fields.comparative_rationale !== undefined && comparison && comparison !== row.comparative_rationale) {
+        recommendation = recommendation
+            ? { ...recommendation, alternatives_rationale: comparison }
+            : recommendation;
+    }
     const conditions = fields.conditions === undefined ? meta.conditions : z.array(z.string().trim().min(1)).parse(fields.conditions);
     const was = { recommendation: meta.recommendation, conditions: meta.conditions, ...before, ...design, expansion_scope: row.expansion_scope, comparative_rationale: row.comparative_rationale };
     const now = { recommendation, conditions, ...next, ...next.design, expansion_scope: scope, comparative_rationale: comparison };

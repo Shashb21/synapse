@@ -38,7 +38,9 @@ test.describe("tactic side panel", () => {
     await page.goto("/?place=tactics");
     const card = await openIdeationCard(page, gapId);
     const panel = page.getByTestId("tactic-panel");
-    const row = card.getByRole("list").first().getByRole("button").first();
+    // KAN-122 adds an evidence brief with its own lists. Scope this interaction
+    // to the semantic linked-tactics region rather than its incidental order.
+    const row = card.getByRole("region", { name: /^Linked tactics for / }).getByRole("button").first();
     await expect(async () => {
       await row.click({ timeout: 5_000 });
       await expect(panel).toBeVisible({ timeout: 1_000 });
