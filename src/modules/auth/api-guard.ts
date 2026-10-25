@@ -38,7 +38,7 @@ import { can, ForbiddenError, ROLE_LABELS, type Capability, type Role } from "./
  * demo Medical Affairs role in whatever workspace the query scope resolves to.
  */
 
-export type GuardCode = "no_session" | "no_workspace" | "not_member" | "forbidden" | "invalid_json" | "invalid_request" | "ingest_busy";
+export type GuardCode = "workspace_mismatch" | "no_session" | "no_workspace" | "not_member" | "forbidden" | "invalid_json" | "invalid_request" | "ingest_busy";
 
 export class ApiGuardError extends Error {
   constructor(

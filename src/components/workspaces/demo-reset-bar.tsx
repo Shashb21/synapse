@@ -24,9 +24,10 @@ import { acceptDemoStep, DEMO_STEP_LABELS, demoStepFor } from "@/lib/demo/accept
  */
 export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["current"] }) {
   const [open, setOpen] = useState(false);
+  const [target, setTarget] = useState<typeof workspace | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const owner = workspace.role === "owner";
+  const owner = (target ?? workspace).role === "owner";
   const pathname = usePathname() ?? "";
   const place = useSearchParams()?.get("place") ?? null;
   const step = workspace.demo_mode ? demoStepFor(pathname, place) : null;
@@ -48,10 +49,11 @@ export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["curr
   }
 
   async function reset() {
+    if (!target) return;
     setPending(true);
     setError(null);
     try {
-      await sendJson("/api/iegp", { action: "load_demo" });
+      await sendJson("/api/iegp", { action: "load_demo", expected_workspace_id: target.id });
       // A full load from the home page, so nothing from before the reset stays on screen.
       window.location.assign("/");
     } catch (err) {
@@ -105,10 +107,11 @@ export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["curr
           onOpenChange={(next) => {
             if (pending) return;
             setOpen(next);
+            setTarget(next ? { ...workspace } : null);
             if (!next) setError(null);
           }}
         >
-          <Button type="button" size="xs" variant="outline" onClick={() => setOpen(true)}>
+          <Button type="button" size="xs" variant="outline" onClick={() => { setTarget({ ...workspace }); setOpen(true); }}>
             <RotateCcw className="size-3" aria-hidden />
             Reset demo
           </Button>
@@ -116,9 +119,9 @@ export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["curr
             <DialogHeader>
               <DialogTitle>Reset the demo?</DialogTitle>
               <DialogDescription>
-                {workspace.demo_mode
-                  ? `Everything in ${workspace.name} is deleted, including uploads and saved plan versions, and the demo restarts at upload with setup done. Use it before each client demo.`
-                  : `Everything changed in ${workspace.name} since the demo was loaded is deleted, including saved plan versions, and the clean Velmara demo is put back. Use it before each client demo.`}
+                {(target ?? workspace).demo_mode
+                  ? `Everything in ${(target ?? workspace).name} is deleted, including uploads and saved plan versions, and the demo restarts at upload with setup done. Use it before each client demo.`
+                  : `Everything changed in ${(target ?? workspace).name} since the demo was loaded is deleted, including saved plan versions, and the clean Velmara demo is put back. Use it before each client demo.`}
               </DialogDescription>
             </DialogHeader>
             {error ? (
