@@ -174,4 +174,115 @@ describe("accuracy source upload API", () => {
     expect(body.parse_error).toBeNull();
     expect(body.block_count).toBe(1);
   });
+
+  it.each([
+    ["deck.ppt", "application/vnd.ms-powerpoint"],
+    ["deck.PPT", "application/vnd.ms-powerpoint"],
+    ["notes.doc", "application/msword"],
+    ["deck.key", "application/octet-stream"],
+    ["program.exe", "application/octet-stream"],
+    ["README", "text/plain"],
+    ["disguised.ppt", "application/pdf"],
+  ])("rejects unsupported %s without saving a source", async (filename, mime) => {
+    const { workspace_id } = await freshWorkspace("unsupported");
+    const sourcesBefore = await listSourceFiles(workspace_id);
+    const form = new FormData();
+    form.set("workspace_id", workspace_id);
+    form.set("file", new File(["unsupported content"], filename, { type: mime }));
+
+    const res = await uploadPost(
+      new Request("http://localhost/api/accuracy/sources/upload", { method: "POST", body: form }),
+    );
+    const body = (await res.json()) as { ok: boolean; error: string };
+
+    expect(res.status).toBe(400);
+    expect(body.ok).toBe(false);
+    if (filename.toLowerCase().endsWith(".ppt")) {
+      expect(body.error).toBe(
+        "Legacy .ppt files are not supported. Save the file as .pptx and upload it again.",
+      );
+    } else {
+      expect(body.error).toContain(".pptx, .docx, .xlsx, .xls, .pdf, .txt, .md");
+    }
+    expect(await listSourceFiles(workspace_id)).toEqual(sourcesBefore);
+  });
+
+  it.each([
+    "pptx", "docx", "xlsx", "xls", "pdf", "txt", "md",
+    "PPTX", "DOCX", "XLSX", "XLS", "PDF", "TXT", "MD",
+  ])("parses and persists an eligible .%s source", async (extension) => {
+    registerAccuracyStack();
+    const { workspace_id } = await freshWorkspace("supported");
+    const filename = `source.${extension}`;
+    mockParseLocal.mockResolvedValue({
+      id: "DOC-supported",
+      filename,
+      title: "Evidence notes",
+      stakeholder_function: "medical_affairs",
+      mime: "application/octet-stream",
+      parser: "local",
+      ingested_at: new Date().toISOString(),
+      blocks: [{
+        id: "DOC-supported-B01",
+        location: { kind: "page", ref: "p.1" },
+        text: "Need comparative evidence",
+        kind: "paragraph",
+      }],
+      fullText: "Need comparative evidence",
+    });
+    mockExtractUnits.mockResolvedValue([
+      { location: { kind: "page", ref: "p.1" }, text: "Need comparative evidence" },
+    ]);
+    const form = new FormData();
+    form.set("workspace_id", workspace_id);
+    form.set("file", new File(["supported content"], filename));
+
+    const res = await uploadPost(
+      new Request("http://localhost/api/accuracy/sources/upload", { method: "POST", body: form }),
+    );
+    const body = (await res.json()) as {
+      ok: boolean;
+      source_file_id: string;
+      block_count: number;
+      parse_error: string | null;
+    };
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.parse_error).toBeNull();
+    expect(body.block_count).toBe(1);
+    expect(await listSourceFiles(workspace_id)).toEqual([
+      expect.objectContaining({ id: body.source_file_id, filename }),
+    ]);
+    expect(await countParseBlocks(workspace_id, body.source_file_id)).toBe(1);
+  });
+
+  it("retains an eligible source when its parser rejects the contents", async () => {
+    registerAccuracyStack();
+    const { workspace_id } = await freshWorkspace("parse-failure");
+    mockParseLocal.mockRejectedValue(new Error("Malformed DOCX archive"));
+    const form = new FormData();
+    form.set("workspace_id", workspace_id);
+    form.set("file", new File(["malformed contents"], "broken.docx"));
+
+    const res = await uploadPost(
+      new Request("http://localhost/api/accuracy/sources/upload", { method: "POST", body: form }),
+    );
+    const body = (await res.json()) as {
+      ok: boolean;
+      source_file_id: string;
+      block_count: number;
+      parse_error: string | null;
+    };
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.parse_error).toBe("Malformed DOCX archive");
+    expect(body.block_count).toBe(0);
+    expect(await listSourceFiles(workspace_id)).toEqual([
+      expect.objectContaining({ id: body.source_file_id, filename: "broken.docx" }),
+    ]);
+    expect(await countParseBlocks(workspace_id, body.source_file_id)).toBe(0);
+  });
+
 });
