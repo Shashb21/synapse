@@ -38,7 +38,7 @@ const COPY: Record<Replace, { button: string; title: string; body: string; confi
 /**
  * Owner-only: replace the workspace's contents with the Velmara demo, or empty
  * it. Both go through the /api/iegp "load_demo" and "reset" actions, which act
- * on the open workspace, so this workspace is opened first when it is not.
+ * on the confirmed workspace, opening it first when it is not current.
  */
 export function WorkspaceContents({
   workspaceId,
@@ -52,20 +52,22 @@ export function WorkspaceContents({
   const router = useRouter();
   const [demo, setDemo] = useState(initialDemo);
   const [open, setOpen] = useState<Replace | null>(null);
+  const [target, setTarget] = useState<{ id: string; isCurrent: boolean } | null>(null);
   const [pending, setPending] = useState<Replace | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   async function run(action: Replace) {
+    if (!target) return;
     setPending(action);
     setError(null);
-    setNotice(null);
     try {
-      if (!isCurrent) await sendJson("/api/workspaces/select", { workspace_id: workspaceId });
-      await sendJson("/api/iegp", { action });
+      if (!target.isCurrent) await sendJson("/api/workspaces/select", { workspace_id: target.id });
+      await sendJson("/api/iegp", { action, expected_workspace_id: target.id });
       setDemo(action === "load_demo");
       setNotice(COPY[action].done);
       setOpen(null);
+      setTarget(null);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "That did not work.");
@@ -92,8 +94,12 @@ export function WorkspaceContents({
             key={action}
             open={open === action}
             onOpenChange={(next) => {
+              if (pending !== null) return;
               setOpen(next ? action : null);
-              if (next) setError(null);
+              if (next) {
+                setTarget({ id: workspaceId, isCurrent });
+                setError(null);
+              } else setTarget(null);
             }}
           >
             <Button
@@ -101,7 +107,7 @@ export function WorkspaceContents({
               size="sm"
               variant={action === "reset" ? "outline" : "default"}
               disabled={pending !== null}
-              onClick={() => setOpen(action)}
+              onClick={() => { setTarget({ id: workspaceId, isCurrent }); setError(null); setOpen(action); }}
             >
               {action === "reset" ? <Eraser className="size-3.5" aria-hidden /> : <Database className="size-3.5" aria-hidden />}
               {COPY[action].button}
@@ -117,7 +123,7 @@ export function WorkspaceContents({
                 </p>
               ) : null}
               <DialogFooter>
-                <DialogClose render={<Button type="button" size="sm" variant="outline" />}>Cancel</DialogClose>
+                <DialogClose render={<Button type="button" size="sm" variant="outline" disabled={pending !== null} />}>Cancel</DialogClose>
                 <Button
                   type="button"
                   size="sm"

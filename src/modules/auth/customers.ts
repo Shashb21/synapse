@@ -82,8 +82,8 @@ function ensureTables(): Promise<void> {
   return ready;
 }
 
-async function rows(query: SQL): Promise<Row[]> {
-  await ensureTables();
+async function rows(query: SQL, options: { readOnly?: boolean } = {}): Promise<Row[]> {
+  if (!options.readOnly) await ensureTables();
   return (await sharedDb().execute(query)) as unknown as Row[];
 }
 
@@ -221,12 +221,12 @@ export async function seatFor(email: string): Promise<{ assignment: SeatAssignme
  * The seat check behind SSO sign-in and every session lookup: this verified
  * email holds a seat on an active customer. One indexed query.
  */
-export async function hasActiveSeat(email: string | null | undefined): Promise<boolean> {
+export async function hasActiveSeat(email: string | null | undefined, options: { readOnly?: boolean } = {}): Promise<boolean> {
   const address = email ? normalizeEmail(email) : "";
   if (!address) return false;
   const found = await rows(sql`
     select 1 as ok from seat_assignments s join customers c on c.id = s.customer_id
-    where s.email = ${address} and c.active limit 1`);
+    where s.email = ${address} and c.active limit 1`, options);
   return Boolean(found[0]);
 }
 

@@ -72,8 +72,8 @@ function ensureTables(): Promise<void> {
 }
 
 type Row = Record<string, unknown>;
-async function rows(query: ReturnType<typeof sql>): Promise<Row[]> {
-  await ensureTables();
+async function rows(query: ReturnType<typeof sql>, options: { readOnly?: boolean } = {}): Promise<Row[]> {
+  if (!options.readOnly) await ensureTables();
   return (await sharedDb().execute(query)) as unknown as Row[];
 }
 
@@ -126,13 +126,13 @@ export async function findAccountByEmail(email: string): Promise<AccountWithHash
   return found[0] ? withHash(found[0]) : null;
 }
 
-export async function getAccountWithHash(id: string): Promise<AccountWithHash | null> {
-  const found = await rows(sql`select * from user_accounts where id = ${id} limit 1`);
+export async function getAccountWithHash(id: string, options: { readOnly?: boolean } = {}): Promise<AccountWithHash | null> {
+  const found = await rows(sql`select * from user_accounts where id = ${id} limit 1`, options);
   return found[0] ? withHash(found[0]) : null;
 }
 
-export async function getAccount(id: string): Promise<Account | null> {
-  const found = await getAccountWithHash(id);
+export async function getAccount(id: string, options: { readOnly?: boolean } = {}): Promise<Account | null> {
+  const found = await getAccountWithHash(id, options);
   if (!found) return null;
   const { password_hash: _hash, ...account } = found;
   void _hash;
@@ -154,8 +154,8 @@ export function isStaffAccount(account: Pick<Account, "is_admin" | "role" | "dis
 }
 
 /** Whether a password session's account may still use it: it exists, is enabled and is staff. */
-export async function passwordSessionValid(accountId: string): Promise<boolean> {
-  const found = await rows(sql`select is_admin, role, disabled from user_accounts where id = ${accountId} limit 1`);
+export async function passwordSessionValid(accountId: string, options: { readOnly?: boolean } = {}): Promise<boolean> {
+  const found = await rows(sql`select is_admin, role, disabled from user_accounts where id = ${accountId} limit 1`, options);
   const row = found[0];
   if (!row) return false;
   const role = String(row.role);
@@ -172,10 +172,10 @@ export async function isAdminAccount(accountId: string): Promise<boolean> {
  * Whether this verified email belongs to an enabled, verified admin account:
  * a platform admin signing in with SSO needs no customer seat.
  */
-export async function isAdminEmail(email: string): Promise<boolean> {
+export async function isAdminEmail(email: string, options: { readOnly?: boolean } = {}): Promise<boolean> {
   const found = await rows(sql`
     select 1 as ok from user_accounts
-    where email = ${normalizeEmail(email)} and is_admin and email_verified and not disabled limit 1`);
+    where email = ${normalizeEmail(email)} and is_admin and email_verified and not disabled limit 1`, options);
   return Boolean(found[0]);
 }
 

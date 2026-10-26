@@ -75,7 +75,7 @@ async function postJson(request: APIRequestContext, url: string, body: Record<st
  * gaps or tactics (load_demo, scope "setup"). A plain "reset" is truly blank.
  */
 export async function resetWorkspace(request: APIRequestContext) {
-  await postJson(request, "/api/iegp", { action: "load_demo", scope: "setup" });
+  await iegpAction(request, { action: "load_demo", scope: "setup" });
 }
 
 export async function runStage<O = unknown>(
@@ -144,7 +144,19 @@ export async function coverageOpeningTokens(request: APIRequestContext, tacticId
   return { expected_version: coverage.review_version, expected_relationship: coverage.relationship_version };
 }
 
+/** Resolves the authenticated selection before opening a replacement fixture action. */
+export async function selectedWorkspaceId(request: APIRequestContext): Promise<string> {
+  const response = await request.get("/api/workspaces");
+  if (!response.ok()) throw new Error(`Opening workspace selection failed: ${response.status()} ${await response.text()}`);
+  const { current_id } = await response.json() as { current_id?: unknown };
+  if (typeof current_id !== "string" || !current_id) throw new Error("A selected workspace is required for replacement fixtures.");
+  return current_id;
+}
+
 export async function iegpAction(request: APIRequestContext, body: Record<string, unknown>) {
+  if (["reset", "load_demo"].includes(String(body.action)) && body.expected_workspace_id === undefined) {
+    body = { ...body, expected_workspace_id: await selectedWorkspaceId(request) };
+  }
   // Fixtures open the same record as a person; explicitly supplied stale tokens stay intact.
   if (["assign_tactic", "unassign_tactic", "accept_mapping", "reject_mapping"].includes(String(body.action)) && body.expected_relationship === undefined) {
     const response = await request.get(`/api/gaps/${encodeURIComponent(String(body.gap_id))}`);

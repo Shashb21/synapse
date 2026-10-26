@@ -64,11 +64,13 @@ import { EVIDENCE_DOMAINS } from "@/lib/iegp/enums";
 import { COVERAGE_DIMENSIONS, type CoverageDimension, type DimensionValue, type OverallCoverage } from "@/lib/iegp/enums";
 import { clearIngestedFiles } from "@/modules/workspaces/clear-ingested-files";
 import { recordAudit } from "@/modules/kernel/audit";
+import { runInWorkspace } from "@/modules/workspaces/context";
 import { replaceContents } from "@/modules/workspaces/contents";
 import { recordEdit, requireRationale, type EditAction } from "@/modules/kernel/edit-records";
 import { recordDenied } from "@/modules/kernel/audit";
 import type { StageId } from "@/modules/kernel/contracts";
 import {
+  ApiGuardError,
   apiErrorResponse,
   readJsonBody,
   requireCapability,
@@ -280,16 +282,55 @@ async function actionOf(request: Request): Promise<string> {
  * write, leaves nothing half-written.
  */
 export async function POST(request: Request) {
-  if (NON_ATOMIC_ACTIONS.has(await actionOf(request.clone()))) return handleAction(request);
+  const action = await actionOf(request.clone());
+  if (action === "reset" || action === "load_demo") {
+    // Verify the confirmed target before schema initialization, denial audits or writes.
+    let prepared: PreparedAction;
+    try {
+      prepared = await prepareAction(request);
+    } catch (error) {
+      return apiErrorResponse(error);
+    }
+    const workspace = prepared.identity.workspace;
+    const execute = () => atomicAction(request, prepared);
+    // Keep execution on the verified workspace even if an ambient scope differs.
+    return workspace
+      ? runInWorkspace({ workspace_id: workspace.id, schema: workspace.schema_name }, execute)
+      : execute();
+  }
+  if (NON_ATOMIC_ACTIONS.has(action)) return handleAction(request);
+  return atomicAction(request);
+}
+
+type PreparedAction = { body: Record<string, string>; identity: CustomerContext };
+
+/** Parses and authorizes once, retaining the verified target for execution. */
+async function prepareAction(request: Request): Promise<PreparedAction> {
+  const body = (await readJsonBody(request)) as Record<string, string>;
+  const identity = await requireCustomerContext({ body, readOnly: body.action === "reset" || body.action === "load_demo" });
+  if (!identity.anonymous_test && (body.action === "reset" || body.action === "load_demo")) {
+    const expected = body.expected_workspace_id;
+    if (typeof expected !== "string" || !expected.trim()) {
+      throw new ApiGuardError(400, "invalid_request", "Confirm the workspace to replace first.");
+    }
+    if (expected !== identity.workspace?.id) {
+      throw new ApiGuardError(409, "workspace_mismatch", "The selected workspace changed. Reopen the intended workspace and try again. No contents were changed.");
+    }
+  }
+  return { body, identity };
+}
+
+/** Preserves the existing transaction boundary for all plan actions. */
+async function atomicAction(request: Request, prepared?: PreparedAction): Promise<Response> {
   try {
     // An unresolvable workspace is the action's own error to report, unwrapped.
     await currentSchemaName();
   } catch {
-    return handleAction(request);
+    return handleAction(request, prepared);
   }
   try {
     return await withWorkspaceTransaction(async () => {
-      const response = await handleAction(request);
+      const response = await handleAction(request, prepared);
       if (!response.ok) throw new RolledBack(response);
       return response;
     });
@@ -299,12 +340,11 @@ export async function POST(request: Request) {
   }
 }
 
-async function handleAction(request: Request): Promise<Response> {
+async function handleAction(request: Request, prepared?: PreparedAction): Promise<Response> {
   let body: Record<string, string>;
   let identity: CustomerContext;
   try {
-    body = (await readJsonBody(request)) as Record<string, string>;
-    identity = await requireCustomerContext({ body });
+    ({ body, identity } = prepared ?? await prepareAction(request));
     const retired = retiredActionMessage(String(body.action ?? ""));
     if (retired) return NextResponse.json({ error: retired }, { status: 410 });
     const capability = iegpActionCapability(String(body.action ?? ""));

@@ -79,7 +79,7 @@ async function json(response: Response) {
 
 /** Every customer route, as a signed-out caller would hit it. */
 const CUSTOMER_CALLS: [string, () => Promise<Response>][] = [
-  ["iegp POST", () => iegpPost(post("/api/iegp", { action: "reset", actor_name: "Mallory", actor_function: "medical_affairs" }))],
+  ["iegp POST", () => iegpPost(post("/api/iegp", { action: "reset", expected_workspace_id: workspace.id, actor_name: "Mallory", actor_function: "medical_affairs" }))],
   ["plan GET", () => planGet()],
   ["plan POST", () => planPost(post("/api/plan", { action: "save_plan", status: "draft" }))],
   ["modules POST", () => modulesPost(post("/api/modules", { stage: "S10", input: {} }))],
@@ -101,7 +101,7 @@ beforeAll(async () => {
   }
   // Seed the workspace's plan as its lead.
   await signIn(LEAD);
-  const reset = await json(await inWorkspace(() => iegpPost(post("/api/iegp", { action: "reset" }))));
+  const reset = await json(await inWorkspace(() => iegpPost(post("/api/iegp", { action: "reset", expected_workspace_id: workspace.id }))));
   expect(reset).toEqual({ status: 200, body: { ok: true } });
 }, 60_000);
 
@@ -200,7 +200,7 @@ describe("KAN-10: roles are enforced server-side", () => {
     expect((await inWorkspace(planGet)).status).toBe(200);
     expect((await inWorkspace(() => roomGet(new Request("http://localhost/api/room")))).status).toBe(200);
     const refused: [string, () => Promise<Response>][] = [
-      ["reset", () => iegpPost(post("/api/iegp", { action: "reset" }))],
+      ["reset", () => iegpPost(post("/api/iegp", { action: "reset", expected_workspace_id: workspace.id }))],
       ["validate_gap", () => iegpPost(post("/api/iegp", { action: "validate_gap", gap_id: "GAP-001" }))],
       ["create_gap", () => iegpPost(post("/api/iegp", { action: "create_gap", statement: "Viewer gap." }))],
       ["ingest", () => iegpPost(post("/api/iegp", { action: "ingest", title: "x", text: "y" }))],
@@ -224,7 +224,7 @@ describe("KAN-10: roles are enforced server-side", () => {
       await inWorkspace(() => iegpPost(post("/api/iegp", { action: "create_gap", statement: `Contributor gap ${unique}.`, domain: "unmet_need" }))),
     );
     expect(created.status).toBe(200);
-    expect((await json(await iegpPost(post("/api/iegp", { action: "reset" })))).status).toBe(403);
+    expect((await json(await iegpPost(post("/api/iegp", { action: "reset", expected_workspace_id: workspace.id })))).status).toBe(403);
     const final = await json(await planPost(post("/api/plan", { action: "save_plan", status: "final" })));
     expect(final.status).toBe(403);
     expect(final.body.code).toBe("forbidden");

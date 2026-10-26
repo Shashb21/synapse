@@ -69,8 +69,8 @@ function ensureTables(): Promise<void> {
 }
 
 type Row = Record<string, unknown>;
-async function rows(query: ReturnType<typeof sql>): Promise<Row[]> {
-  await ensureTables();
+async function rows(query: ReturnType<typeof sql>, options: { readOnly?: boolean } = {}): Promise<Row[]> {
+  if (!options.readOnly) await ensureTables();
   return (await sharedDb().execute(query)) as unknown as Row[];
 }
 
@@ -101,8 +101,8 @@ function toWorkspace(row: Row): Workspace {
   };
 }
 
-export async function getWorkspace(id: string): Promise<Workspace | null> {
-  const found = await rows(sql`select * from workspaces where id = ${id} limit 1`);
+export async function getWorkspace(id: string, options: { readOnly?: boolean } = {}): Promise<Workspace | null> {
+  const found = await rows(sql`select * from workspaces where id = ${id} limit 1`, options);
   return found[0] ? toWorkspace(found[0]) : null;
 }
 
@@ -130,9 +130,9 @@ export async function listAllWorkspaces(): Promise<WorkspaceSummary[]> {
   return found.map((row) => ({ ...toWorkspace(row), member_count: Number(row.member_count ?? 0) }));
 }
 
-export async function memberRole(workspaceId: string, principal: string): Promise<WorkspaceRole | null> {
+export async function memberRole(workspaceId: string, principal: string, options: { readOnly?: boolean } = {}): Promise<WorkspaceRole | null> {
   const found = await rows(sql`
-    select role from workspace_members where workspace_id = ${workspaceId} and principal = ${normalizePrincipal(principal)} limit 1`);
+    select role from workspace_members where workspace_id = ${workspaceId} and principal = ${normalizePrincipal(principal)} limit 1`, options);
   if (!found[0]) return null;
   return found[0].role === "owner" ? "owner" : "member";
 }

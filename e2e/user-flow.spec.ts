@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { selectedWorkspaceId } from "./support/synapse";
 import { openInventoryRow } from "./support/inventory";
 
 /** The demo's asset and objectives, no sources yet; the demo files wait on Upload. */
@@ -7,6 +8,7 @@ async function loadDemoSetup(page: Page) {
     headers: { "content-type": "application/json" },
     data: JSON.stringify({
       action: "load_demo",
+      expected_workspace_id: await selectedWorkspaceId(page.request),
       scope: "setup",
       actor_name: "E2E",
       actor_function: "evidence_lead",

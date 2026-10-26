@@ -115,13 +115,20 @@ test("start with demo data: the Velmara demo loads and the workspace is badged D
   await expect(row.getByTestId("demo-badge")).toHaveText("Demo");
 });
 
-test("the owner can load demo data and reset to blank from settings, each after a confirm", async ({ page }) => {
+for (const nonCurrent of [false, true]) {
+test(`the owner can load demo data and reset to blank from ${nonCurrent ? "non-current" : "current"} settings, each after a confirm`, async ({ page }) => {
   const id = unique();
   await signIn(page, `Settings Tester ${id}`, `kan26.settings.${id}@example.com`);
   const name = `Switch ${id}`;
   await createWorkspace(page, name, "blank");
   await expect(page).toHaveURL(/\/setup\?new=1/, { timeout: 90_000 });
 
+  let otherId: string | undefined;
+  if (nonCurrent) {
+    const other = await page.request.post("/api/workspaces", { data: { name: `Other ${id}`, start: "blank" } });
+    expect(other.ok(), await other.text()).toBe(true);
+    otherId = (await other.json()).workspace.id;
+  }
   await openSettings(page, name);
   await expect(page.getByTestId("settings-demo-badge")).toHaveCount(0);
 
@@ -142,6 +149,10 @@ test("the owner can load demo data and reset to blank from settings, each after 
   await page.goto("/workspaces");
   await expect(page.getByTestId("workspace-row").filter({ hasText: name }).getByTestId("demo-badge")).toHaveText("Demo");
 
+  if (otherId) {
+    const select = await page.request.post("/api/workspaces/select", { data: { workspace_id: otherId } });
+    expect(select.ok()).toBe(true);
+  }
   await openSettings(page, name);
   dialog = await openDialog(page, "Reset to blank");
   await expect(dialog).toContainText("Reset this workspace to blank?");
@@ -154,6 +165,8 @@ test("the owner can load demo data and reset to blank from settings, each after 
   await page.goto("/workspaces");
   await expect(page.getByTestId("workspace-row").filter({ hasText: name }).getByTestId("demo-badge")).toHaveCount(0);
 });
+
+}
 
 test("a member who is not the owner sees no load-demo or reset actions and is refused by the API", async ({ page }) => {
   const id = unique();
@@ -179,7 +192,7 @@ test("a member who is not the owner sees no load-demo or reset actions and is re
   const select = await page.request.post("/api/workspaces/select", { data: { workspace_id: ws.id } });
   expect(select.ok()).toBe(true);
   for (const action of ["reset", "load_demo"]) {
-    const refused = await page.request.post("/api/iegp", { data: { action } });
+    const refused = await page.request.post("/api/iegp", { data: { action, expected_workspace_id: ws.id } });
     expect(refused.status(), action).toBe(403);
   }
 });

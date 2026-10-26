@@ -208,14 +208,14 @@ describe("KAN-26: demo data on request", () => {
 
   it("the owner can load the demo into an existing workspace, then reset it to blank", async () => {
     await signIn(OWNER);
-    const loaded = await json(await inWorkspace(workspace.id, () => iegpPost(post("/api/iegp", { action: "load_demo" }))));
+    const loaded = await json(await inWorkspace(workspace.id, () => iegpPost(post("/api/iegp", { action: "load_demo", expected_workspace_id: workspace.id }))));
     expect(loaded).toEqual({ status: 200, body: { ok: true } });
     expect((await getWorkspace(workspace.id))?.demo).toBe(true);
     const demo = await inWorkspace(workspace.id, loadState);
     expect(demo.gaps).toHaveLength(buildSeed().gaps.length);
     expect(timelineMarkers(demo).length).toBeGreaterThan(0);
 
-    const reset = await json(await inWorkspace(workspace.id, () => iegpPost(post("/api/iegp", { action: "reset" }))));
+    const reset = await json(await inWorkspace(workspace.id, () => iegpPost(post("/api/iegp", { action: "reset", expected_workspace_id: workspace.id }))));
     expect(reset).toEqual({ status: 200, body: { ok: true } });
     expect((await getWorkspace(workspace.id))?.demo).toBe(false);
     const blank = await inWorkspace(workspace.id, loadState);
@@ -230,7 +230,7 @@ describe("KAN-26: demo data on request", () => {
   it("load_demo with scope setup loads only the demo asset and objectives", async () => {
     await signIn(OWNER);
     const loaded = await json(
-      await inWorkspace(workspace.id, () => iegpPost(post("/api/iegp", { action: "load_demo", scope: "setup" }))),
+      await inWorkspace(workspace.id, () => iegpPost(post("/api/iegp", { action: "load_demo", scope: "setup", expected_workspace_id: workspace.id }))),
     );
     expect(loaded.status).toBe(200);
     const state = await inWorkspace(workspace.id, loadState);
@@ -239,7 +239,7 @@ describe("KAN-26: demo data on request", () => {
     expect(state.sources).toHaveLength(0);
     expect(state.gaps).toHaveLength(0);
     expect((await getWorkspace(workspace.id))?.demo).toBe(true);
-    await inWorkspace(workspace.id, () => iegpPost(post("/api/iegp", { action: "reset" })));
+    await inWorkspace(workspace.id, () => iegpPost(post("/api/iegp", { action: "reset", expected_workspace_id: workspace.id })));
   }, 60_000);
 
   it("a member who is not the owner cannot load the demo or reset, even with Medical Affairs rights", async () => {
@@ -248,7 +248,7 @@ describe("KAN-26: demo data on request", () => {
       createGap({ statement: `Kept ${unique}: no PRO data.`, actor_name: "Member Mo", actor_function: "medical_affairs" }),
     );
     for (const action of ["load_demo", "reset"]) {
-      const refused = await json(await inWorkspace(workspace.id, () => iegpPost(post("/api/iegp", { action }))));
+      const refused = await json(await inWorkspace(workspace.id, () => iegpPost(post("/api/iegp", { action, expected_workspace_id: workspace.id }))));
       expect({ action, status: refused.status, code: refused.body.code }).toEqual({ action, status: 403, code: "forbidden" });
     }
     const state = await inWorkspace(workspace.id, loadState);
@@ -259,7 +259,7 @@ describe("KAN-26: demo data on request", () => {
   it("a contributor is refused by role", async () => {
     await signIn(CONTRIBUTOR);
     for (const action of ["load_demo", "reset"]) {
-      const refused = await json(await inWorkspace(workspace.id, () => iegpPost(post("/api/iegp", { action }))));
+      const refused = await json(await inWorkspace(workspace.id, () => iegpPost(post("/api/iegp", { action, expected_workspace_id: workspace.id }))));
       expect(refused.status).toBe(403);
     }
     expect((await getWorkspace(workspace.id))?.demo).toBe(false);

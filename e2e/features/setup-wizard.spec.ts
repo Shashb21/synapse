@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { ACTOR } from "../support/synapse";
+import { ACTOR, selectedWorkspaceId } from "../support/synapse";
 
 /**
  * The IEGP setup wizard, end to end: a new workspace lands on /setup?new=1,
@@ -15,7 +15,7 @@ import { ACTOR } from "../support/synapse";
 const ASSET = `E2E Nova ${Date.now().toString(36)}`;
 
 async function reset(page: Page) {
-  const res = await page.request.post("/api/iegp", { data: { ...ACTOR, action: "reset" } });
+  const res = await page.request.post("/api/iegp", { data: { ...ACTOR, action: "reset", expected_workspace_id: await selectedWorkspaceId(page.request) } });
   expect(res.ok()).toBeTruthy();
 }
 

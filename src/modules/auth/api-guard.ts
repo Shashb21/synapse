@@ -38,7 +38,7 @@ import { can, ForbiddenError, ROLE_LABELS, type Capability, type Role } from "./
  * demo Medical Affairs role in whatever workspace the query scope resolves to.
  */
 
-export type GuardCode = "no_session" | "no_workspace" | "not_member" | "forbidden" | "invalid_json" | "invalid_request" | "ingest_busy";
+export type GuardCode = "workspace_mismatch" | "no_session" | "no_workspace" | "not_member" | "forbidden" | "invalid_json" | "invalid_request" | "ingest_busy";
 
 export class ApiGuardError extends Error {
   constructor(
@@ -65,6 +65,8 @@ export type CustomerContext = {
 
 export type GuardOptions = {
   capability?: Capability;
+  /** Verify existing records without schema setup or session cleanup writes. */
+  readOnly?: boolean;
   /** Only read on the Vitest anonymous path, for the typed actor. */
   body?: Record<string, unknown>;
   /** Default true: the route reads or writes workspace data. */
@@ -117,7 +119,7 @@ export async function requireCustomerContext(options: GuardOptions = {}): Promis
 
   let session: Session | null = null;
   try {
-    session = await currentSession();
+    session = await currentSession({ readOnly: options.readOnly });
   } catch {
     session = null;
   }
@@ -128,7 +130,7 @@ export async function requireCustomerContext(options: GuardOptions = {}): Promis
   if (needsWorkspace) {
     const id = await selectedWorkspaceId();
     if (!id) throw new ApiGuardError(409, "no_workspace", "Choose a workspace first.");
-    const [found, membership] = await Promise.all([getWorkspace(id), memberRole(id, principal)]);
+    const [found, membership] = await Promise.all([getWorkspace(id, options), memberRole(id, principal, options)]);
     if (!found) throw new ApiGuardError(409, "no_workspace", "That workspace no longer exists. Choose another.");
     if (!membership) throw new ApiGuardError(403, "not_member", "You are not a member of this workspace.");
     workspace = { ...found, role: membership };

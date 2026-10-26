@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { fillNameIfAsked, freshWorkspace } from "./support/session";
-import { iegpAction, resolveFinalPlanGaps } from "./support/synapse";
+import { iegpAction, resolveFinalPlanGaps, selectedWorkspaceId } from "./support/synapse";
 
 const ACTOR = { actor_name: "E2E Platform", actor_function: "medical_affairs" };
 
@@ -23,7 +23,7 @@ test.describe("platform surfaces", () => {
     seed: async (request) => {
       const res = await request.post("/api/iegp", {
         headers: { "content-type": "application/json" },
-        data: JSON.stringify({ action: "load_demo", scope: "setup", ...ACTOR }),
+        data: JSON.stringify({ action: "load_demo", scope: "setup", ...ACTOR, expected_workspace_id: await selectedWorkspaceId(request) }),
       });
       if (!res.ok()) throw new Error(`reset failed: ${res.status()}`);
     },

@@ -51,7 +51,7 @@ describe("Reset demo bar", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe("/api/iegp");
-    expect(JSON.parse(String(init.body))).toEqual({ action: "load_demo" });
+    expect(JSON.parse(String(init.body))).toEqual({ action: "load_demo", expected_workspace_id: "wdemo" });
     expect(assign).toHaveBeenCalledWith("/");
   });
 
@@ -64,4 +64,17 @@ describe("Reset demo bar", () => {
     expect(document.querySelector('[role="alert"]')?.textContent).toMatch(/owner/);
     expect(document.body.textContent).toContain("Reset the demo?");
   });
+});
+
+it("keeps the confirmed workspace and its description when props change while open", async () => {
+  const fetchMock = vi.fn().mockResolvedValue(Response.json({ error: "The selected workspace changed. Reopen the intended workspace and try again. No contents were changed.", code: "workspace_mismatch" }, { status: 409 }));
+  vi.stubGlobal("fetch", fetchMock);
+  act(() => root.render(createElement(DemoResetBar, { workspace: workspace("owner") })));
+  await act(async () => button("Reset demo")!.click());
+  act(() => root.render(createElement(DemoResetBar, { workspace: { ...workspace("owner"), id: "other", name: "Other workspace" } })));
+  const confirm = [...document.querySelectorAll('[role="dialog"] button')].find(b => b.textContent?.trim() === "Reset demo") as HTMLButtonElement;
+  await act(async () => confirm.click());
+  expect(JSON.parse(String(fetchMock.mock.calls[0]![1].body))).toEqual({ action: "load_demo", expected_workspace_id: "wdemo" });
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Client demo");
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain("Reopen the intended workspace");
 });
