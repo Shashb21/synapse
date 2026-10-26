@@ -202,10 +202,12 @@ function NavButton({
   item,
   active,
   dense,
+  onNavigate,
 }: {
   item: PlaceItem | SecondaryItem;
   active: ShellId;
   dense?: boolean;
+  onNavigate?: () => void;
 }) {
   const Icon = item.icon;
   const isActive = itemActive(active, item.id);
@@ -249,7 +251,7 @@ function NavButton({
   );
 
   return (
-    <Link href={item.href} className={className} title={"hint" in item ? item.hint : item.label}>
+    <Link href={item.href} onClick={onNavigate} className={className} title={"hint" in item ? item.hint : item.label}>
       {body}
     </Link>
   );
@@ -296,11 +298,13 @@ function NavLists({
   active,
   dense,
   label,
+  onNavigate,
 }: {
   nav: PlanNavModel;
   active: ShellId;
   dense?: boolean;
   label: string;
+  onNavigate?: () => void;
 }) {
   const places = placesOf(nav, useAiEnabled("ingestion"));
   const reveal = dense ? "opacity-0 transition-opacity group-data-[open=true]/rail:opacity-100 group-has-[:focus-visible]/rail:opacity-100" : "";
@@ -313,7 +317,7 @@ function NavLists({
       </p>
       <nav aria-label={label} className="grid gap-0.5">
         {places.map((item) => (
-          <NavButton key={item.id} item={item} active={active} dense={dense} />
+          <NavButton key={item.id} item={item} active={active} dense={dense} onNavigate={onNavigate} />
         ))}
       </nav>
       <details className={cn("mt-auto border-t border-sidebar-border pt-3", reveal)} aria-label={dense ? "More" : "More places"}>
@@ -328,7 +332,7 @@ function NavLists({
         </summary>
         <div className="mt-1 grid gap-0.5" role="navigation" aria-label={dense ? "More places" : "All more places"}>
           {SECONDARY.map((item) => (
-            <NavButton key={item.id} item={item} active={active} dense={dense} />
+            <NavButton key={item.id} item={item} active={active} dense={dense} onNavigate={onNavigate} />
           ))}
           <RestartWalkthroughButton variant="link" className="h-8 px-2 text-sidebar-foreground/70" />
         </div>
@@ -452,8 +456,8 @@ export function PlanChrome({
               <SheetHeader className="px-1 pb-2">
                 <SheetTitle className="text-[13px]">Synapse IEGP</SheetTitle>
               </SheetHeader>
-              <div className="flex h-[calc(100%-3rem)] flex-col" onClick={() => setOpen(false)}>
-                <NavLists nav={nav} active={active} label="All places" />
+              <div className="flex h-[calc(100%-3rem)] flex-col">
+                <NavLists nav={nav} active={active} label="All places" onNavigate={() => setOpen(false)} />
               </div>
             </SheetContent>
           </Sheet>
