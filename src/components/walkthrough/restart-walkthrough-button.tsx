@@ -17,11 +17,14 @@ export function RestartWalkthroughButton({
   variant = "outline",
   size = "sm",
   className,
+  onRestart,
 }: {
   label?: string;
   variant?: "outline" | "ghost" | "default" | "link";
   size?: "sm" | "default" | "xs";
   className?: string;
+  /** Called when restarting launches the first step, e.g. to dismiss mobile navigation. */
+  onRestart?: () => void;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -29,6 +32,7 @@ export function RestartWalkthroughButton({
     setBusy(true);
     await updateWalkthrough("restart");
     setBusy(false);
+    onRestart?.();
     router.push(TOUR_STEPS[0]!.href);
   };
   if (variant === "link") {
