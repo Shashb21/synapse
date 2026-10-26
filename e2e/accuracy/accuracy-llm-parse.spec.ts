@@ -1,11 +1,11 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * Every file type is parsed on the chosen LLM's parse route; LlamaParse is
+ * Supported files are parsed on the chosen LLM's parse route; LlamaParse is
  * disabled, so there is no key gate. Playwright runs the test stub.
  */
 test.describe("accuracy LLM parse", () => {
-  test("uploads with no LlamaParse gate and says the LLM parses every file", async ({ page, request }) => {
+  test("shows supported formats and uploads with no LlamaParse gate", async ({ page, request }) => {
     const created = await request.post("/api/accuracy/workspaces", {
       data: { name: "E2E LLM Parse", slug: `e2e-llm-parse-${Date.now()}` },
     });
@@ -14,7 +14,11 @@ test.describe("accuracy LLM parse", () => {
 
     await page.goto(`/admin/accuracy/sources?workspace_id=${encodeURIComponent(workspace_id)}`);
     await expect(page.getByRole("heading", { name: /^sources$/i })).toBeVisible();
-    await expect(page.getByText(/parsed by the LLM on the parse route/i)).toBeVisible();
+    await expect(page.getByText(/Supported formats: PPTX, DOCX, XLSX, XLS, PDF, TXT, or Markdown \(\.md\)/i)).toBeVisible();
+    await expect(page.getByText(/Legacy \.ppt files are not supported\. Save the file as \.pptx and upload it again\./i)).toBeVisible();
+    await expect(page.locator('input[type="file"]')).toHaveAttribute(
+      "accept", ".pptx,.docx,.xlsx,.xls,.pdf,.txt,.md",
+    );
     await expect(page.getByText(/LLAMA_CLOUD_API_KEY/)).toHaveCount(0);
 
     await page.locator('input[type="file"]').setInputFiles({

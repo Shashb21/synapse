@@ -5,6 +5,7 @@ import { registerAccuracyStack } from "@/accuracy";
 import { runAccuracyModule } from "@/accuracy/kernel/run";
 import { AI_OFF_ADMIN_MESSAGE, aiEnabled } from "@/modules/kernel/ai-switch";
 import { resolveParsePolicy } from "@/accuracy/modules/parse/parse-policy";
+import { accuracyUploadFormatError } from "@/accuracy/modules/parse/upload-formats";
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { getWorkspace, getWorkspaceOrgId } from "@/accuracy/store/tenant";
 import { mimeForFilename } from "@/lib/ingest/local-parse";
@@ -59,6 +60,10 @@ export async function POST(req: Request) {
     const org_id = (await getWorkspaceOrgId(workspace_id)) ?? workspace.org_id;
 
     const filename = file.name || "upload.bin";
+    const formatError = accuracyUploadFormatError(filename);
+    if (formatError) {
+      return NextResponse.json({ ok: false, error: formatError }, { status: 400 });
+    }
     const mime = file.type || mimeForFilename(filename);
     const policy = resolveParsePolicy({ filename, mime });
 

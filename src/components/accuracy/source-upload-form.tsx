@@ -3,6 +3,10 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { postJson } from "@/lib/post-json";
+import {
+  ACCURACY_UPLOAD_ACCEPT,
+  ACCURACY_UPLOAD_FORMATS_LABEL,
+} from "@/accuracy/modules/parse/upload-formats";
 
 const ROLES = [
   { id: "interview", label: "Interview" },
@@ -28,7 +32,7 @@ export function SourceUploadForm({ workspaceId }: { workspaceId: string }) {
     const fileInput = form.elements.namedItem("file") as HTMLInputElement | null;
     const file = fileInput?.files?.[0];
     if (!file) {
-      setError("Choose a PPTX, DOCX, XLSX, or PDF file.");
+      setError(`Choose a ${ACCURACY_UPLOAD_FORMATS_LABEL} file.`);
       return;
     }
 
@@ -72,8 +76,8 @@ export function SourceUploadForm({ workspaceId }: { workspaceId: string }) {
     >
       <h3 className="text-[12px] font-semibold text-foreground">Upload source</h3>
       <p className="text-[12px] text-muted-foreground">
-        PDF, PPTX, DOCX, XLSX and text are all parsed by the LLM on the parse route in{" "}
-        <code>/admin/control</code>: the file&apos;s text is extracted, then the model decides the blocks.
+        Supported formats: {ACCURACY_UPLOAD_FORMATS_LABEL}. Legacy .ppt files are not supported.
+        Save the file as .pptx and upload it again.
       </p>
       <label className="grid gap-1 text-[12px]">
         <span className="text-muted-foreground">Doc role</span>
@@ -94,7 +98,7 @@ export function SourceUploadForm({ workspaceId }: { workspaceId: string }) {
         <input
           name="file"
           type="file"
-          accept=".pptx,.ppt,.docx,.xlsx,.xls,.pdf,.txt,.md"
+          accept={ACCURACY_UPLOAD_ACCEPT}
           className="text-[12px]"
           required
         />
