@@ -258,7 +258,7 @@ describe("KAN-90 refused attempts", () => {
 
   it("a non-owner workspace member's reset is refused and logged", async () => {
     await signIn({ ...VIEWER, role: "medical_affairs" });
-    const res = await call(iegpPost, "/api/iegp", { action: "reset" });
+    const res = await call(iegpPost, "/api/iegp", { action: "reset", expected_workspace_id: workspace.id });
     expect(res.status).toBe(403);
     const denied = (await eventsFor(res.request_id)).find((event) => event.action === "reset.denied");
     expect(denied).toMatchObject({ entity_id: workspace.id, meta: { outcome: "denied" } });
