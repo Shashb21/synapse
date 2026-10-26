@@ -69,6 +69,53 @@ const card = (overrides: Partial<ReviewGapCard> = {}): ReviewGapCard => ({
 function renderCard(overrides: Partial<ReviewGapCard> = {}) {
   act(() => root.render(createElement(GapsWorkbench, { cards: [card(overrides)], availableTactics: [], readyForPrioritize: false })));
 }
+it("toggles the review region closed and reopens with task focus", () => {
+  // Arrange: the review starts collapsed, with an actionable mapping task.
+  renderCard({ needs_review: true });
+  const next = container.querySelector<HTMLButtonElement>('[data-next-action] button')!;
+  const region = () => container.querySelector('[aria-label="Outstanding gap review"]');
+  expect(next.getAttribute('aria-expanded')).toBe('false');
+  expect(region()).toBeNull();
+
+  // Act / Assert: opening focuses the task; closing returns focus to its trigger.
+  act(() => next.click());
+  expect(next.getAttribute('aria-expanded')).toBe('true');
+  expect(region()).not.toBeNull();
+  expect(document.activeElement?.getAttribute('href')).toBe('/gaps/GAP-001#mapped-tactics');
+  act(() => next.click());
+  expect(next.getAttribute('aria-expanded')).toBe('false');
+  expect(region()).toBeNull();
+  expect(document.activeElement).toBe(next);
+
+  act(() => next.click());
+  expect(next.getAttribute('aria-expanded')).toBe('true');
+  expect(region()).not.toBeNull();
+  expect(document.activeElement?.getAttribute('href')).toBe('/gaps/GAP-001#mapped-tactics');
+});
+
+it("switches review rows with only the current row expanded and its task focused", () => {
+  // Arrange: two independently actionable rows.
+  act(() => root.render(createElement(GapsWorkbench, {
+    cards: [card({ needs_review: true }), card({ gap_id: 'GAP-002', human_validated: false })],
+    availableTactics: [], readyForPrioritize: false,
+  })));
+  const first = container.querySelector<HTMLButtonElement>('tr[data-gap-id="GAP-001"] [data-next-action] button')!;
+  const second = container.querySelector<HTMLButtonElement>('tr[data-gap-id="GAP-002"] [data-next-action] button')!;
+
+  // Act / Assert: switching replaces the region, including when returning to an earlier row.
+  act(() => first.click());
+  act(() => second.click());
+  expect(first.getAttribute('aria-expanded')).toBe('false');
+  expect(second.getAttribute('aria-expanded')).toBe('true');
+  expect(container.querySelectorAll('[aria-label="Outstanding gap review"]')).toHaveLength(1);
+  expect(document.activeElement?.textContent).toBe('Confirm evidence assessment');
+  act(() => first.click());
+  expect(first.getAttribute('aria-expanded')).toBe('true');
+  expect(second.getAttribute('aria-expanded')).toBe('false');
+  expect(container.querySelectorAll('[aria-label="Outstanding gap review"]')).toHaveLength(1);
+  expect(document.activeElement?.getAttribute('href')).toBe('/gaps/GAP-001#mapped-tactics');
+});
+
 it("opens the primary task and exposes additional tasks in priority order", () => {
   renderCard({ gap_status: "validated_partial", human_validated: false, needs_review: true, new_source: { at: "2026-10-15", statement: "New evidence", source_title: "Study" } });
   const next = Array.from(container.querySelectorAll('button')).find(b => b.textContent === 'Resolve partial gap');
@@ -96,10 +143,12 @@ it("focuses the existing mapping and source review controls", () => {
   let next = container.querySelector<HTMLButtonElement>('[data-next-action] button')!;
   act(() => next.click());
   expect(document.activeElement?.getAttribute('href')).toBe('/gaps/GAP-001#mapped-tactics');
+  act(() => next.click());
   renderCard({ new_source: { at: '2026-10-15', statement: null, source_title: null } });
   next = container.querySelector<HTMLButtonElement>('[data-next-action] button')!;
   act(() => next.click());
   expect(document.activeElement?.textContent).toBe('Mark reviewed');
+  act(() => next.click());
   renderCard({ human_validated: false });
   next = container.querySelector<HTMLButtonElement>('[data-next-action] button')!;
   act(() => next.click());
@@ -114,6 +163,7 @@ it("keeps ordered review reasons beside the primary action and only explains app
   expect(action.querySelector('button')?.textContent).toBe("Resolve partial gap");
   act(() => action.querySelector('button')!.click());
   expect(document.activeElement?.getAttribute('href')).toBe('/gaps/GAP-001#gap-coverage-actions');
+  act(() => action.querySelector('button')!.click());
   renderCard({ human_validated: false });
   act(() => container.querySelector<HTMLButtonElement>('[data-next-action] button')!.click());
   expect(container.querySelector('[aria-label="Outstanding gap review"]')?.textContent).not.toContain("Review tactic mappings:");

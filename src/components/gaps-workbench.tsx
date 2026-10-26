@@ -504,7 +504,12 @@ export function GapsWorkbench({
                           <div data-next-action>
                             {tasks[0] ? <>
                               <p className="mb-2 mt-1 text-[12px] text-foreground">{REVIEW_REASONS[tasks[0]]}</p>
-                              <Button type="button" size="sm" variant="default" className="h-auto min-h-8 max-w-full whitespace-normal py-1.5 text-left" aria-expanded={open} onClick={() => {
+                              <Button type="button" size="sm" variant="default" className="h-auto min-h-8 max-w-full whitespace-normal py-1.5 text-left" aria-expanded={open} onClick={(event) => {
+                                if (open) {
+                                  setOpenId(null);
+                                  event.currentTarget.focus();
+                                  return;
+                                }
                                 setOpenId(card.gap_id);
                                 setFocusTask((previous) => ({ label: tasks[0], sequence: (previous?.sequence ?? 0) + 1 }));
                               }}>{reviewTaskLabel(tasks[0])}</Button>
