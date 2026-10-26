@@ -334,7 +334,7 @@ function NavLists({
           {SECONDARY.map((item) => (
             <NavButton key={item.id} item={item} active={active} dense={dense} onNavigate={onNavigate} />
           ))}
-          <RestartWalkthroughButton variant="link" className="h-8 px-2 text-sidebar-foreground/70" />
+          <RestartWalkthroughButton variant="link" className="h-8 px-2 text-sidebar-foreground/70" onRestart={onNavigate} />
         </div>
       </details>
       <ThemeToggle className="mt-1" labelClassName={reveal} />

@@ -90,12 +90,17 @@ test.describe("KAN-160 mobile navigation", () => {
     await expect(theme).toHaveAttribute("aria-checked", wasDark === "true" ? "false" : "true");
     await sheet.locator("summary").click();
     const restarted = page.waitForResponse(response => response.url().endsWith("/api/walkthrough") && response.request().method() === "POST");
-    await sheet.getByRole("button", { name: "Restart walkthrough" }).click();
+    await sheet.getByRole("button", { name: "Restart walkthrough" }).focus();
+    await page.keyboard.press("Enter");
     expect((await restarted).ok()).toBe(true);
     await expect(page).toHaveURL(/\/\?place=gaps$/);
-    await page.keyboard.press("Escape");
+    await expect(sheet).toBeHidden();
     await expect(page.getByTestId("walkthrough")).toBeVisible();
-    await page.getByRole("button", { name: "Close walkthrough" }).click();
+    const closeWalkthrough = page.getByRole("button", { name: "Close walkthrough" });
+    await closeWalkthrough.focus();
+    await expect(closeWalkthrough).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("walkthrough")).toBeHidden();
   });
 
   test("desktop More keeps Needs and Restart walkthrough usable", async ({ page }) => {
