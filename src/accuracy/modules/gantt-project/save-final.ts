@@ -1,4 +1,4 @@
-import { gapsForGantt, isActiveLedgerClaim, listClaims, tacticsForGantt } from "@/accuracy/store/claim-store";
+import { gapsForGantt, isActiveLedgerClaim, listClaims, tacticsForGantt, type AccuracyClaimRow } from "@/accuracy/store/claim-store";
 import { listCoverageJoins } from "@/accuracy/store/coverage-store";
 import {
   latestAccuracyPlan,
@@ -62,6 +62,7 @@ export function auditBundleFromPlan(plan: AccuracyPlanRecord): GanttAuditBundle 
   });
 }
 
+/** Project all active workspace claims, including older claims beyond list defaults. */
 export async function projectWorkspaceGantt(workspace_id: string): Promise<{
   workspace_id: string;
   activities: GanttActivity[];
@@ -69,9 +70,16 @@ export async function projectWorkspaceGantt(workspace_id: string): Promise<{
   tactic_count: number;
   catalog: GanttCatalogEntry[];
 }> {
-  const claims = (await listClaims(workspace_id, { limit: 500 })).filter(isActiveLedgerClaim);
+  const claims = (await listClaims(workspace_id, { limit: null })).filter(isActiveLedgerClaim);
+  const { projected } = await projectActiveClaims(workspace_id, claims);
+  return projected;
+}
+
+/** Derive bars, labels, counts, and validation bindings from the same active rows. */
+async function projectActiveClaims(workspace_id: string, claims: AccuracyClaimRow[]) {
   const tactics = tacticsForGantt(claims);
   const gaps = gapsForGantt(claims);
+  const validatedIds = new Set(tactics.filter((tactic) => tactic.validated).map((tactic) => tactic.id));
   const coverages = (await listCoverageJoins(workspace_id)).map((row) => ({
     gap_id: row.gap_id,
     tactic_id: row.tactic_id,
@@ -80,16 +88,20 @@ export async function projectWorkspaceGantt(workspace_id: string): Promise<{
   }));
   const activities = projectGanttFromTactics({ tactics, gaps, coverages });
   return {
-    workspace_id,
-    activities,
-    validated_tactic_count: tactics.filter((t) => t.validated).length,
-    tactic_count: tactics.length,
-    catalog: catalogForActivities({ claims, activities }),
+    projected: {
+      workspace_id,
+      activities,
+      validated_tactic_count: validatedIds.size,
+      tactic_count: tactics.length,
+      catalog: catalogForActivities({ claims, activities }),
+    },
+    validatedIds,
   };
 }
 
 /**
- * Persist a draft/final snapshot from validated tactics only.
+ * Persist a draft/final snapshot from one complete set of active workspace claims.
+ * Validated undated tactics count in the snapshot but do not produce bars.
  * Invented bars (no validated tactic binding) are rejected.
  * The snapshot hash is the save-final truth fingerprint; the audit bundle
  * links the frozen bars to the workspace hillclimb trail.
@@ -106,12 +118,8 @@ export async function saveFinalGanttPlan(args: {
   audit_bundle: GanttAuditBundle;
 }> {
   const status = args.status ?? "final";
-  const projected = await projectWorkspaceGantt(args.workspace_id);
-  const validatedIds = new Set(
-    (await listClaims(args.workspace_id, { claim_type: "tactic" }))
-      .filter((c) => c.validated && isActiveLedgerClaim(c))
-      .map((c) => c.id),
-  );
+  const claims = (await listClaims(args.workspace_id, { limit: null })).filter(isActiveLedgerClaim);
+  const { projected, validatedIds } = await projectActiveClaims(args.workspace_id, claims);
   assertSaveFinalActivities(projected.activities, validatedIds);
 
   const tactic_ids = [...validatedIds].sort();
