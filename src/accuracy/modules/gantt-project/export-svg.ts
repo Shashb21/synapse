@@ -1,4 +1,5 @@
 import type { GanttActivity } from "./engine";
+import type { GanttCatalogEntry } from "./snapshot-hash";
 
 export function ganttExportFileName(args: {
   workspace_id: string;
@@ -28,11 +29,11 @@ function toDay(iso: string): number {
 }
 
 function escapeXml(value: string): string {
-  return value.replace(/[<>&"]/g, "");
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 /** Render validated Gantt activities as a standalone SVG document string. */
-export function activitiesToSvg(activities: GanttActivity[]): string {
+export function activitiesToSvg(activities: GanttActivity[], catalog: GanttCatalogEntry[] = []): string {
   const width = 960;
   const rowH = 36;
   const height = Math.max(80, 48 + activities.length * rowH);
@@ -54,7 +55,7 @@ export function activitiesToSvg(activities: GanttActivity[]): string {
       const x = 160 + ((toDay(activity.start) - min) / span) * (width - 180);
       const w = Math.max(((toDay(activity.end) - toDay(activity.start)) / span) * (width - 180), 8);
       const y = 28 + index * rowH;
-      const label = escapeXml(activity.tactic_id);
+      const label = escapeXml(catalog.find((row) => row.id === activity.tactic_id)?.statement ?? activity.tactic_id);
       const readout = activity.readout ? ` · readout ${activity.readout.slice(0, 10)}` : "";
       return `<text x="8" y="${y + 14}" font-size="11" fill="#111">${label}</text>
 <rect x="${x}" y="${y}" width="${w}" height="16" rx="2" fill="#333"/>

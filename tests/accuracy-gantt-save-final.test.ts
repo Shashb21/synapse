@@ -8,6 +8,7 @@ import {
   auditBundleFromPlan,
   catalogForActivities,
   projectWorkspaceGantt,
+  readWorkspaceGantt,
   saveFinalGanttPlan,
   snapshotHashForPlan,
 } from "@/accuracy/modules/gantt-project/save-final";
@@ -18,7 +19,8 @@ import {
 } from "@/accuracy/modules/gantt-project/snapshot-hash";
 import { insertClaim, persistClaimPatch } from "@/accuracy/store/claim-store";
 import { insertCoverageJoin } from "@/accuracy/store/coverage-store";
-import { latestAccuracyPlan } from "@/accuracy/store/plan-store";
+import { updateClaim } from "@/accuracy/store/claim-edit";
+import { getAccuracyPlanById, listAccuracyPlans, latestAccuracyPlan } from "@/accuracy/store/plan-store";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { ensureAccuracySchema } from "@/accuracy/store/db";
 import { registerAccuracyStack } from "@/accuracy";
@@ -252,6 +254,28 @@ describe("gantt save-final guard", () => {
     });
     expect(second.snapshot_hash).not.toBe(first.snapshot_hash);
     expect(second.activities[0]?.start).toBe("2026-02-01");
+  });
+
+  it("reads frozen v1 after live dates and labels change and keeps v1 intact after saving v2", async () => {
+    registerAccuracyStack();
+    const { workspace_id } = await freshWorkspace("frozen-read");
+    const tactic = await insertClaim({ workspace_id, claim_type: "tactic", statement: "Original registry", validated: true, status: "validated", metadata: { start: "2026-01-01", end: "2026-06-01" } });
+    const actor = { name: "reviewer", function: "medical_affairs" as const };
+    const first = await saveFinalGanttPlan({ workspace_id, note: "Initial sign-off", actor });
+    const original = structuredClone(first.plan);
+    await updateClaim({ workspace_id, claim_id: tactic.id, patch: { statement: "Renamed registry", start: "2027-01-01", end: "2027-06-01" }, rationale: "New live schedule and title", actor });
+    const read = await readWorkspaceGantt(workspace_id);
+    expect(read.activities).toEqual(original.snapshot.activities);
+    expect(read.catalog).toEqual(original.snapshot.labels);
+    expect(read.snapshot_hash).toBe(first.snapshot_hash);
+    expect(read.live.activities[0].start).toBe("2027-01-01");
+    expect(read.live.catalog[0].statement).toBe("Renamed registry");
+    const second = await saveFinalGanttPlan({ workspace_id, note: "Second sign-off", actor });
+    expect(second.plan.version).toBe(2);
+    expect(second.snapshot_hash).not.toBe(first.snapshot_hash);
+    expect((await readWorkspaceGantt(workspace_id)).activities).toEqual(second.activities);
+    expect(await getAccuracyPlanById(workspace_id, original.id)).toEqual(original);
+    expect((await listAccuracyPlans(workspace_id)).map(plan => plan.id)).toEqual([second.plan.id, first.plan.id]);
   });
 
   it("hashes workspace identity so identical bars differ across workspaces", () => {

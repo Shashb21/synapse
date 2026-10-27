@@ -43,6 +43,13 @@ describe("gantt SVG export", () => {
     expect(svg).toContain("readout 2027-01-15");
   });
 
+  it("exports the selected catalog labels and falls back to IDs without live lookups", () => {
+    const activity = { id: "ACT-T1", tactic_id: "T1", start: "2026-01-01", end: "2026-06-01", readout: null, depends_on: [], gap_ids: [] };
+    expect(activitiesToSvg([activity], [{ id: "T1", claim_type: "tactic", statement: "Frozen study" }])).toContain("Frozen study");
+    expect(activitiesToSvg([activity], [])).toContain(">T1</text>");
+    expect(activitiesToSvg([activity], [{ id: "T1", claim_type: "tactic", statement: 'Frozen & <reviewed> "study"' }])).toContain("Frozen &amp; &lt;reviewed&gt; &quot;study&quot;");
+  });
+
   it("names PNG exports from workspace and plan version", () => {
     expect(ganttExportFileName({ workspace_id: "ws-1", version: 3, ext: "png" })).toBe(
       "synapse-gantt-ws-1-v3.png",

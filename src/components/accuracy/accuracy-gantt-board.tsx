@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import type { AccuracyPlanRecord } from "@/accuracy/store/plan-store";
 import type { GanttActivity } from "@/accuracy/modules/gantt-project/engine";
 import {
   ganttBarAriaLabel,
@@ -37,17 +38,7 @@ function focusBar(refs: Array<HTMLButtonElement | null>, index: number) {
   next.focus();
 }
 
-export function AccuracyGanttBoard({
-  workspaceId,
-  activities,
-  catalog,
-  planVersion,
-  planStatus,
-  planId,
-  snapshotHash,
-  auditBundleHref,
-  tactics = [],
-}: {
+type GanttBoardProps = {
   workspaceId: string;
   activities: GanttActivity[];
   catalog: GanttCatalogEntry[];
@@ -56,9 +47,40 @@ export function AccuracyGanttBoard({
   planId: string | null;
   snapshotHash: string | null;
   auditBundleHref: string | null;
-  /** Active tactics with their stored schedule (for manual date / dependency entry). */
+  liveActivities: GanttActivity[];
+  liveCatalog: GanttCatalogEntry[];
+  /** Active tactics with their stored schedule for unsaved live editing. */
   tactics?: GanttTacticSchedule[];
-}) {
+};
+
+type SavedGanttView = {
+  activities: GanttActivity[];
+  catalog: GanttCatalogEntry[];
+  version: number | null;
+  status: string | null;
+  id: string;
+  hash: string | null;
+  auditHref: string | null;
+};
+
+/** Keep transient selection/save state scoped to one workspace and server plan. */
+export function AccuracyGanttBoard(props: GanttBoardProps) {
+  return <GanttBoardContent key={`${props.workspaceId}:${props.planId ?? "live"}`} {...props} />;
+}
+
+function GanttBoardContent({
+  workspaceId,
+  activities: initialActivities,
+  catalog: initialCatalog,
+  planVersion: initialVersion,
+  planStatus: initialStatus,
+  planId: initialPlanId,
+  snapshotHash,
+  auditBundleHref,
+  liveActivities,
+  liveCatalog,
+  tactics = [],
+}: GanttBoardProps) {
   const router = useRouter();
   const barRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [note, setNote] = useState("");
@@ -67,14 +89,24 @@ export function AccuracyGanttBoard({
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [savedHash, setSavedHash] = useState<string | null>(null);
-  const [savedAuditHref, setSavedAuditHref] = useState<string | null>(null);
-
-  const hash = savedHash ?? snapshotHash;
-  const auditHref = savedAuditHref ?? auditBundleHref;
+  const [savedAfterSubmit, setSavedAfterSubmit] = useState<SavedGanttView | null>(null);
+  const [view, setView] = useState<"saved" | "live">(initialPlanId ? "saved" : "live");
+  const saved = savedAfterSubmit ?? (initialPlanId ? {
+    activities: initialActivities, catalog: initialCatalog,
+    version: initialVersion, status: initialStatus, id: initialPlanId,
+    hash: snapshotHash, auditHref: auditBundleHref,
+  } : null);
+  const showingSaved = view === "saved" && saved !== null;
+  const activities = showingSaved ? saved.activities : liveActivities;
+  const catalog = showingSaved ? saved.catalog : liveCatalog;
+  const planVersion = showingSaved ? saved.version : null;
+  const planStatus = showingSaved ? saved.status : null;
+  const planId = showingSaved ? saved.id : null;
+  const hash = showingSaved ? saved.hash : null;
+  const auditHref = showingSaved ? saved.auditHref : null;
   const selected = activities.find((row) => row.id === selectedId) ?? null;
   const tacticOptions = tactics.map((row) => ({ id: row.id, statement: row.statement }));
-  const scheduledIds = new Set(activities.map((row) => row.tactic_id));
+  const scheduledIds = new Set(liveActivities.map((row) => row.tactic_id));
   const unscheduled = tactics.filter((row) => row.validated && !scheduledIds.has(row.id));
   const selectedTactic = selected
     ? (tactics.find((row) => row.id === selected.tactic_id) ?? null)
@@ -118,7 +150,7 @@ export function AccuracyGanttBoard({
         });
       const body = res.json as {
         error?: string;
-        plan?: { version: number; status: string; id: string };
+        plan?: AccuracyPlanRecord;
         snapshot_hash?: string;
         audit_bundle?: { href: string; snapshot_hash: string };
       };
@@ -128,8 +160,20 @@ export function AccuracyGanttBoard({
       }
       const nextHash = body.snapshot_hash ?? body.audit_bundle?.snapshot_hash ?? null;
       const nextHref = body.audit_bundle?.href ?? null;
-      setSavedHash(nextHash);
-      setSavedAuditHref(nextHref);
+      const plan = body.plan;
+      if (!plan || plan.workspace_id !== workspaceId || !plan.snapshot ||
+          !Array.isArray(plan.snapshot.activities) || !nextHash || !nextHref) {
+        throw new Error("Saved snapshot response is incomplete. Reload the timeline to review it.");
+      }
+      // Commit all frozen data and metadata together, even if refresh is delayed.
+      setSavedAfterSubmit({
+        activities: plan.snapshot.activities,
+        catalog: plan.snapshot.labels ?? [],
+        version: plan.version, status: plan.status, id: plan.id,
+        hash: nextHash, auditHref: nextHref,
+      });
+      setView("saved");
+      setSelectedId(null);
       setMessage(
         body.plan
           ? `Saved v${body.plan.version} as ${body.plan.status}`
@@ -148,7 +192,7 @@ export function AccuracyGanttBoard({
     if (activities.length === 0) return;
     downloadSvg(
       ganttExportFileName({ workspace_id: workspaceId, version: planVersion, ext: "svg" }),
-      activitiesToSvg(activities),
+      activitiesToSvg(activities, catalog),
     );
   }
 
@@ -157,7 +201,7 @@ export function AccuracyGanttBoard({
     setExporting(true);
     setError(null);
     try {
-      const blob = await svgMarkupToPngBlob(activitiesToSvg(activities));
+      const blob = await svgMarkupToPngBlob(activitiesToSvg(activities, catalog));
       triggerBlobDownload(
         blob,
         ganttExportFileName({ workspace_id: workspaceId, version: planVersion, ext: "png" }),
@@ -194,9 +238,20 @@ export function AccuracyGanttBoard({
 
   return (
     <div className="grid gap-4">
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Gantt view">
+        {saved ? (
+          <Button size="sm" variant="outline" aria-pressed={showingSaved} onClick={() => { setView("saved"); setSelectedId(null); }}>
+            Saved snapshot
+          </Button>
+        ) : null}
+        <Button size="sm" variant="outline" aria-pressed={!showingSaved} onClick={() => { setView("live"); setSelectedId(null); }}>
+          Live projection (unsaved)
+        </Button>
+      </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-[12px] text-muted-foreground">
           {activities.length} bar(s) from validated tactics only
+          {!showingSaved ? " · Unsaved live projection" : " · Saved snapshot"}
           {planVersion != null ? (
             <span>
               {" "}
@@ -224,7 +279,7 @@ export function AccuracyGanttBoard({
           </Button>
           <Button
             size="sm"
-            disabled={pending || activities.length === 0}
+            disabled={pending || liveActivities.length === 0}
             onClick={() => void saveFinal()}
           >
             {pending ? "Saving…" : "Save as final"}
@@ -255,7 +310,7 @@ export function AccuracyGanttBoard({
       ) : null}
 
       <label className="grid gap-1 text-[11px] text-muted-foreground">
-        Sign-off rationale (required)
+        Sign-off rationale for current live projection (required)
         <Textarea
           value={note}
           onChange={(event) => setNote(event.target.value)}
@@ -418,9 +473,9 @@ export function AccuracyGanttBoard({
               ) : null}
             </div>
           </div>
-          {selectedTactic ? (
+          {!showingSaved && selectedTactic ? (
             <div className="mt-4 border-t border-border pt-3">
-              <h3 className="mb-2 text-[12px] font-medium text-foreground">Edit schedule</h3>
+              <h3 className="mb-2 text-[12px] font-medium text-foreground">Edit live schedule (unsaved)</h3>
               <GanttScheduleEditor
                 key={`${selectedTactic.id}-${selectedTactic.start}-${selectedTactic.end}-${selectedTactic.readout}-${selectedTactic.depends_on.join(",")}`}
                 workspaceId={workspaceId}
@@ -431,10 +486,10 @@ export function AccuracyGanttBoard({
           ) : null}
         </section>
       ) : null}
-      {unscheduled.length > 0 ? (
+      {!showingSaved && unscheduled.length > 0 ? (
         <section className="grid gap-2" aria-labelledby="gantt-unscheduled" data-testid="gantt-unscheduled">
           <h2 id="gantt-unscheduled" className="text-[12px] font-semibold text-foreground">
-            Validated tactics without a bar ({unscheduled.length})
+            Unsaved live tactics without a bar ({unscheduled.length})
           </h2>
           <p className="text-[11px] text-muted-foreground">
             Enter start and end dates (and optional readout / dependencies) to place them on the
