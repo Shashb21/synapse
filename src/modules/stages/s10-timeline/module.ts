@@ -1,3 +1,4 @@
+/** Builds and edits workspace timelines, preserving human decisions and attributable history. */
 import { tacticEditVersion } from "@/lib/iegp/tactic-edit-version";
 import { expansionScopeSchema } from "@/lib/iegp/tactic-expansions";
 import { desc, eq, sql } from "drizzle-orm";
@@ -138,6 +139,25 @@ const outputSchema = z.object({
 
 export type TimelineInput = z.infer<typeof inputSchema>;
 export type TimelineOutput = z.infer<typeof outputSchema>;
+
+/**
+ * Serialize authoritative timeline reads and writes in the ambient workspace
+ * transaction. The resolved schema identifies the lock, including workspace
+ * aliases; every edit record and its audit mirrors commit or roll back with it.
+ */
+async function withTimelineMutation<T>(change: () => Promise<T>): Promise<T> {
+  await ensurePlatformSchema();
+  return withWorkspaceTransaction(async () => {
+    const schema = await currentSchemaName();
+    await db().execute(sql`select pg_advisory_xact_lock(hashtext(${`timeline_mutations:${schema}`}))`);
+    return change();
+  });
+}
+
+/** Stable ordering prevents database row order from making an unchanged rebuild look stale. */
+function timelineRevision(activities: SavedActivity[]): string {
+  return JSON.stringify([...activities].sort((a, b) => a.id.localeCompare(b.id)));
+}
 
 async function storedActivities(): Promise<SavedActivity[]> {
   await ensurePlatformSchema();
@@ -518,45 +538,52 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
       );
     }
     if (input.persist) {
-      for (const activity of model.activities) {
-        // A user's per-dependency reasons live only on the row; keep them.
-        const saved = byId.get(activity.id)?.saved;
-        const reasons = saved?.meta?.dependency_reasons;
-        const values = {
-          id: activity.id,
-          tactic_id: activity.tactic_id,
-          gap_ids: activity.gap_ids,
-          lane: activity.lane,
-          start_date: activity.start_date,
-          end_date: activity.end_date,
-          readout_date: activity.readout_date,
-          // Accepted and hand-set dependencies are stored as they were, even one
-          // whose upstream is off the timeline for now. A model's are proposals (meta).
-          depends_on: saved ? acceptedDependencies(saved) : activity.depends_on,
-          band: activity.band,
-          meta: reasons ? { ...activity.meta, dependency_reasons: reasons } : activity.meta,
-          updated_by: ctx.actor.name,
-          updated_at: nowIso(),
-        };
-        await db()
-          .insert(t.timelineActivities)
-          .values(values)
-          .onConflictDoUpdate({
-            target: t.timelineActivities.id,
-            // A saved row's dates survive a rebuild; derived fields refresh. The
-            // lane follows the validated band unless a user moved it by hand,
-            // and dependencies a user set (depends_locked) come back unchanged.
-            set: {
-              tactic_id: values.tactic_id,
-              gap_ids: values.gap_ids,
-              lane: values.lane,
-              band: values.band,
-              meta: values.meta,
-              depends_on: values.depends_on,
-              updated_at: values.updated_at,
-            },
-          });
-      }
+      // Model calls happen before locking. Refuse stale output rather than
+      // replacing metadata a person changed while the model was running.
+      await withTimelineMutation(async () => {
+        if (timelineRevision(await storedActivities()) !== timelineRevision(overrides)) {
+          throw new Error("The timeline changed while this rebuild was running. Rebuild again to include the latest edits.");
+        }
+        for (const activity of model.activities) {
+          // A user's per-dependency reasons live only on the row; keep them.
+          const saved = byId.get(activity.id)?.saved;
+          const reasons = saved?.meta?.dependency_reasons;
+          const values = {
+            id: activity.id,
+            tactic_id: activity.tactic_id,
+            gap_ids: activity.gap_ids,
+            lane: activity.lane,
+            start_date: activity.start_date,
+            end_date: activity.end_date,
+            readout_date: activity.readout_date,
+            // Accepted and hand-set dependencies are stored as they were, even one
+            // whose upstream is off the timeline for now. A model's are proposals (meta).
+            depends_on: saved ? acceptedDependencies(saved) : activity.depends_on,
+            band: activity.band,
+            meta: reasons ? { ...activity.meta, dependency_reasons: reasons } : activity.meta,
+            updated_by: ctx.actor.name,
+            updated_at: nowIso(),
+          };
+          await db()
+            .insert(t.timelineActivities)
+            .values(values)
+            .onConflictDoUpdate({
+              target: t.timelineActivities.id,
+              // A saved row's dates survive a rebuild; derived fields refresh. The
+              // lane follows the validated band unless a user moved it by hand,
+              // and dependencies a user set (depends_locked) come back unchanged.
+              set: {
+                tactic_id: values.tactic_id,
+                gap_ids: values.gap_ids,
+                lane: values.lane,
+                band: values.band,
+                meta: values.meta,
+                depends_on: values.depends_on,
+                updated_at: values.updated_at,
+              },
+            });
+        }
+      });
     }
     ctx.run.note("timeline", {
       activities: model.activities.length,
@@ -720,92 +747,94 @@ export async function updateTimelineActivity(args: {
   actor: Actor;
   workspace_id?: string;
 }) {
-  const rationale = requireRationale(args.rationale);
-  if (args.lane && args.lane !== "band" && !TIMELINE_LANES.includes(args.lane as TimelineBand)) {
-    throw new Error(`Unknown lane ${args.lane}.`);
-  }
-  const current = assertOnTimeline(await activityRow(args.id), args.id);
-  const meta = rowMeta(current);
-  const releaseLane = args.lane === "band";
-  const start_date = args.start_date ?? current.start_date;
-  // A readout the user did not touch moves with the start (a dragged bar keeps it in step).
-  const readoutUntouched = args.readout_date === undefined;
-  const readout_date = readoutUntouched
-    ? current.readout_date && ISO_DATE.test(start_date) && start_date !== current.start_date
-      ? shiftBy(current.readout_date, current.start_date, start_date)
-      : current.readout_date
-    : args.readout_date;
-  const next = {
-    start_date,
-    end_date: args.end_date ?? current.end_date,
-    readout_date,
-    lane: args.lane && !releaseLane ? args.lane : releaseLane ? (current.band ?? current.lane) : current.lane,
-    updated_by: args.actor.name,
-    updated_at: nowIso(),
-  };
-  assertWindow(next.start_date, next.end_date, readoutUntouched ? null : next.readout_date);
-  const basis = (meta.schedule_basis as TimelineActivity["meta"]["schedule_basis"] | undefined) ?? {
-    start: "saved",
-    end: "saved",
-    readout: current.readout_date ? "saved" : null,
-  };
-  // Only a value the user actually changed becomes theirs; the dialog resends
-  // unchanged dates when only the lane or rationale was edited.
-  const startChanged = next.start_date !== current.start_date;
-  const endChanged = next.end_date !== current.end_date;
-  const readoutChanged = next.readout_date !== current.readout_date;
-  meta.schedule_basis = {
-    start: startChanged ? "human" : basis.start,
-    end: endChanged ? "human" : basis.end,
-    readout: !next.readout_date ? null : readoutChanged ? "human" : (basis.readout ?? "saved"),
-  };
-  if (args.lane) meta.lane_locked = !releaseLane;
-  // A date a person set is no longer an estimate; once none is left, nothing is stale.
-  if (estimatedFields(meta.schedule_basis as TimelineActivity["meta"]["schedule_basis"]).length === 0) {
-    meta.estimate_stale = false;
-  }
-  const rationaleChanged =
-    args.schedule_rationale !== undefined &&
-    (args.schedule_rationale?.trim() || null) !== ((meta.schedule_rationale as string | null | undefined) ?? null);
-  if (rationaleChanged) {
-    meta.schedule_rationale = args.schedule_rationale?.trim() || null;
-    meta.rationale_locked = true;
-  }
-  await db()
-    .update(t.timelineActivities)
-    .set({ ...next, meta })
-    .where(eq(t.timelineActivities.id, args.id));
+  return withTimelineMutation(async () => {
+    const rationale = requireRationale(args.rationale);
+    if (args.lane && args.lane !== "band" && !TIMELINE_LANES.includes(args.lane as TimelineBand)) {
+      throw new Error(`Unknown lane ${args.lane}.`);
+    }
+    const current = assertOnTimeline(await activityRow(args.id), args.id);
+    const meta = rowMeta(current);
+    const releaseLane = args.lane === "band";
+    const start_date = args.start_date ?? current.start_date;
+    // A readout the user did not touch moves with the start (a dragged bar keeps it in step).
+    const readoutUntouched = args.readout_date === undefined;
+    const readout_date = readoutUntouched
+      ? current.readout_date && ISO_DATE.test(start_date) && start_date !== current.start_date
+        ? shiftBy(current.readout_date, current.start_date, start_date)
+        : current.readout_date
+      : args.readout_date;
+    const next = {
+      start_date,
+      end_date: args.end_date ?? current.end_date,
+      readout_date,
+      lane: args.lane && !releaseLane ? args.lane : releaseLane ? (current.band ?? current.lane) : current.lane,
+      updated_by: args.actor.name,
+      updated_at: nowIso(),
+    };
+    assertWindow(next.start_date, next.end_date, readoutUntouched ? null : next.readout_date);
+    const basis = (meta.schedule_basis as TimelineActivity["meta"]["schedule_basis"] | undefined) ?? {
+      start: "saved",
+      end: "saved",
+      readout: current.readout_date ? "saved" : null,
+    };
+    // Only a value the user actually changed becomes theirs; the dialog resends
+    // unchanged dates when only the lane or rationale was edited.
+    const startChanged = next.start_date !== current.start_date;
+    const endChanged = next.end_date !== current.end_date;
+    const readoutChanged = next.readout_date !== current.readout_date;
+    meta.schedule_basis = {
+      start: startChanged ? "human" : basis.start,
+      end: endChanged ? "human" : basis.end,
+      readout: !next.readout_date ? null : readoutChanged ? "human" : (basis.readout ?? "saved"),
+    };
+    if (args.lane) meta.lane_locked = !releaseLane;
+    // A date a person set is no longer an estimate; once none is left, nothing is stale.
+    if (estimatedFields(meta.schedule_basis as TimelineActivity["meta"]["schedule_basis"]).length === 0) {
+      meta.estimate_stale = false;
+    }
+    const rationaleChanged =
+      args.schedule_rationale !== undefined &&
+      (args.schedule_rationale?.trim() || null) !== ((meta.schedule_rationale as string | null | undefined) ?? null);
+    if (rationaleChanged) {
+      meta.schedule_rationale = args.schedule_rationale?.trim() || null;
+      meta.rationale_locked = true;
+    }
+    await db()
+      .update(t.timelineActivities)
+      .set({ ...next, meta })
+      .where(eq(t.timelineActivities.id, args.id));
 
-  const datesTouched = startChanged || endChanged || readoutChanged;
-  const edit = (field: string, before: string | null, after: string | null) =>
-    recordEdit({
-      workspace_id: args.workspace_id,
-      stage: "S10",
-      entity_type: "timeline_activity",
-      entity_id: args.id,
-      field,
-      action: "edit",
-      before,
-      after,
-      rationale,
-      actor: args.actor,
-    });
-  if (datesTouched || (!args.lane && !rationaleChanged)) {
-    await edit(
-      "schedule",
-      `${current.start_date} → ${current.end_date} (readout ${current.readout_date ?? "—"})`,
-      `${next.start_date} → ${next.end_date} (readout ${next.readout_date ?? "—"})`,
-    );
-  }
-  if (args.lane) await edit("lane", current.lane, releaseLane ? `${next.lane} (follows band)` : next.lane);
-  if (rationaleChanged) {
-    await edit(
-      "schedule_rationale",
-      ((current.meta as RowMeta | null)?.schedule_rationale as string | null | undefined) ?? null,
-      (meta.schedule_rationale as string | null) ?? null,
-    );
-  }
-  return { ...next, meta };
+    const datesTouched = startChanged || endChanged || readoutChanged;
+    const edit = (field: string, before: string | null, after: string | null) =>
+      recordEdit({
+        workspace_id: args.workspace_id,
+        stage: "S10",
+        entity_type: "timeline_activity",
+        entity_id: args.id,
+        field,
+        action: "edit",
+        before,
+        after,
+        rationale,
+        actor: args.actor,
+      });
+    if (datesTouched || (!args.lane && !rationaleChanged)) {
+      await edit(
+        "schedule",
+        `${current.start_date} → ${current.end_date} (readout ${current.readout_date ?? "—"})`,
+        `${next.start_date} → ${next.end_date} (readout ${next.readout_date ?? "—"})`,
+      );
+    }
+    if (args.lane) await edit("lane", current.lane, releaseLane ? `${next.lane} (follows band)` : next.lane);
+    if (rationaleChanged) {
+      await edit(
+        "schedule_rationale",
+        ((current.meta as RowMeta | null)?.schedule_rationale as string | null | undefined) ?? null,
+        (meta.schedule_rationale as string | null) ?? null,
+      );
+    }
+    return { ...next, meta };
+  });
 }
 
 /**
@@ -823,55 +852,57 @@ export async function setTimelineDependencies(args: {
   actor: Actor;
   workspace_id?: string;
 }) {
-  const rationale = requireRationale(args.rationale);
-  const current = assertOnTimeline(await activityRow(args.id), args.id);
-  const model = await timelineModel();
-  const byId = new Map(model.activities.map((activity) => [activity.id, activity]));
-  const upstream = [...new Set(args.depends_on.map((id) => id.trim()).filter(Boolean))];
-  for (const id of upstream) {
-    if (id === args.id) throw new Error("An activity cannot depend on itself.");
-    if (!byId.has(id)) throw new Error(`Unknown activity ${id}: an activity can only wait on a dated activity.`);
-  }
-  const graph = new Map(model.activities.map((activity) => [activity.id, activity.depends_on]));
-  graph.delete(args.id);
-  if (wouldCycle(graph, args.id, upstream)) {
-    throw new Error("That dependency would create a cycle: an upstream activity already waits on this one.");
-  }
-  const reasons: Record<string, string> = {};
-  for (const id of upstream) {
-    const reason = args.reasons?.[id]?.trim();
-    if (reason) reasons[id] = reason;
-  }
-  const meta = rowMeta(current);
-  const pendingProposals = savedProposals(asSaved(current)).filter((row) => !upstream.includes(row.id));
-  meta.proposed_dependencies = pendingProposals;
-  meta.depends_locked = true;
-  meta.dependency_reasons = reasons;
-  meta.dependency_note =
-    Object.keys(reasons).length > 0
-      ? upstream
-          .filter((id) => reasons[id])
-          .map((id) => `${byId.get(id)?.tactic_name ?? id}: ${reasons[id]}`)
-          .join(" ")
-      : null;
-  const before = (current.depends_on as string[] | null) ?? [];
-  await db()
-    .update(t.timelineActivities)
-    .set({ depends_on: upstream, meta, updated_by: args.actor.name, updated_at: nowIso() })
-    .where(eq(t.timelineActivities.id, args.id));
-  await recordEdit({
-    workspace_id: args.workspace_id,
-    stage: "S10",
-    entity_type: "timeline_activity",
-    entity_id: args.id,
-    field: "depends_on",
-    action: "edit",
-    before: before.join(", ") || "none",
-    after: upstream.join(", ") || "none",
-    rationale,
-    actor: args.actor,
+  return withTimelineMutation(async () => {
+    const rationale = requireRationale(args.rationale);
+    const current = assertOnTimeline(await activityRow(args.id), args.id);
+    const model = await timelineModel();
+    const byId = new Map(model.activities.map((activity) => [activity.id, activity]));
+    const upstream = [...new Set(args.depends_on.map((id) => id.trim()).filter(Boolean))];
+    for (const id of upstream) {
+      if (id === args.id) throw new Error("An activity cannot depend on itself.");
+      if (!byId.has(id)) throw new Error(`Unknown activity ${id}: an activity can only wait on a dated activity.`);
+    }
+    const graph = new Map(model.activities.map((activity) => [activity.id, activity.depends_on]));
+    graph.delete(args.id);
+    if (wouldCycle(graph, args.id, upstream)) {
+      throw new Error("That dependency would create a cycle: an upstream activity already waits on this one.");
+    }
+    const reasons: Record<string, string> = {};
+    for (const id of upstream) {
+      const reason = args.reasons?.[id]?.trim();
+      if (reason) reasons[id] = reason;
+    }
+    const meta = rowMeta(current);
+    const pendingProposals = savedProposals(asSaved(current)).filter((row) => !upstream.includes(row.id));
+    meta.proposed_dependencies = pendingProposals;
+    meta.depends_locked = true;
+    meta.dependency_reasons = reasons;
+    meta.dependency_note =
+      Object.keys(reasons).length > 0
+        ? upstream
+            .filter((id) => reasons[id])
+            .map((id) => `${byId.get(id)?.tactic_name ?? id}: ${reasons[id]}`)
+            .join(" ")
+        : null;
+    const before = (current.depends_on as string[] | null) ?? [];
+    await db()
+      .update(t.timelineActivities)
+      .set({ depends_on: upstream, meta, updated_by: args.actor.name, updated_at: nowIso() })
+      .where(eq(t.timelineActivities.id, args.id));
+    await recordEdit({
+      workspace_id: args.workspace_id,
+      stage: "S10",
+      entity_type: "timeline_activity",
+      entity_id: args.id,
+      field: "depends_on",
+      action: "edit",
+      before: before.join(", ") || "none",
+      after: upstream.join(", ") || "none",
+      rationale,
+      actor: args.actor,
+    });
+    return { id: args.id, depends_on: upstream, meta };
   });
-  return { id: args.id, depends_on: upstream, meta };
 }
 
 /**
@@ -892,90 +923,92 @@ export async function addTimelineActivity(args: {
   actor: Actor;
   workspace_id?: string;
 }) {
-  const rationale = requireRationale(args.rationale);
-  if (args.lane && !TIMELINE_LANES.includes(args.lane as TimelineBand)) throw new Error(`Unknown lane ${args.lane}.`);
-  const [state, placements, overrides] = await Promise.all([loadState(), listPlacements(), storedActivities()]);
-  const selectedExpansion = args.activity_id ? state.expansions.find(child => activityId(child.tactic_id, child.id) === args.activity_id) : undefined;
-  const selectedTactic = args.activity_id ? state.tactics.find(row => activityId(row.id) === args.activity_id) : undefined;
-  if (args.activity_id && !selectedExpansion && !selectedTactic) throw new Error("Unknown timeline activity.");
-  const tacticId = selectedExpansion?.tactic_id ?? selectedTactic?.id ?? args.tactic_id;
-  if (args.tactic_id && args.tactic_id !== tacticId) throw new Error("Activity does not belong to this tactic.");
-  const tactic = state.tactics.find((row) => row.id === tacticId);
-  if (!tactic) throw new Error(`Unknown tactic ${args.tactic_id}.`);
-  const expansion = selectedExpansion ?? (args.expansion_id ? state.expansions.find(child => child.id === args.expansion_id && child.tactic_id === tactic.id) : undefined);
-  if (args.expansion_id && expansion?.id !== args.expansion_id) throw new Error("Activity does not match this expansion.");
-  if (args.expansion_id && !expansion) throw new Error("Expansion not found under this tactic.");
-  if ((expansion?.status ?? tactic.status) === "cancelled" || (!expansion && tactic.review_status === "rejected")) {
-    throw new Error(`${tactic.name} is cancelled or rejected, so it cannot go on the timeline.`);
-  }
-  const id = activityId(tactic.id, expansion?.id);
-  const existing = await activityRow(id);
-  const restoring = existing && rowMeta(existing).removed === true;
-  if (existing && !restoring) {
-    throw new Error(`${tactic.name} is already on the timeline. Reschedule it instead.`);
-  }
-  const start = args.start_date ?? (restoring && existing.start_date ? existing.start_date : undefined);
-  const end = args.end_date ?? (restoring && existing.end_date ? existing.end_date : undefined);
-  if (!start || !end) throw new Error("A start and an end date are required.");
-  const readout =
-    args.readout_date !== undefined ? args.readout_date : restoring ? (existing.readout_date ?? null) : null;
-  assertWindow(start, end, readout);
+  return withTimelineMutation(async () => {
+    const rationale = requireRationale(args.rationale);
+    if (args.lane && !TIMELINE_LANES.includes(args.lane as TimelineBand)) throw new Error(`Unknown lane ${args.lane}.`);
+    const [state, placements, overrides] = await Promise.all([loadState(), listPlacements(), storedActivities()]);
+    const selectedExpansion = args.activity_id ? state.expansions.find(child => activityId(child.tactic_id, child.id) === args.activity_id) : undefined;
+    const selectedTactic = args.activity_id ? state.tactics.find(row => activityId(row.id) === args.activity_id) : undefined;
+    if (args.activity_id && !selectedExpansion && !selectedTactic) throw new Error("Unknown timeline activity.");
+    const tacticId = selectedExpansion?.tactic_id ?? selectedTactic?.id ?? args.tactic_id;
+    if (args.tactic_id && args.tactic_id !== tacticId) throw new Error("Activity does not belong to this tactic.");
+    const tactic = state.tactics.find((row) => row.id === tacticId);
+    if (!tactic) throw new Error(`Unknown tactic ${args.tactic_id}.`);
+    const expansion = selectedExpansion ?? (args.expansion_id ? state.expansions.find(child => child.id === args.expansion_id && child.tactic_id === tactic.id) : undefined);
+    if (args.expansion_id && expansion?.id !== args.expansion_id) throw new Error("Activity does not match this expansion.");
+    if (args.expansion_id && !expansion) throw new Error("Expansion not found under this tactic.");
+    if ((expansion?.status ?? tactic.status) === "cancelled" || (!expansion && tactic.review_status === "rejected")) {
+      throw new Error(`${tactic.name} is cancelled or rejected, so it cannot go on the timeline.`);
+    }
+    const id = activityId(tactic.id, expansion?.id);
+    const existing = await activityRow(id);
+    const restoring = existing && rowMeta(existing).removed === true;
+    if (existing && !restoring) {
+      throw new Error(`${tactic.name} is already on the timeline. Reschedule it instead.`);
+    }
+    const start = args.start_date ?? (restoring && existing.start_date ? existing.start_date : undefined);
+    const end = args.end_date ?? (restoring && existing.end_date ? existing.end_date : undefined);
+    if (!start || !end) throw new Error("A start and an end date are required.");
+    const readout =
+      args.readout_date !== undefined ? args.readout_date : restoring ? (existing.readout_date ?? null) : null;
+    assertWindow(start, end, readout);
 
-  // Mapped tactics keep their gaps and band; an unmapped one is a manual activity.
-  const others = overrides.filter((row) => row.id !== id);
-  const candidate = timelineCandidates({ state, placements, overrides: others }).find((row) => row.id === id);
-  const band: TimelineBand = candidate?.band ?? "unprioritized";
-  const previous = restoring ? rowMeta(existing) : ({} as RowMeta);
-  const note = args.schedule_rationale?.trim() || null;
-  const meta: RowMeta = {
-    ...previous,
-    removed: false,
-    manual: !candidate,
-    schedule_basis: {
-      start: args.start_date || !restoring ? "human" : (previous.schedule_basis?.start ?? "human"),
-      end: args.end_date || !restoring ? "human" : (previous.schedule_basis?.end ?? "human"),
-      readout: readout
-        ? args.readout_date || !restoring
-          ? "human"
-          : (previous.schedule_basis?.readout ?? "human")
-        : null,
-    },
-    schedule_rationale: note ?? previous.schedule_rationale ?? null,
-    rationale_locked: Boolean(note) || previous.rationale_locked === true,
-    lane_locked: Boolean(args.lane) || previous.lane_locked === true,
-  };
-  delete meta.removed_reason;
-  const values = {
-    id,
-    tactic_id: tactic.id,
-    gap_ids: candidate?.gap_ids ?? [],
-    lane: args.lane ?? (previous.lane_locked && existing ? existing.lane : band),
-    start_date: start,
-    end_date: end,
-    readout_date: readout,
-    depends_on: restoring ? ((existing.depends_on as string[]) ?? []) : [],
-    band,
-    meta,
-    updated_by: args.actor.name,
-    updated_at: nowIso(),
-  };
-  await db()
-    .insert(t.timelineActivities)
-    .values(values)
-    .onConflictDoUpdate({ target: t.timelineActivities.id, set: values });
-  await recordEdit({
-    workspace_id: args.workspace_id,
-    stage: "S10",
-    entity_type: "timeline_activity",
-    entity_id: id,
-    field: "schedule",
-    action: "add",
-    before: restoring ? "removed" : "not dated",
-    after: `${start} → ${end} (readout ${readout ?? "—"})`,
-    rationale,
-    actor: args.actor,
+    // Mapped tactics keep their gaps and band; an unmapped one is a manual activity.
+    const others = overrides.filter((row) => row.id !== id);
+    const candidate = timelineCandidates({ state, placements, overrides: others }).find((row) => row.id === id);
+    const band: TimelineBand = candidate?.band ?? "unprioritized";
+    const previous = restoring ? rowMeta(existing) : ({} as RowMeta);
+    const note = args.schedule_rationale?.trim() || null;
+    const meta: RowMeta = {
+      ...previous,
+      removed: false,
+      manual: !candidate,
+      schedule_basis: {
+        start: args.start_date || !restoring ? "human" : (previous.schedule_basis?.start ?? "human"),
+        end: args.end_date || !restoring ? "human" : (previous.schedule_basis?.end ?? "human"),
+        readout: readout
+          ? args.readout_date || !restoring
+            ? "human"
+            : (previous.schedule_basis?.readout ?? "human")
+          : null,
+      },
+      schedule_rationale: note ?? previous.schedule_rationale ?? null,
+      rationale_locked: Boolean(note) || previous.rationale_locked === true,
+      lane_locked: Boolean(args.lane) || previous.lane_locked === true,
+    };
+    delete meta.removed_reason;
+    const values = {
+      id,
+      tactic_id: tactic.id,
+      gap_ids: candidate?.gap_ids ?? [],
+      lane: args.lane ?? (previous.lane_locked && existing ? existing.lane : band),
+      start_date: start,
+      end_date: end,
+      readout_date: readout,
+      depends_on: restoring ? ((existing.depends_on as string[]) ?? []) : [],
+      band,
+      meta,
+      updated_by: args.actor.name,
+      updated_at: nowIso(),
+    };
+    await db()
+      .insert(t.timelineActivities)
+      .values(values)
+      .onConflictDoUpdate({ target: t.timelineActivities.id, set: values });
+    await recordEdit({
+      workspace_id: args.workspace_id,
+      stage: "S10",
+      entity_type: "timeline_activity",
+      entity_id: id,
+      field: "schedule",
+      action: "add",
+      before: restoring ? "removed" : "not dated",
+      after: `${start} → ${end} (readout ${readout ?? "—"})`,
+      rationale,
+      actor: args.actor,
+    });
+    return values;
   });
-  return values;
 }
 
 /**
@@ -997,59 +1030,61 @@ export async function createTimelineActivity(args: {
   actor: Actor;
   workspace_id?: string;
 }) {
-  const rationale = requireRationale(args.rationale);
-  if (!args.name.trim()) throw new Error("A name is required.");
-  if (!args.evidence_question.trim()) throw new Error("An evidence question is required.");
-  if (Boolean(args.start_date) !== Boolean(args.end_date)) {
-    throw new Error("Give both a start and an end date, or neither to leave it unscheduled.");
-  }
-  if (args.start_date && args.end_date) assertWindow(args.start_date, args.end_date, args.readout_date);
-  const state = await loadState();
-  const gap = state.gaps.find((row) => row.id === args.gap_id);
-  if (!gap) throw new Error(`Unknown gap ${args.gap_id}.`);
-  const tacticId = await createProposedTactic({
-    rationale,
-    name: args.name.trim(),
-    type: args.type as Tactic["type"],
-    description: args.name.trim(),
-    evidence_question: args.evidence_question.trim(),
-    population: "",
-    intervention: "",
-    comparator: "",
-    outcomes: "",
-    owner: args.actor.name,
-    function: args.actor.function,
-    residual_ids: [],
-    gap_id: gap.id,
-    actor_name: args.actor.name,
-    actor_function: args.actor.function,
+  return withTimelineMutation(async () => {
+    const rationale = requireRationale(args.rationale);
+    if (!args.name.trim()) throw new Error("A name is required.");
+    if (!args.evidence_question.trim()) throw new Error("An evidence question is required.");
+    if (Boolean(args.start_date) !== Boolean(args.end_date)) {
+      throw new Error("Give both a start and an end date, or neither to leave it unscheduled.");
+    }
+    if (args.start_date && args.end_date) assertWindow(args.start_date, args.end_date, args.readout_date);
+    const state = await loadState();
+    const gap = state.gaps.find((row) => row.id === args.gap_id);
+    if (!gap) throw new Error(`Unknown gap ${args.gap_id}.`);
+    const tacticId = await createProposedTactic({
+      rationale,
+      name: args.name.trim(),
+      type: args.type as Tactic["type"],
+      description: args.name.trim(),
+      evidence_question: args.evidence_question.trim(),
+      population: "",
+      intervention: "",
+      comparator: "",
+      outcomes: "",
+      owner: args.actor.name,
+      function: args.actor.function,
+      residual_ids: [],
+      gap_id: gap.id,
+      actor_name: args.actor.name,
+      actor_function: args.actor.function,
+    });
+    await recordEdit({
+      workspace_id: args.workspace_id,
+      stage: "S10",
+      entity_type: "tactic",
+      entity_id: tacticId,
+      field: "created",
+      action: "add",
+      before: null,
+      after: `${args.name.trim()} → ${gap.id}`,
+      rationale,
+      actor: args.actor,
+    });
+    if (!args.start_date || !args.end_date) {
+      return { tactic_id: tacticId, activity_id: activityId(tacticId), scheduled: false };
+    }
+    await addTimelineActivity({
+      tactic_id: tacticId,
+      start_date: args.start_date,
+      end_date: args.end_date,
+      readout_date: args.readout_date ?? null,
+      schedule_rationale: args.schedule_rationale ?? null,
+      rationale,
+      actor: args.actor,
+      workspace_id: args.workspace_id,
+    });
+    return { tactic_id: tacticId, activity_id: activityId(tacticId), scheduled: true };
   });
-  await recordEdit({
-    workspace_id: args.workspace_id,
-    stage: "S10",
-    entity_type: "tactic",
-    entity_id: tacticId,
-    field: "created",
-    action: "add",
-    before: null,
-    after: `${args.name.trim()} → ${gap.id}`,
-    rationale,
-    actor: args.actor,
-  });
-  if (!args.start_date || !args.end_date) {
-    return { tactic_id: tacticId, activity_id: activityId(tacticId), scheduled: false };
-  }
-  await addTimelineActivity({
-    tactic_id: tacticId,
-    start_date: args.start_date,
-    end_date: args.end_date,
-    readout_date: args.readout_date ?? null,
-    schedule_rationale: args.schedule_rationale ?? null,
-    rationale,
-    actor: args.actor,
-    workspace_id: args.workspace_id,
-  });
-  return { tactic_id: tacticId, activity_id: activityId(tacticId), scheduled: true };
 }
 
 /**
@@ -1062,50 +1097,52 @@ export async function removeTimelineActivity(args: {
   actor: Actor;
   workspace_id?: string;
 }) {
-  const rationale = requireRationale(args.rationale);
-  const existing = await activityRow(args.id);
-  if (existing && rowMeta(existing).removed === true) throw new Error(`${args.id} is already off the timeline.`);
-  if (!existing) {
-    // A pending activity has no row yet: keep an undated one that says it was removed.
-    const [state, placements, overrides] = await Promise.all([loadState(), listPlacements(), storedActivities()]);
-    const candidate = timelineCandidates({ state, placements, overrides }).find((row) => row.id === args.id);
-    if (!candidate) throw new Error(`Unknown activity ${args.id}.`);
-    await db()
-      .insert(t.timelineActivities)
-      .values({
-        id: args.id,
-        tactic_id: candidate.tactic.id,
-        gap_ids: candidate.gap_ids,
-        lane: candidate.band,
-        start_date: "",
-        end_date: "",
-        readout_date: null,
-        depends_on: [],
-        band: candidate.band,
-        meta: { removed: true, removed_reason: rationale },
-        updated_by: args.actor.name,
-        updated_at: nowIso(),
-      });
-  } else {
-    const meta = { ...rowMeta(existing), removed: true, removed_reason: rationale };
-    await db()
-      .update(t.timelineActivities)
-      .set({ meta, updated_by: args.actor.name, updated_at: nowIso() })
-      .where(eq(t.timelineActivities.id, args.id));
-  }
-  await recordEdit({
-    workspace_id: args.workspace_id,
-    stage: "S10",
-    entity_type: "timeline_activity",
-    entity_id: args.id,
-    field: "on_timeline",
-    action: "edit",
-    before: existing ? `${existing.start_date} → ${existing.end_date}` : "not dated",
-    after: "removed",
-    rationale,
-    actor: args.actor,
+  return withTimelineMutation(async () => {
+    const rationale = requireRationale(args.rationale);
+    const existing = await activityRow(args.id);
+    if (existing && rowMeta(existing).removed === true) throw new Error(`${args.id} is already off the timeline.`);
+    if (!existing) {
+      // A pending activity has no row yet: keep an undated one that says it was removed.
+      const [state, placements, overrides] = await Promise.all([loadState(), listPlacements(), storedActivities()]);
+      const candidate = timelineCandidates({ state, placements, overrides }).find((row) => row.id === args.id);
+      if (!candidate) throw new Error(`Unknown activity ${args.id}.`);
+      await db()
+        .insert(t.timelineActivities)
+        .values({
+          id: args.id,
+          tactic_id: candidate.tactic.id,
+          gap_ids: candidate.gap_ids,
+          lane: candidate.band,
+          start_date: "",
+          end_date: "",
+          readout_date: null,
+          depends_on: [],
+          band: candidate.band,
+          meta: { removed: true, removed_reason: rationale },
+          updated_by: args.actor.name,
+          updated_at: nowIso(),
+        });
+    } else {
+      const meta = { ...rowMeta(existing), removed: true, removed_reason: rationale };
+      await db()
+        .update(t.timelineActivities)
+        .set({ meta, updated_by: args.actor.name, updated_at: nowIso() })
+        .where(eq(t.timelineActivities.id, args.id));
+    }
+    await recordEdit({
+      workspace_id: args.workspace_id,
+      stage: "S10",
+      entity_type: "timeline_activity",
+      entity_id: args.id,
+      field: "on_timeline",
+      action: "edit",
+      before: existing ? `${existing.start_date} → ${existing.end_date}` : "not dated",
+      after: "removed",
+      rationale,
+      actor: args.actor,
+    });
+    return { id: args.id, removed: true };
   });
-  return { id: args.id, removed: true };
 }
 
 export type IegpPlanRecord = {
@@ -1318,49 +1355,51 @@ export async function reviewTimelineDependency(args: {
   actor: Actor;
   workspace_id?: string;
 }) {
-  const rationale = requireRationale(args.rationale);
-  const current = assertOnTimeline(await activityRow(args.id), args.id);
-  const saved = asSaved(current);
-  const proposals = savedProposals(saved);
-  const proposal = proposals.find((row) => row.id === args.upstream_id);
-  if (!proposal) throw new Error(`There is no proposed dependency of ${args.id} on ${args.upstream_id} to review.`);
-  const meta = rowMeta(current);
-  const before = acceptedDependencies(saved);
-  let dependsOn = before;
-  if (args.decision === "accept") {
-    const model = await timelineModel();
-    if (!model.activities.some((row) => row.id === args.upstream_id)) {
-      throw new Error(`${args.upstream_id} has no dates on the timeline, so nothing can wait on it yet.`);
+  return withTimelineMutation(async () => {
+    const rationale = requireRationale(args.rationale);
+    const current = assertOnTimeline(await activityRow(args.id), args.id);
+    const saved = asSaved(current);
+    const proposals = savedProposals(saved);
+    const proposal = proposals.find((row) => row.id === args.upstream_id);
+    if (!proposal) throw new Error(`There is no proposed dependency of ${args.id} on ${args.upstream_id} to review.`);
+    const meta = rowMeta(current);
+    const before = acceptedDependencies(saved);
+    let dependsOn = before;
+    if (args.decision === "accept") {
+      const model = await timelineModel();
+      if (!model.activities.some((row) => row.id === args.upstream_id)) {
+        throw new Error(`${args.upstream_id} has no dates on the timeline, so nothing can wait on it yet.`);
+      }
+      const graph = new Map(model.activities.map((activity) => [activity.id, activity.depends_on]));
+      graph.delete(args.id);
+      dependsOn = [...new Set([...before, args.upstream_id])];
+      if (wouldCycle(graph, args.id, dependsOn)) {
+        throw new Error("Accepting that dependency would create a cycle: the other activity already waits on this one.");
+      }
+      meta.depends_locked = true;
+      meta.dependency_reasons = { ...((meta.dependency_reasons as Record<string, string> | undefined) ?? {}), [args.upstream_id]: proposal.reason };
+    } else {
+      meta.rejected_dependencies = [...new Set([...((meta.rejected_dependencies as string[] | undefined) ?? []), args.upstream_id])];
     }
-    const graph = new Map(model.activities.map((activity) => [activity.id, activity.depends_on]));
-    graph.delete(args.id);
-    dependsOn = [...new Set([...before, args.upstream_id])];
-    if (wouldCycle(graph, args.id, dependsOn)) {
-      throw new Error("Accepting that dependency would create a cycle: the other activity already waits on this one.");
-    }
-    meta.depends_locked = true;
-    meta.dependency_reasons = { ...((meta.dependency_reasons as Record<string, string> | undefined) ?? {}), [args.upstream_id]: proposal.reason };
-  } else {
-    meta.rejected_dependencies = [...new Set([...((meta.rejected_dependencies as string[] | undefined) ?? []), args.upstream_id])];
-  }
-  meta.proposed_dependencies = proposals.filter((row) => row.id !== args.upstream_id);
-  await db()
-    .update(t.timelineActivities)
-    .set({ depends_on: dependsOn, meta, updated_by: args.actor.name, updated_at: nowIso() })
-    .where(eq(t.timelineActivities.id, args.id));
-  await recordEdit({
-    workspace_id: args.workspace_id,
-    stage: "S10",
-    entity_type: "timeline_activity",
-    entity_id: args.id,
-    field: "proposed_dependency",
-    action: args.decision,
-    before: `proposed: waits on ${args.upstream_id} (${proposal.reason})`,
-    after: args.decision === "accept" ? `waits on ${dependsOn.join(", ")}` : `rejected: ${args.upstream_id}`,
-    rationale,
-    actor: args.actor,
+    meta.proposed_dependencies = proposals.filter((row) => row.id !== args.upstream_id);
+    await db()
+      .update(t.timelineActivities)
+      .set({ depends_on: dependsOn, meta, updated_by: args.actor.name, updated_at: nowIso() })
+      .where(eq(t.timelineActivities.id, args.id));
+    await recordEdit({
+      workspace_id: args.workspace_id,
+      stage: "S10",
+      entity_type: "timeline_activity",
+      entity_id: args.id,
+      field: "proposed_dependency",
+      action: args.decision,
+      before: `proposed: waits on ${args.upstream_id} (${proposal.reason})`,
+      after: args.decision === "accept" ? `waits on ${dependsOn.join(", ")}` : `rejected: ${args.upstream_id}`,
+      rationale,
+      actor: args.actor,
+    });
+    return { id: args.id, depends_on: dependsOn, meta };
   });
-  return { id: args.id, depends_on: dependsOn, meta };
 }
 
 /**
@@ -1374,42 +1413,44 @@ export async function acceptTimelineEstimates(args: {
   actor: Actor;
   workspace_id?: string;
 }) {
-  const rationale = requireRationale(args.rationale);
-  await ensurePlatformSchema();
-  const rows = await db().select().from(t.timelineActivities);
-  const wanted = args.ids && args.ids.length > 0 ? new Set(args.ids) : null;
-  const accepted: string[] = [];
-  for (const row of rows) {
-    if (wanted && !wanted.has(row.id)) continue;
-    const meta = rowMeta(row);
-    if (meta.removed === true) continue;
-    const basis = meta.schedule_basis as TimelineActivity["meta"]["schedule_basis"] | undefined;
-    const fields = estimatedFields(basis);
-    if (!basis || fields.length === 0) continue;
-    meta.schedule_basis = {
-      start: basis.start === "model" ? "human" : basis.start,
-      end: basis.end === "model" ? "human" : basis.end,
-      readout: basis.readout === "model" ? "human" : basis.readout,
-    };
-    meta.estimate_stale = false;
-    await db()
-      .update(t.timelineActivities)
-      .set({ meta, updated_by: args.actor.name, updated_at: nowIso() })
-      .where(eq(t.timelineActivities.id, row.id));
-    await recordEdit({
-      workspace_id: args.workspace_id,
-      stage: "S10",
-      entity_type: "timeline_activity",
-      entity_id: row.id,
-      field: "schedule_basis",
-      action: "accept",
-      before: `model estimate (${fields.join(", ")}): ${row.start_date} → ${row.end_date} (readout ${row.readout_date ?? "—"})`,
-      after: "accepted as set by hand",
-      rationale,
-      actor: args.actor,
-    });
-    accepted.push(row.id);
-  }
-  if (wanted && accepted.length === 0) throw new Error("None of those activities carries a model estimate to accept.");
-  return { accepted };
+  return withTimelineMutation(async () => {
+    const rationale = requireRationale(args.rationale);
+    await ensurePlatformSchema();
+    const rows = await db().select().from(t.timelineActivities);
+    const wanted = args.ids && args.ids.length > 0 ? new Set(args.ids) : null;
+    const accepted: string[] = [];
+    for (const row of rows) {
+      if (wanted && !wanted.has(row.id)) continue;
+      const meta = rowMeta(row);
+      if (meta.removed === true) continue;
+      const basis = meta.schedule_basis as TimelineActivity["meta"]["schedule_basis"] | undefined;
+      const fields = estimatedFields(basis);
+      if (!basis || fields.length === 0) continue;
+      meta.schedule_basis = {
+        start: basis.start === "model" ? "human" : basis.start,
+        end: basis.end === "model" ? "human" : basis.end,
+        readout: basis.readout === "model" ? "human" : basis.readout,
+      };
+      meta.estimate_stale = false;
+      await db()
+        .update(t.timelineActivities)
+        .set({ meta, updated_by: args.actor.name, updated_at: nowIso() })
+        .where(eq(t.timelineActivities.id, row.id));
+      await recordEdit({
+        workspace_id: args.workspace_id,
+        stage: "S10",
+        entity_type: "timeline_activity",
+        entity_id: row.id,
+        field: "schedule_basis",
+        action: "accept",
+        before: `model estimate (${fields.join(", ")}): ${row.start_date} → ${row.end_date} (readout ${row.readout_date ?? "—"})`,
+        after: "accepted as set by hand",
+        rationale,
+        actor: args.actor,
+      });
+      accepted.push(row.id);
+    }
+    if (wanted && accepted.length === 0) throw new Error("None of those activities carries a model estimate to accept.");
+    return { accepted };
+  });
 }

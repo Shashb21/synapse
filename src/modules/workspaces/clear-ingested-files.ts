@@ -21,6 +21,10 @@ export async function clearIngestedFiles(): Promise<void> {
   await withWorkspaceTransaction(async () => {
     const locked = await db().execute(sql`select pg_try_advisory_xact_lock(hashtextextended(${`ingest:${schema}`}, 0)) as locked`);
     if (!locked[0]?.locked) throw new ApiGuardError(409, "ingest_busy", "An ingestion step is still running. Wait for it to finish, then retry clearing files.");
+    // Timeline editors replace metadata after authoritative reads. Own their
+    // schema lock before deriving deletion sets or rewriting dependencies, and
+    // before relationship locks so timeline-created tactics use the same order.
+    await db().execute(sql`select pg_advisory_xact_lock(hashtext(${`timeline_mutations:${schema}`}))`);
     await lockRelationships();
     // Temporary sets live only in this transaction and schema. Missing/truncated
     // historical outputs contribute no IDs, so uncertain legacy work is preserved.
