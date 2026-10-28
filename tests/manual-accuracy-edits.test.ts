@@ -1,3 +1,6 @@
+import { seedAccuracyEvidence } from "./support/accuracy-evidence";
+import { eq } from "drizzle-orm";
+import * as t from "@/accuracy/store/schema";
 import { describe, expect, it } from "vitest";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import { PATCH as claimsPatch, POST as claimsPost } from "@/app/api/accuracy/claims/route";
@@ -26,10 +29,10 @@ import { projectGanttFromTactics } from "@/accuracy/modules/gantt-project/engine
 import { mergeDedupeCandidates, type MergeCandidate } from "@/accuracy/modules/merge-dedupe/engine";
 import type { MergeDedupeOutput } from "@/accuracy/modules/merge-dedupe/module";
 import type { StatusDeriveOutput } from "@/accuracy/modules/status-derive/module";
-import { persistParseBlocks } from "@/accuracy/store/parse-store";
+import { editParseBlock, persistParseBlocks, readParseBlocksWithMeta } from "@/accuracy/store/parse-store";
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
-import { ensureAccuracySchema } from "@/accuracy/store/db";
+import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import { ownerAccess } from "@/modules/auth/owner";
 
 registerAccuracyStack();
@@ -79,6 +82,7 @@ async function runStatus(org_id: string, workspace_id: string) {
 
 /** What extract persists for an inventory tactic (AI, unprotected). */
 async function extractLikeTactic(workspace_id: string, name: string, extra: Record<string, unknown> = {}) {
+  const provenance = await seedAccuracyEvidence(workspace_id, ["AI quote"]);
   return insertClaim({
     workspace_id,
     claim_type: "tactic",
@@ -90,7 +94,7 @@ async function extractLikeTactic(workspace_id: string, name: string, extra: Reco
       type: "registry",
       evidence_question: "AI question",
       tactic_status: "ongoing",
-      provenance: [{ source_file_id: "src-x", block_id: "b-ai", quote: "AI quote" }],
+      provenance,
       ...extra,
     },
   });
@@ -211,6 +215,77 @@ describe("updateClaim / PATCH /api/accuracy/claims", () => {
       }),
     );
     expect(noRationale.status).toBe(400);
+  });
+
+  it.each([false, true])("POST manual creation retains an unresolved human quote (source associated: %s)", async (sourceAssociated) => {
+    const { workspace_id } = await freshWorkspace("manual-quote"); // Arrange
+    const [verified] = await seedAccuracyEvidence(workspace_id, ["Verified source evidence"]);
+    const quote = "Human annotation outside source text";
+    const res = await claimsPost(req("/api/accuracy/claims", "POST", { // Act
+      workspace_id,
+      claim_type: "gap",
+      statement: "Manual need with supporting annotation",
+      rationale: "Captured during the advisory board",
+      ...(sourceAssociated ? { source_file_id: verified!.source_file_id } : {}),
+      fields: { provenance_quote: quote },
+    }));
+    expect(res.status).toBe(200); // Assert
+    const body = await res.json() as { claim: { id: string } };
+    const row = (await getClaim(workspace_id, body.claim.id))!;
+    expect(row.source_file_id).toBe(sourceAssociated ? verified!.source_file_id : null);
+    expect(claimMetadata(row)).toMatchObject({
+      provenance: [{ source_file_id: sourceAssociated ? verified!.source_file_id : "manual", block_id: `manual:${row.id}`, quote, edited_by_human: true }],
+      human_locked: expect.arrayContaining(["statement", "provenance_quote"]),
+      edit_history: [{ action: "create" }],
+    });
+    const blocks = await readParseBlocksWithMeta(workspace_id, verified!.source_file_id);
+    expect(blocks[0]?.provenance.cited_by).toContain(row.id);
+    await expect(editParseBlock({ workspace_id, block_id: verified!.block_id, text: "Changed source text", actor, rationale: "Attempt source revision" })).rejects.toThrow(/unresolved|orphan/i);
+    const trusted = await accuracyDb().select().from(t.accuracyProvenance).where(eq(t.accuracyProvenance.claim_id, row.id));
+    expect(trusted).toEqual([]);
+  });
+
+  it("manual creation atomically keeps verified companion citations beside an unresolved annotation", async () => {
+    const { workspace_id } = await freshWorkspace("manual-mixed-quotes");
+    const spans = await seedAccuracyEvidence(workspace_id, ["Original first quote", "Verified companion quote"]);
+    const row = await createManualClaim({
+      workspace_id,
+      claim_type: "gap",
+      statement: "Manual need",
+      rationale: "Reviewer added context",
+      actor,
+      metadata: { provenance: spans },
+      fields: { provenance_quote: "Unsupported human annotation" },
+    });
+    expect(claimMetadata(row).provenance).toEqual([{ ...spans[0], quote: "Unsupported human annotation", edited_by_human: true }, spans[1]]);
+    const trusted = await accuracyDb().select().from(t.accuracyProvenance).where(eq(t.accuracyProvenance.claim_id, row.id));
+    expect(trusted).toHaveLength(1);
+    expect(trusted[0]).toMatchObject(spans[1]!);
+  });
+
+  it("manual creation rejects an unverified nonhuman companion without partial writes", async () => {
+    const { workspace_id } = await freshWorkspace("manual-invalid-companion");
+    const spans = await seedAccuracyEvidence(workspace_id, ["Original first quote", "Actual companion text"]);
+    await expect(createManualClaim({
+      workspace_id, claim_type: "gap", statement: "Manual need", rationale: "Reviewer context", actor,
+      metadata: { provenance: [spans[0], { ...spans[1], quote: "Fabricated companion evidence" }] },
+      fields: { provenance_quote: "Unsupported human annotation" },
+    })).rejects.toThrow(/quote_not_substring/);
+    expect(await listClaims(workspace_id)).toEqual([]);
+    expect(await accuracyDb().select().from(t.accuracyProvenance).where(eq(t.accuracyProvenance.workspace_id, workspace_id))).toEqual([]);
+  });
+
+  it("raw POST and extraction inserts reject fabricated evidence even when marked edited_by_human", async () => {
+    const { workspace_id } = await freshWorkspace("raw-fabricated-quote");
+    const [verified] = await seedAccuracyEvidence(workspace_id, ["Actual source text"]);
+    const metadata = { provenance: [{ ...verified, quote: "Fabricated extraction quote", edited_by_human: true }] };
+    const res = await claimsPost(req("/api/accuracy/claims", "POST", {
+      workspace_id, claim_type: "gap", statement: "Fabricated gap", source_file_id: verified!.source_file_id, metadata,
+    }));
+    expect(res.status).toBe(400);
+    await expect(insertClaim({ workspace_id, claim_type: "gap", statement: "Fabricated extraction", source_file_id: verified!.source_file_id, metadata })).rejects.toThrow(/quote_not_substring/);
+    expect(await listClaims(workspace_id)).toEqual([]);
+    expect(await accuracyDb().select().from(t.accuracyProvenance).where(eq(t.accuracyProvenance.workspace_id, workspace_id))).toEqual([]);
   });
 
   it("preserveHumanLocks restores locked fields from an AI rewrite", () => {

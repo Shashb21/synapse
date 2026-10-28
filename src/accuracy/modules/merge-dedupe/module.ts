@@ -1,3 +1,5 @@
+/** Applies deduplication decisions while retaining validated evidence and human locks. */
+import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { agenticModule, mechanicalModule } from "../_factory";
 import {
@@ -12,6 +14,7 @@ import { judgeEquivalence } from "./judge";
 import { isTestStub } from "@/modules/kernel/llm";
 import {
   claimMetadata,
+  getClaimsByIds,
   isActiveLedgerClaim,
   listClaims,
   persistClaimPatch,
@@ -23,6 +26,7 @@ import {
   mergeRejectedPairs,
   preserveHumanLocks,
 } from "@/accuracy/store/claim-edit";
+import { ProvenanceValidationError, withProvenanceTransaction } from "@/accuracy/store/provenance-store";
 import { reassignCoverageClaimId } from "@/accuracy/store/coverage-store";
 import { nowIso } from "@/modules/kernel/ids";
 import { listSourceFiles } from "@/accuracy/store/source-store";
@@ -173,51 +177,62 @@ export const mergeDedupeModule = agenticModule({
     const result = mergeDedupeCandidates(candidates, { equivalent, blocked });
     const byId = new Map(active.map((row) => [row.id, row]));
 
-    for (const [duplicateId, survivorId] of Object.entries(result.absorbed)) {
-      const duplicate = byId.get(duplicateId);
-      if (!duplicate) continue;
-      // Defence in depth: never auto-merge away a validated or human-edited claim.
-      if (isHumanProtectedClaim(duplicate)) continue;
-      const meta = claimMetadata(duplicate);
-      const mergeRow = result.merges.find((m) => m.duplicate_id === duplicateId);
-      await persistClaimPatch({
-        workspace_id: input.workspace_id,
-        claim_id: duplicateId,
-        status: "merged",
-        metadata: {
-          ...meta,
-          pre_merge_status: duplicate.status,
-          merged_into: survivorId,
-          merge_reason: mergeRow?.reason ?? "transitive",
-          merge_rationale: mergeRow?.rationale ?? null,
-        },
-      });
-      const role = duplicate.claim_type === "tactic" ? "tactic" : "gap";
-      await reassignCoverageClaimId({
-        workspace_id: input.workspace_id,
-        from_id: duplicateId,
-        to_id: survivorId,
-        role,
-      });
-    }
-
-    for (const survivor of result.survivors) {
-      const row = byId.get(survivor.id);
-      if (!row) continue;
-      const meta = claimMetadata(row);
-      const absorbedIds = Object.entries(result.absorbed)
-        .filter(([, keep]) => keep === survivor.id)
-        .map(([dup]) => dup);
-      if (absorbedIds.length === 0 && survivor.provenance.length === provenanceFromMeta(meta).length) {
-        continue;
+    // Judging happens above, without holding a database transaction or source lock.
+    // Reject stale decisions before any merge flag, evidence, or coverage is saved.
+    await withProvenanceTransaction(input.workspace_id, async (transaction) => {
+      const touched = [...new Set([...Object.keys(result.absorbed), ...Object.values(result.absorbed)])];
+      const current = await getClaimsByIds(input.workspace_id, touched, transaction);
+      for (const id of touched) {
+        const before = byId.get(id);
+        const after = current.find((row) => row.id === id);
+        if (!before || !after || !isDeepStrictEqual(before, after)) {
+          throw new ProvenanceValidationError("stale_provenance_retry");
+        }
       }
-      const mergedFrom = [
-        ...new Set([...(Array.isArray(meta.merged_from) ? meta.merged_from : []), ...absorbedIds]),
-      ];
-      await persistClaimPatch({
-        workspace_id: input.workspace_id,
-        claim_id: survivor.id,
-        metadata: preserveHumanLocks(meta, {
+      for (const [duplicateId, survivorId] of Object.entries(result.absorbed)) {
+        const duplicate = byId.get(duplicateId);
+        if (!duplicate) continue;
+        // Defence in depth: never auto-merge away a validated or human-edited claim.
+        if (isHumanProtectedClaim(duplicate)) continue;
+        const meta = claimMetadata(duplicate);
+        const mergeRow = result.merges.find((m) => m.duplicate_id === duplicateId);
+        await persistClaimPatch({
+          workspace_id: input.workspace_id,
+          transaction,
+          claim_id: duplicateId,
+          status: "merged",
+          metadata: {
+            ...meta,
+            pre_merge_status: duplicate.status,
+            merged_into: survivorId,
+            merge_reason: mergeRow?.reason ?? "transitive",
+            merge_rationale: mergeRow?.rationale ?? null,
+          },
+        });
+        const role = duplicate.claim_type === "tactic" ? "tactic" : "gap";
+        await reassignCoverageClaimId({
+          workspace_id: input.workspace_id,
+          transaction,
+          from_id: duplicateId,
+          to_id: survivorId,
+          role,
+        });
+      }
+
+      for (const survivor of result.survivors) {
+        const row = byId.get(survivor.id);
+        if (!row) continue;
+        const meta = claimMetadata(row);
+        const absorbedIds = Object.entries(result.absorbed)
+          .filter(([, keep]) => keep === survivor.id)
+          .map(([dup]) => dup);
+        if (absorbedIds.length === 0 && survivor.provenance.length === provenanceFromMeta(meta).length) {
+          continue;
+        }
+        const mergedFrom = [
+          ...new Set([...(Array.isArray(meta.merged_from) ? meta.merged_from : []), ...absorbedIds]),
+        ];
+        const metadata = preserveHumanLocks(meta, {
           ...meta,
           external_id: survivor.external_id ?? meta.external_id ?? null,
           reference_pack_id: survivor.reference_pack_id ?? meta.reference_pack_id ?? null,
@@ -225,9 +240,18 @@ export const mergeDedupeModule = agenticModule({
           provenance: survivor.provenance,
           merged_from: mergedFrom,
           merged_into: null,
-        }),
-      });
-    }
+        });
+        await persistClaimPatch({
+          workspace_id: input.workspace_id,
+          transaction,
+          claim_id: survivor.id,
+          ...(isDeepStrictEqual(meta.provenance, metadata.provenance) ? {} : {
+            provenance_update: { previous: meta.provenance },
+          }),
+          metadata,
+        });
+      }
+    });
 
     // Proposals: persist on the protected duplicate; a human confirms or dismisses.
     const proposalByDuplicate = new Map(result.proposals.map((row) => [row.duplicate_id, row]));

@@ -1,14 +1,17 @@
+/** Extracts gaps whose evidence matches the supplied source blocks. */
 import { z } from "zod";
 import { agenticModule } from "../_factory";
 import { runShallowAgenticCycle } from "../../kernel/agentic";
 import { completeJson } from "../../kernel/routing";
 import { isTestStub } from "@/modules/kernel/llm";
-import { provenanceSpanSchema } from "../../store/quote-validator";
+import { provenanceSpanSchema, validateProvenance, type ParseBlock } from "../../store/quote-validator";
 import { newId } from "@/modules/kernel/ids";
 import type { AccuracyModuleContext } from "../../kernel/contracts";
 import { NEED_PROPOSER_SYSTEM, needProposerUser } from "./prompts";
 import { scorePackRecall } from "../../eval/reference-gold";
 import { readParseBlocks, readParseBlocksByIds } from "../../store/parse-store";
+
+type EvidenceBlock = Pick<ParseBlock, "id" | "workspace_id" | "source_file_id" | "heading" | "text">;
 
 export const needGapSchema = z.object({
   id: z.string(),
@@ -37,7 +40,7 @@ type NeedDraft = {
   gaps: z.infer<typeof proposerGapSchema>[];
 };
 
-function critiqueDraft(draft: NeedDraft, source_file_id: string): { score: number; issues: string[] } {
+function critiqueDraft(draft: NeedDraft, source_file_id: string, blocks: Map<string, EvidenceBlock>): { score: number; issues: string[] } {
   const issues: string[] = [];
   if (draft.gaps.length === 0) issues.push("no_gaps_proposed");
   const seen = new Set<string>();
@@ -49,7 +52,12 @@ function critiqueDraft(draft: NeedDraft, source_file_id: string): { score: numbe
     } else {
       for (const span of gap.provenance) {
         if (span.source_file_id !== source_file_id) issues.push(`${subject}:source_file_mismatch`);
-        if (!span.quote?.trim()) issues.push(`${subject}:empty_quote`);
+        const block = blocks.get(span.block_id);
+        if (!block) issues.push(`${subject}:unknown_block`);
+        else {
+          const evidence = validateProvenance({ block, span });
+          if (!evidence.ok) issues.push(`${subject}:${evidence.reason}`);
+        }
       }
     }
     const key = (gap.external_id || gap.statement).trim().toLowerCase();
@@ -77,7 +85,7 @@ function normalizeDraft(raw: unknown, source_file_id: string): NeedDraft {
   };
 }
 
-function judgeDraft(draft: NeedDraft): NeedGap[] {
+function judgeDraft(draft: NeedDraft, source_file_id: string, blocks: Map<string, EvidenceBlock>): NeedGap[] {
   const out: NeedGap[] = [];
   for (const gap of draft.gaps) {
     const parsed = needGapSchema.safeParse({
@@ -86,7 +94,10 @@ function judgeDraft(draft: NeedDraft): NeedGap[] {
       external_id: gap.external_id?.trim() || null,
       provenance: gap.provenance ?? [],
     });
-    if (parsed.success) out.push(parsed.data);
+    if (parsed.success && parsed.data.provenance.every((span) => {
+      const block = blocks.get(span.block_id);
+      return span.source_file_id === source_file_id && block !== undefined && validateProvenance({ block, span }).ok;
+    })) out.push(parsed.data);
   }
   return out;
 }
@@ -101,12 +112,7 @@ async function loadBlocksForPrompt(input: {
       ? await readParseBlocksByIds(input.workspace_id, input.block_ids)
       : await readParseBlocks(input.workspace_id, input.source_file_id);
   return rows
-    .filter((row) => row.source_file_id === input.source_file_id)
-    .map((row) => ({
-      id: row.id,
-      heading: row.heading,
-      text: row.text,
-    }));
+    .filter((row) => row.workspace_id === input.workspace_id && row.source_file_id === input.source_file_id);
 }
 
 async function proposeNeeds(
@@ -115,11 +121,11 @@ async function proposeNeeds(
   round: number,
   prior: NeedDraft | null,
   critiques: string[],
+  blocks: EvidenceBlock[],
 ): Promise<NeedDraft> {
   if (isTestStub()) {
     return { gaps: [] };
   }
-  const blocks = await loadBlocksForPrompt(input);
   const block_ids = input.block_ids.length > 0 ? input.block_ids : blocks.map((b) => b.id);
   const raw = await completeJson(ctx.complete, {
     system: NEED_PROPOSER_SYSTEM,
@@ -160,18 +166,20 @@ export const needExtractModule = agenticModule({
   outputSchema: needExtractOutputSchema,
   run: async (input, ctx) => {
     const stub = isTestStub();
+    const blocks = stub ? [] : await loadBlocksForPrompt(input);
+    const byId = new Map(blocks.map((block) => [block.id, block]));
 
     const cycle = await runShallowAgenticCycle<NeedDraft>({
-      proposer: (round, prior, critiques) => proposeNeeds(ctx, input, round, prior, critiques),
+      proposer: (round, prior, critiques) => proposeNeeds(ctx, input, round, prior, critiques, blocks),
       critic: async (draft) => {
         if (stub) return { score: 1, issues: [] };
-        return critiqueDraft(draft, input.source_file_id);
+        return critiqueDraft(draft, input.source_file_id, byId);
       },
       judge: async (draft) => draft,
     });
 
     ctx.run.note("agentic:trace", cycle.trace);
-    const gaps = stub ? [] : judgeDraft(cycle.final);
+    const gaps = stub ? [] : judgeDraft(cycle.final, input.source_file_id, byId);
     return {
       output: {
         workspace_id: input.workspace_id,

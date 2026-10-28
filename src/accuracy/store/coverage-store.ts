@@ -1,3 +1,5 @@
+/** Stores coverage decisions and reassigns their claim references during merges. */
+import type { AccuracyTransaction } from "./provenance-store";
 import { and, eq } from "drizzle-orm";
 import { accuracyDb, ensureAccuracySchema } from "./db";
 import * as t from "./schema";
@@ -182,9 +184,12 @@ export async function reassignCoverageClaimId(args: {
   from_id: string;
   to_id: string;
   role: "gap" | "tactic";
+  transaction?: AccuracyTransaction;
 }): Promise<number> {
   if (args.from_id === args.to_id) return 0;
-  const joins = await listCoverageJoins(args.workspace_id);
+  await ensureAccuracySchema();
+  const db = args.transaction ?? accuracyDb();
+  const joins = await db.select().from(t.accuracyCoverageJoins).where(eq(t.accuracyCoverageJoins.workspace_id, args.workspace_id));
   let updated = 0;
   for (const join of joins) {
     const fromGap = args.role === "gap" && join.gap_id === args.from_id;
@@ -196,11 +201,11 @@ export async function reassignCoverageClaimId(args: {
       (row) => row.id !== join.id && row.gap_id === nextGap && row.tactic_id === nextTactic,
     );
     if (collision) {
-      await accuracyDb()
+      await db
         .delete(t.accuracyCoverageJoins)
         .where(eq(t.accuracyCoverageJoins.id, join.id));
     } else {
-      await accuracyDb()
+      await db
         .update(t.accuracyCoverageJoins)
         .set({ gap_id: nextGap, tactic_id: nextTactic })
         .where(eq(t.accuracyCoverageJoins.id, join.id));

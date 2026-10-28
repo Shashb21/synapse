@@ -4,7 +4,9 @@
  * (`metadata.human_locked`). AI writers call `preserveHumanLocks` so a re-run
  * never clobbers what a human set by hand.
  */
-import { and, eq } from "drizzle-orm";
+import type { AccuracyTransaction } from "./provenance-store";
+import { isDeepStrictEqual } from "node:util";
+import { eq } from "drizzle-orm";
 import { accuracyDb, ensureAccuracySchema } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
@@ -13,7 +15,8 @@ import { TACTIC_STATUSES, TACTIC_TYPES } from "@/lib/iegp/enums";
 import {
   claimMetadata,
   getClaim,
-  insertClaim,
+  insertHumanAuthoredClaim,
+  persistClaimPatch,
   requireValidationRationale,
   type AccuracyClaimMetadata,
   type AccuracyClaimRow,
@@ -430,7 +433,7 @@ async function workspaceTacticIds(workspace_id: string): Promise<Set<string>> {
   return new Set(rows.filter((row) => row.claim_type === "tactic").map((row) => row.id));
 }
 
-/** Write statement/status/metadata for one claim (no lock logic — callers decide). */
+/** Write human fields while preserving current evidence or validating an intentional change. */
 export async function writeClaimRow(args: {
   workspace_id: string;
   claim: AccuracyClaimRow;
@@ -438,26 +441,21 @@ export async function writeClaimRow(args: {
   status?: string;
   metadata: AccuracyClaimMetadata;
   at?: string;
+  transaction?: AccuracyTransaction;
 }): Promise<AccuracyClaimRow> {
-  const at = args.at ?? nowIso();
-  const statement = args.statement ?? args.claim.statement;
-  const status = args.status ?? args.claim.status;
-  await accuracyDb()
-    .update(t.accuracyClaims)
-    .set({ statement, status, metadata: args.metadata as Record<string, unknown>, updated_at: at })
-    .where(
-      and(
-        eq(t.accuracyClaims.id, args.claim.id),
-        eq(t.accuracyClaims.workspace_id, args.workspace_id),
-      ),
-    );
-  return {
-    ...args.claim,
-    statement,
-    status,
-    metadata: args.metadata as Record<string, unknown>,
-    updated_at: at,
-  };
+  const previous = claimMetadata(args.claim).provenance;
+  return persistClaimPatch({
+    workspace_id: args.workspace_id,
+    claim_id: args.claim.id,
+    statement: args.statement,
+    status: args.status,
+    metadata: args.metadata,
+    at: args.at,
+    transaction: args.transaction,
+    ...(isDeepStrictEqual(previous, args.metadata.provenance) ? {} : {
+      provenance_update: { previous, allow_human_annotations: true },
+    }),
+  });
 }
 
 /**
@@ -580,7 +578,7 @@ export async function createManualClaim(args: {
     args.claim_type === "tactic" && typeof metadata.tactic_status === "string"
       ? metadata.tactic_status
       : "draft";
-  return insertClaim({
+  return insertHumanAuthoredClaim({
     id,
     workspace_id: args.workspace_id,
     claim_type: args.claim_type,

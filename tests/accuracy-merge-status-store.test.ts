@@ -1,3 +1,4 @@
+import { seedAccuracyEvidence } from "./support/accuracy-evidence";
 import { describe, expect, it } from "vitest";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import { claimMetadata, insertClaim, listClaims } from "@/accuracy/store/claim-store";
@@ -38,6 +39,7 @@ describe("merge-dedupe + status-derive persistence", () => {
     });
     // The older claim survives a merge; within the same millisecond the one with more provenance would.
     await new Promise((resolve) => setTimeout(resolve, 5));
+    const provenance = await seedAccuracyEvidence(workspace_id, ["NSCLC_CE_01 CNS Differentiation"]);
     const dup = await insertClaim({
       workspace_id,
       claim_type: "gap",
@@ -45,9 +47,7 @@ describe("merge-dedupe + status-derive persistence", () => {
       metadata: {
         external_id: "NSCLC_CE_01",
         reference_pack_id: BGB,
-        provenance: [
-          { source_file_id: "src-bgb", block_id: "b9", quote: "NSCLC_CE_01 CNS Differentiation" },
-        ],
+        provenance,
       },
     });
     const tisle = await insertClaim({
