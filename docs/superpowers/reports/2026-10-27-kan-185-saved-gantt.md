@@ -130,3 +130,29 @@ Artifacts:
 The initial direct `tsx` command was blocked by sandbox IPC permissions. Running Node with the tsx import loader avoided that IPC requirement; Chromium itself required the approved unsandboxed local launch. One temporary-script run exposed a tsx-generated `__name` helper missing in the browser evaluation context; adding that helper to the verification harness resolved it. These were verification-harness failures, and no production change was made for them.
 
 The separately running full suite was left untouched. Its eventual result remains the controller's responsibility to collect and reconcile with the earlier status above.
+
+## Browser acceptance follow-up (2026-10-28)
+
+The published browser regression failed because its test data reused `2027-01-01` as a supposedly new live date. The scheduler correctly moves the dependent Congress activity after the pivotal study's July readout, so its frozen end date is already `2027-01-01`. Rejecting that date anywhere in the saved SVG was therefore an invalid assertion. The regression now uses distinct live dates (`2028-01-11`, `2028-06-13`, `2028-07-17`) and first asserts that none occurs anywhere in the complete saved v1 snapshot. It checks the original saved activity dates, confirms the edited dates in live API data, excludes them from the saved SVG, checks the actual SVG supplied to PNG rendering, and requires them in the unsaved and v2 SVG exports.
+
+The first local rerun passed the saved/live/export regression but exposed a separate test reliability issue in the existing click-detail flow: its temporary `Saved v1 as final` message had cleared after the server refresh, while the persistent saved version, hash and audit link were present. That assertion now waits for persistent `latest plan v1 (final)` content; the existing hash and audit assertions remain.
+
+Final focused browser command:
+
+```sh
+E2E_PORT=43225 E2E_DATABASE_URL=postgres://synapse:synapse@127.0.0.1:55485/synapse_e2e npx playwright test --config=/private/tmp/kan185-playwright.config.ts e2e/accuracy/accuracy-gantt-save-final.spec.ts --project=chromium --reporter=line
+```
+
+Exit **0**, **3 passed** (authentication setup plus both browser tests), duration **19.3 seconds**. Screenshots and videos are in this worktree's ignored `test-results` directory. The temporary configuration imports the repository configuration, sets absolute test/output paths and starts `next dev --webpack` on port 43225. It is outside the repository. The default Turbopack startup rejects this worktree's `node_modules` symlink because it points outside the project root; webpack supports that existing dependency arrangement. This successful application browser run supersedes the earlier local browser limitation for the two focused tests, but does not establish a full-browser-suite result for the revised head.
+
+Additional fresh verification:
+
+```sh
+npx tsc --noEmit --incremental false
+npx eslint e2e/accuracy/accuracy-gantt-save-final.spec.ts
+git diff --check
+```
+
+All exit **0**, with no diagnostics. Only the browser test and this report changed in this follow-up; no application code, dependency or permanent configuration change was needed. No commit or push was made by the implementer.
+
+Controller reconciliation: the original full `npm test` run completed with **205 files passed / 1 skipped; 1,960 tests passed / 10 skipped**, duration 1093.27 seconds (log `/private/tmp/kan185-vitest-full.log`). GitHub push and PR unit jobs plus typecheck/lint passed on `6e28218`. Push browser run `40604513122` finished with **273 passed / 9 skipped / 1 failed**; its sole failure was the date-collision assertion corrected above. Full CI must be collected again for the revised commit before marking the Jira issue Done.
