@@ -1,7 +1,9 @@
+/** Persist parsed source blocks and preserve human edits and their quoted evidence. */
 import { createHash } from "node:crypto";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { boolean, pgTable, text } from "drizzle-orm/pg-core";
 import { accuracyDb, ensureAccuracySchema } from "./db";
+import { lockAccuracySource, type SourceConnection } from "./source-lock";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { ParseBlock } from "./quote-validator";
@@ -215,12 +217,19 @@ export async function persistParseBlocksDetailed(args: {
   source_file_id: string;
   parser: string;
   blocks: Omit<ParseBlock, "workspace_id">[];
-}): Promise<PersistParseBlocksResult> {
+}, connection?: SourceConnection): Promise<PersistParseBlocksResult> {
   await ensureParseSchema();
-  const db = accuracyDb();
+  if (!connection) {
+    const sourceId = args.source_file_id;
+    return accuracyDb().transaction(async (tx) => {
+      await lockAccuracySource(tx, args.workspace_id, sourceId);
+      return persistParseBlocksDetailed(args, tx);
+    });
+  }
+  const db = connection;
   const created_at = nowIso();
-  const existing = await readParseBlocks(args.workspace_id, args.source_file_id);
-  const metas = await readMetaForSource(args.workspace_id, args.source_file_id);
+  const existing = await readParseBlocks(args.workspace_id, args.source_file_id, db);
+  const metas = await readMetaForSource(args.workspace_id, args.source_file_id, db);
   const metaById = new Map(metas.map((m) => [m.block_id, m]));
 
   if (existing.length === 0 && metas.length === 0) {
@@ -241,7 +250,7 @@ export async function persistParseBlocksDetailed(args: {
   }
 
   const cited = new Set(
-    (await dependentsFor(args.workspace_id, existing.map((b) => b.id))).map((d) => d.block_id),
+    (await dependentsFor(args.workspace_id, existing.map((b) => b.id), db)).map((d) => d.block_id),
   );
   const kept: BlockRow[] = [];
   const replaced: string[] = [];
@@ -298,17 +307,16 @@ export async function persistParseBlocksDetailed(args: {
       created_at,
     });
   }
-  await renumber(args.workspace_id, args.source_file_id, new Set(kept.map((b) => b.id)));
+  await renumber(args.workspace_id, args.source_file_id, new Set(kept.map((b) => b.id)), db);
   return { inserted: fresh.length, kept_human, kept_cited, skipped_duplicates };
 }
 
 /** Rewrites indices 0..n-1 in current order; on ties kept (human/cited) blocks come first. */
-async function renumber(workspace_id: string, source_file_id: string, preferred: Set<string> = new Set()) {
-  const rows = await readParseBlocks(workspace_id, source_file_id);
+async function renumber(workspace_id: string, source_file_id: string, preferred: Set<string> = new Set(), db: SourceConnection = accuracyDb()) {
+  const rows = await readParseBlocks(workspace_id, source_file_id, db);
   const ordered = [...rows].sort(
     (a, b) => a.index - b.index || Number(preferred.has(b.id)) - Number(preferred.has(a.id)),
   );
-  const db = accuracyDb();
   for (const [index, row] of ordered.entries()) {
     if (row.index !== index) {
       await db.update(t.accuracyParseBlocks).set({ index }).where(eq(t.accuracyParseBlocks.id, row.id));
@@ -320,9 +328,9 @@ async function renumber(workspace_id: string, source_file_id: string, preferred:
 /* Reads                                                                      */
 /* ------------------------------------------------------------------------- */
 
-export async function readParseBlocks(workspace_id: string, source_file_id: string) {
+export async function readParseBlocks(workspace_id: string, source_file_id: string, db: SourceConnection = accuracyDb()) {
   await ensureAccuracySchema();
-  return accuracyDb()
+  return db
     .select()
     .from(t.accuracyParseBlocks)
     .where(
@@ -358,9 +366,9 @@ export async function readParseBlocksByIds(workspace_id: string, block_ids: stri
   });
 }
 
-async function readMetaForSource(workspace_id: string, source_file_id: string): Promise<MetaRow[]> {
+async function readMetaForSource(workspace_id: string, source_file_id: string, db: SourceConnection = accuracyDb()): Promise<MetaRow[]> {
   await ensureParseSchema();
-  return accuracyDb()
+  return db
     .select()
     .from(accuracyParseBlockMeta)
     .where(
@@ -438,9 +446,10 @@ export async function listDroppedUnits(workspace_id: string, source_file_id: str
 async function dependentsFor(
   workspace_id: string,
   block_ids: string[],
+  db: SourceConnection = accuracyDb(),
 ): Promise<(QuoteDependent & { block_id: string; provenance_id: string })[]> {
   if (block_ids.length === 0) return [];
-  const rows = await accuracyDb()
+  const rows = await db
     .select()
     .from(t.accuracyProvenance)
     .where(and(eq(t.accuracyProvenance.workspace_id, workspace_id), inArray(t.accuracyProvenance.block_id, block_ids)));
@@ -461,8 +470,8 @@ async function audit(args: {
   after?: string | null;
   rationale: string;
   actor: ParseEditActor;
-}) {
-  await accuracyDb().insert(accuracyParseBlockEdits).values({
+}, db: SourceConnection = accuracyDb()) {
+  await db.insert(accuracyParseBlockEdits).values({
     id: newId("pbe"),
     workspace_id: args.workspace_id,
     source_file_id: args.source_file_id,
@@ -485,8 +494,7 @@ async function markHuman(args: {
   origin?: "llm" | "human";
   deleted?: boolean;
   actor: ParseEditActor;
-}) {
-  const db = accuracyDb();
+}, db: SourceConnection = accuracyDb()) {
   const [meta] = await db
     .select()
     .from(accuracyParseBlockMeta)
@@ -524,9 +532,9 @@ async function markHuman(args: {
   });
 }
 
-async function requireBlock(workspace_id: string, block_id: string): Promise<BlockRow> {
+async function requireBlock(workspace_id: string, block_id: string, db: SourceConnection = accuracyDb()): Promise<BlockRow> {
   await ensureParseSchema();
-  const [block] = await accuracyDb()
+  const [block] = await db
     .select()
     .from(t.accuracyParseBlocks)
     .where(and(eq(t.accuracyParseBlocks.workspace_id, workspace_id), eq(t.accuracyParseBlocks.id, block_id)));
@@ -556,14 +564,23 @@ export async function editParseBlock(args: {
   heading?: string | null;
   rationale: string;
   actor: ParseEditActor;
-}) {
+}, connection?: SourceConnection): Promise<BlockRow> {
+  await ensureParseSchema();
+  if (!connection) {
+    const sourceId = (await requireBlock(args.workspace_id, args.block_id)).source_file_id;
+    return accuracyDb().transaction(async (tx) => {
+      await lockAccuracySource(tx, args.workspace_id, sourceId);
+      return editParseBlock(args, tx);
+    });
+  }
+  const db = connection;
   const rationale = requireEditRationale(args.rationale);
-  const block = await requireBlock(args.workspace_id, args.block_id);
+  const block = await requireBlock(args.workspace_id, args.block_id, db);
   const patch: Partial<Pick<BlockRow, "text" | "kind" | "heading">> = {};
   if (args.text !== undefined) {
     const next = requireText(args.text);
     if (next !== block.text) {
-      const orphans = orphanedQuotes(await dependentsFor(args.workspace_id, [block.id]), [next]);
+      const orphans = orphanedQuotes(await dependentsFor(args.workspace_id, [block.id], db), [next]);
       if (orphans.length) throw new ProvenanceConflictError(orphans);
       patch.text = next;
     }
@@ -572,8 +589,8 @@ export async function editParseBlock(args: {
   if (args.heading !== undefined && normHeading(args.heading) !== block.heading) patch.heading = normHeading(args.heading);
   if (Object.keys(patch).length === 0) throw new Error("Nothing changed: the block already has these values.");
 
-  await accuracyDb().update(t.accuracyParseBlocks).set(patch).where(eq(t.accuracyParseBlocks.id, block.id));
-  await markHuman({ block, current_text: patch.text ?? block.text, actor: args.actor });
+  await db.update(t.accuracyParseBlocks).set(patch).where(eq(t.accuracyParseBlocks.id, block.id));
+  await markHuman({ block, current_text: patch.text ?? block.text, actor: args.actor }, db);
   for (const field of Object.keys(patch) as (keyof typeof patch)[]) {
     await audit({
       workspace_id: args.workspace_id,
@@ -585,7 +602,7 @@ export async function editParseBlock(args: {
       after: patch[field] ?? null,
       rationale,
       actor: args.actor,
-    });
+    }, db);
   }
   return { ...block, ...patch };
 }
@@ -602,15 +619,23 @@ export async function splitParseBlock(args: {
   at_text?: string;
   rationale: string;
   actor: ParseEditActor;
-}) {
+}, connection?: SourceConnection): Promise<{ first_id: string; second_id: string }> {
+  await ensureParseSchema();
+  if (!connection) {
+    const sourceId = (await requireBlock(args.workspace_id, args.block_id)).source_file_id;
+    return accuracyDb().transaction(async (tx) => {
+      await lockAccuracySource(tx, args.workspace_id, sourceId);
+      return splitParseBlock(args, tx);
+    });
+  }
+  const db = connection;
   const rationale = requireEditRationale(args.rationale);
-  const block = await requireBlock(args.workspace_id, args.block_id);
+  const block = await requireBlock(args.workspace_id, args.block_id, db);
   const [first, second] = splitAtOffset(block.text, resolveSplitOffset(block.text, args));
-  const deps = await dependentsFor(args.workspace_id, [block.id]);
+  const deps = await dependentsFor(args.workspace_id, [block.id], db);
   const orphans = orphanedQuotes(deps, [first, second]);
   if (orphans.length) throw new ProvenanceConflictError(orphans);
 
-  const db = accuracyDb();
   const secondId = `${block.source_file_id}-${newId("H")}`;
   // Shift later blocks to make room right after the split block.
   await db
@@ -640,13 +665,13 @@ export async function splitParseBlock(args: {
       await db.update(t.accuracyProvenance).set({ block_id: secondId }).where(eq(t.accuracyProvenance.id, dep.provenance_id));
     }
   }
-  await markHuman({ block, current_text: first, actor: args.actor });
+  await markHuman({ block, current_text: first, actor: args.actor }, db);
   await markHuman({
     block: { ...block, id: secondId, text: second },
     current_text: second,
     origin: "human",
     actor: args.actor,
-  });
+  }, db);
   await audit({
     workspace_id: args.workspace_id,
     source_file_id: block.source_file_id,
@@ -657,7 +682,7 @@ export async function splitParseBlock(args: {
     after: JSON.stringify({ [block.id]: first, [secondId]: second }),
     rationale,
     actor: args.actor,
-  });
+  }, db);
   return { first_id: block.id, second_id: secondId };
 }
 
@@ -672,31 +697,39 @@ export async function mergeParseBlocks(args: {
   next_block_id?: string;
   rationale: string;
   actor: ParseEditActor;
-}) {
+}, connection?: SourceConnection): Promise<{ block_id: string; absorbed_id: string; text: string }> {
+  await ensureParseSchema();
+  if (!connection) {
+    const sourceId = (await requireBlock(args.workspace_id, args.block_id)).source_file_id;
+    return accuracyDb().transaction(async (tx) => {
+      await lockAccuracySource(tx, args.workspace_id, sourceId);
+      return mergeParseBlocks(args, tx);
+    });
+  }
+  const db = connection;
   const rationale = requireEditRationale(args.rationale);
-  const block = await requireBlock(args.workspace_id, args.block_id);
+  const block = await requireBlock(args.workspace_id, args.block_id, db);
   let next: BlockRow | undefined;
   if (args.next_block_id) {
-    next = await requireBlock(args.workspace_id, args.next_block_id);
+    next = await requireBlock(args.workspace_id, args.next_block_id, db);
     if (next.source_file_id !== block.source_file_id) throw new Error("Only blocks of the same source can be merged.");
   } else {
-    const rows = await readParseBlocks(args.workspace_id, block.source_file_id);
+    const rows = await readParseBlocks(args.workspace_id, block.source_file_id, db);
     next = rows.find((row) => row.index > block.index);
     if (!next) throw new Error("This is the last block: there is nothing after it to merge.");
   }
   if (next.id === block.id) throw new Error("A block cannot be merged with itself.");
   const merged = `${block.text}\n\n${next.text}`;
-  const db = accuracyDb();
   await db.update(t.accuracyParseBlocks).set({ text: merged }).where(eq(t.accuracyParseBlocks.id, block.id));
   await db
     .update(t.accuracyProvenance)
     .set({ block_id: block.id })
     .where(and(eq(t.accuracyProvenance.workspace_id, args.workspace_id), eq(t.accuracyProvenance.block_id, next.id)));
   await db.delete(t.accuracyParseBlocks).where(eq(t.accuracyParseBlocks.id, next.id));
-  await markHuman({ block, current_text: merged, actor: args.actor });
+  await markHuman({ block, current_text: merged, actor: args.actor }, db);
   // Tombstone the absorbed block so a re-parse does not bring it back as a duplicate.
-  await markHuman({ block: next, current_text: next.text, deleted: true, actor: args.actor });
-  await renumber(args.workspace_id, block.source_file_id);
+  await markHuman({ block: next, current_text: next.text, deleted: true, actor: args.actor }, db);
+  await renumber(args.workspace_id, block.source_file_id, new Set(), db);
   await audit({
     workspace_id: args.workspace_id,
     source_file_id: block.source_file_id,
@@ -707,7 +740,7 @@ export async function mergeParseBlocks(args: {
     after: merged,
     rationale,
     actor: args.actor,
-  });
+  }, db);
   return { block_id: block.id, absorbed_id: next.id, text: merged };
 }
 
@@ -717,14 +750,23 @@ export async function deleteParseBlock(args: {
   block_id: string;
   rationale: string;
   actor: ParseEditActor;
-}) {
+}, connection?: SourceConnection): Promise<{ deleted: string }> {
+  await ensureParseSchema();
+  if (!connection) {
+    const sourceId = (await requireBlock(args.workspace_id, args.block_id)).source_file_id;
+    return accuracyDb().transaction(async (tx) => {
+      await lockAccuracySource(tx, args.workspace_id, sourceId);
+      return deleteParseBlock(args, tx);
+    });
+  }
+  const db = connection;
   const rationale = requireEditRationale(args.rationale);
-  const block = await requireBlock(args.workspace_id, args.block_id);
-  const deps = await dependentsFor(args.workspace_id, [block.id]);
+  const block = await requireBlock(args.workspace_id, args.block_id, db);
+  const deps = await dependentsFor(args.workspace_id, [block.id], db);
   if (deps.length) throw new ProvenanceConflictError(deps);
-  await accuracyDb().delete(t.accuracyParseBlocks).where(eq(t.accuracyParseBlocks.id, block.id));
-  await markHuman({ block, current_text: block.text, deleted: true, actor: args.actor });
-  await renumber(args.workspace_id, block.source_file_id);
+  await db.delete(t.accuracyParseBlocks).where(eq(t.accuracyParseBlocks.id, block.id));
+  await markHuman({ block, current_text: block.text, deleted: true, actor: args.actor }, db);
+  await renumber(args.workspace_id, block.source_file_id, new Set(), db);
   await audit({
     workspace_id: args.workspace_id,
     source_file_id: block.source_file_id,
@@ -735,7 +777,7 @@ export async function deleteParseBlock(args: {
     after: null,
     rationale,
     actor: args.actor,
-  });
+  }, db);
   return { deleted: block.id };
 }
 
@@ -747,10 +789,10 @@ async function insertHumanBlock(args: {
   kind?: string;
   heading?: string | null;
   actor: ParseEditActor;
-}): Promise<BlockRow> {
+}, db: SourceConnection): Promise<BlockRow> {
   const text = requireText(args.text);
   const kind = requireKind(args.kind ?? "prose");
-  const rows = await readParseBlocks(args.workspace_id, args.source_file_id);
+  const rows = await readParseBlocks(args.workspace_id, args.source_file_id, db);
   let index = rows.length;
   if (args.after_block_id) {
     const after = rows.find((row) => row.id === args.after_block_id);
@@ -759,7 +801,6 @@ async function insertHumanBlock(args: {
   } else if (args.after_block_id === null) {
     index = 0;
   }
-  const db = accuracyDb();
   await db
     .update(t.accuracyParseBlocks)
     .set({ index: sql`${t.accuracyParseBlocks.index} + 1` })
@@ -782,13 +823,13 @@ async function insertHumanBlock(args: {
     created_at: nowIso(),
   };
   await db.insert(t.accuracyParseBlocks).values(row);
-  await markHuman({ block: row, current_text: text, origin: "human", actor: args.actor });
+  await markHuman({ block: row, current_text: text, origin: "human", actor: args.actor }, db);
   return row;
 }
 
-async function requireSource(workspace_id: string, source_file_id: string) {
+async function requireSource(workspace_id: string, source_file_id: string, db: SourceConnection = accuracyDb()) {
   await ensureParseSchema();
-  const [row] = await accuracyDb()
+  const [row] = await db
     .select()
     .from(t.accuracySourceFiles)
     .where(and(eq(t.accuracySourceFiles.workspace_id, workspace_id), eq(t.accuracySourceFiles.id, source_file_id)));
@@ -809,10 +850,18 @@ export async function addParseBlock(args: {
   heading?: string | null;
   rationale: string;
   actor: ParseEditActor;
-}) {
+}, connection?: SourceConnection): Promise<BlockRow> {
+  await ensureParseSchema();
+  if (!connection) {
+    return accuracyDb().transaction(async (tx) => {
+      await lockAccuracySource(tx, args.workspace_id, args.source_file_id);
+      return addParseBlock(args, tx);
+    });
+  }
+  const db = connection;
   const rationale = requireEditRationale(args.rationale);
-  await requireSource(args.workspace_id, args.source_file_id);
-  const row = await insertHumanBlock(args);
+  await requireSource(args.workspace_id, args.source_file_id, db);
+  const row = await insertHumanBlock(args, db);
   await audit({
     workspace_id: args.workspace_id,
     source_file_id: args.source_file_id,
@@ -823,7 +872,7 @@ export async function addParseBlock(args: {
     after: row.text,
     rationale,
     actor: args.actor,
-  });
+  }, db);
   return row;
 }
 
@@ -859,6 +908,14 @@ export async function persistDroppedUnits(args: {
   return stored;
 }
 
+async function requireDroppedUnit(workspaceId: string, droppedId: string) {
+  const [unit] = await accuracyDb().select().from(accuracyParseDropped).where(and(
+    eq(accuracyParseDropped.workspace_id, workspaceId), eq(accuracyParseDropped.id, droppedId),
+  ));
+  if (!unit) throw new Error(`Unknown dropped unit ${droppedId}.`);
+  return unit;
+}
+
 /** Restore a unit the model dropped as noise as a human block (appended, or after a block). */
 export async function restoreDroppedUnit(args: {
   workspace_id: string;
@@ -868,10 +925,19 @@ export async function restoreDroppedUnit(args: {
   heading?: string | null;
   rationale: string;
   actor: ParseEditActor;
-}) {
+}, connection?: SourceConnection): Promise<BlockRow> {
+  await ensureParseSchema();
+  if (!connection) {
+    const sourceId = (await requireDroppedUnit(args.workspace_id, args.dropped_id)).source_file_id;
+    return accuracyDb().transaction(async (tx) => {
+      await lockAccuracySource(tx, args.workspace_id, sourceId);
+      return restoreDroppedUnit(args, tx);
+    });
+  }
+  const db = connection;
   const rationale = requireEditRationale(args.rationale);
   await ensureParseSchema();
-  const [unit] = await accuracyDb()
+  const [unit] = await db
     .select()
     .from(accuracyParseDropped)
     .where(and(eq(accuracyParseDropped.workspace_id, args.workspace_id), eq(accuracyParseDropped.id, args.dropped_id)));
@@ -885,8 +951,8 @@ export async function restoreDroppedUnit(args: {
     kind: args.kind,
     heading: args.heading ?? unit.location,
     actor: args.actor,
-  });
-  await accuracyDb()
+  }, db);
+  await db
     .update(accuracyParseDropped)
     .set({ restored_block_id: row.id })
     .where(eq(accuracyParseDropped.id, unit.id));
@@ -900,7 +966,7 @@ export async function restoreDroppedUnit(args: {
     after: row.text,
     rationale,
     actor: args.actor,
-  });
+  }, db);
   return row;
 }
 
@@ -921,9 +987,9 @@ export type SourceStakeholder = {
   override_at: string | null;
 };
 
-export async function readSourceStakeholder(workspace_id: string, source_file_id: string): Promise<SourceStakeholder> {
+export async function readSourceStakeholder(workspace_id: string, source_file_id: string, db: SourceConnection = accuracyDb()): Promise<SourceStakeholder> {
   await ensureParseSchema();
-  const [row] = await accuracyDb()
+  const [row] = await db
     .select()
     .from(accuracySourceStakeholder)
     .where(
@@ -976,15 +1042,15 @@ export async function setSourceStakeholder(args: {
   stakeholder_function: string;
   rationale: string;
   actor: ParseEditActor;
-}) {
+}, db: SourceConnection = accuracyDb()) {
   const rationale = requireEditRationale(args.rationale);
   if (!(STAKEHOLDER_FUNCTIONS as readonly string[]).includes(args.stakeholder_function)) {
     throw new Error(`Unknown stakeholder function "${args.stakeholder_function}".`);
   }
-  await requireSource(args.workspace_id, args.source_file_id);
-  const before = await readSourceStakeholder(args.workspace_id, args.source_file_id);
+  await requireSource(args.workspace_id, args.source_file_id, db);
+  const before = await readSourceStakeholder(args.workspace_id, args.source_file_id, db);
   const at = nowIso();
-  await accuracyDb()
+  await db
     .insert(accuracySourceStakeholder)
     .values({
       source_file_id: args.source_file_id,
@@ -1013,8 +1079,8 @@ export async function setSourceStakeholder(args: {
     after: args.stakeholder_function,
     rationale,
     actor: args.actor,
-  });
-  return readSourceStakeholder(args.workspace_id, args.source_file_id);
+  }, db);
+  return readSourceStakeholder(args.workspace_id, args.source_file_id, db);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1024,6 +1090,8 @@ export async function setSourceStakeholder(args: {
 /**
  * Create a source from typed/pasted text with the blocks the user defined.
  * No LLM runs; every block is `origin: human`, `parser: "human"`.
+ * Publish the source, blocks, human metadata and audit together so readers cannot
+ * extract from an incomplete manual source.
  */
 export async function createManualSource(args: {
   workspace_id: string;
@@ -1043,55 +1111,56 @@ export async function createManualSource(args: {
   for (const block of blocks) requireKind(block.kind ?? "prose");
   const filename = args.filename.trim() || "typed-source.txt";
   const fullText = blocks.map((block) => block.text).join("\n\n");
-  const source = await insertSourceFile({
-    workspace_id: args.workspace_id,
-    org_id: args.org_id,
-    filename,
-    mime: "text/plain",
-    checksum: createHash("sha256").update(fullText).digest("hex"),
-    doc_role: args.doc_role ?? "other",
-  });
   await ensureParseSchema();
-  const created_at = nowIso();
-  const db = accuracyDb();
-  const ids: string[] = [];
-  for (const [index, block] of blocks.entries()) {
-    const row: BlockRow = {
-      id: `${source.id}-H${String(index + 1).padStart(3, "0")}`,
+  return accuracyDb().transaction(async (db) => {
+    const source = await insertSourceFile({
+      workspace_id: args.workspace_id,
+      org_id: args.org_id,
+      filename,
+      mime: "text/plain",
+      checksum: createHash("sha256").update(fullText).digest("hex"),
+      doc_role: args.doc_role ?? "other",
+    }, db);
+    const created_at = nowIso();
+    const ids: string[] = [];
+    for (const [index, block] of blocks.entries()) {
+      const row: BlockRow = {
+        id: `${source.id}-H${String(index + 1).padStart(3, "0")}`,
+        workspace_id: args.workspace_id,
+        source_file_id: source.id,
+        index,
+        kind: block.kind ?? "prose",
+        heading: normHeading(block.heading),
+        text: block.text,
+        parser: "human",
+        created_at,
+      };
+      await db.insert(t.accuracyParseBlocks).values(row);
+      await markHuman({ block: row, current_text: row.text, origin: "human", actor: args.actor }, db);
+      ids.push(row.id);
+    }
+    await audit({
       workspace_id: args.workspace_id,
       source_file_id: source.id,
-      index,
-      kind: block.kind ?? "prose",
-      heading: normHeading(block.heading),
-      text: block.text,
-      parser: "human",
-      created_at,
-    };
-    await db.insert(t.accuracyParseBlocks).values(row);
-    await markHuman({ block: row, current_text: row.text, origin: "human", actor: args.actor });
-    ids.push(row.id);
-  }
-  await audit({
-    workspace_id: args.workspace_id,
-    source_file_id: source.id,
-    block_id: null,
-    action: "manual_source",
-    field: "blocks",
-    before: null,
-    after: `${blocks.length} human-entered block(s)`,
-    rationale,
-    actor: args.actor,
-  });
-  if (args.stakeholder_function) {
-    await setSourceStakeholder({
-      workspace_id: args.workspace_id,
-      source_file_id: source.id,
-      stakeholder_function: args.stakeholder_function,
+      block_id: null,
+      action: "manual_source",
+      field: "blocks",
+      before: null,
+      after: `${blocks.length} human-entered block(s)`,
       rationale,
       actor: args.actor,
-    });
-  }
-  return { source, block_ids: ids };
+    }, db);
+    if (args.stakeholder_function) {
+      await setSourceStakeholder({
+        workspace_id: args.workspace_id,
+        source_file_id: source.id,
+        stakeholder_function: args.stakeholder_function,
+        rationale,
+        actor: args.actor,
+      }, db);
+    }
+    return { source, block_ids: ids };
+  });
 }
 
 /* ------------------------------------------------------------------------- */

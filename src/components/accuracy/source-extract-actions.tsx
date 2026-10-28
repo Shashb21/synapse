@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import type { LiveExtractGate } from "@/accuracy/kernel/extract-gate";
+import type { ExtractContinuation, ExtractKind } from "@/accuracy/store/extract-batch-store";
 import { postJson } from "@/lib/post-json";
 
 export function ExtractKeyGateBanner({ gate }: { gate: LiveExtractGate }) {
@@ -52,19 +53,25 @@ export function SourceExtractActions({
   const [error, setError] = useState<string | null>(null);
   const [connectPath, setConnectPath] = useState<string | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState<{ kinds: ExtractKind[]; continuation?: ExtractContinuation } | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [restartRequired, setRestartRequired] = useState(false);
   const extractReady = gate.ready;
 
-  function runExtract(kinds: Array<"need" | "inventory">) {
+  function runExtract(kinds: ExtractKind[], continuation?: ExtractContinuation) {
     setError(null);
     setConnectPath(null);
-    setSummary(null);
+    setRestartRequired(false);
+    if (!continuation) setSummary(null);
+    setAttempt({ kinds, continuation });
     startTransition(async () => {
       const res = await postJson("/api/accuracy/extract", {
           workspace_id: workspaceId,
           source_file_id: sourceFileId,
           kinds,
+          ...(continuation ? { continuation } : {}),
         });
-      const json = res.json as {
+      const json = (res.json && typeof res.json === "object" ? res.json : {}) as {
         ok?: boolean;
         error?: string;
         gaps_inserted?: number;
@@ -74,10 +81,22 @@ export function SourceExtractActions({
         gate?: string;
         connect_path?: string;
         runs?: Array<{ summary: string }>;
+        complete?: boolean;
+        block_count?: number;
+        blocks_processed?: number;
+        continuation?: ExtractContinuation | null;
+        restart_required?: boolean;
       };
       if (!res.ok || !json.ok) {
         setError(json.error ?? "Extract failed");
         if (json.connect_path) setConnectPath(json.connect_path);
+        if (json.restart_required) {
+          setRestartRequired(true);
+          setHasMore(false);
+          setAttempt({ kinds });
+        } else if (json.continuation) {
+          setAttempt({ kinds, continuation: json.continuation });
+        }
         return;
       }
       const parts = [
@@ -88,7 +107,11 @@ export function SourceExtractActions({
       const note = json.stub
         ? " (stub LLM — set a provider's API key in the server environment for live extract)"
         : via;
-      setSummary(`Extracted ${parts.join(" · ")}${note}`);
+      const more = Boolean(json.continuation) && !json.complete;
+      setHasMore(more);
+      setAttempt(more ? { kinds, continuation: json.continuation! } : null);
+      const progress = `${json.blocks_processed ?? blockCount} of ${json.block_count ?? blockCount} blocks processed`;
+      setSummary(`${more ? "Extraction partial" : "Extraction complete"} — ${progress}. Extracted ${parts.join(" · ")}${note}`);
       router.refresh();
     });
   }
@@ -104,6 +127,16 @@ export function SourceExtractActions({
   return (
     <div className="mt-2 grid gap-1">
       <div className="flex flex-wrap gap-2">
+        {attempt && (error || hasMore) ? (
+          <button
+            type="button"
+            disabled={pending || !extractReady}
+            onClick={() => runExtract(attempt.kinds, attempt.continuation)}
+            className="border border-foreground bg-foreground px-2 py-1 text-[11px] text-background disabled:opacity-50"
+          >
+            {pending ? "Extracting…" : restartRequired ? "Restart extraction" : error ? "Retry extraction" : "Continue extraction"}
+          </button>
+        ) : null}
         <button
           type="button"
           disabled={pending || !extractReady}
@@ -135,9 +168,10 @@ export function SourceExtractActions({
           Ledger →
         </Link>
       </div>
+      {pending ? <p role="status" className="text-[11px] text-muted-foreground">Extracting source batch…</p> : null}
       {error ? (
-        <p className="text-[11px] text-destructive" data-testid="extract-outcome">
-          {error}
+        <p role="alert" className="text-[11px] text-destructive" data-testid="extract-outcome">
+          Extraction failed. {error}
           {connectPath ? (
             <>
               {" "}
@@ -149,7 +183,7 @@ export function SourceExtractActions({
         </p>
       ) : null}
       {summary ? (
-        <p className="text-[11px] text-muted-foreground" data-testid="extract-outcome">
+        <p role="status" className="text-[11px] text-muted-foreground" data-testid="extract-outcome">
           {summary}
         </p>
       ) : null}

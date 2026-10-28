@@ -1,11 +1,13 @@
+/** Store source-file records and share the caller's transaction when publishing parsed sources. */
 import { and, desc, eq } from "drizzle-orm";
 import { accuracyDb, ensureAccuracySchema } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
-import { getWorkspaceOrgId } from "./tenant";
+import type { SourceConnection } from "./source-lock";
 
 export type SourceFileRow = typeof t.accuracySourceFiles.$inferSelect;
 
+/** Insert a source using the optional transaction for its workspace lookup and write. */
 export async function insertSourceFile(args: {
   workspace_id: string;
   org_id?: string;
@@ -14,9 +16,15 @@ export async function insertSourceFile(args: {
   checksum: string;
   doc_role?: string;
   reference_pack_id?: string | null;
-}): Promise<SourceFileRow> {
+}, connection?: SourceConnection): Promise<SourceFileRow> {
   await ensureAccuracySchema();
-  const org_id = args.org_id ?? (await getWorkspaceOrgId(args.workspace_id));
+  const db = connection ?? accuracyDb();
+  let org_id = args.org_id;
+  if (!org_id) {
+    const [workspace] = await db.select({ org_id: t.accuracyWorkspaces.org_id })
+      .from(t.accuracyWorkspaces).where(eq(t.accuracyWorkspaces.id, args.workspace_id));
+    org_id = workspace?.org_id;
+  }
   if (!org_id) throw new Error(`Unknown workspace: ${args.workspace_id}`);
   const row = {
     id: newId("src"),
@@ -29,7 +37,7 @@ export async function insertSourceFile(args: {
     uploaded_at: nowIso(),
     reference_pack_id: args.reference_pack_id ?? null,
   };
-  await accuracyDb().insert(t.accuracySourceFiles).values(row);
+  await db.insert(t.accuracySourceFiles).values(row);
   return row as SourceFileRow;
 }
 
