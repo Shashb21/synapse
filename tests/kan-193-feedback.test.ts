@@ -127,10 +127,16 @@ it("keeps immediate bulk feedback through credential-only refreshes and updates 
   expect(container.querySelector('[role="status"]')?.textContent).toContain("No configured provider");
 });
 
-it("drops a provider from its own draft fallback list when it becomes primary", () => {
+it("keeps a primary-as-backup visible until the owner explicitly removes it", () => {
   render({ ...route, fallbacks: ["anthropic-claude"] });
   selectProvider("anthropic-claude");
-  expect([...container.querySelectorAll("input")].at(-1)?.value).toBe("");
+  expect(container.querySelector("li")?.textContent).toContain("Anthropic · Claude");
+  expect(container.textContent).toContain("This backup is also the primary provider");
+  const save = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("Save route"))!;
+  expect(save.disabled).toBe(true);
+  act(() => container.querySelector<HTMLButtonElement>('[aria-label="Remove backup 1: Anthropic · Claude"]')!.click());
+  expect(container.querySelector("li")).toBeNull();
+  expect(save.disabled).toBe(false);
 });
 
 it("retires a route-save confirmation on unknown settings without losing the draft", async () => {

@@ -9,7 +9,7 @@ const keys = [
 ];
 const routes = STAGE_IDS.filter(stage => STAGES[stage].kind === "agentic").map(stage => ({ stage, provider_id: "xai-grok", model: "grok-4", fallbacks: ["anthropic-claude"] }));
 const enabled = { ...noAiSections(), gap_extraction: true };
-const input = { master: true, sections: enabled, routes, providers: keys };
+const input = { master: true, sections: enabled, routes, runtimeRoutes: routes, providers: keys };
 describe("KAN-193 customer availability", () => {
   it("keeps stored section counts while the master switch is off", () => {
     const summary = buildAiSummary({ ...input, master: false });

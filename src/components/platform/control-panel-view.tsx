@@ -64,7 +64,7 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
     {params.signed_in ? <p className="mb-4 border border-[var(--known)]/40 bg-card p-2 text-[12px] text-foreground rounded-lg">Signed in as {params.signed_in}.</p> : null}
     {params.sign_in_error ? <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">Sign-in failed. Please try signing in again.</p> : null}
     <div className="control-panel grid min-w-0 gap-8">
-      <AiAvailabilitySummary input={{ master: ai?.enabled ?? null, sections, routes: configs, providers: credentialProviders }} />
+      <AiAvailabilitySummary input={{ master: ai?.enabled ?? null, sections, routes: configs, runtimeRoutes: data.runtimeConfigs.status === "ready" ? data.runtimeConfigs.value : null, providers: credentialProviders }} />
       <ConfigurationRecovery loadId={randomUUID()} unavailable={unavailable} />
       {!identity || data.owner.status === "unavailable" ? <p className="text-sm text-[var(--unknown-foreground)]">Owner authorization unavailable. Changes are disabled until your identity and owner access can be confirmed.</p> : null}
       <AiSwitchPanel ai={ai} sections={sections} mayToggle={mayEdit} identity={{
@@ -84,6 +84,7 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
       /> : <p id="providers" role="status">Provider credential status unavailable. Retry configuration to try again.</p>}
       <RoutingPanel credentials={credentialProviders} routes={routes} masterEnabled={ai?.enabled ?? null} providers={PROVIDERS.map(provider => ({
         id: provider.id, label: provider.label, models: provider.models, default_model: provider.default_model, auth: provider.auth,
+        temperature_unsupported_models: provider.models.filter(model => provider.sendsTemperature?.(model) === false),
       }))} canRoute={mayEdit} canActivate={mayEdit} />
       {identity ? <SessionPanel actorName={identity.actor.name} role={identity.role} signedIn={identity.signed_in}
         demo={identity.demo} providers={loginOptions().providers} capabilities={capabilitiesOf(identity.role)} />

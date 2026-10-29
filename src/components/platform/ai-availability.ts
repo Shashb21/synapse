@@ -6,7 +6,10 @@ export type SummaryRoute = CredentialRoute & { stage: string };
 export type AiSummaryInput = {
   master: boolean | null;
   sections: AiSections | null;
+  /** Raw saved values describe stored preferences. */
   routes: SummaryRoute[] | null;
+  /** Server-normalized values describe execution credential consequences. */
+  runtimeRoutes: SummaryRoute[] | null;
   providers: CredentialProvider[] | null;
 };
 const UNVERIFIED = "Key presence only; provider access, quota and connectivity are unverified.";
@@ -23,14 +26,14 @@ export function credentialFeedback(route: CredentialRoute, providers: Credential
 
 /** Derive summary copy from independently known settings; unknown reads stay unknown. */
 export function buildAiSummary(input: AiSummaryInput) {
-  const { master, sections, routes, providers } = input;
+  const { master, sections, routes, runtimeRoutes, providers } = input;
   const enabled = sections ? AI_SECTIONS.filter(section => sections[section.id]) : null;
   const permitted = enabled?.filter(section => section.built);
   const modelStages = STAGE_IDS.filter(stageHasRoute);
   const modelRoutes = routes?.filter(route => modelStages.some(stage => stage === route.stage));
   const completeRoutes = modelRoutes && modelStages.every(stage => modelRoutes.some(route => route.stage === stage));
   const activeStages = permitted?.flatMap(section => [...section.stages]).filter(stage => modelStages.some(id => id === stage));
-  const activeRoutes = activeStages?.map(stage => modelRoutes?.find(route => route.stage === stage));
+  const activeRoutes = activeStages?.map(stage => runtimeRoutes?.find(route => route.stage === stage));
   const selected = activeRoutes?.map(route => route && providers ? selectCredentialRoute(route, providers).selected : null);
   const blocked = selected?.filter(route => !route).length ?? 0;
   const fallback = selected?.filter(route => route?.fallback).length ?? 0;
