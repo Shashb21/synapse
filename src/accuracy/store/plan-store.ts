@@ -1,4 +1,5 @@
-import { and, desc, eq } from "drizzle-orm";
+/** Stores immutable plan snapshots and serializes version allocation per workspace. */
+import { and, desc, eq, sql } from "drizzle-orm";
 import { accuracyDb, ensureAccuracySchema } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
@@ -31,6 +32,7 @@ export type AccuracyPlanRecord = {
   snapshot: AccuracyPlanSnapshot;
 };
 
+/** Return the highest committed version, or null for an empty workspace. */
 export async function latestAccuracyPlan(
   workspace_id: string,
 ): Promise<AccuracyPlanRecord | null> {
@@ -39,13 +41,14 @@ export async function latestAccuracyPlan(
     .select()
     .from(t.accuracyPlans)
     .where(eq(t.accuracyPlans.workspace_id, workspace_id))
-    .orderBy(desc(t.accuracyPlans.version))
+    .orderBy(desc(t.accuracyPlans.version), desc(t.accuracyPlans.saved_at), desc(t.accuracyPlans.id))
     .limit(1);
   const row = rows[0];
   if (!row) return null;
   return toPlanRecord(row);
 }
 
+/** List committed versions newest first, with deterministic legacy tie-breakers. */
 export async function listAccuracyPlans(
   workspace_id: string,
   limit = 20,
@@ -55,11 +58,17 @@ export async function listAccuracyPlans(
     .select()
     .from(t.accuracyPlans)
     .where(eq(t.accuracyPlans.workspace_id, workspace_id))
-    .orderBy(desc(t.accuracyPlans.version))
+    .orderBy(desc(t.accuracyPlans.version), desc(t.accuracyPlans.saved_at), desc(t.accuracyPlans.id))
     .limit(limit);
   return rows.map(toPlanRecord);
 }
 
+/**
+ * Allocate and persist one version atomically on the shared Accuracy database.
+ * A transaction-scoped advisory lock makes concurrent saves wait for this
+ * workspace's previous commit. An insert error rolls back without consuming
+ * a version; the transaction promise returns only after commit succeeds.
+ */
 export async function saveAccuracyPlan(args: {
   workspace_id: string;
   status: AccuracyPlanStatus;
@@ -69,31 +78,28 @@ export async function saveAccuracyPlan(args: {
 }): Promise<AccuracyPlanRecord> {
   const note = requireValidationRationale(args.note);
   await ensureAccuracySchema();
-  const previous = await latestAccuracyPlan(args.workspace_id);
-  const version = (previous?.version ?? 0) + 1;
-  const record = {
-    id: newId("plan"),
-    workspace_id: args.workspace_id,
-    version,
-    status: args.status,
-    snapshot: args.snapshot,
-    note,
-    saved_by: args.actor.name,
-    saved_function: args.actor.function,
-    saved_at: nowIso(),
-  };
-  await accuracyDb().insert(t.accuracyPlans).values(record);
-  return {
-    id: record.id,
-    workspace_id: record.workspace_id,
-    version: record.version,
-    status: record.status,
-    note: record.note,
-    saved_by: record.saved_by,
-    saved_function: record.saved_function,
-    saved_at: record.saved_at,
-    snapshot: record.snapshot,
-  };
+  return accuracyDb().transaction(async (db) => {
+    await db.execute(sql`select pg_advisory_xact_lock(hashtext('accuracy-plans'), hashtext(${args.workspace_id}))`);
+    const [previous] = await db.select({ version: t.accuracyPlans.version })
+      .from(t.accuracyPlans)
+      .where(eq(t.accuracyPlans.workspace_id, args.workspace_id))
+      .orderBy(desc(t.accuracyPlans.version))
+      .limit(1);
+    const record = {
+      id: newId("plan"),
+      workspace_id: args.workspace_id,
+      version: (previous?.version ?? 0) + 1,
+      status: args.status,
+      snapshot: args.snapshot,
+      note,
+      saved_by: args.actor.name,
+      saved_function: args.actor.function,
+      saved_at: nowIso(),
+    };
+    // Let database errors escape: Drizzle rolls back and releases the lock.
+    await db.insert(t.accuracyPlans).values(record);
+    return record;
+  });
 }
 
 function toPlanRecord(row: typeof t.accuracyPlans.$inferSelect): AccuracyPlanRecord {
