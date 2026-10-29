@@ -39,7 +39,10 @@ vi.mock("@/modules/kernel/ai-switch", () => ({
   storedAiSections: async () => ({ sections: {} }),
 }));
 vi.mock("@/modules/kernel/registry", () => ({ stageWiring: async () => [] }));
-vi.mock("@/modules/kernel/routing", () => ({ routeConfigs: async () => [], resolveRoute: vi.fn() }));
+vi.mock("@/modules/kernel/routing", async importOriginal => ({
+  ...await importOriginal<typeof import("@/modules/kernel/routing")>(),
+  routeConfigs: async () => [], resolveRoute: vi.fn(),
+}));
 import { loadControlPanel } from "@/components/platform/control-panel-load";
 it("marks real owner lookup failure unavailable in the control-panel loader without leaking its error", async () => {
   const passwordContext = { ...context, session: { ...context.session!, provider_id: "password" } };
