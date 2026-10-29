@@ -38,7 +38,7 @@ export class AccuracyRunRecorder implements RunHandle {
   private readonly collected: RunStep[] = [];
   private readonly startedAtMs = Date.now();
   private totalUsage: TokenUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-  private totalCostUsd = 0;
+  private totalCostUsd: number | null = 0;
 
   constructor(
     readonly meta: {
@@ -65,12 +65,19 @@ export class AccuracyRunRecorder implements RunHandle {
   }
 
   addCost(cost: CostEstimate) {
+    const previousSource = this.totalUsage.source;
+    const nextSource = cost.usage.source;
+    const source = previousSource && nextSource && previousSource !== nextSource
+      ? "mixed" : nextSource ?? previousSource;
     this.totalUsage = {
+      ...(source ? { source } : {}),
       prompt_tokens: this.totalUsage.prompt_tokens + cost.usage.prompt_tokens,
       completion_tokens: this.totalUsage.completion_tokens + cost.usage.completion_tokens,
       total_tokens: this.totalUsage.total_tokens + cost.usage.total_tokens,
     };
-    this.totalCostUsd += cost.cost_usd;
+    this.totalCostUsd = this.totalCostUsd === null || cost.cost_usd === null
+      ? null : Math.round((this.totalCostUsd + cost.cost_usd) * 1_000_000) / 1_000_000;
+    this.note("cost", cost);
   }
 
   async step<T>(name: string, fn: () => Promise<T> | T, detail?: string): Promise<T> {
@@ -175,7 +182,7 @@ export async function closeAccuracyRun(args: {
       steps: args.recorder.steps(),
       route: sanitizeRunTelemetry(args.route ?? null),
       token_usage,
-      cost_usd: String(cost_usd),
+      cost_usd: cost_usd === null ? null : String(cost_usd),
       evals: sanitizeRunTelemetry(args.evals ?? null),
     })
     .where(eq(t.accuracyModuleRuns.id, args.recorder.id));
