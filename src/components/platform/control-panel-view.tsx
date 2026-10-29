@@ -1,176 +1,91 @@
+/** Owner control panel: confirmed configuration, independent availability, and safe recovery. */
+import { randomUUID } from "node:crypto";
 import { ProviderPanel } from "@/components/platform/provider-panel";
 import { RoutingPanel, type StageRouteView } from "@/components/platform/routing-panel";
 import { SessionPanel } from "@/components/platform/session-panel";
 import { AiSwitchPanel } from "@/components/platform/ai-switch-panel";
-import { AiStatusProvider } from "@/components/platform/ai-status";
-import { aiSwitch, storedAiSections, type AiSwitch } from "@/modules/kernel/ai-switch";
-import { noAiSections } from "@/modules/kernel/ai-sections";
+import { ConfigurationRecovery } from "@/components/platform/configuration-recovery";
+import { loadControlPanel } from "@/components/platform/control-panel-load";
 import { STAGES, STAGE_IDS } from "@/modules/kernel/contracts";
-import { stageWiring, type StageWiring } from "@/modules/kernel/registry";
-import { previewRoute, routeConfigs, type RouteConfig } from "@/modules/kernel/routing";
+import { type RouteConfig } from "@/modules/kernel/routing";
 import { listProviderKeys } from "@/modules/llm/api-keys";
-import {
-  ALTERNATE_ROUTE_PROVIDER,
-  DEFAULT_ROUTE_PROVIDER,
-  PROVIDERS,
-} from "@/modules/llm/provider";
-import { capabilitiesOf, can } from "@/modules/auth/roles";
-import { loginOptions, sessionContext } from "@/modules/auth/session";
-import { ownerAccess } from "@/modules/auth/owner";
+import { ALTERNATE_ROUTE_PROVIDER, DEFAULT_ROUTE_PROVIDER, PROVIDERS } from "@/modules/llm/provider";
+import { capabilitiesOf } from "@/modules/auth/roles";
+import { loginOptions } from "@/modules/auth/session";
 
-export type ControlPanelSearchParams = {
-  signed_in?: string;
-  sign_in_error?: string;
-};
+export { AI_OFF_OWNER_MESSAGE } from "@/components/platform/control-panel-load";
 
-/** Owner control panel (/admin/control): the AI switch, provider key status and per-stage routing. Five LLM providers, Grok default, Claude one-click; keys come from the server environment and are never shown or entered here. */
+export type ControlPanelSearchParams = { signed_in?: string; sign_in_error?: string };
+
+/** Read settings on the server; never substitute invented defaults for a failed source. */
 export async function ControlPanelView({ params }: { params: ControlPanelSearchParams }) {
-  let wiring: StageWiring[] = STAGE_IDS.map((stage) => ({
-    stage,
-    active: null,
-    available: [],
-    activated_by: null,
-    activated_at: null,
-    has_evals: false,
-  }));
-  let configs: RouteConfig[] = STAGE_IDS.map((stage) => ({
-    stage,
-    provider_id: DEFAULT_ROUTE_PROVIDER,
-    model: "grok-4",
-    params: { temperature: 0, max_tokens: 8192 },
-    fallbacks: [ALTERNATE_ROUTE_PROVIDER],
-    updated_by: "default (locked: Grok)",
-    updated_at: "—",
-  }));
-  let identity = await sessionContext().catch(() => ({
-    session: null,
-    actor: { name: "Unsigned (demo)", function: "medical_affairs" as const },
-    role: "medical_affairs" as const,
-    demo: true,
-    signed_in: false,
-  }));
-
-  try {
-    [wiring, configs, identity] = await Promise.all([stageWiring(), routeConfigs(), sessionContext()]);
-  } catch {
-    // Control panel must render before Postgres is ready.
-  }
-  // Key presence only, read from the environment; never a key's value.
-  const keys = listProviderKeys();
-
-  const ai: AiSwitch = await aiSwitch().catch(() => ({
-    enabled: true,
-    updated_by: null,
-    updated_at: null,
-    rationale: null,
-  }));
-  const sections = await storedAiSections()
-    .then((row) => row.sections)
-    .catch(() => noAiSections());
-  // Platform configuration follows the master switch, not the owner's open workspace.
-  const resolved = await Promise.all(STAGE_IDS.map((stage) => previewRoute(stage, ai.enabled)));
-  // The owner holds every platform capability, whatever their plan role.
-  const owner = (await ownerAccess()).owner;
-  const may = (capability: Parameters<typeof can>[1]) => owner || can(identity.role, capability);
-
-  const routes: StageRouteView[] = STAGE_IDS.map((stage, index) => {
-    const config = configs.find((row) => row.stage === stage)!;
-    const wired = wiring.find((row) => row.stage === stage)!;
-    const route = resolved[index]!;
+  const data = await loadControlPanel();
+  const ai = data.master.status === "ready" ? data.master.value : null;
+  const sections = data.sections.status === "ready" ? data.sections.value : null;
+  const identity = data.identity.status === "ready" ? data.identity.value : null;
+  const configs = data.configs.status === "ready" ? data.configs.value : null;
+  // The control panel is owner-only. Unknown authorization never enables a mutation.
+  const mayEdit = Boolean(identity && data.owner.status === "ready" && data.owner.value.owner);
+  const keys = listProviderKeys(); // Presence only, never a credential's value.
+  const unavailable = [
+    ...(ai ? [] : ["master AI switch"]),
+    ...(sections ? [] : ["section switches"]),
+    ...(configs && STAGE_IDS.every(stage => configs.some(row => row.stage === stage)) ? [] : ["saved routes"]),
+    ...(data.wiring.status === "ready" && STAGE_IDS.every(stage => data.wiring.status === "ready" && data.wiring.value.some(row => row.stage === stage)) ? [] : ["module configuration"]),
+    ...(identity ? [] : ["identity"]),
+    ...(data.owner.status === "ready" ? [] : ["owner authorization"]),
+    ...(STAGE_IDS.some(stage => STAGES[stage].kind === "agentic" && data.resolutions[stage].status === "unavailable") ? ["route previews"] : []),
+  ];
+  const routes: StageRouteView[] = STAGE_IDS.map(stage => {
+    const config = configs?.find(row => row.stage === stage);
+    const wired = data.wiring.status === "ready" ? data.wiring.value.find(row => row.stage === stage) : undefined;
+    const resolution = data.resolutions[stage];
     return {
-      stage,
-      stage_title: `${stage} · ${STAGES[stage].title}`,
-      module_id: wired.active?.id ?? null,
-      module_version: wired.active?.version ?? null,
-      available_modules: wired.available.map((manifest) => ({
-        id: manifest.id,
-        version: manifest.version,
-        title: manifest.title,
-      })),
-      agentic: wired.active?.agentic ?? STAGES[stage].kind === "agentic",
-      provider_id: config.provider_id,
-      model: config.model,
-      temperature: config.params.temperature,
-      max_tokens: config.params.max_tokens,
-      fallbacks: config.fallbacks,
-      updated_by: config.updated_by,
-      updated_at: config.updated_at,
-      resolved_label: `${route.provider_label} · ${route.model}`,
-      // The owner gets owner copy, not the customer's "ask your administrator" text.
-      degraded_reason: !ai.enabled
-        ? AI_OFF_OWNER_MESSAGE
-        : route.degraded
-          ? (route.reason ?? "degraded to a fallback")
-          : null,
+      stage, stage_title: `${stage} · ${STAGES[stage].title}`,
+      config_available: Boolean(config), wiring_available: Boolean(wired),
+      module_id: wired?.active?.id ?? null, module_version: wired?.active?.version ?? null,
+      available_modules: wired?.available.map(manifest => ({ id: manifest.id, version: manifest.version, title: manifest.title })) ?? [],
+      agentic: wired?.active?.agentic ?? STAGES[stage].kind === "agentic",
+      provider_id: config?.provider_id ?? null, model: config?.model ?? null,
+      temperature: config?.params.temperature ?? null, max_tokens: config?.params.max_tokens ?? null,
+      fallbacks: config?.fallbacks ?? null, updated_by: config?.updated_by ?? null, updated_at: config?.updated_at ?? null,
+      resolved_label: resolution.status === "ready" ? resolution.value.label : null,
+      degraded_reason: resolution.status === "ready" ? resolution.value.message : null,
+      resolution_state: resolution.status === "ready" ? resolution.value.state : "unavailable",
     };
   });
 
-  return (
-    <>
-      {params.signed_in ? (
-        <p className="mb-4 border border-[var(--known)]/40 bg-card p-2 text-[12px] text-foreground rounded-lg">
-          Signed in as {params.signed_in}.
-        </p>
-      ) : null}
-      {params.sign_in_error ? (
-        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
-          Sign-in failed: {params.sign_in_error}
-        </p>
-      ) : null}
-
-      <div className="grid gap-8">
-        <AiSwitchPanel
-          ai={ai}
-          sections={sections}
-          mayToggle={may("toggle_ai")}
-          identity={{
-            signed_in: identity.signed_in,
-            actor_name: identity.actor.name,
-            actor_function: identity.actor.function,
-          }}
-        />
-        <SessionPanel
-          actorName={identity.actor.name}
-          role={identity.role}
-          signedIn={identity.signed_in}
-          demo={identity.demo}
-          providers={loginOptions().providers}
-          capabilities={capabilitiesOf(identity.role)}
-        />
-
-        {/* Providers and routes follow the master switch, not the owner's open workspace. */}
-        <AiStatusProvider enabled={ai.enabled} offBy={ai.enabled ? null : "platform"}>
-        <ProviderPanel
-          connections={keys.map((key) => ({ ...key, tier: key.tier ?? null }))}
-          defaults={{ primary: DEFAULT_ROUTE_PROVIDER, alternate: ALTERNATE_ROUTE_PROVIDER }}
-          canRoute={may("configure_routing")}
-          routedTo={routedToEveryStage(configs)}
-        />
-
-        <RoutingPanel
-          routes={routes}
-          providers={PROVIDERS.map((provider) => ({
-              id: provider.id,
-              label: provider.label,
-              models: provider.models,
-              default_model: provider.default_model,
-              auth: provider.auth,
-            }),
-          )}
-          canRoute={may("configure_routing")}
-          canActivate={may("activate_module")}
-        />
-        </AiStatusProvider>
-      </div>
-    </>
-  );
+  return <>
+    {params.signed_in ? <p className="mb-4 border border-[var(--known)]/40 bg-card p-2 text-[12px] text-foreground rounded-lg">Signed in as {params.signed_in}.</p> : null}
+    {params.sign_in_error ? <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">Sign-in failed: {params.sign_in_error}</p> : null}
+    <div className="control-panel grid min-w-0 gap-8">
+      <ConfigurationRecovery loadId={randomUUID()} unavailable={unavailable} />
+      {!identity || data.owner.status === "unavailable" ? <p className="text-sm text-[var(--unknown-foreground)]">Owner authorization unavailable. Changes are disabled until your identity and owner access can be confirmed.</p> : null}
+      <AiSwitchPanel ai={ai} sections={sections} mayToggle={mayEdit} identity={{
+        signed_in: identity?.signed_in ?? false,
+        actor_name: identity?.actor.name ?? "Identity unavailable",
+        actor_function: identity?.actor.function ?? "medical_affairs",
+      }} />
+      <ProviderPanel
+        masterEnabled={ai?.enabled ?? null}
+        connections={keys.map(key => ({ ...key, tier: key.tier ?? null }))}
+        defaults={{ primary: DEFAULT_ROUTE_PROVIDER, alternate: ALTERNATE_ROUTE_PROVIDER }}
+        canRoute={mayEdit}
+        routesAvailable={Boolean(configs && STAGE_IDS.every(stage => configs.some(row => row.stage === stage)))}
+        routedTo={configs ? routedToEveryStage(configs) : null}
+      />
+      <RoutingPanel routes={routes} masterEnabled={ai?.enabled ?? null} providers={PROVIDERS.map(provider => ({
+        id: provider.id, label: provider.label, models: provider.models, default_model: provider.default_model, auth: provider.auth,
+      }))} canRoute={mayEdit} canActivate={mayEdit} />
+      {identity ? <SessionPanel actorName={identity.actor.name} role={identity.role} signedIn={identity.signed_in}
+        demo={identity.demo} providers={loginOptions().providers} capabilities={capabilitiesOf(identity.role)} />
+        : <p className="text-sm text-muted-foreground">Session details unavailable. Retry configuration to confirm your signed-in identity.</p>}
+    </div>
+  </>;
 }
-
-/** Why a route is idle while the master switch is off, worded for the owner. */
-export const AI_OFF_OWNER_MESSAGE = "AI is off platform-wide. Turn it on above.";
 
 /** The provider every stage routes to, or null when they differ (KAN-60). */
 export function routedToEveryStage(configs: Pick<RouteConfig, "provider_id">[]): string | null {
   const first = configs[0]?.provider_id;
-  return first && configs.every((config) => config.provider_id === first) ? first : null;
+  return first && configs.every(config => config.provider_id === first) ? first : null;
 }

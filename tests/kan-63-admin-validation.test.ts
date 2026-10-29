@@ -55,8 +55,10 @@ import {
   stageHasRoute,
   type RouteConfig,
 } from "@/modules/kernel/routing";
-import { AI_OFF_MESSAGE } from "@/modules/kernel/ai-switch";
+import { aiSwitch, AI_OFF_MESSAGE, setAiEnabled } from "@/modules/kernel/ai-switch";
 import { AI_OFF_OWNER_MESSAGE } from "@/components/platform/control-panel-view";
+import { loadControlPanel } from "@/components/platform/control-panel-load";
+import { STAGE_IDS } from "@/modules/kernel/contracts";
 import { SDLC_DOCS, SPEC_DOCS } from "@/components/admin/sdlc-docs";
 import { formatUtc } from "@/lib/format-time";
 
@@ -235,13 +237,29 @@ describe("KAN-63: routes only for stages that call a model", () => {
     expect(res.body.error).toBe("Unknown action connect_provider");
   });
 
-  it("the control panel's AI-off copy is for the owner, not the customer", () => {
+  it("the control panel's AI-off copy is for the owner, not the customer", async () => {
     expect(AI_OFF_OWNER_MESSAGE).toBe("AI is off platform-wide. Turn it on above.");
     expect(AI_OFF_MESSAGE).toMatch(/contact your Synapse administrator/);
     // KAN-68: the customer is not told AI is off, nor sent to a workspace owner with no switch.
     expect(AI_OFF_MESSAGE).not.toMatch(/\bAI\b|workspace owner/);
-    const view = readFileSync(join(process.cwd(), "src/components/platform/control-panel-view.tsx"), "utf8");
-    expect(view).toMatch(/!ai\.enabled\s*\?\s*AI_OFF_OWNER_MESSAGE/);
+    const previous = await aiSwitch();
+    try {
+      await setAiEnabled({ enabled: false, actor_name: "KAN-63 test" });
+      const panel = await loadControlPanel();
+      expect(panel.master).toMatchObject({ status: "ready", value: { enabled: false } });
+      for (const stage of STAGE_IDS) {
+        expect(panel.resolutions[stage], stage).toEqual({
+          status: "ready",
+          value: { state: "off", label: null, message: AI_OFF_OWNER_MESSAGE },
+        });
+      }
+    } finally {
+      await setAiEnabled({
+        enabled: previous.enabled,
+        actor_name: previous.updated_by ?? "KAN-63 test cleanup",
+        rationale: previous.rationale ?? undefined,
+      });
+    }
   });
 });
 
