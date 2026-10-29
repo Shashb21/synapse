@@ -20,7 +20,8 @@ import { insertClaim, persistClaimPatch } from "@/accuracy/store/claim-store";
 import { insertCoverageJoin } from "@/accuracy/store/coverage-store";
 import { latestAccuracyPlan } from "@/accuracy/store/plan-store";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
-import { ensureAccuracySchema } from "@/accuracy/store/db";
+import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
+import { accuracyClaims } from "@/accuracy/store/schema";
 import { registerAccuracyStack } from "@/accuracy";
 
 async function freshWorkspace(label: string) {
@@ -32,6 +33,28 @@ async function freshWorkspace(label: string) {
     slug: `${label}-${Date.now()}`,
   });
   return { org_id, workspace_id };
+}
+
+
+/** Build bulk-insert rows with deterministic timestamps for large-ledger regressions. */
+function ledgerClaim(
+  workspace_id: string,
+  index: number,
+  overrides: Partial<typeof accuracyClaims.$inferInsert> = {},
+): typeof accuracyClaims.$inferInsert {
+  const timestamp = new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString();
+  return {
+    id: `${workspace_id}-claim-${index}`,
+    workspace_id,
+    claim_type: "tactic",
+    statement: `Validated tactic ${index}`,
+    status: "validated",
+    validated: true,
+    metadata: { start: "2026-03-01", end: "2026-06-01" },
+    created_at: timestamp,
+    updated_at: timestamp,
+    ...overrides,
+  };
 }
 
 describe("gantt save-final guard", () => {
@@ -108,6 +131,64 @@ describe("gantt save-final guard", () => {
     expect(projected.activities).toHaveLength(1);
     expect(projected.validated_tactic_count).toBe(2);
     expect(projected.activities[0]?.start).toBe("2026-01-01");
+  });
+
+  it("saves an older validated tactic behind more than 200 newer opposite-type claims", async () => {
+    const { workspace_id } = await freshWorkspace("mixed-over-200");
+    const tactic = ledgerClaim(workspace_id, 0);
+    await accuracyDb().insert(accuracyClaims).values([
+      tactic,
+      ...Array.from({ length: 210 }, (_, index) => ledgerClaim(workspace_id, index + 1, {
+        claim_type: "gap", metadata: {},
+      })),
+    ]);
+
+    const saved = await saveFinalGanttPlan({
+      workspace_id, note: "Complete mixed ledger", actor: { name: "reviewer", function: "medical_affairs" },
+    });
+
+    expect(saved.activities.map((row) => row.tactic_id)).toEqual([tactic.id]);
+    expect(saved.plan.snapshot.tactic_ids).toEqual([tactic.id]);
+    expect(saved.plan.snapshot.counts).toEqual({ activities: 1, validated_tactics: 1 });
+  });
+
+  it("projects and freezes all activities, old labels, and validated undated IDs beyond 500 claims", async () => {
+    const { workspace_id } = await freshWorkspace("complete-over-500");
+    const gap = ledgerClaim(workspace_id, 0, { claim_type: "gap", statement: "Old covered gap", metadata: {} });
+    const dated = Array.from({ length: 505 }, (_, index) => ledgerClaim(workspace_id, index + 1));
+    const undated = ledgerClaim(workspace_id, 506, { metadata: {}, statement: "Validated undated" });
+    const controls = [
+      ledgerClaim(workspace_id, 507, { status: "draft", validated: false }),
+      ledgerClaim(workspace_id, 508, { status: "rejected" }),
+      ledgerClaim(workspace_id, 509, { status: "merged" }),
+    ];
+    await accuracyDb().insert(accuracyClaims).values([gap, ...dated, undated, ...controls]);
+    await insertCoverageJoin({ workspace_id, gap_id: gap.id, tactic_id: dated[0]!.id, overall: "covers", validated: true });
+    const expectedActivityIds = dated.map((row) => row.id).sort();
+    const expectedTacticIds = [...expectedActivityIds, undated.id].sort();
+    const expectedLabels = [gap, ...dated].map((row) => ({ id: row.id, claim_type: row.claim_type, statement: row.statement }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+
+    const projected = await projectWorkspaceGantt(workspace_id);
+
+    expect(projected.activities.map((row) => row.tactic_id).sort()).toEqual(expectedActivityIds);
+    expect(projected.validated_tactic_count).toBe(506);
+    expect(projected.tactic_count).toBe(507);
+    expect(projected.catalog).toEqual(expectedLabels);
+
+    const saved = await saveFinalGanttPlan({
+      workspace_id, note: "Complete large ledger", actor: { name: "reviewer", function: "medical_affairs" },
+    });
+
+    expect(saved.activities).toEqual(projected.activities);
+    expect(saved.activities.find((row) => row.tactic_id === dated[0]!.id)?.gap_ids).toEqual([gap.id]);
+    expect(saved.plan.snapshot.tactic_ids).toEqual(expectedTacticIds);
+    expect(saved.plan.snapshot.counts).toEqual({ activities: 505, validated_tactics: 506 });
+    expect(saved.plan.snapshot.labels).toEqual(expectedLabels);
+    expect(saved.snapshot_hash).toBe(hashGanttSnapshot({
+      workspace_id, activities: saved.activities, tactic_ids: expectedTacticIds,
+      counts: { activities: 505, validated_tactics: 506 }, labels: saved.plan.snapshot.labels,
+    }));
   });
 
   it("saves a final snapshot only from validated dated tactics", async () => {

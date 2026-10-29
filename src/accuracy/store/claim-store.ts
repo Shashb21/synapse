@@ -127,20 +127,27 @@ export async function insertClaim(args: {
   return row as AccuracyClaimRow;
 }
 
+/**
+ * List workspace claims, filtering by type before limiting the newest rows.
+ * Omitted limits retain the 200-row default; `null` explicitly loads all matches.
+ */
 export async function listClaims(
   workspace_id: string,
-  opts?: { claim_type?: AccuracyClaimType; limit?: number },
+  opts?: { claim_type?: AccuracyClaimType; limit?: number | null },
 ): Promise<AccuracyClaimRow[]> {
   await ensureAccuracySchema();
-  const limit = opts?.limit ?? 200;
-  const rows = await accuracyDb()
+  const limit = opts?.limit === undefined ? 200 : opts.limit;
+  const query = accuracyDb()
     .select()
     .from(t.accuracyClaims)
-    .where(eq(t.accuracyClaims.workspace_id, workspace_id))
-    .orderBy(desc(t.accuracyClaims.updated_at))
-    .limit(limit);
-  if (!opts?.claim_type) return rows;
-  return rows.filter((row) => row.claim_type === opts.claim_type);
+    .where(
+      and(
+        eq(t.accuracyClaims.workspace_id, workspace_id),
+        opts?.claim_type ? eq(t.accuracyClaims.claim_type, opts.claim_type) : undefined,
+      ),
+    )
+    .orderBy(desc(t.accuracyClaims.updated_at));
+  return limit === null ? query : query.limit(limit);
 }
 
 export async function getClaimsByIds(
