@@ -158,6 +158,31 @@ export async function saveFinalGanttPlan(args: {
   };
 }
 
+/**
+ * Read frozen display data and its metadata from the same saved plan.
+ * Live projection remains separate for editing and the next save. Legacy plans
+ * without labels deliberately use ID fallback rather than current claim labels.
+ */
+export async function readWorkspaceGantt(workspace_id: string) {
+  const [live, plan] = await Promise.all([
+    projectWorkspaceGantt(workspace_id),
+    workspaceLatestPlan(workspace_id),
+  ]);
+  return {
+    ...live,
+    ...(plan ? {
+      activities: plan.snapshot.activities,
+      catalog: plan.snapshot.labels ?? [],
+      validated_tactic_count: plan.snapshot.counts.validated_tactics,
+      tactic_count: plan.snapshot.tactic_ids.length,
+    } : {}),
+    live,
+    plan,
+    snapshot_hash: plan ? snapshotHashForPlan(plan) : null,
+    audit_bundle: plan ? auditBundleFromPlan(plan) : null,
+  };
+}
+
 export async function workspaceLatestPlan(workspace_id: string) {
   return latestAccuracyPlan(workspace_id);
 }

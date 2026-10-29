@@ -1,3 +1,4 @@
+/** @vitest-environment jsdom */
 import { describe, expect, it } from "vitest";
 import {
   activitiesToSvg,
@@ -41,6 +42,48 @@ describe("gantt SVG export", () => {
     expect(svg).toContain("2026-01-01");
     expect(svg).toContain("2026-12-01");
     expect(svg).toContain("readout 2027-01-15");
+  });
+
+  it("exports the selected catalog labels and falls back to IDs without live lookups", () => {
+    const activity = { id: "ACT-T1", tactic_id: "T1", start: "2026-01-01", end: "2026-06-01", readout: null, depends_on: [], gap_ids: [] };
+    expect(activitiesToSvg([activity], [{ id: "T1", claim_type: "tactic", statement: "Frozen study" }])).toContain("Frozen study");
+    expect(activitiesToSvg([activity], [])).toContain(">T1</text>");
+    expect(activitiesToSvg([activity], [{ id: "T1", claim_type: "tactic", statement: 'Frozen & <reviewed> "study"' }])).toContain("Frozen &amp; &lt;reviewed&gt; &quot;study&quot;");
+  });
+
+  it("keeps complete wrapped statements above their own bars and below the preceding row", () => {
+    const activity = { id: "ACT-T1", tactic_id: "T1", start: "2026-01-01", end: "2026-06-01", readout: null, depends_on: [], gap_ids: [] };
+    const statements = [
+      "A multicenter phase III randomized overall survival follow-up study for patients with advanced disease and extended longitudinal assessment of outcomes and safety",
+      "X".repeat(200),
+    ];
+    const svg = activitiesToSvg(
+      [activity, { ...activity, id: "ACT-T2", tactic_id: "T2" }],
+      statements.map((statement, index) => ({ id: `T${index + 1}`, claim_type: "tactic", statement })),
+    );
+    const document = new DOMParser().parseFromString(svg, "image/svg+xml");
+    const bars = [...document.querySelectorAll('rect[fill="#333"]')];
+    const labels = [...document.querySelectorAll('text[font-size="11"]')];
+    let previousBarBottom = 18;
+    bars.forEach((bar, index) => {
+      const barTop = Number(bar.getAttribute("y"));
+      const lines = labels.filter(label => {
+        const baseline = Number(label.getAttribute("y"));
+        return baseline > previousBarBottom && baseline < barTop;
+      });
+      expect(lines.length).toBeGreaterThan(1);
+      expect(lines.map(line => line.textContent).join(index === 0 ? " " : "")).toBe(statements[index]);
+      for (const line of lines) {
+        // Reserve ascent/descent space around every label, not only its baseline.
+        const baseline = Number(line.getAttribute("y"));
+        const fontSize = Number(line.getAttribute("font-size"));
+        expect(baseline - fontSize).toBeGreaterThan(previousBarBottom);
+        expect(baseline + fontSize).toBeLessThan(barTop);
+        expect([...line.textContent!].length * fontSize + Number(line.getAttribute("x"))).toBeLessThan(960);
+      }
+      previousBarBottom = barTop + Number(bar.getAttribute("height"));
+    });
+    expect(svgViewport(svg).height).toBeGreaterThan(previousBarBottom);
   });
 
   it("names PNG exports from workspace and plan version", () => {

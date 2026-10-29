@@ -2,10 +2,7 @@ import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { registerAccuracyStack } from "@/accuracy";
 import {
-  auditBundleFromPlan,
-  projectWorkspaceGantt,
-  snapshotHashForPlan,
-  workspaceLatestPlan,
+  readWorkspaceGantt,
 } from "@/accuracy/modules/gantt-project/save-final";
 
 export const runtime = "nodejs";
@@ -22,16 +19,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "workspace_id is required" }, { status: 400 });
   }
   try {
-    const [projection, plan] = await Promise.all([
-      projectWorkspaceGantt(workspace_id),
-      workspaceLatestPlan(workspace_id),
-    ]);
-    return NextResponse.json({
-      ...projection,
-      plan,
-      snapshot_hash: plan ? snapshotHashForPlan(plan) : null,
-      audit_bundle: plan ? auditBundleFromPlan(plan) : null,
-    });
+    return NextResponse.json(await readWorkspaceGantt(workspace_id));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Gantt projection failed";
     return NextResponse.json({ error: message }, { status: 400 });
