@@ -3,7 +3,9 @@ import { POST as uploadPost } from "@/app/api/accuracy/sources/upload/route";
 import { registerAccuracyStack } from "@/accuracy";
 import { countParseBlocks, listSourceFiles } from "@/accuracy/store/source-store";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
-import { ensureAccuracySchema } from "@/accuracy/store/db";
+import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
+import { eq } from "drizzle-orm";
+import * as t from "@/accuracy/store/schema";
 
 const mockParseLocal = vi.fn();
 const mockExtractUnits = vi.fn();
@@ -58,9 +60,10 @@ describe("accuracy source upload API", () => {
     expect(noFile.status).toBe(400);
   });
 
-  it("registers a DOCX source and persists local parse blocks", async () => {
+  it.each([9, 100_000])("registers a %i byte DOCX source and persists local parse blocks without raw telemetry", async (size) => {
     registerAccuracyStack();
     const { workspace_id } = await freshWorkspace("upload");
+    const bytes = Buffer.alloc(size, 65);
 
     mockParseLocal.mockResolvedValue({
       id: "DOC-local",
@@ -86,7 +89,7 @@ describe("accuracy source upload API", () => {
     form.set("doc_role", "medical");
     form.set(
       "file",
-      new File([Buffer.from("fake-docx")], "notes.docx", {
+      new File([bytes], "notes.docx", {
         type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       }),
     );
@@ -110,6 +113,13 @@ describe("accuracy source upload API", () => {
     expect(body.parser).toMatch(/local/i);
     expect(body.parse_error).toBeNull();
     expect(mockParseLocal).toHaveBeenCalledOnce();
+    expect(mockParseLocal.mock.calls[0][0].buffer).toEqual(bytes);
+    const [run] = await accuracyDb().select().from(t.accuracyModuleRuns)
+      .where(eq(t.accuracyModuleRuns.workspace_id, workspace_id));
+    expect(run.status).toBe("ok");
+    expect(run.input).toEqual(expect.objectContaining({ source_file_id: body.source_file_id, byte_count: size, checksum: expect.stringMatching(/^[a-f0-9]{64}$/) }));
+    expect(JSON.stringify({ input: run.input, steps: run.steps })).not.toContain("content_base64");
+    expect(JSON.stringify({ input: run.input, steps: run.steps })).not.toContain(bytes.toString("base64"));
 
     const sources = await listSourceFiles(workspace_id);
     expect(sources.some((s) => s.id === body.source_file_id)).toBe(true);
@@ -257,13 +267,14 @@ describe("accuracy source upload API", () => {
     expect(await countParseBlocks(workspace_id, body.source_file_id)).toBe(1);
   });
 
-  it("retains an eligible source when its parser rejects the contents", async () => {
+  it.each([18, 100_000])("retains an eligible source without raw bytes when its parser rejects %i bytes", async (size) => {
     registerAccuracyStack();
     const { workspace_id } = await freshWorkspace("parse-failure");
     mockParseLocal.mockRejectedValue(new Error("Malformed DOCX archive"));
     const form = new FormData();
     form.set("workspace_id", workspace_id);
-    form.set("file", new File(["malformed contents"], "broken.docx"));
+    const bytes = Buffer.alloc(size, 65);
+    form.set("file", new File([bytes], "broken.docx"));
 
     const res = await uploadPost(
       new Request("http://localhost/api/accuracy/sources/upload", { method: "POST", body: form }),
@@ -278,6 +289,13 @@ describe("accuracy source upload API", () => {
     expect(res.status).toBe(200);
     expect(body.ok).toBe(true);
     expect(body.parse_error).toBe("Malformed DOCX archive");
+    expect(mockParseLocal.mock.calls[0][0].buffer).toEqual(bytes);
+    const [run] = await accuracyDb().select().from(t.accuracyModuleRuns)
+      .where(eq(t.accuracyModuleRuns.workspace_id, workspace_id));
+    expect(run.status).toBe("error");
+    expect(run.input).toEqual(expect.objectContaining({ source_file_id: body.source_file_id, byte_count: size }));
+    expect(JSON.stringify({ input: run.input, steps: run.steps })).not.toContain("content_base64");
+    expect(JSON.stringify({ input: run.input, steps: run.steps })).not.toContain(bytes.toString("base64"));
     expect(body.block_count).toBe(0);
     expect(await listSourceFiles(workspace_id)).toEqual([
       expect.objectContaining({ id: body.source_file_id, filename: "broken.docx" }),

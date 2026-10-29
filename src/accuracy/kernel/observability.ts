@@ -1,8 +1,10 @@
-import { and, desc, eq, inArray, lt } from "drizzle-orm";
+/** Record byte-free run diagnostics and safely read historical module runs. */
+import { and, desc, eq, getTableColumns, inArray, lt, sql } from "drizzle-orm";
 import { accuracyDb, ensureAccuracySchema } from "../store/db";
 import * as t from "../store/schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { rollupAccuracyRunCost, type AccuracyCostRollup } from "./cost-rollup";
+import { historicParseMetadata, parseRunMetadata, sanitizeRunTelemetry } from "./run-telemetry";
 import type {
   Actor,
   AgentRole,
@@ -24,11 +26,13 @@ const MAX_STEP_BYTES = 40_000;
 
 function trim(data: unknown): unknown {
   if (data === undefined) return null;
+  data = sanitizeRunTelemetry(data);
   const json = JSON.stringify(data) ?? "null";
   if (json.length <= MAX_STEP_BYTES) return data;
   return { truncated: true, bytes: json.length, preview: json.slice(0, 2_000) };
 }
 
+/** Own the telemetry trust boundary while leaving module processing input intact. */
 export class AccuracyRunRecorder implements RunHandle {
   readonly id: string;
   private readonly collected: RunStep[] = [];
@@ -50,6 +54,10 @@ export class AccuracyRunRecorder implements RunHandle {
     id?: string,
   ) {
     this.id = id ?? newId("arun");
+    this.meta = {
+      ...meta,
+      input: meta.call_kind === "parse" ? parseRunMetadata(meta.input) : sanitizeRunTelemetry(meta.input),
+    };
   }
 
   get workspace_id(): string {
@@ -84,7 +92,7 @@ export class AccuracyRunRecorder implements RunHandle {
         duration_ms: Date.now() - began,
         detail: error instanceof Error ? error.message : String(error),
         // A failed model call is still kept whole; the step names it (KAN-91).
-        data: error && typeof error === "object" && "llm_call_id" in error ? { llm_call_id: (error as { llm_call_id: unknown }).llm_call_id } : null,
+        data: error && typeof error === "object" && "llm_call_id" in error ? trim({ llm_call_id: (error as { llm_call_id: unknown }).llm_call_id }) : null,
       });
       throw error;
     }
@@ -96,7 +104,7 @@ export class AccuracyRunRecorder implements RunHandle {
       at: nowIso(),
       duration_ms: null,
       detail: detail ?? null,
-      data: trim(data),
+      data: trim(this.meta.call_kind === "parse" && name === "input:accepted" ? parseRunMetadata(data) : data),
     });
   }
 
@@ -113,6 +121,7 @@ export class AccuracyRunRecorder implements RunHandle {
   }
 }
 
+/** Persist only the recorder-owned input projection before processing starts. */
 export async function openAccuracyRun(recorder: AccuracyRunRecorder) {
   await ensureAccuracySchema();
   await accuracyDb()
@@ -143,6 +152,7 @@ export async function openAccuracyRun(recorder: AccuracyRunRecorder) {
     });
 }
 
+/** Persist final diagnostics with document payload keys removed from structured fields. */
 export async function closeAccuracyRun(args: {
   recorder: AccuracyRunRecorder;
   status: RunStatus;
@@ -161,12 +171,12 @@ export async function closeAccuracyRun(args: {
       duration_ms: args.recorder.durationMs(),
       summary: args.summary ?? null,
       error: args.error ?? null,
-      output: args.output ?? null,
+      output: sanitizeRunTelemetry(args.output ?? null),
       steps: args.recorder.steps(),
-      route: args.route ?? null,
+      route: sanitizeRunTelemetry(args.route ?? null),
       token_usage,
       cost_usd: String(cost_usd),
-      evals: args.evals ?? null,
+      evals: sanitizeRunTelemetry(args.evals ?? null),
     })
     .where(eq(t.accuracyModuleRuns.id, args.recorder.id));
 }
@@ -218,15 +228,37 @@ export async function sweepStaleAccuracyRuns(args?: {
   return { abandoned_ids: stale.map((row) => row.id), cutoff };
 }
 
+/** Read runs with historic parse payloads projected in SQL before transfer. */
 export async function listAccuracyRuns(workspace_id: string, limit = 40) {
   await ensureAccuracySchema();
   await sweepStaleAccuracyRuns({ workspace_id });
-  return accuracyDb()
-    .select()
+  const columns = getTableColumns(t.accuracyModuleRuns);
+  const metadata = historicParseMetadata(sql`${columns.input}`);
+  const runs = await accuracyDb()
+    .select({
+      ...columns,
+      input: sql<unknown>`case when ${columns.call_kind} = 'parse' then ${metadata} else ${columns.input} end`,
+      // Older accepted-input steps can contain raw JSON or an unsafe truncated preview.
+      // Reuse the input metadata without materializing either form in the application.
+      steps: sql<unknown>`case when ${columns.call_kind} = 'parse' and jsonb_typeof(${columns.steps}) = 'array' then
+        coalesce((select jsonb_agg(case when step->>'name' = 'input:accepted'
+          then (step - 'data') || jsonb_build_object('data', ${metadata}) else step end order by ordinal)
+          from jsonb_array_elements(${columns.steps}) with ordinality as entries(step, ordinal)), '[]'::jsonb)
+        else ${columns.steps} end`,
+    })
     .from(t.accuracyModuleRuns)
     .where(eq(t.accuracyModuleRuns.workspace_id, workspace_id))
     .orderBy(desc(t.accuracyModuleRuns.started_at))
     .limit(limit);
+  return runs.map((run) => ({
+    ...run,
+    input: sanitizeRunTelemetry(run.input),
+    output: sanitizeRunTelemetry(run.output),
+    steps: sanitizeRunTelemetry(run.steps),
+    route: sanitizeRunTelemetry(run.route),
+    token_usage: sanitizeRunTelemetry(run.token_usage),
+    evals: sanitizeRunTelemetry(run.evals),
+  }));
 }
 
 export async function summarizeAccuracyRunCost(
