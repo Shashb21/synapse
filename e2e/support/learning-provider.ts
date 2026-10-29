@@ -10,7 +10,7 @@ export const CANDIDATE_INSTRUCTION = "Candidate instruction: separate timing fro
 export type LearningProviderCall = { system: string; user: string; purpose: "prompt-revision" | "priority-critic" | "priority-suggester" };
 
 /** Start a loopback-only provider; unrecognised prompts fail rather than inventing evidence. */
-export async function startLearningBrowserServer(port: number) {
+export async function startLearningBrowserServer() {
   const calls: LearningProviderCall[] = [];
   const provider = createServer(async (request, response) => {
     try {
@@ -87,16 +87,24 @@ export default { ...config, turbopack: { ...config.turbopack, root: ${JSON.strin
     const address = provider.address();
     if (!address || typeof address === "string") throw new Error("Fixture provider has no TCP address.");
     child = fork(resolve("e2e/support/learning-next-server.mjs"), [], {
-      env: { ...process.env, NODE_ENV: "development", SYNAPSE_TEST_STUB_LLM: "0", KAN80_BROWSER_PORT: String(port), KAN80_PROJECT_DIR: projectDir,
+      env: { ...process.env, NODE_ENV: "development", SYNAPSE_TEST_STUB_LLM: "0", KAN80_PROJECT_DIR: projectDir,
         XAI_API_KEY: "kan80-local-fixture", XAI_BASE_URL: `http://127.0.0.1:${address.port}/v1`, XAI_MODELS: "grok-4",
         ANTHROPIC_API_KEY: "", OPENAI_API_KEY: "", GEMINI_API_KEY: "", OPENROUTER_API_KEY: "", },
       stdio: ["ignore", "pipe", "pipe", "ipc"],
     });
     child.stdout?.on("data", chunk => { logs += String(chunk); });
     child.stderr?.on("data", chunk => { logs += String(chunk); });
-    await new Promise<void>((ready, reject) => {
+    const port = await new Promise<number>((ready, reject) => {
       const timer = setTimeout(() => reject(new Error(`Learning browser server startup timed out.\n${logs}`)), 90_000);
-      child!.once("message", () => { clearTimeout(timer); ready(); });
+      child!.once("message", (message: { ready?: boolean; port?: number }) => {
+        clearTimeout(timer);
+        const port = message?.port;
+        if (message?.ready === true && typeof port === "number" && Number.isInteger(port) && port > 0 && port < 65536) {
+          ready(port);
+        } else {
+          reject(new Error(`Learning browser server returned an invalid address.\n${logs}`));
+        }
+      });
       child!.once("exit", code => { clearTimeout(timer); reject(new Error(`Learning browser server exited (${code}).\n${logs}`)); });
       child!.once("error", error => { clearTimeout(timer); reject(error); });
     });

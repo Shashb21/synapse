@@ -10,8 +10,11 @@ import type { NeedExtractOutput } from "@/accuracy/modules/need-extract/module";
 import type { InventoryExtractOutput } from "@/accuracy/modules/inventory-extract/module";
 import type { MergeDedupeOutput } from "@/accuracy/modules/merge-dedupe/module";
 import type { StatusDeriveOutput } from "@/accuracy/modules/status-derive/module";
-import { insertClaim } from "@/accuracy/store/claim-store";
-import { readParseBlocks } from "@/accuracy/store/parse-store";
+import {
+  completedExtractKinds, extractContinuationSchema, extractPageProgress,
+  ExtractContinuationError, prepareExtractPage, retryExtractContinuation, saveExtractBatch,
+  type ExtractPage,
+} from "@/accuracy/store/extract-batch-store";
 import { listSourceFiles } from "@/accuracy/store/source-store";
 import { siThemeFromGapId } from "@/accuracy/domain/ledger-filters";
 import { NoRouteError } from "@/modules/llm/provider";
@@ -36,12 +39,11 @@ const bodySchema = z.object({
     .array(z.enum(["need", "inventory"]))
     .min(1)
     .default(["need", "inventory"]),
+  continuation: extractContinuationSchema.optional(),
   /** Ignored: the run is credited to the signed-in owner. */
   actor_name: z.string().optional(),
   actor_function: z.string().optional(),
 });
-
-const MAX_EXTRACT_BLOCKS = 80;
 
 /**
  * Run need_extract and/or inventory_extract for a source file's parse blocks,
@@ -50,6 +52,7 @@ const MAX_EXTRACT_BLOCKS = 80;
 export async function POST(req: Request) {
   const denied = await ownerGate();
   if (denied) return denied;
+  let page: ExtractPage | undefined;
   try {
     const body = await parseLabBody(req, bodySchema);
     // Extract is an AI step: with AI off, refuse before reading or writing anything.
@@ -63,20 +66,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Unknown source_file_id" }, { status: 404 });
     }
 
-    const allBlocks = await readParseBlocks(body.workspace_id, body.source_file_id);
-    if (allBlocks.length === 0) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "No parse blocks for this source — upload/re-parse before extracting.",
-        },
-        { status: 400 },
-      );
+    page = await prepareExtractPage({
+      workspace_id: body.workspace_id,
+      source_file_id: body.source_file_id,
+      reference_pack_id: source.reference_pack_id ?? null,
+      kinds: body.kinds,
+      continuation: body.continuation,
+    });
+    if (page.total === 0) {
+      return NextResponse.json({ ok: false, error: "No parse blocks for this source — upload/re-parse before extracting." }, { status: 400 });
     }
-
-    const sorted = [...allBlocks].sort((a, b) => a.index - b.index);
-    const blocks = sorted.slice(0, MAX_EXTRACT_BLOCKS);
-    const block_ids = blocks.map((b) => b.id);
+    const block_ids = page.blocks.map((block) => block.id);
 
     const gate = await inspectLiveExtractGate();
     if (!gate.ready) {
@@ -86,6 +86,7 @@ export async function POST(req: Request) {
     const actor = await labActor();
 
     const kinds = body.kinds;
+    const completed = await completedExtractKinds(page);
     let gaps_inserted = 0;
     let tactics_inserted = 0;
     const runs: Array<{
@@ -95,7 +96,7 @@ export async function POST(req: Request) {
       count: number;
     }> = [];
 
-    if (kinds.includes("need")) {
+    if (kinds.includes("need") && !completed.has("need")) {
       const result = await runAccuracyModule<NeedExtractOutput>({
         call_kind: "need_extract",
         agent_role: "proposer",
@@ -108,26 +109,19 @@ export async function POST(req: Request) {
         org_id,
         workspace_id: body.workspace_id,
       });
-      for (const gap of result.output.gaps) {
-        await insertClaim({
-          id: gap.id,
-          workspace_id: body.workspace_id,
-          claim_type: "gap",
-          statement: gap.statement,
-          status: "draft",
-          validated: false,
-          source_file_id: body.source_file_id,
+      if (result.output.workspace_id !== body.workspace_id || result.output.source_file_id !== body.source_file_id) {
+        throw new Error("Extraction returned a different workspace or source.");
+      }
+      gaps_inserted += await saveExtractBatch({ page, kind: "need", run_id: result.run_id,
+        claims: result.output.gaps.map((gap) => ({
+          claim_type: "gap", statement: gap.statement, status: "draft", provenance: gap.provenance,
           metadata: {
-            origin: "need_extract",
-            source_badge: "extract",
-            external_id: gap.external_id,
+            origin: "need_extract", source_badge: "extract", external_id: gap.external_id,
             si_theme: siThemeFromGapId(gap.external_id)?.slug ?? null,
-            provenance: gap.provenance,
             reference_pack_id: source.reference_pack_id ?? null,
           },
-        });
-        gaps_inserted += 1;
-      }
+        })),
+      });
       runs.push({
         call_kind: "need_extract",
         run_id: result.run_id,
@@ -136,7 +130,7 @@ export async function POST(req: Request) {
       });
     }
 
-    if (kinds.includes("inventory")) {
+    if (kinds.includes("inventory") && !completed.has("inventory")) {
       const result = await runAccuracyModule<InventoryExtractOutput>({
         call_kind: "inventory_extract",
         agent_role: "proposer",
@@ -149,27 +143,19 @@ export async function POST(req: Request) {
         org_id,
         workspace_id: body.workspace_id,
       });
-      for (const tactic of result.output.tactics) {
-        await insertClaim({
-          id: tactic.id,
-          workspace_id: body.workspace_id,
-          claim_type: "tactic",
-          statement: tactic.name,
-          status: tactic.status,
-          validated: false,
-          source_file_id: body.source_file_id,
+      if (result.output.workspace_id !== body.workspace_id || result.output.source_file_id !== body.source_file_id) {
+        throw new Error("Extraction returned a different workspace or source.");
+      }
+      tactics_inserted += await saveExtractBatch({ page, kind: "inventory", run_id: result.run_id,
+        claims: result.output.tactics.map((tactic) => ({
+          claim_type: "tactic", statement: tactic.name, status: tactic.status, provenance: tactic.provenance,
           metadata: {
-            origin: "inventory",
-            source_badge: "extract",
-            type: tactic.type,
-            evidence_question: tactic.evidence_question,
-            provenance: tactic.provenance,
-            tactic_status: tactic.status,
+            origin: "inventory", source_badge: "extract", type: tactic.type,
+            evidence_question: tactic.evidence_question, tactic_status: tactic.status,
             reference_pack_id: source.reference_pack_id ?? null,
           },
-        });
-        tactics_inserted += 1;
-      }
+        })),
+      });
       runs.push({
         call_kind: "inventory_extract",
         run_id: result.run_id,
@@ -212,8 +198,7 @@ export async function POST(req: Request) {
       ok: true,
       workspace_id: body.workspace_id,
       source_file_id: body.source_file_id,
-      block_count: allBlocks.length,
-      blocks_used: blocks.length,
+      ...await extractPageProgress(page),
       gaps_inserted,
       tactics_inserted,
       merge: mergeRun.output,
@@ -233,9 +218,15 @@ export async function POST(req: Request) {
         return NextResponse.json(extractKeyGateJson(gate), { status: 409 });
       }
     }
+    if (error instanceof ExtractContinuationError) {
+      return NextResponse.json({ ok: false, error: error.message, code: "stale_continuation", status: "failed", restart_required: true }, { status: 409 });
+    }
     const known = labRequestErrorResponse(error);
     if (known) return known;
     const message = labErrorMessage(error, "Extract failed");
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    return NextResponse.json({
+      ...(page ? { ...await extractPageProgress(page), continuation: retryExtractContinuation(page) } : {}),
+      ok: false, status: "failed", complete: false, error: message,
+    }, { status: 400 });
   }
 }
