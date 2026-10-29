@@ -349,7 +349,7 @@ describe("modular pipeline, S0 to S10", () => {
   it("rejects input that breaks a module's contract and records the failed run", async () => {
     await expect(
       runStage({ stage: "S4", input: { max_per_gap: 99 }, ...LEAD }),
-    ).rejects.toThrow(/rejected its input/i);
+    ).rejects.toThrow("Check the required fields and their values, then try again.");
     const failed = (await listRuns({ stage: "S4", limit: 5 })).find((record) => record.status === "error");
     expect(failed?.error).toBe(HISTORICAL_FAILURE_MESSAGE);
     const detail = await getRun(failed!.id);

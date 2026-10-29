@@ -336,7 +336,14 @@ async function atomicAction(request: Request, prepared?: PreparedAction): Promis
       return response;
     });
   } catch (error) {
-    if (error instanceof RolledBack) return error.response;
+    if (error instanceof RolledBack) {
+      // The transaction has finished rolling back; correction cannot repeat a saved action.
+      const body = await error.response.json();
+      return NextResponse.json({ ...body, request_outcome: "rejected" }, {
+        status: error.response.status,
+        headers: error.response.headers,
+      });
+    }
     return apiErrorResponse(error, "We couldn’t complete this workspace action. Check the current workspace before trying again. If this continues, contact your Synapse administrator.");
   }
 }

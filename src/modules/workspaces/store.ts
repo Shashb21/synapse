@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { ensureWorkspaceSchema, setWorkspaceSchemaLookup, sharedDb } from "@/lib/iegp/db";
 import { nowIso } from "@/modules/kernel/ids";
-import { actorForPrincipal, recordAudit } from "@/modules/kernel/audit";
+import { actorForPrincipal, recordAudit, type SqlWriter } from "@/modules/kernel/audit";
 import { DEFAULT_SCHEMA, DEFAULT_WORKSPACE_ID, runInWorkspace } from "./context";
 
 /**
@@ -233,7 +233,12 @@ export async function assertCanCreateWorkspace(principal: string, limit = worksp
 }
 
 /** Marks whether the workspace holds demo data. Set by load demo, cleared by reset to blank. */
-export async function setWorkspaceDemo(workspaceId: string, demo: boolean): Promise<void> {
+export async function setWorkspaceDemo(workspaceId: string, demo: boolean, writer?: SqlWriter): Promise<void> {
+  if (writer) {
+    // A replacement's workspace connection owns the whole change, including this public row.
+    await writer.execute(sql`update public.workspaces set demo = ${demo} where id = ${workspaceId}`);
+    return;
+  }
   await rows(sql`update workspaces set demo = ${demo} where id = ${workspaceId}`);
 }
 

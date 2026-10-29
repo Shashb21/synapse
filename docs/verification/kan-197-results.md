@@ -93,3 +93,18 @@ Final local proof on 2026-10-29:
 - `git diff --check`: exit 0.
 
 At this checkpoint, GitHub access fails even from an escalated CLI call (`gh api repos/Shashb21/synapse --jq .full_name`: error connecting to api.github.com). The authenticated Jira connector also fails with a transport error reaching the MCP endpoint. These are external connection failures, not an approval rejection. Publication to both configured remotes, an open PR into main, latest-head CI, the Jira completion comment and a confirmed Done transition remain required. No merge, deployment, Done claim or next-ticket handoff is authorized by local verification alone. The last authenticated Jira state recorded in the ledger is In Progress.
+
+## Resumed CI follow-up (2026-10-29)
+
+PR #137's initial GitHub checks passed unit tests and static checks, but failed browser regressions. The follow-up distinguishes confirmed rejections from unconfirmed writes for customer/account validation and rolled-back workspace actions. Workspace replacement now includes contents, demo metadata and required audit insertion in one transaction. An injected audit failure proves both contents and metadata roll back. Stage input validation gives safe field-correction guidance, including the S5 rationale minimum, without exposing schema diagnostics or input values.
+
+Browser fixtures for deliberate no-write failures now declare `safe_error: true` and `request_outcome: "rejected"`; unknown-outcome acceptance cases retain their duplicate prevention assertions. Learning controls are located by their current task names. The stale option test now seeds a separate gap: the preceding acceptance changes context and legitimately requires context review, which would confound the intended concurrent-proposal-edit scenario. Its selection, rationale and persisted-status assertions remain intact.
+
+Fresh verification of the follow-up:
+
+- `DATABASE_URL=postgres://synapse:synapse@127.0.0.1:55497/synapse_test npx vitest run --project application tests/kan-197-errors.test.ts tests/kan-197-final-api-recovery.test.ts tests/kan-197-stage-validation.test.ts tests/kan-162-workspace-target.test.ts tests/kan-121-source-review.test.ts tests/modules-pipeline.test.ts`: exit 0; 6 files, 96 tests passed. Log `/private/tmp/kan197-resumed-focused.log`.
+- `E2E_DATABASE_URL=postgres://synapse:synapse@127.0.0.1:55497/synapse_e2e E2E_PORT=43397 npx playwright test e2e/features/decision-learning-admin.spec.ts e2e/features/tactic-option-audit.spec.ts --project=chromium --output=/private/tmp/kan197-browser-resumed`: 5 passed, 1 failed; both learning cases passed. The remaining failure reproduced the shared-context test setup problem described above.
+- After isolating that setup, `E2E_DATABASE_URL=postgres://synapse:synapse@127.0.0.1:55497/synapse_e2e E2E_PORT=43397 npx playwright test e2e/features/tactic-option-audit.spec.ts --project=chromium --output=/private/tmp/kan197-option-isolated`: exit 0; 4 passed, including setup, in 18.7 seconds. Log `/private/tmp/kan197-option-isolated.log`.
+- `npm run typecheck`: exit 0; `/private/tmp/kan197-resumed-types.log`. Changed-file ESLint with `--max-warnings 0`: exit 0; `/private/tmp/kan197-resumed-lint.log`; the final tactic test edit also passed its separate lint check. `git diff --check`: exit 0.
+
+The fresh full Vitest run uses a newly created disposable `synapse_kan197_verify` database on port 55497; its result and latest-head CI are still pending at publication of this follow-up. Jira remains In Progress until the required checks succeed. GitHub and Jira connectivity have recovered.

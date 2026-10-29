@@ -67,9 +67,9 @@ test("coverage failure and stale rejection preserve the entered judgement and re
   const editor = page.getByRole("dialog").filter({ has: page.getByRole("heading", { name: "Change overall coverage", exact: true }) });
   await editor.getByRole("combobox", { name: "Overall", exact: true }).selectOption("full");
   await editor.getByLabel("Your rationale (required)").fill("Retain this registry review reason on failure");
-  await page.route("**/api/iegp", route => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "Temporary relationship failure. Try again." }) }), { times: 1 });
+  await page.route("**/api/iegp", route => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ safe_error: true, request_outcome: "rejected", error: "The coverage change was refused. Review your judgement and try again." }) }), { times: 1 });
   await editor.getByRole("button", { name: "Change overall coverage", exact: true }).click();
-  await expect(editor.getByRole("alert")).toContainText("Temporary relationship failure");
+  await expect(editor.getByRole("alert")).toContainText("The coverage change was refused. Review your judgement and try again.");
   await expect(editor.getByLabel("Your rationale (required)")).toHaveValue("Retain this registry review reason on failure");
   const record = await (await request.get(`/api/tactics/${tacticId}`)).json();
   const coverage = record.coverages.find((row: { gap_id: string }) => row.gap_id === gaps[1]);

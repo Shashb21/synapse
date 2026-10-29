@@ -31,9 +31,9 @@ async function expectReadableAlert(page: Page, alert: Locator) {
   await expect(page.locator("body")).not.toContainText("sk-kan197-secret");
 }
 
-/** Keep screenshots outside tracked test outputs while attaching them to the report. */
+/** Keep screenshots in Playwright’s per-test output directory on every platform. */
 async function capture(page: Page, info: TestInfo, label: string) {
-  const path = `/private/tmp/kan197-browser-${info.testId.replace(/[^a-zA-Z0-9]/g, "-")}-${label}.png`;
+  const path = info.outputPath(`${label}.png`);
   await page.screenshot({ path, fullPage: true });
   await info.attach(label, { path, contentType: "image/png" });
 }

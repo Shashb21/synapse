@@ -1,3 +1,4 @@
+import { postJson } from "@/lib/post-json";
 import { openingActionTokens } from "./support/opening-action-tokens";
 /** Cited manual source review through the public action and persisted read model. */
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -62,6 +63,17 @@ describe("KAN-145 cited manual source review", () => {
   expect(after.source_reviews!.find(r => r.id === row.id)).toMatchObject({ status: "dismissed", history: [expect.objectContaining({ decision: "dismiss", rationale: "Appendix does not change the recorded judgement" })] });
   expect(relationshipFit(after, gapId, tacticId).review_reasons.filter(r => /pending source discrepancy/i.test(r))).toHaveLength(1);
   expect((await post({ action: "resolve_source_discrepancy", review_id: row.id, expected_version: row.version, decision: "dismiss", rationale: "Stale open form" })).status).toBe(400);
+ });
+ it("allows a corrected citation after a confirmed rollback without creating a duplicate finding", async () => {
+  const rejected = await claim("create_source_discrepancy", { passage: "Invented fact" });
+  expect(rejected.status).toBe(400);
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json(rejected.body, { status: rejected.status })));
+  try {
+   expect(await postJson("/api/iegp", {})).toMatchObject({ ok: false, outcome: "rejected", json: { error: expect.stringMatching(/actual passage/i) } });
+  } finally { vi.unstubAllGlobals(); }
+  expect(await findings()).toHaveLength(0);
+  expect((await claim()).status).toBe(200);
+  expect(await findings()).toHaveLength(1);
  });
  it("requires a real retained passage and same-plan matching relationship targets", async () => {
   for (const extra of [{ passage: "Invented fact" }, { source_id: "foreign-source" }, { block_id: "foreign-block" }, { gap_id: "foreign-gap" }, { tactic_id: "foreign-tactic" }, { coverage_id: "foreign-coverage" }]) expect((await claim("create_source_discrepancy", extra)).status, JSON.stringify(extra)).toBe(400);

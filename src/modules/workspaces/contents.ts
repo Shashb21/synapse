@@ -1,9 +1,9 @@
 import type { ActorFunction } from "@/lib/iegp/enums";
-import { currentSchemaName, withWorkspaceTransaction } from "@/lib/iegp/db";
+import { currentSchemaName, db, withWorkspaceTransaction } from "@/lib/iegp/db";
 import { loadState, replaceWorkspaceContents, type WorkspaceContents } from "@/lib/iegp/store";
 import type { IegpState } from "@/lib/iegp/types";
 import { resetWorkspaceModules } from "@/modules/kernel/db";
-import { recordAudit } from "@/modules/kernel/audit";
+import { recordAuditVia } from "@/modules/kernel/audit";
 import { loadDemoPlan } from "./demo-plan";
 import { getWorkspace, setWorkspaceDemo, withWorkspace } from "./store";
 
@@ -52,16 +52,16 @@ export async function replaceContents(
     await resetWorkspaceModules();
     // The full demo also opens prioritized, with a dated timeline to try.
     if (contents === "demo") await loadDemoPlan(workspaceId ?? undefined);
-  });
-  if (workspaceId) await setWorkspaceDemo(workspaceId, contents !== "blank");
-  await recordAudit({
-    category: "workspace",
-    action: RESET_ACTIONS[contents],
-    entity_type: "workspace",
-    entity_id: workspaceId,
-    workspace_id: workspaceId,
-    before,
-    after: contentCounts(await loadState()),
+    if (workspaceId) await setWorkspaceDemo(workspaceId, contents !== "blank", db());
+    await recordAuditVia(db(), {
+      category: "workspace",
+      action: RESET_ACTIONS[contents],
+      entity_type: "workspace",
+      entity_id: workspaceId,
+      workspace_id: workspaceId,
+      before,
+      after: contentCounts(await loadState()),
+    });
   });
 }
 
