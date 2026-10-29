@@ -168,11 +168,47 @@ test("Control Panel fits phone, tablet and desktop in both themes", async ({ pag
         expect(bounds?.width).toBeGreaterThanOrEqual(44);
         expect(bounds?.height).toBeGreaterThanOrEqual(44);
       }
+      await expect(page.getByTestId("ai-availability-summary")).toBeVisible();
       await page.screenshot({ path: testInfo.outputPath(`control-${theme}-${width}.png`), fullPage: true });
+      if (width === 390 || width === 1440) {
+        await page.screenshot({ path: testInfo.outputPath(`availability-first-viewport-${theme}-${width}.png`), fullPage: false });
+      }
     }
   }
   const providers = page.getByRole("region", { name: "LLM providers" });
   await providers.screenshot({ path: testInfo.outputPath("providers-desktop-dark.png") });
+});
+
+// KAN-193: summary describes permission separately from key presence and follows saves.
+test("availability summary links to the priority control and updates after a routing save", async ({ page, request }) => {
+  await controlAction(request, { action: "set_ai_enabled", enabled: true, rationale: "Verify availability summary" });
+  await controlAction(request, { action: "set_ai_sections", enabled: false });
+  await controlAction(request, { action: "set_ai_section", section: "gap_extraction", enabled: true });
+  await controlAction(request, { action: "set_default_provider", provider_id: "xai-grok" });
+  try {
+    await page.goto("/admin/control");
+    const summary = page.getByTestId("ai-availability-summary");
+    await expect(summary).toContainText("1 of 8 enabled; 7 disabled");
+    await expect(summary).toContainText("1 section permitted");
+    await expect(summary).toContainText("1 enabled model stage has no configured provider");
+    const action = summary.getByRole("link", { name: "Review provider credentials" });
+    await expect(action).toHaveAttribute("href", "#providers");
+    await action.click();
+    await expect(page).toHaveURL(/#providers$/);
+    await expect(page.getByRole("heading", { name: "LLM providers", exact: true })).toBeInViewport();
+    await page.getByRole("button", { name: "Anthropic · Claude", exact: true }).click();
+    await expect(summary).toContainText("Anthropic · Claude");
+    await expect(page.getByRole("status").filter({ hasText: "Saved preferences: every stage" })).toContainText("No configured provider");
+    const stage = page.locator("article").filter({ has: page.getByRole("heading", { name: "S2 · Evidence gap extraction", exact: true }) });
+    await stage.getByRole("combobox", { name: "Provider", exact: true }).selectOption("openai");
+    await expect(stage.getByTestId("route-credential-readiness")).toContainText("No configured provider");
+    await stage.getByRole("button", { name: "Save route", exact: true }).click();
+    await expect(stage.getByRole("status")).toContainText("Saved preferences");
+    await expect(summary).toContainText("Mixed providers and models");
+  } finally {
+    await controlAction(request, { action: "set_default_provider", provider_id: "xai-grok" });
+    await controlAction(request, { action: "set_ai_sections", enabled: true });
+  }
 });
 
 // KAN-192: only the disposable suite database is changed, always restored in finally.
@@ -194,6 +230,8 @@ test("keyboard retry preserves drafts through a real settings outage and confirm
     await page.getByRole("button", { name: "Refresh configuration", exact: true }).focus();
     await page.keyboard.press("Enter");
     await expect(page.getByTestId("ai-switch-state")).toContainText("Master AI switch unavailable");
+    await expect(page.getByTestId("ai-availability-summary")).toContainText("Status unavailable");
+    await expect(page.getByTestId("ai-availability-summary")).toContainText("Customer permission unavailable");
     await expect(provider).toHaveValue("openai");
     await expect(stage.getByRole("button", { name: "Save route" })).toBeEnabled();
     await expect(page.getByTestId("provider-card-xai-grok").getByTestId("provider-key-env")).toContainText("XAI_API_KEY");
@@ -213,6 +251,8 @@ test("keyboard retry preserves drafts through a real settings outage and confirm
     await page.keyboard.press("Enter");
     await expect(page.getByRole("status").filter({ hasText: "Configuration refreshed. Saved settings are available." })).toBeVisible();
     await expect(page.getByTestId("ai-switch-state")).toContainText("AI is on");
+    await expect(page.getByTestId("ai-availability-summary")).not.toContainText("Status unavailable");
+    await expect(page.getByTestId("ai-availability-summary")).not.toContainText("Customer permission unavailable");
     await expect(provider).toHaveValue("openai");
     await page.screenshot({ path: testInfo.outputPath("configuration-recovered-narrow.png"), fullPage: true });
   } finally {

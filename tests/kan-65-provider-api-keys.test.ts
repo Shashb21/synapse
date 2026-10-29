@@ -129,6 +129,7 @@ describe("key status: presence only, never the value", () => {
           defaults: { primary: "xai-grok", alternate: "anthropic-claude" },
           canRoute: true,
           routedTo: "xai-grok",
+          routingSnapshot: "[]",
         }),
       ),
     );

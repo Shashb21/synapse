@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import { postJson } from "@/lib/post-json";
+import { credentialFeedback } from "./ai-availability";
+import type { CredentialProvider } from "@/modules/kernel/credential-route";
 
 export type ProviderOption = {
   id: string;
@@ -44,6 +46,8 @@ export function RoutingPanel({
   providers,
   canRoute,
   canActivate,
+  credentials = null,
+  aiKnown = true,
   masterEnabled,
 }: {
   routes: StageRouteView[];
@@ -51,6 +55,8 @@ export function RoutingPanel({
   providers: ProviderOption[];
   canRoute: boolean;
   canActivate: boolean;
+  credentials?: CredentialProvider[] | null;
+  aiKnown?: boolean;
 }) {
   const inheritedAi = useAiEnabled();
   const ai = masterEnabled === undefined ? inheritedAi : masterEnabled;
@@ -64,13 +70,12 @@ export function RoutingPanel({
           Choose the provider and model for each AI stage. A provider needs a server API key;
           if neither it nor a fallback is available, the run stops and links back here.
         </p>
-        {ai !== false ? null : (
+        {!aiKnown || ai === null ? <p className="mt-1 text-[12px] text-muted-foreground">Master AI state unavailable; whether saved routes are in use is unknown. Confirmed routes can still be edited.</p> : ai ? null : (
           <p className="mt-1 text-[12px] text-[var(--unknown-foreground)]" data-testid="routing-ai-off">
             AI is off, so these routes are not used. You can still edit them; they take effect when
             an admin turns AI back on.
           </p>
         )}
-        {ai === null ? <p className="mt-1 text-sm text-[var(--unknown-foreground)]">Master AI state unavailable. Confirmed routes can still be edited; whether AI is running cannot be confirmed.</p> : null}
       </div>
       <div className="grid gap-3 lg:grid-cols-2">
         {routes.map((route) => (
@@ -78,6 +83,7 @@ export function RoutingPanel({
             key={route.stage}
             route={route}
             providers={providers}
+            credentials={credentials}
             canRoute={canRoute && route.config_available !== false}
             canActivate={canActivate && route.wiring_available !== false}
           />
@@ -92,11 +98,13 @@ function StageRouteCard({
   providers,
   canRoute,
   canActivate,
+  credentials = null,
 }: {
   route: StageRouteView;
   providers: ProviderOption[];
   canRoute: boolean;
   canActivate: boolean;
+  credentials?: CredentialProvider[] | null;
 }) {
   const router = useRouter();
   const [providerId, setProviderId] = useState(route.provider_id ?? "");
@@ -113,6 +121,8 @@ function StageRouteCard({
     route.fallbacks, route.updated_at,
   ]);
   const [previousPersisted, setPreviousPersisted] = useState(persisted);
+  // Unknown saved settings retire confirmations, while the editable draft survives recovery.
+  if (route.config_available === false && saved !== null) setSaved(null);
   if (route.config_available !== false && previousPersisted !== persisted) {
     setPreviousPersisted(persisted);
     setProviderId(route.provider_id ?? "");
@@ -133,6 +143,7 @@ function StageRouteCard({
 
   const provider = providers.find((candidate) => candidate.id === providerId);
   const models = provider?.models ?? (model ? [model] : []);
+  const readiness = credentialFeedback({ provider_id: providerId, model, fallbacks: fallbacks.split(",").map(id => id.trim()).filter(Boolean) }, credentials);
 
   async function save() {
     if (!canRoute) return;
@@ -165,7 +176,7 @@ function StageRouteCard({
       setMaxTokens(String(json.config.params.max_tokens));
       setFallbacks(json.config.fallbacks.join(", "));
     }
-    setSaved("Saved.");
+    setSaved("Saved preferences.");
     router.refresh();
   }
 
@@ -217,6 +228,8 @@ function StageRouteCard({
               onChange={(event) => {
                 const next = event.target.value;
                 setProviderId(next);
+                // A primary cannot also be its own fallback (same rule as the server).
+                setFallbacks(current => current.split(",").map(id => id.trim()).filter(id => id && id !== next).join(", "));
                 const picked = providers.find((candidate) => candidate.id === next);
                 if (picked) setModel(picked.default_model);
               }}
@@ -308,6 +321,7 @@ function StageRouteCard({
         </label>
       ) : null}
 
+      {route.agentic ? <p data-testid="route-credential-readiness" className="break-words text-[12px] text-muted-foreground">{readiness}</p> : null}
       <div className="flex flex-wrap items-center gap-2">
         {route.agentic ? (
           <Button className="min-h-11" size="sm" variant="outline" disabled={!canRoute || pending} onClick={() => void save()}>
@@ -316,7 +330,7 @@ function StageRouteCard({
           </Button>
         ) : null}
         <span role="status" className="text-[12px] text-muted-foreground">
-          {saved ?? (pending ? "Saving…" : route.config_available === false ? "Saved route unavailable" : `Last set by ${route.updated_by}`)}
+          {saved ? `${saved}${saved === "Saved preferences." ? ` ${readiness}` : ""}` : (pending ? "Saving…" : route.config_available === false ? "Saved route unavailable" : `Last set by ${route.updated_by}`)}
         </span>
       </div>
       {error ? <p role="alert" className="text-[11px] text-destructive">{error}</p> : null}

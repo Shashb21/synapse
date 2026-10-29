@@ -1,4 +1,5 @@
 /** Owner control panel: confirmed configuration, independent availability, and safe recovery. */
+import { AiAvailabilitySummary } from "./ai-availability-summary";
 import { randomUUID } from "node:crypto";
 import { ProviderPanel } from "@/components/platform/provider-panel";
 import { RoutingPanel, type StageRouteView } from "@/components/platform/routing-panel";
@@ -9,7 +10,7 @@ import { loadControlPanel } from "@/components/platform/control-panel-load";
 import { STAGES, STAGE_IDS } from "@/modules/kernel/contracts";
 import { type RouteConfig } from "@/modules/kernel/routing";
 import { listProviderKeys } from "@/modules/llm/api-keys";
-import { ALTERNATE_ROUTE_PROVIDER, DEFAULT_ROUTE_PROVIDER, PROVIDERS } from "@/modules/llm/provider";
+import { ALTERNATE_ROUTE_PROVIDER, DEFAULT_ROUTE_PROVIDER, DEFAULT_ROUTE_FALLBACKS, PROVIDERS } from "@/modules/llm/provider";
 import { capabilitiesOf } from "@/modules/auth/roles";
 import { loginOptions } from "@/modules/auth/session";
 
@@ -26,8 +27,12 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
   const configs = data.configs.status === "ready" ? data.configs.value : null;
   // The control panel is owner-only. Unknown authorization never enables a mutation.
   const mayEdit = Boolean(identity && data.owner.status === "ready" && data.owner.value.owner);
-  const keys = listProviderKeys(); // Presence only, never a credential's value.
+  // Presence metadata only. A failed key read remains unknown, never missing.
+  let keys: ReturnType<typeof listProviderKeys> | null = null;
+  try { keys = listProviderKeys(); } catch { /* Do not expose credential-read errors. */ }
+  const credentialProviders = keys?.map(key => ({ ...key, id: key.provider_id })) ?? null;
   const unavailable = [
+    ...(keys ? [] : ["provider credentials"]),
     ...(ai ? [] : ["master AI switch"]),
     ...(sections ? [] : ["section switches"]),
     ...(configs && STAGE_IDS.every(stage => configs.some(row => row.stage === stage)) ? [] : ["saved routes"]),
@@ -49,16 +54,17 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
       provider_id: config?.provider_id ?? null, model: config?.model ?? null,
       temperature: config?.params.temperature ?? null, max_tokens: config?.params.max_tokens ?? null,
       fallbacks: config?.fallbacks ?? null, updated_by: config?.updated_by ?? null, updated_at: config?.updated_at ?? null,
-      resolved_label: resolution.status === "ready" ? resolution.value.label : null,
-      degraded_reason: resolution.status === "ready" ? resolution.value.message : null,
-      resolution_state: resolution.status === "ready" ? resolution.value.state : "unavailable",
+      resolved_label: credentialProviders === null ? "Credential status unavailable" : resolution.status === "ready" ? resolution.value.label : null,
+      degraded_reason: credentialProviders === null ? null : resolution.status === "ready" ? resolution.value.message : null,
+      resolution_state: credentialProviders === null ? "unavailable" : resolution.status === "ready" ? resolution.value.state : "unavailable",
     };
   });
 
   return <>
     {params.signed_in ? <p className="mb-4 border border-[var(--known)]/40 bg-card p-2 text-[12px] text-foreground rounded-lg">Signed in as {params.signed_in}.</p> : null}
-    {params.sign_in_error ? <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">Sign-in failed: {params.sign_in_error}</p> : null}
+    {params.sign_in_error ? <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">Sign-in failed. Please try signing in again.</p> : null}
     <div className="control-panel grid min-w-0 gap-8">
+      <AiAvailabilitySummary input={{ master: ai?.enabled ?? null, sections, routes: configs, providers: credentialProviders }} />
       <ConfigurationRecovery loadId={randomUUID()} unavailable={unavailable} />
       {!identity || data.owner.status === "unavailable" ? <p className="text-sm text-[var(--unknown-foreground)]">Owner authorization unavailable. Changes are disabled until your identity and owner access can be confirmed.</p> : null}
       <AiSwitchPanel ai={ai} sections={sections} mayToggle={mayEdit} identity={{
@@ -66,15 +72,17 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
         actor_name: identity?.actor.name ?? "Identity unavailable",
         actor_function: identity?.actor.function ?? "medical_affairs",
       }} />
-      <ProviderPanel
+      {keys ? <ProviderPanel
         masterEnabled={ai?.enabled ?? null}
         connections={keys.map(key => ({ ...key, tier: key.tier ?? null }))}
-        defaults={{ primary: DEFAULT_ROUTE_PROVIDER, alternate: ALTERNATE_ROUTE_PROVIDER }}
+        defaults={{ primary: DEFAULT_ROUTE_PROVIDER, alternate: ALTERNATE_ROUTE_PROVIDER, chain: [DEFAULT_ROUTE_PROVIDER, ...DEFAULT_ROUTE_FALLBACKS] }}
         canRoute={mayEdit}
         routesAvailable={Boolean(configs && STAGE_IDS.every(stage => configs.some(row => row.stage === stage)))}
+        routingSnapshot={configs ? JSON.stringify(configs) : null}
+        routingKnown={configs !== null}
         routedTo={configs ? routedToEveryStage(configs) : null}
-      />
-      <RoutingPanel routes={routes} masterEnabled={ai?.enabled ?? null} providers={PROVIDERS.map(provider => ({
+      /> : <p id="providers" role="status">Provider credential status unavailable. Retry configuration to try again.</p>}
+      <RoutingPanel credentials={credentialProviders} routes={routes} masterEnabled={ai?.enabled ?? null} providers={PROVIDERS.map(provider => ({
         id: provider.id, label: provider.label, models: provider.models, default_model: provider.default_model, auth: provider.auth,
       }))} canRoute={mayEdit} canActivate={mayEdit} />
       {identity ? <SessionPanel actorName={identity.actor.name} role={identity.role} signedIn={identity.signed_in}
