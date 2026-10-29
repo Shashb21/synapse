@@ -169,7 +169,9 @@ export const accuracyPlans = pgTable("accuracy_plans", {
   saved_by: text("saved_by").notNull(),
   saved_function: text("saved_function").notNull(),
   saved_at: text("saved_at").notNull(),
-});
+}, (table) => ({
+  workspaceVersion: unique("accuracy_plans_workspace_version_unique").on(table.workspace_id, table.version),
+}));
 
 /** Workspace-scoped workshop freeze: inventory + facilitator tags + overlays. */
 export const accuracyWorkshopSnapshots = pgTable("accuracy_workshop_snapshots", {
@@ -314,7 +316,8 @@ export const ACCURACY_DDL = [
     note text,
     saved_by text NOT NULL,
     saved_function text NOT NULL,
-    saved_at text NOT NULL
+    saved_at text NOT NULL,
+    CONSTRAINT accuracy_plans_workspace_version_unique UNIQUE (workspace_id, version)
   )`,
   `CREATE TABLE IF NOT EXISTS accuracy_workshop_snapshots (
     id text PRIMARY KEY,
@@ -341,7 +344,45 @@ export const ACCURACY_DDL = [
   )`,
 ];
 
-/** Additive ALTERs for already-created tables. Safe to re-run. */
+/** Runtime migrations for existing tables. Each entry must be safe to re-run. */
 export const ACCURACY_MIGRATIONS = [
   `ALTER TABLE accuracy_workspaces ADD COLUMN IF NOT EXISTS archived_at text`,
+  // A single DO statement is atomic even though db.ts executes entries separately.
+  // Only histories with duplicate versions are renumbered, preserving their
+  // original version order, then timestamp/ID order within each old version.
+  // Healthy histories keep their original numbers (including existing gaps).
+  // The one-time ACCESS EXCLUSIVE lock blocks reads/writes during repair/index
+  // creation and serializes concurrent startups. Recheck after acquiring it;
+  // subsequent startups skip the lock and history scan once uniqueness exists.
+  `DO $$
+  BEGIN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conrelid = 'accuracy_plans'::regclass
+        AND conname = 'accuracy_plans_workspace_version_unique' AND contype = 'u'
+    ) THEN
+      LOCK TABLE accuracy_plans IN ACCESS EXCLUSIVE MODE;
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'accuracy_plans'::regclass
+          AND conname = 'accuracy_plans_workspace_version_unique' AND contype = 'u'
+      ) THEN
+        WITH duplicate_workspaces AS (
+          SELECT DISTINCT workspace_id FROM accuracy_plans
+          GROUP BY workspace_id, version HAVING count(*) > 1
+        ), ranked AS (
+          SELECT id, row_number() OVER (
+            PARTITION BY workspace_id ORDER BY version, saved_at, id
+          ) AS repaired_version
+          FROM accuracy_plans
+          WHERE workspace_id IN (SELECT workspace_id FROM duplicate_workspaces)
+        )
+        UPDATE accuracy_plans AS plans
+        SET version = ranked.repaired_version
+        FROM ranked WHERE plans.id = ranked.id;
+        ALTER TABLE accuracy_plans ADD CONSTRAINT accuracy_plans_workspace_version_unique
+          UNIQUE (workspace_id, version);
+      END IF;
+    END IF;
+  END $$`,
 ];
