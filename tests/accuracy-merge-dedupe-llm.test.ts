@@ -1,3 +1,4 @@
+import { seedAccuracyEvidence } from "./support/accuracy-evidence";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AccuracyModuleContext, JsonCompletion } from "@/accuracy/kernel/contracts";
 import {
@@ -129,17 +130,18 @@ describe("merge equivalence judge (scripted model)", () => {
       name: "Merge LLM WS",
       slug: `merge-llm-${Date.now().toString(36)}`,
     });
+    const [span] = await seedAccuracyEvidence(workspace_id, ["OS elderly; 75+"]);
     const a = await insertClaim({
       workspace_id,
       claim_type: "gap",
       statement: "Need OS data in elderly",
-      metadata: { provenance: shared("OS elderly") },
+      metadata: { provenance: [{ ...span!, quote: "OS elderly" }] },
     });
     const b = await insertClaim({
       workspace_id,
       claim_type: "gap",
       statement: "Overall survival evidence for patients 75+",
-      metadata: { provenance: shared("75+") },
+      metadata: { provenance: [{ ...span!, quote: "75+" }] },
     });
     const complete = scriptedJudge(() => true);
     const ctx = fakeCtx(complete);

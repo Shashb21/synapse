@@ -1,3 +1,4 @@
+import { seedAccuracyEvidence } from "./support/accuracy-evidence";
 import { describe, expect, it } from "vitest";
 import { POST as assistPost } from "@/app/api/accuracy/coverage/assist/route";
 import { registerAccuracyStack } from "@/accuracy";
@@ -56,12 +57,13 @@ describe("accuracy coverage assist API", () => {
     expect(process.env.SYNAPSE_TEST_STUB_LLM).toBe("1");
     registerAccuracyStack();
     const { workspace_id } = await freshWorkspace("cov-assist-stub");
+    const spans = await seedAccuracyEvidence(workspace_id, ["Need OS", "Registry"]);
     const gap = await insertClaim({
       workspace_id,
       claim_type: "gap",
       statement: "Need comparative OS in 1L NSCLC",
       metadata: {
-        provenance: [{ source_file_id: "src-1", block_id: "B1", quote: "Need OS" }],
+        provenance: [spans[0]!],
       },
     });
     const tactic = await insertClaim({
@@ -69,7 +71,7 @@ describe("accuracy coverage assist API", () => {
       claim_type: "tactic",
       statement: "VEL-REG-01",
       metadata: {
-        provenance: [{ source_file_id: "src-1", block_id: "B2", quote: "Registry" }],
+        provenance: [spans[1]!],
         gap_ids: [gap.id],
       },
     });
@@ -96,6 +98,6 @@ describe("accuracy coverage assist API", () => {
     expect(json.suggestion?.schema_overall).toBe("not_relevant");
     expect(json.suggestion?.overall).toBe("none");
     expect(json.suggestion?.confidence).toBe(0);
-    expect(json.block_bundle_ids).toEqual(["B1", "B2"]);
+    expect(json.block_bundle_ids).toEqual(spans.map((span) => span.block_id));
   });
 });

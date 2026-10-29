@@ -13,6 +13,7 @@ import {
 } from "./claim-store";
 import { humanLockedFields, withHumanEdit, writeClaimRow } from "./claim-edit";
 import { reassignCoverageClaimId } from "./coverage-store";
+import { withProvenanceTransaction, type AccuracyTransaction } from "./provenance-store";
 import { ensureAccuracySchema } from "./db";
 
 function provenanceSpans(meta: AccuracyClaimMetadata): Record<string, unknown>[] {
@@ -53,9 +54,9 @@ function restoredStatus(claim: AccuracyClaimRow, meta: AccuracyClaimMetadata): s
   return "draft";
 }
 
-async function requirePair(workspace_id: string, a_id: string, b_id: string) {
+async function requirePair(workspace_id: string, a_id: string, b_id: string, transaction?: AccuracyTransaction) {
   if (a_id === b_id) throw new Error("Pick two different claims.");
-  const [a, b] = await Promise.all([getClaim(workspace_id, a_id), getClaim(workspace_id, b_id)]);
+  const [a, b] = await Promise.all([getClaim(workspace_id, a_id, transaction), getClaim(workspace_id, b_id, transaction)]);
   if (!a) throw new Error(`Unknown claim: ${a_id}`);
   if (!b) throw new Error(`Unknown claim: ${b_id}`);
   if (a.claim_type !== b.claim_type) {
@@ -78,90 +79,96 @@ export async function manualMergeClaims(args: {
 }): Promise<{ survivor: AccuracyClaimRow; duplicate: AccuracyClaimRow }> {
   const rationale = requireValidationRationale(args.rationale);
   await ensureAccuracySchema();
-  const { a: survivor, b: duplicate } = await requirePair(
-    args.workspace_id,
-    args.survivor_id,
-    args.duplicate_id,
-  );
-  if (survivor.status === "merged") {
-    throw new Error("The surviving claim is itself merged — unmerge it or pick its survivor.");
-  }
-  if (duplicate.status === "merged") throw new Error("That claim is already merged.");
-  const at = nowIso();
+  return withProvenanceTransaction(args.workspace_id, async (transaction) => {
+    const { a: survivor, b: duplicate } = await requirePair(
+      args.workspace_id,
+      args.survivor_id,
+      args.duplicate_id,
+      transaction,
+    );
+    if (survivor.status === "merged") {
+      throw new Error("The surviving claim is itself merged — unmerge it or pick its survivor.");
+    }
+    if (duplicate.status === "merged") throw new Error("That claim is already merged.");
+    const at = nowIso();
 
-  const dupMeta = claimMetadata(duplicate);
-  const nextDup = withHumanEdit(
-    {
-      ...dupMeta,
-      pre_merge_status: duplicate.status,
-      merged_into: survivor.id,
-      merge_reason: "human",
-      merge_rationale: rationale,
-      merge_proposal: null,
-    },
-    {
-      action: "merge",
-      fields: ["merged_into"],
-      before: { status: duplicate.status, merged_into: dupMeta.merged_into ?? null },
-      after: { status: "merged", merged_into: survivor.id },
-      rationale,
-      actor: args.actor,
+    const dupMeta = claimMetadata(duplicate);
+    const nextDup = withHumanEdit(
+      {
+        ...dupMeta,
+        pre_merge_status: duplicate.status,
+        merged_into: survivor.id,
+        merge_reason: "human",
+        merge_rationale: rationale,
+        merge_proposal: null,
+      },
+      {
+        action: "merge",
+        fields: ["merged_into"],
+        before: { status: duplicate.status, merged_into: dupMeta.merged_into ?? null },
+        after: { status: "merged", merged_into: survivor.id },
+        rationale,
+        actor: args.actor,
+        at,
+        lock: ["merge"],
+      },
+    );
+
+    const survMeta = claimMetadata(survivor);
+    const mergedFrom = [
+      ...new Set([
+        ...(Array.isArray(survMeta.merged_from) ? survMeta.merged_from : []),
+        duplicate.id,
+      ]),
+    ];
+    const provenanceLocked = humanLockedFields(survMeta).some(
+      (key) => key === "provenance" || key === "provenance_quote",
+    );
+    const nextSurv = withHumanEdit(
+      {
+        ...survMeta,
+        merged_from: mergedFrom,
+        provenance: provenanceLocked
+          ? survMeta.provenance
+          : unionSpans(provenanceSpans(survMeta), provenanceSpans(dupMeta)),
+        external_id: survMeta.external_id ?? dupMeta.external_id ?? null,
+      },
+      {
+        action: "merge",
+        fields: ["merged_from"],
+        before: { merged_from: survMeta.merged_from ?? [] },
+        after: { merged_from: mergedFrom, absorbed: duplicate.id },
+        rationale,
+        actor: args.actor,
+        at,
+        lock: ["merge"],
+      },
+    );
+
+    const dupRow = await writeClaimRow({
+      workspace_id: args.workspace_id,
+      claim: duplicate,
+      status: "merged",
+      metadata: nextDup,
       at,
-      lock: ["merge"],
-    },
-  );
-
-  const survMeta = claimMetadata(survivor);
-  const mergedFrom = [
-    ...new Set([
-      ...(Array.isArray(survMeta.merged_from) ? survMeta.merged_from : []),
-      duplicate.id,
-    ]),
-  ];
-  const provenanceLocked = humanLockedFields(survMeta).some(
-    (key) => key === "provenance" || key === "provenance_quote",
-  );
-  const nextSurv = withHumanEdit(
-    {
-      ...survMeta,
-      merged_from: mergedFrom,
-      provenance: provenanceLocked
-        ? survMeta.provenance
-        : unionSpans(provenanceSpans(survMeta), provenanceSpans(dupMeta)),
-      external_id: survMeta.external_id ?? dupMeta.external_id ?? null,
-    },
-    {
-      action: "merge",
-      fields: ["merged_from"],
-      before: { merged_from: survMeta.merged_from ?? [] },
-      after: { merged_from: mergedFrom, absorbed: duplicate.id },
-      rationale,
-      actor: args.actor,
+      transaction,
+    });
+    const survRow = await writeClaimRow({
+      workspace_id: args.workspace_id,
+      claim: survivor,
+      metadata: nextSurv,
       at,
-      lock: ["merge"],
-    },
-  );
-
-  const dupRow = await writeClaimRow({
-    workspace_id: args.workspace_id,
-    claim: duplicate,
-    status: "merged",
-    metadata: nextDup,
-    at,
+      transaction,
+    });
+    await reassignCoverageClaimId({
+      workspace_id: args.workspace_id,
+      from_id: duplicate.id,
+      to_id: survivor.id,
+      role: duplicate.claim_type === "tactic" ? "tactic" : "gap",
+      transaction,
+    });
+    return { survivor: survRow, duplicate: dupRow };
   });
-  const survRow = await writeClaimRow({
-    workspace_id: args.workspace_id,
-    claim: survivor,
-    metadata: nextSurv,
-    at,
-  });
-  await reassignCoverageClaimId({
-    workspace_id: args.workspace_id,
-    from_id: duplicate.id,
-    to_id: survivor.id,
-    role: duplicate.claim_type === "tactic" ? "tactic" : "gap",
-  });
-  return { survivor: survRow, duplicate: dupRow };
 }
 
 /**

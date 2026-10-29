@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { boolean, pgTable, text } from "drizzle-orm/pg-core";
 import { accuracyDb, ensureAccuracySchema } from "./db";
-import { lockAccuracySource, type SourceConnection } from "./source-lock";
+import { lockAccuracySource } from "./source-lock";
+import { reconcileDependents, repointMetadataProvenance, withProvenanceTransaction, type AccuracyExecutor } from "./provenance-store";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { ParseBlock } from "./quote-validator";
@@ -217,11 +218,11 @@ export async function persistParseBlocksDetailed(args: {
   source_file_id: string;
   parser: string;
   blocks: Omit<ParseBlock, "workspace_id">[];
-}, connection?: SourceConnection): Promise<PersistParseBlocksResult> {
+}, connection?: AccuracyExecutor): Promise<PersistParseBlocksResult> {
   await ensureParseSchema();
   if (!connection) {
     const sourceId = args.source_file_id;
-    return accuracyDb().transaction(async (tx) => {
+    return withProvenanceTransaction(args.workspace_id, async (tx) => {
       await lockAccuracySource(tx, args.workspace_id, sourceId);
       return persistParseBlocksDetailed(args, tx);
     });
@@ -312,7 +313,7 @@ export async function persistParseBlocksDetailed(args: {
 }
 
 /** Rewrites indices 0..n-1 in current order; on ties kept (human/cited) blocks come first. */
-async function renumber(workspace_id: string, source_file_id: string, preferred: Set<string> = new Set(), db: SourceConnection = accuracyDb()) {
+async function renumber(workspace_id: string, source_file_id: string, preferred: Set<string> = new Set(), db: AccuracyExecutor = accuracyDb()) {
   const rows = await readParseBlocks(workspace_id, source_file_id, db);
   const ordered = [...rows].sort(
     (a, b) => a.index - b.index || Number(preferred.has(b.id)) - Number(preferred.has(a.id)),
@@ -328,7 +329,7 @@ async function renumber(workspace_id: string, source_file_id: string, preferred:
 /* Reads                                                                      */
 /* ------------------------------------------------------------------------- */
 
-export async function readParseBlocks(workspace_id: string, source_file_id: string, db: SourceConnection = accuracyDb()) {
+export async function readParseBlocks(workspace_id: string, source_file_id: string, db: AccuracyExecutor = accuracyDb()) {
   await ensureAccuracySchema();
   return db
     .select()
@@ -366,7 +367,7 @@ export async function readParseBlocksByIds(workspace_id: string, block_ids: stri
   });
 }
 
-async function readMetaForSource(workspace_id: string, source_file_id: string, db: SourceConnection = accuracyDb()): Promise<MetaRow[]> {
+async function readMetaForSource(workspace_id: string, source_file_id: string, db: AccuracyExecutor = accuracyDb()): Promise<MetaRow[]> {
   await ensureParseSchema();
   return db
     .select()
@@ -397,23 +398,25 @@ export type BlockProvenanceMeta = {
 /** Blocks with who-made-it metadata and their citing claims, for the edit UI. */
 export async function readParseBlocksWithMeta(workspace_id: string, source_file_id: string) {
   await ensureParseSchema();
-  const blocks = await readParseBlocks(workspace_id, source_file_id);
-  const metas = new Map((await readMetaForSource(workspace_id, source_file_id)).map((m) => [m.block_id, m]));
-  const deps = await dependentsFor(workspace_id, blocks.map((b) => b.id));
-  return blocks.map((block) => {
-    const meta = metas.get(block.id);
-    const provenance: BlockProvenanceMeta = {
-      origin: meta?.origin === "human" ? "human" : "llm",
-      human: Boolean(meta?.locked),
-      locked: Boolean(meta?.locked),
-      original_text: meta?.original_text ?? null,
-      original_kind: meta?.original_kind ?? null,
-      original_heading: meta?.original_heading ?? null,
-      edited_by: meta?.edited_by ?? null,
-      edited_at: meta?.edited_at ?? null,
-      cited_by: [...new Set(deps.filter((d) => d.block_id === block.id).map((d) => d.id))],
-    };
-    return { ...block, provenance };
+  return withProvenanceTransaction(workspace_id, async (db) => {
+    const blocks = await readParseBlocks(workspace_id, source_file_id, db);
+    const metas = new Map((await readMetaForSource(workspace_id, source_file_id, db)).map((m) => [m.block_id, m]));
+    const deps = await dependentsFor(workspace_id, blocks.map((b) => b.id), db);
+    return blocks.map((block) => {
+      const meta = metas.get(block.id);
+      const provenance: BlockProvenanceMeta = {
+        origin: meta?.origin === "human" ? "human" : "llm",
+        human: Boolean(meta?.locked),
+        locked: Boolean(meta?.locked),
+        original_text: meta?.original_text ?? null,
+        original_kind: meta?.original_kind ?? null,
+        original_heading: meta?.original_heading ?? null,
+        edited_by: meta?.edited_by ?? null,
+        edited_at: meta?.edited_at ?? null,
+        cited_by: [...new Set(deps.filter((d) => d.block_id === block.id).map((d) => d.id))],
+      };
+      return { ...block, provenance };
+    });
   });
 }
 
@@ -442,18 +445,9 @@ export async function listDroppedUnits(workspace_id: string, source_file_id: str
     .orderBy(asc(accuracyParseDropped.created_at), asc(accuracyParseDropped.location));
 }
 
-/** Claim provenance rows quoting any of these blocks. */
-async function dependentsFor(
-  workspace_id: string,
-  block_ids: string[],
-  db: SourceConnection = accuracyDb(),
-): Promise<(QuoteDependent & { block_id: string; provenance_id: string })[]> {
-  if (block_ids.length === 0) return [];
-  const rows = await db
-    .select()
-    .from(t.accuracyProvenance)
-    .where(and(eq(t.accuracyProvenance.workspace_id, workspace_id), inArray(t.accuracyProvenance.block_id, block_ids)));
-  return rows.map((row) => ({ id: row.claim_id, quote: row.quote, block_id: row.block_id, provenance_id: row.id }));
+/** Read/reconcile current and historic references using the caller's transaction. */
+async function dependentsFor(workspace_id: string, block_ids: string[], db: AccuracyExecutor) {
+  return reconcileDependents(db, workspace_id, block_ids);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -470,7 +464,7 @@ async function audit(args: {
   after?: string | null;
   rationale: string;
   actor: ParseEditActor;
-}, db: SourceConnection = accuracyDb()) {
+}, db: AccuracyExecutor = accuracyDb()) {
   await db.insert(accuracyParseBlockEdits).values({
     id: newId("pbe"),
     workspace_id: args.workspace_id,
@@ -494,7 +488,7 @@ async function markHuman(args: {
   origin?: "llm" | "human";
   deleted?: boolean;
   actor: ParseEditActor;
-}, db: SourceConnection = accuracyDb()) {
+}, db: AccuracyExecutor = accuracyDb()) {
   const [meta] = await db
     .select()
     .from(accuracyParseBlockMeta)
@@ -532,7 +526,7 @@ async function markHuman(args: {
   });
 }
 
-async function requireBlock(workspace_id: string, block_id: string, db: SourceConnection = accuracyDb()): Promise<BlockRow> {
+async function requireBlock(workspace_id: string, block_id: string, db: AccuracyExecutor = accuracyDb()): Promise<BlockRow> {
   await ensureParseSchema();
   const [block] = await db
     .select()
@@ -564,11 +558,11 @@ export async function editParseBlock(args: {
   heading?: string | null;
   rationale: string;
   actor: ParseEditActor;
-}, connection?: SourceConnection): Promise<BlockRow> {
+}, connection?: AccuracyExecutor): Promise<BlockRow> {
   await ensureParseSchema();
   if (!connection) {
     const sourceId = (await requireBlock(args.workspace_id, args.block_id)).source_file_id;
-    return accuracyDb().transaction(async (tx) => {
+    return withProvenanceTransaction(args.workspace_id, async (tx) => {
       await lockAccuracySource(tx, args.workspace_id, sourceId);
       return editParseBlock(args, tx);
     });
@@ -580,7 +574,8 @@ export async function editParseBlock(args: {
   if (args.text !== undefined) {
     const next = requireText(args.text);
     if (next !== block.text) {
-      const orphans = orphanedQuotes(await dependentsFor(args.workspace_id, [block.id], db), [next]);
+      const deps = await dependentsFor(args.workspace_id, [block.id], db);
+      const orphans = deps.filter((dep) => dep.unresolved || orphanedQuotes([dep], [next]).length);
       if (orphans.length) throw new ProvenanceConflictError(orphans);
       patch.text = next;
     }
@@ -619,11 +614,11 @@ export async function splitParseBlock(args: {
   at_text?: string;
   rationale: string;
   actor: ParseEditActor;
-}, connection?: SourceConnection): Promise<{ first_id: string; second_id: string }> {
+}, connection?: AccuracyExecutor): Promise<{ first_id: string; second_id: string }> {
   await ensureParseSchema();
   if (!connection) {
     const sourceId = (await requireBlock(args.workspace_id, args.block_id)).source_file_id;
-    return accuracyDb().transaction(async (tx) => {
+    return withProvenanceTransaction(args.workspace_id, async (tx) => {
       await lockAccuracySource(tx, args.workspace_id, sourceId);
       return splitParseBlock(args, tx);
     });
@@ -633,7 +628,7 @@ export async function splitParseBlock(args: {
   const block = await requireBlock(args.workspace_id, args.block_id, db);
   const [first, second] = splitAtOffset(block.text, resolveSplitOffset(block.text, args));
   const deps = await dependentsFor(args.workspace_id, [block.id], db);
-  const orphans = orphanedQuotes(deps, [first, second]);
+  const orphans = deps.filter((dep) => dep.unresolved || orphanedQuotes([dep], [first, second]).length);
   if (orphans.length) throw new ProvenanceConflictError(orphans);
 
   const secondId = `${block.source_file_id}-${newId("H")}`;
@@ -663,6 +658,7 @@ export async function splitParseBlock(args: {
   for (const dep of deps) {
     if (!squashText(first).includes(squashText(dep.quote))) {
       await db.update(t.accuracyProvenance).set({ block_id: secondId }).where(eq(t.accuracyProvenance.id, dep.provenance_id));
+      await repointMetadataProvenance(db, args.workspace_id, block.id, secondId, dep.quote);
     }
   }
   await markHuman({ block, current_text: first, actor: args.actor }, db);
@@ -697,11 +693,11 @@ export async function mergeParseBlocks(args: {
   next_block_id?: string;
   rationale: string;
   actor: ParseEditActor;
-}, connection?: SourceConnection): Promise<{ block_id: string; absorbed_id: string; text: string }> {
+}, connection?: AccuracyExecutor): Promise<{ block_id: string; absorbed_id: string; text: string }> {
   await ensureParseSchema();
   if (!connection) {
     const sourceId = (await requireBlock(args.workspace_id, args.block_id)).source_file_id;
-    return accuracyDb().transaction(async (tx) => {
+    return withProvenanceTransaction(args.workspace_id, async (tx) => {
       await lockAccuracySource(tx, args.workspace_id, sourceId);
       return mergeParseBlocks(args, tx);
     });
@@ -719,12 +715,16 @@ export async function mergeParseBlocks(args: {
     if (!next) throw new Error("This is the last block: there is nothing after it to merge.");
   }
   if (next.id === block.id) throw new Error("A block cannot be merged with itself.");
+  const deps = await dependentsFor(args.workspace_id, [block.id, next.id], db);
+  const unresolved = deps.filter((dep) => dep.unresolved);
+  if (unresolved.length) throw new ProvenanceConflictError(unresolved);
   const merged = `${block.text}\n\n${next.text}`;
   await db.update(t.accuracyParseBlocks).set({ text: merged }).where(eq(t.accuracyParseBlocks.id, block.id));
   await db
     .update(t.accuracyProvenance)
     .set({ block_id: block.id })
     .where(and(eq(t.accuracyProvenance.workspace_id, args.workspace_id), eq(t.accuracyProvenance.block_id, next.id)));
+  await repointMetadataProvenance(db, args.workspace_id, next.id, block.id);
   await db.delete(t.accuracyParseBlocks).where(eq(t.accuracyParseBlocks.id, next.id));
   await markHuman({ block, current_text: merged, actor: args.actor }, db);
   // Tombstone the absorbed block so a re-parse does not bring it back as a duplicate.
@@ -750,11 +750,11 @@ export async function deleteParseBlock(args: {
   block_id: string;
   rationale: string;
   actor: ParseEditActor;
-}, connection?: SourceConnection): Promise<{ deleted: string }> {
+}, connection?: AccuracyExecutor): Promise<{ deleted: string }> {
   await ensureParseSchema();
   if (!connection) {
     const sourceId = (await requireBlock(args.workspace_id, args.block_id)).source_file_id;
-    return accuracyDb().transaction(async (tx) => {
+    return withProvenanceTransaction(args.workspace_id, async (tx) => {
       await lockAccuracySource(tx, args.workspace_id, sourceId);
       return deleteParseBlock(args, tx);
     });
@@ -789,7 +789,7 @@ async function insertHumanBlock(args: {
   kind?: string;
   heading?: string | null;
   actor: ParseEditActor;
-}, db: SourceConnection): Promise<BlockRow> {
+}, db: AccuracyExecutor): Promise<BlockRow> {
   const text = requireText(args.text);
   const kind = requireKind(args.kind ?? "prose");
   const rows = await readParseBlocks(args.workspace_id, args.source_file_id, db);
@@ -827,7 +827,7 @@ async function insertHumanBlock(args: {
   return row;
 }
 
-async function requireSource(workspace_id: string, source_file_id: string, db: SourceConnection = accuracyDb()) {
+async function requireSource(workspace_id: string, source_file_id: string, db: AccuracyExecutor = accuracyDb()) {
   await ensureParseSchema();
   const [row] = await db
     .select()
@@ -850,10 +850,10 @@ export async function addParseBlock(args: {
   heading?: string | null;
   rationale: string;
   actor: ParseEditActor;
-}, connection?: SourceConnection): Promise<BlockRow> {
+}, connection?: AccuracyExecutor): Promise<BlockRow> {
   await ensureParseSchema();
   if (!connection) {
-    return accuracyDb().transaction(async (tx) => {
+    return withProvenanceTransaction(args.workspace_id, async (tx) => {
       await lockAccuracySource(tx, args.workspace_id, args.source_file_id);
       return addParseBlock(args, tx);
     });
@@ -925,11 +925,11 @@ export async function restoreDroppedUnit(args: {
   heading?: string | null;
   rationale: string;
   actor: ParseEditActor;
-}, connection?: SourceConnection): Promise<BlockRow> {
+}, connection?: AccuracyExecutor): Promise<BlockRow> {
   await ensureParseSchema();
   if (!connection) {
     const sourceId = (await requireDroppedUnit(args.workspace_id, args.dropped_id)).source_file_id;
-    return accuracyDb().transaction(async (tx) => {
+    return withProvenanceTransaction(args.workspace_id, async (tx) => {
       await lockAccuracySource(tx, args.workspace_id, sourceId);
       return restoreDroppedUnit(args, tx);
     });
@@ -987,7 +987,7 @@ export type SourceStakeholder = {
   override_at: string | null;
 };
 
-export async function readSourceStakeholder(workspace_id: string, source_file_id: string, db: SourceConnection = accuracyDb()): Promise<SourceStakeholder> {
+export async function readSourceStakeholder(workspace_id: string, source_file_id: string, db: AccuracyExecutor = accuracyDb()): Promise<SourceStakeholder> {
   await ensureParseSchema();
   const [row] = await db
     .select()
@@ -1042,7 +1042,7 @@ export async function setSourceStakeholder(args: {
   stakeholder_function: string;
   rationale: string;
   actor: ParseEditActor;
-}, db: SourceConnection = accuracyDb()) {
+}, db: AccuracyExecutor = accuracyDb()) {
   const rationale = requireEditRationale(args.rationale);
   if (!(STAKEHOLDER_FUNCTIONS as readonly string[]).includes(args.stakeholder_function)) {
     throw new Error(`Unknown stakeholder function "${args.stakeholder_function}".`);

@@ -359,16 +359,38 @@ describe("durable source extraction continuation", () => {
 
   it("rolls back all claims and the checkpoint if a later claim has an invalid quote", async () => {
     const f = await fixture(2);
-    provider.reply = () => ({ gaps: [gapReply(f, 0).gaps[0], {
-      ...gapReply(f, 1, "Other need").gaps[0],
+    const page = await prepareExtractPage({ ...f, reference_pack_id: null, kinds: ["need"] });
+    // Test persistence directly: the extraction judge now filters bad quotes
+    // before API results reach this final database guard.
+    const valid = {
+      claim_type: "gap" as const, statement: "Need evidence", status: "draft", metadata: {},
+      provenance: gapReply(f, 0).gaps[0].provenance,
+    };
+    await expect(saveExtractBatch({ page, kind: "need", run_id: "invalid-later-quote", claims: [valid, {
+      ...valid, statement: "Other need",
       provenance: [{ source_file_id: f.source_file_id, block_id: f.blocks[1].id, quote: "Invalid quote" }],
-    }] });
-    const failed = await extract({ ...f, kinds: ["need"] });
-    expect(failed.status).toBe(400);
+    }] })).rejects.toThrow(/invalid quote/);
     expect(await listClaims(f.workspace_id)).toHaveLength(0);
-    provider.reply = () => gapReply(f, 0);
-    const retried = await extract({ ...f, kinds: ["need"], continuation: failed.body.continuation });
-    expect(retried.body).toMatchObject({ complete: true, gaps_inserted: 1 });
+    expect(await completedExtractKinds(page)).toEqual(new Set());
+    expect(await saveExtractBatch({ page, kind: "need", run_id: "valid-retry", claims: [valid] })).toBe(1);
+    expect(await listClaims(f.workspace_id)).toHaveLength(1);
+    expect(await completedExtractKinds(page)).toEqual(new Set(["need"]));
+  });
+
+  it("saves supported API results, filters unsupported quotes and reuses the completed checkpoint", async () => {
+    const f = await fixture(2);
+    provider.reply = () => ({ gaps: [gapReply(f, 0).gaps[0], {
+      ...gapReply(f, 1, "Unsupported need").gaps[0],
+      provenance: [{ source_file_id: f.source_file_id, block_id: f.blocks[1].id, quote: "Invented quote" }],
+    }] });
+    const result = await extract({ ...f, kinds: ["need"] });
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ complete: true, blocks_processed: 2, gaps_inserted: 1 });
+    expect((await listClaims(f.workspace_id)).map((claim) => claim.statement)).toEqual(["Need evidence"]);
+    provider.calls = [];
+    const retry = await extract({ ...f, kinds: ["need"] });
+    expect(retry.body).toMatchObject({ complete: true, gaps_inserted: 0 });
+    expect(provider.calls.some((call) => call.startsWith("need_extract"))).toBe(false);
     expect(await listClaims(f.workspace_id)).toHaveLength(1);
   });
 
@@ -413,17 +435,17 @@ describe("durable source extraction continuation", () => {
 
   it.each(["quote", "source", "page"])("rejects invalid %s provenance without saving claims or completing the kind", async (bad) => {
     const f = await fixture();
-    provider.reply = () => {
-      const reply = gapReply(f, bad === "page" ? 80 : 0);
-      if (bad === "quote") reply.gaps[0].provenance[0].quote = "Invented quote";
-      if (bad === "source") reply.gaps[0].provenance[0].source_file_id = "other-source";
-      return reply;
-    };
-    const result = await extract({ ...f, kinds: ["need"] });
-    expect(result.status).toBe(400);
-    expect(result.body).toMatchObject({ status: "failed", blocks_processed: 0 });
+    const page = await prepareExtractPage({ ...f, reference_pack_id: null, kinds: ["need"] });
+    const reply = gapReply(f, bad === "page" ? 80 : 0);
+    if (bad === "quote") reply.gaps[0].provenance[0].quote = "Invented quote";
+    if (bad === "source") reply.gaps[0].provenance[0].source_file_id = "other-source";
+    await expect(saveExtractBatch({ page, kind: "need", run_id: `invalid-${bad}`, claims: [{
+      claim_type: "gap", statement: "Unsupported need", status: "draft", metadata: {},
+      provenance: reply.gaps[0].provenance,
+    }] })).rejects.toThrow(/invalid quote/);
     expect(await listClaims(f.workspace_id)).toHaveLength(0);
-    provider.reply = () => ({ gaps: [] });
-    expect((await extract({ ...f, kinds: ["need"], continuation: result.body.continuation })).body.blocks_processed).toBe(80);
+    expect(await completedExtractKinds(page)).toEqual(new Set());
+    expect(await saveExtractBatch({ page, kind: "need", run_id: "empty-retry", claims: [] })).toBe(0);
+    expect(await completedExtractKinds(page)).toEqual(new Set(["need"]));
   });
 });

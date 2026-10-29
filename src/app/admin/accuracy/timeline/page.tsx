@@ -4,10 +4,7 @@ import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
 import { AccuracyGanttBoard } from "@/components/accuracy/accuracy-gantt-board";
 import { registerAccuracyStack } from "@/accuracy";
 import {
-  auditBundleFromPlan,
-  projectWorkspaceGantt,
-  snapshotHashForPlan,
-  workspaceLatestPlan,
+  readWorkspaceGantt,
 } from "@/accuracy/modules/gantt-project/save-final";
 import { workspacePlanLabel } from "@/accuracy/domain/plan-label";
 import { getWorkspace, listWorkspaces } from "@/accuracy/store/tenant";
@@ -31,9 +28,7 @@ export default async function AccuracyTimelinePage({
 
   let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
   let activeWorkspace: Awaited<ReturnType<typeof getWorkspace>> = null;
-  let activities: Awaited<ReturnType<typeof projectWorkspaceGantt>>["activities"] = [];
-  let catalog: Awaited<ReturnType<typeof projectWorkspaceGantt>>["catalog"] = [];
-  let plan: Awaited<ReturnType<typeof workspaceLatestPlan>> = null;
+  let gantt: Awaited<ReturnType<typeof readWorkspaceGantt>> | null = null;
   let loadError: string | null = null;
   let tactics: GanttTacticSchedule[] = [];
 
@@ -42,10 +37,7 @@ export default async function AccuracyTimelinePage({
     // Looked up directly, so a workspace past the picker's cap still shows its name.
     if (workspaceId) activeWorkspace = await getWorkspace(workspaceId);
     if (activeWorkspace) {
-      const projected = await projectWorkspaceGantt(workspaceId);
-      activities = projected.activities;
-      catalog = projected.catalog;
-      plan = await workspaceLatestPlan(workspaceId);
+      gantt = await readWorkspaceGantt(workspaceId);
       const claims = (await listClaims(workspaceId, { limit: 500 })).filter(
         (row) => row.claim_type === "tactic" && isActiveLedgerClaim(row),
       );
@@ -156,13 +148,15 @@ export default async function AccuracyTimelinePage({
 
           <AccuracyGanttBoard
             workspaceId={workspaceId}
-            activities={activities}
-            catalog={catalog}
-            planVersion={plan?.version ?? null}
-            planStatus={plan?.status ?? null}
-            planId={plan?.id ?? null}
-            snapshotHash={plan ? snapshotHashForPlan(plan) : null}
-            auditBundleHref={plan ? auditBundleFromPlan(plan).href : null}
+            activities={gantt?.activities ?? []}
+            catalog={gantt?.catalog ?? []}
+            liveActivities={gantt?.live.activities ?? []}
+            liveCatalog={gantt?.live.catalog ?? []}
+            planVersion={gantt?.plan?.version ?? null}
+            planStatus={gantt?.plan?.status ?? null}
+            planId={gantt?.plan?.id ?? null}
+            snapshotHash={gantt?.snapshot_hash ?? null}
+            auditBundleHref={gantt?.audit_bundle?.href ?? null}
             tactics={tactics}
           />
         </>

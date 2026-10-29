@@ -1,6 +1,8 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+/** Stores ledger claims, validation decisions, and durable source evidence. */
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { accuracyDb, ensureAccuracySchema } from "./db";
 import * as t from "./schema";
+import { ProvenanceValidationError, validateClaimProvenance, validateClaimProvenanceChange, withProvenanceTransaction, type AccuracyTransaction } from "./provenance-store";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { Actor } from "@/accuracy/kernel/contracts";
 
@@ -99,7 +101,7 @@ export function requireValidationRationale(rationale: string | null | undefined)
   return trimmed;
 }
 
-export async function insertClaim(args: {
+type ClaimInsert = {
   id?: string;
   workspace_id: string;
   claim_type: AccuracyClaimType;
@@ -108,7 +110,24 @@ export async function insertClaim(args: {
   validated?: boolean;
   source_file_id?: string | null;
   metadata?: AccuracyClaimMetadata;
-}): Promise<AccuracyClaimRow> {
+};
+
+/** Insert extraction/raw claims only after every citation has been verified. */
+export async function insertClaim(args: ClaimInsert): Promise<AccuracyClaimRow> {
+  return insertClaimWithEvidence(args, false);
+}
+
+/**
+ * Human-create owner boundary: keep unsupported human annotations as metadata,
+ * while persisting only verified citations as trusted evidence. Raw metadata
+ * cannot opt into this policy through `insertClaim`.
+ */
+export async function insertHumanAuthoredClaim(args: ClaimInsert): Promise<AccuracyClaimRow> {
+  return insertClaimWithEvidence(args, true);
+}
+
+/** Save a claim and its verified evidence in one workspace-locked transaction. */
+async function insertClaimWithEvidence(args: ClaimInsert, allowHumanAnnotations: boolean): Promise<AccuracyClaimRow> {
   await ensureAccuracySchema();
   const now = nowIso();
   const row = {
@@ -123,33 +142,58 @@ export async function insertClaim(args: {
     created_at: now,
     updated_at: now,
   };
-  await accuracyDb().insert(t.accuracyClaims).values(row);
-  return row as AccuracyClaimRow;
+  return withProvenanceTransaction(args.workspace_id, async (db) => {
+    // Even human-created claims must name a source in their own workspace.
+    const strictSpans = await validateClaimProvenance(db, {
+      workspace_id: args.workspace_id,
+      source_file_id: args.source_file_id,
+      provenance: allowHumanAnnotations ? [] : args.metadata?.provenance,
+    });
+    const spans = allowHumanAnnotations
+      ? await validateClaimProvenanceChange(db, row as AccuracyClaimRow, row.metadata, true)
+      : strictSpans;
+    await db.insert(t.accuracyClaims).values(row);
+    const unique = new Map(spans.map((span) => [JSON.stringify([span.source_file_id, span.block_id, span.quote]), span]));
+    if (unique.size) await db.insert(t.accuracyProvenance).values([...unique.values()].map((span) => ({
+      id: newId("prov"), workspace_id: args.workspace_id, claim_id: row.id,
+      source_file_id: span.source_file_id, block_id: span.block_id, quote: span.quote,
+    })));
+    return row as AccuracyClaimRow;
+  });
 }
 
+/**
+ * List workspace claims, filtering by type before limiting the newest rows.
+ * Omitted limits retain the 200-row default; `null` explicitly loads all matches.
+ */
 export async function listClaims(
   workspace_id: string,
-  opts?: { claim_type?: AccuracyClaimType; limit?: number },
+  opts?: { claim_type?: AccuracyClaimType; limit?: number | null },
 ): Promise<AccuracyClaimRow[]> {
   await ensureAccuracySchema();
-  const limit = opts?.limit ?? 200;
-  const rows = await accuracyDb()
+  const limit = opts?.limit === undefined ? 200 : opts.limit;
+  const query = accuracyDb()
     .select()
     .from(t.accuracyClaims)
-    .where(eq(t.accuracyClaims.workspace_id, workspace_id))
-    .orderBy(desc(t.accuracyClaims.updated_at))
-    .limit(limit);
-  if (!opts?.claim_type) return rows;
-  return rows.filter((row) => row.claim_type === opts.claim_type);
+    .where(
+      and(
+        eq(t.accuracyClaims.workspace_id, workspace_id),
+        opts?.claim_type ? eq(t.accuracyClaims.claim_type, opts.claim_type) : undefined,
+      ),
+    )
+    .orderBy(desc(t.accuracyClaims.updated_at));
+  return limit === null ? query : query.limit(limit);
 }
 
+/** Read requested claims; a merge transaction also locks them until its commit. */
 export async function getClaimsByIds(
   workspace_id: string,
   claim_ids: string[],
+  transaction?: AccuracyTransaction,
 ): Promise<AccuracyClaimRow[]> {
   if (claim_ids.length === 0) return [];
   await ensureAccuracySchema();
-  const rows = await accuracyDb()
+  const query = (transaction ?? accuracyDb())
     .select()
     .from(t.accuracyClaims)
     .where(
@@ -158,6 +202,7 @@ export async function getClaimsByIds(
         inArray(t.accuracyClaims.id, claim_ids),
       ),
     );
+  const rows = transaction ? await query.for("update") : await query;
   const byId = new Map(rows.map((row) => [row.id, row]));
   return claim_ids.flatMap((id) => {
     const row = byId.get(id);
@@ -193,39 +238,24 @@ export async function applyClaimValidation(args: {
   const nextStatus = args.action === "validate" ? "validated" : "rejected";
   const updated: AccuracyClaimRow[] = [];
 
+  const validation: ClaimValidationMeta = {
+    action: args.action, rationale, at: now,
+    by: args.actor.name, by_function: args.actor.function,
+  };
   for (const claim of existing) {
-    const prevMeta = (claim.metadata ?? {}) as AccuracyClaimMetadata;
-    const metadata: AccuracyClaimMetadata = {
-      ...prevMeta,
-      validation: {
-        action: args.action,
-        rationale,
-        at: now,
-        by: args.actor.name,
-        by_function: args.actor.function,
-      },
-    };
-    await accuracyDb()
+    const [row] = await accuracyDb()
       .update(t.accuracyClaims)
       .set({
         validated,
         status: nextStatus,
-        metadata,
+        // Update this field on the database's current JSON, never a prior read.
+        metadata: sql`jsonb_set(coalesce(${t.accuracyClaims.metadata}, '{}'::jsonb), '{validation}', ${JSON.stringify(validation)}::jsonb)`,
         updated_at: now,
       })
-      .where(
-        and(
-          eq(t.accuracyClaims.id, claim.id),
-          eq(t.accuracyClaims.workspace_id, args.workspace_id),
-        ),
-      );
-    updated.push({
-      ...claim,
-      validated,
-      status: nextStatus,
-      metadata,
-      updated_at: now,
-    });
+      .where(and(eq(t.accuracyClaims.id, claim.id), eq(t.accuracyClaims.workspace_id, args.workspace_id)))
+      .returning();
+    if (!row) throw new Error(`Unknown claim: ${claim.id}`);
+    updated.push(row);
   }
 
   return { updated: updated.length, claims: updated };
@@ -234,8 +264,9 @@ export async function applyClaimValidation(args: {
 export async function getClaim(
   workspace_id: string,
   claim_id: string,
+  transaction?: AccuracyTransaction,
 ): Promise<AccuracyClaimRow | null> {
-  const rows = await getClaimsByIds(workspace_id, [claim_id]);
+  const rows = await getClaimsByIds(workspace_id, [claim_id], transaction);
   return rows[0] ?? null;
 }
 
@@ -244,20 +275,7 @@ export async function updateClaimMetadata(args: {
   claim_id: string;
   metadata: AccuracyClaimMetadata;
 }): Promise<AccuracyClaimRow> {
-  await ensureAccuracySchema();
-  const existing = await getClaim(args.workspace_id, args.claim_id);
-  if (!existing) throw new Error(`Unknown claim: ${args.claim_id}`);
-  const now = nowIso();
-  await accuracyDb()
-    .update(t.accuracyClaims)
-    .set({ metadata: args.metadata as Record<string, unknown>, updated_at: now })
-    .where(
-      and(
-        eq(t.accuracyClaims.id, args.claim_id),
-        eq(t.accuracyClaims.workspace_id, args.workspace_id),
-      ),
-    );
-  return { ...existing, metadata: args.metadata as Record<string, unknown>, updated_at: now };
+  return persistClaimPatch(args);
 }
 
 export function claimMetadata(claim: AccuracyClaimRow): AccuracyClaimMetadata {
@@ -269,32 +287,65 @@ export function isActiveLedgerClaim(claim: Pick<AccuracyClaimRow, "status">): bo
   return claim.status !== "merged" && claim.status !== "rejected";
 }
 
+/**
+ * Persist ordinary fields without replacing current evidence. Intentional evidence
+ * changes supply the prior snapshot, then validate and replace rows atomically.
+ */
 export async function persistClaimPatch(args: {
   workspace_id: string;
   claim_id: string;
+  statement?: string;
   status?: string;
   metadata?: AccuracyClaimMetadata;
+  at?: string;
+  provenance_update?: { previous: unknown; allow_human_annotations?: boolean };
+  /** Reuse the caller's workspace-locked transaction for coupled merge writes. */
+  transaction?: AccuracyTransaction;
 }): Promise<AccuracyClaimRow> {
   await ensureAccuracySchema();
-  const existing = await getClaim(args.workspace_id, args.claim_id);
-  if (!existing) throw new Error(`Unknown claim: ${args.claim_id}`);
-  const now = nowIso();
-  const metadata = args.metadata ?? ((existing.metadata ?? {}) as AccuracyClaimMetadata);
-  const status = args.status ?? existing.status;
-  await accuracyDb()
-    .update(t.accuracyClaims)
-    .set({
-      status,
-      metadata: metadata as Record<string, unknown>,
-      updated_at: now,
-    })
-    .where(
-      and(
-        eq(t.accuracyClaims.id, args.claim_id),
-        eq(t.accuracyClaims.workspace_id, args.workspace_id),
-      ),
-    );
-  return { ...existing, status, metadata: metadata as Record<string, unknown>, updated_at: now };
+  const now = args.at ?? nowIso();
+  const fields = {
+    ...(args.statement !== undefined ? { statement: args.statement } : {}),
+    ...(args.status !== undefined ? { status: args.status } : {}),
+    updated_at: now,
+  };
+  const where = and(eq(t.accuracyClaims.id, args.claim_id), eq(t.accuracyClaims.workspace_id, args.workspace_id));
+  if (args.provenance_update) {
+    const update = args.provenance_update;
+    if (!args.metadata) throw new ProvenanceValidationError("missing_metadata");
+    const metadata = args.metadata;
+    const replace = async (db: AccuracyTransaction) => {
+      const [existing] = await db.select().from(t.accuracyClaims).where(where);
+      if (!existing) throw new Error(`Unknown claim: ${args.claim_id}`);
+      const [matching] = await db.select({ id: t.accuracyClaims.id }).from(t.accuracyClaims).where(and(where,
+        sql`coalesce(${t.accuracyClaims.metadata}->'provenance', 'null'::jsonb) = ${JSON.stringify(update.previous ?? null)}::jsonb`,
+      ));
+      if (!matching) throw new ProvenanceValidationError("stale_provenance_retry");
+      const spans = await validateClaimProvenanceChange(db, existing, metadata, update.allow_human_annotations);
+      await db.delete(t.accuracyProvenance).where(and(eq(t.accuracyProvenance.workspace_id, args.workspace_id), eq(t.accuracyProvenance.claim_id, args.claim_id)));
+      const unique = new Map(spans.map((span) => [JSON.stringify([span.source_file_id, span.block_id, span.quote]), span]));
+      if (unique.size) await db.insert(t.accuracyProvenance).values([...unique.values()].map((span) => ({
+        id: newId("prov"), workspace_id: args.workspace_id, claim_id: args.claim_id,
+        source_file_id: span.source_file_id, block_id: span.block_id, quote: span.quote,
+      })));
+      const [row] = await db.update(t.accuracyClaims).set({ ...fields, metadata }).where(where).returning();
+      return row!;
+    };
+    return args.transaction ? replace(args.transaction) : withProvenanceTransaction(args.workspace_id, replace);
+  }
+  const metadataPatch = args.metadata ? { ...args.metadata } : undefined;
+  if (metadataPatch) delete metadataPatch.provenance;
+  const preservedFields = sql`case when coalesce(${t.accuracyClaims.metadata}, '{}'::jsonb) ? 'provenance' then jsonb_build_object('provenance', ${t.accuracyClaims.metadata}->'provenance') else '{}'::jsonb end`;
+  const [row] = await (args.transaction ?? accuracyDb()).update(t.accuracyClaims).set({
+    ...fields,
+    ...(metadataPatch ? {
+      // A caller may have prepared a complete snapshot before a split/merge.
+      // Keep evidence from the database's current row.
+      metadata: sql`${JSON.stringify(metadataPatch)}::jsonb || ${preservedFields}`,
+    } : {}),
+  }).where(where).returning();
+  if (!row) throw new Error(`Unknown claim: ${args.claim_id}`);
+  return row;
 }
 
 function metaString(value: unknown): string | null {

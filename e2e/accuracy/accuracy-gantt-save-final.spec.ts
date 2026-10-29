@@ -1,4 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { readFile } from "node:fs/promises";
+import { svgMarkupForRaster } from "../../src/accuracy/modules/gantt-project/export-svg";
 import { workspaceUrl } from "../support/accuracy";
 
 test.use({
@@ -122,7 +124,8 @@ test.describe("accuracy Gantt save-final truth", () => {
       "Signed off after ledger review of OS follow-up.",
     );
     await page.getByRole("button", { name: /^save as final$/i }).click();
-    await expect(page.getByText(/saved v1 as final/i)).toBeVisible();
+    // The refresh can clear the success message; the saved version remains visible.
+    await expect(page.getByText(/latest plan v1 \(final\)/i)).toBeVisible();
     const hash = page.getByTestId("gantt-snapshot-hash");
     await expect(hash).toBeVisible();
     await expect(hash).toContainText(/[a-f0-9]{64}/);
@@ -140,4 +143,112 @@ test.describe("accuracy Gantt save-final truth", () => {
     await expect(page.getByTestId("audit-snapshot-hash")).toHaveText(hex!);
     await shot(page, "gantt_audit_bundle_after.png");
   });
+});
+
+
+test("saved v1 survives live edits and both exports; v2 replaces the complete snapshot", async ({ page, request }) => {
+  const workspace_id = await seedDatedGantt(request);
+  const timeline = workspaceUrl("/admin/accuracy/timeline", workspace_id);
+  await page.goto(timeline);
+  await page.getByPlaceholder(/final iegp truth/i).fill("Initial sign-off before live edits");
+  const saveOne = page.waitForResponse(response => response.url().includes("/gantt/save-final") && response.request().method() === "POST");
+  await page.getByRole("button", { name: /^save as final$/i }).click();
+  const first = await (await saveOne).json();
+  await expect(page.getByTestId("gantt-snapshot-hash")).toContainText(first.snapshot_hash);
+  const tactic = first.plan.snapshot.labels.find((row: { statement: string }) => row.statement === "Pivotal OS follow-up study");
+  const liveDates = { start: "2028-01-11", end: "2028-06-13", readout: "2028-07-17" };
+  // Other frozen tactics may share dates: establish unique sentinels before editing.
+  for (const date of Object.values(liveDates)) {
+    expect(JSON.stringify(first.plan.snapshot)).not.toContain(date);
+  }
+  expect(first.plan.snapshot.activities).toEqual(expect.arrayContaining([
+    expect.objectContaining({ tactic_id: tactic.id, start: "2026-01-01", end: "2026-06-01", readout: "2026-07-01" }),
+  ]));
+  const edited = await request.patch("/api/accuracy/claims", { data: { workspace_id, claim_id: tactic.id, rationale: "New live schedule and title after sign-off", patch: { statement: "Renamed live follow-up study", ...liveDates } } });
+  expect(edited.ok()).toBe(true);
+  await page.goto(timeline);
+  const frozen = page.getByRole("button", { name: /pivotal os follow-up study/i });
+  await expect(frozen).toBeVisible();
+  await expect(frozen).toContainText("2026-01-01");
+  await frozen.click();
+  await expect(page.getByTestId("gantt-activity-detail")).toContainText("2026-06-01");
+  await expect(page.getByTestId("gantt-activity-detail")).not.toContainText("Renamed live");
+  await expect(page.getByTestId("gantt-snapshot-hash")).toContainText(first.snapshot_hash);
+  const read = await (await request.get(`/api/accuracy/gantt?workspace_id=${workspace_id}`)).json();
+  expect(read.activities).toEqual(first.plan.snapshot.activities);
+  expect(read.catalog).toEqual(first.plan.snapshot.labels);
+  expect(read.live.catalog).toEqual(expect.arrayContaining([expect.objectContaining({ statement: "Renamed live follow-up study" })]));
+  expect(read.live.activities).toEqual(expect.arrayContaining([expect.objectContaining({ tactic_id: tactic.id, ...liveDates })]));
+
+  const svgPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export SVG", exact: true }).click();
+  const svgDownload = await svgPromise;
+  expect(svgDownload.suggestedFilename()).toContain("-v1.svg");
+  const svg = await readFile((await svgDownload.path())!, "utf8");
+  expect(svg).toContain("Pivotal OS follow-up study");
+  expect(svg).toContain("2026-01-01");
+  expect(svg).toContain("2026-06-01");
+  expect(svg).toContain("readout 2026-07-01");
+  expect(svg).not.toContain("Renamed live follow-up study");
+  for (const date of Object.values(liveDates)) {
+    expect(svg).not.toContain(date);
+  }
+
+  // Observe the actual image passed to canvas, rather than trusting a .png suffix.
+  await page.evaluate(() => {
+    const observation = window as Window & { ganttRasterInputs?: string[] };
+    observation.ganttRasterInputs = [];
+    const original = CanvasRenderingContext2D.prototype.drawImage;
+    CanvasRenderingContext2D.prototype.drawImage = function (image: CanvasImageSource, ...coordinates: number[]) {
+      if (image instanceof HTMLImageElement) {
+        void fetch(image.src).then(response => response.text()).then(markup => observation.ganttRasterInputs!.push(markup));
+      }
+      return Reflect.apply(original, this, [image, ...coordinates]);
+    };
+  });
+  const pngPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export PNG", exact: true }).click();
+  const png = await pngPromise;
+  expect(png.suggestedFilename()).toContain("-v1.png");
+  expect((await readFile((await png.path())!)).subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  await expect.poll(() => page.evaluate(() => (window as Window & { ganttRasterInputs?: string[] }).ganttRasterInputs)).toEqual([svgMarkupForRaster(svg)]);
+  await shot(page, "gantt_saved_v1_after_live_edit.png");
+
+  await page.getByRole("button", { name: "Live projection (unsaved)", exact: true }).click();
+  await expect(page.getByRole("button", { name: /renamed live follow-up study/i })).toContainText(liveDates.start);
+  await expect(page.getByText("Unsaved live projection", { exact: false })).toBeVisible();
+  await expect(page.getByTestId("gantt-snapshot-hash")).toHaveCount(0);
+  await expect(page.getByText(/latest plan v1/i)).toHaveCount(0);
+  const liveSvgPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export SVG", exact: true }).click();
+  const liveSvg = await liveSvgPromise;
+  expect(liveSvg.suggestedFilename()).toContain("-draft.svg");
+  const liveMarkup = await readFile((await liveSvg.path())!, "utf8");
+  expect(liveMarkup).toContain("Renamed live follow-up study");
+  for (const date of Object.values(liveDates)) {
+    expect(liveMarkup).toContain(date);
+  }
+  await page.getByPlaceholder(/final iegp truth/i).fill("Approve the revised live projection as v2");
+  const saveTwo = page.waitForResponse(response => response.url().includes("/gantt/save-final") && response.request().method() === "POST");
+  await page.getByRole("button", { name: /^save as final$/i }).click();
+  const second = await (await saveTwo).json();
+  expect(second.plan.version).toBe(2);
+  expect(second.plan.snapshot.activities).toEqual(expect.arrayContaining([expect.objectContaining({ tactic_id: tactic.id, ...liveDates })]));
+  expect(second.snapshot_hash).not.toBe(first.snapshot_hash);
+  await expect(page.getByTestId("gantt-snapshot-hash")).toContainText(second.snapshot_hash);
+  await expect(page.getByText(/latest plan v2/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /renamed live follow-up study/i })).toContainText(liveDates.start);
+  await page.reload();
+  await expect(page.getByTestId("gantt-snapshot-hash")).toContainText(second.snapshot_hash);
+  await expect(page.getByRole("button", { name: /renamed live follow-up study/i })).toContainText(liveDates.start);
+  const v2SvgPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export SVG", exact: true }).click();
+  const v2Svg = await v2SvgPromise;
+  expect(v2Svg.suggestedFilename()).toContain("-v2.svg");
+  const v2Markup = await readFile((await v2Svg.path())!, "utf8");
+  expect(v2Markup).toContain("Renamed live follow-up study");
+  for (const date of Object.values(liveDates)) {
+    expect(v2Markup).toContain(date);
+  }
+  await shot(page, "gantt_saved_v2.png");
 });

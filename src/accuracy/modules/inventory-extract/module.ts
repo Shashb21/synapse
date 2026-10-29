@@ -1,14 +1,17 @@
+/** Extracts tactics whose evidence matches the supplied source blocks. */
 import { z } from "zod";
 import { agenticModule } from "../_factory";
 import { runShallowAgenticCycle } from "../../kernel/agentic";
 import { completeJson } from "../../kernel/routing";
 import { isTestStub } from "@/modules/kernel/llm";
-import { provenanceSpanSchema } from "../../store/quote-validator";
+import { provenanceSpanSchema, validateProvenance, type ParseBlock } from "../../store/quote-validator";
 import { TACTIC_STATUSES, TACTIC_TYPES } from "@/lib/iegp/enums";
 import { newId } from "@/modules/kernel/ids";
 import type { AccuracyModuleContext } from "../../kernel/contracts";
 import { INVENTORY_PROPOSER_SYSTEM, inventoryProposerUser } from "./prompts";
 import { readParseBlocks, readParseBlocksByIds } from "../../store/parse-store";
+
+type EvidenceBlock = Pick<ParseBlock, "id" | "workspace_id" | "source_file_id" | "heading" | "text">;
 
 const tacticStatusSchema = z.enum(TACTIC_STATUSES);
 const tacticTypeSchema = z.enum(TACTIC_TYPES);
@@ -47,7 +50,7 @@ type InventoryDraft = {
   tactics: z.infer<typeof proposerTacticSchema>[];
 };
 
-function critiqueDraft(draft: InventoryDraft, source_file_id: string): { score: number; issues: string[] } {
+function critiqueDraft(draft: InventoryDraft, source_file_id: string, blocks: Map<string, EvidenceBlock>): { score: number; issues: string[] } {
   const issues: string[] = [];
   if (draft.tactics.length === 0) {
     issues.push("no_tactics_proposed");
@@ -66,7 +69,12 @@ function critiqueDraft(draft: InventoryDraft, source_file_id: string): { score: 
         if (span.source_file_id !== source_file_id) {
           issues.push(`${subject}:source_file_mismatch`);
         }
-        if (!span.quote?.trim()) issues.push(`${subject}:empty_quote`);
+        const block = blocks.get(span.block_id);
+        if (!block) issues.push(`${subject}:unknown_block`);
+        else {
+          const evidence = validateProvenance({ block, span });
+          if (!evidence.ok) issues.push(`${subject}:${evidence.reason}`);
+        }
       }
     }
     const key = tactic.name?.trim().toLowerCase();
@@ -96,7 +104,7 @@ function normalizeDraft(raw: unknown, source_file_id: string): InventoryDraft {
   };
 }
 
-function judgeDraft(draft: InventoryDraft): InventoryExtractOutput["tactics"] {
+function judgeDraft(draft: InventoryDraft, source_file_id: string, blocks: Map<string, EvidenceBlock>): InventoryExtractOutput["tactics"] {
   const out: InventoryTactic[] = [];
   for (const tactic of draft.tactics) {
     const parsed = inventoryTacticSchema.safeParse({
@@ -108,7 +116,10 @@ function judgeDraft(draft: InventoryDraft): InventoryExtractOutput["tactics"] {
       origin: "inventory",
       provenance: tactic.provenance ?? [],
     });
-    if (parsed.success) out.push(parsed.data);
+    if (parsed.success && parsed.data.provenance.every((span) => {
+      const block = blocks.get(span.block_id);
+      return span.source_file_id === source_file_id && block !== undefined && validateProvenance({ block, span }).ok;
+    })) out.push(parsed.data);
   }
   return out;
 }
@@ -123,12 +134,7 @@ async function loadBlocksForPrompt(input: {
       ? await readParseBlocksByIds(input.workspace_id, input.block_ids)
       : await readParseBlocks(input.workspace_id, input.source_file_id);
   return rows
-    .filter((row) => row.source_file_id === input.source_file_id)
-    .map((row) => ({
-      id: row.id,
-      heading: row.heading,
-      text: row.text,
-    }));
+    .filter((row) => row.workspace_id === input.workspace_id && row.source_file_id === input.source_file_id);
 }
 
 async function proposeInventory(
@@ -137,11 +143,11 @@ async function proposeInventory(
   round: number,
   prior: InventoryDraft | null,
   critiques: string[],
+  blocks: EvidenceBlock[],
 ): Promise<InventoryDraft> {
   if (isTestStub()) {
     return { tactics: [] };
   }
-  const blocks = await loadBlocksForPrompt(input);
   const block_ids = input.block_ids.length > 0 ? input.block_ids : blocks.map((b) => b.id);
   const raw = await completeJson(ctx.complete, {
     system: INVENTORY_PROPOSER_SYSTEM,
@@ -174,20 +180,22 @@ export const inventoryExtractModule = agenticModule({
   outputSchema: inventoryExtractOutputSchema,
   run: async (input, ctx) => {
     const stub = isTestStub();
+    const blocks = stub ? [] : await loadBlocksForPrompt(input);
+    const byId = new Map(blocks.map((block) => [block.id, block]));
 
     const cycle = await runShallowAgenticCycle<InventoryDraft>({
       proposer: (round, prior, critiques) =>
-        proposeInventory(ctx, input, round, prior, critiques),
+        proposeInventory(ctx, input, round, prior, critiques, blocks),
       critic: async (draft) => {
         if (stub) return { score: 1, issues: [] };
-        return critiqueDraft(draft, input.source_file_id);
+        return critiqueDraft(draft, input.source_file_id, byId);
       },
       judge: async (draft) => draft,
     });
 
     ctx.run.note("agentic:trace", cycle.trace);
 
-    const tactics = stub ? [] : judgeDraft(cycle.final);
+    const tactics = stub ? [] : judgeDraft(cycle.final, input.source_file_id, byId);
     const output = {
       workspace_id: input.workspace_id,
       source_file_id: input.source_file_id,
