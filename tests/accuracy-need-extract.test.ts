@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   needExtractModule,
   needExtractOutputSchema,
@@ -6,6 +6,11 @@ import {
   scoreGapIdRecall,
 } from "@/accuracy/modules/need-extract/module";
 import type { AccuracyModuleContext } from "@/accuracy/kernel/contracts";
+
+vi.mock("@/accuracy/store/parse-store", () => {
+  const rows = [{ id: "blk-1", workspace_id: "ws-test", source_file_id: "src-1", index: 0, kind: "prose", heading: null, text: "Need OS evidence" }];
+  return { readParseBlocks: vi.fn(async () => rows), readParseBlocksByIds: vi.fn(async () => rows) };
+});
 
 function stubCtx(): AccuracyModuleContext {
   return {
@@ -92,6 +97,31 @@ describe("need extract module", () => {
       expect(result.output.gaps).toHaveLength(1);
       expect(result.output.gaps[0]?.statement).toMatch(/OS evidence/);
       expect(result.summary).toMatch(/1 gap/);
+    } finally {
+      process.env.SYNAPSE_TEST_STUB_LLM = prev;
+    }
+  });
+
+  it.each([
+    { source_file_id: "src-1", block_id: "blk-1", quote: "Invented evidence never in the source" },
+    { source_file_id: "src-1", block_id: "unknown", quote: "Need OS evidence" },
+    { source_file_id: "foreign-source", block_id: "blk-1", quote: "Need OS evidence" },
+  ])("rejects schema-valid unsupported evidence: %j", async (span) => {
+    const prev = process.env.SYNAPSE_TEST_STUB_LLM;
+    process.env.SYNAPSE_TEST_STUB_LLM = "0";
+    try {
+      // Arrange: every model revision repeats evidence unsupported by the supplied blocks.
+      const ctx = stubCtx();
+      ctx.complete = async () => ({
+        raw: JSON.stringify({ gaps: [{ statement: "Need OS evidence", external_id: null, provenance: [span] }] }),
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      });
+      // Act: the real extraction critic and judge inspect that evidence.
+      const result = await needExtractModule.run(
+        { workspace_id: "ws-test", source_file_id: "src-1", block_ids: ["blk-1"] }, ctx,
+      );
+      // Assert: a valid JSON shape never authorizes an unsupported quote.
+      expect(result.output.gaps).toEqual([]);
     } finally {
       process.env.SYNAPSE_TEST_STUB_LLM = prev;
     }

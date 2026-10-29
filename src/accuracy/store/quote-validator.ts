@@ -1,3 +1,4 @@
+/** Validates evidence locations and whitespace-compatible quotes against source blocks. */
 import { z } from "zod";
 
 export const provenanceSpanSchema = z.object({
@@ -39,7 +40,7 @@ export function validateQuoteAgainstBlock(args: {
 }
 
 export function validateProvenance(args: {
-  block: ParseBlock;
+  block: Pick<ParseBlock, "id" | "source_file_id" | "text">;
   span: ProvenanceSpan;
 }): { ok: true } | { ok: false; reason: string } {
   if (args.span.block_id !== args.block.id) {

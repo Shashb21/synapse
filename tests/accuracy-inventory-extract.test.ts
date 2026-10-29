@@ -1,10 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   inventoryExtractModule,
   inventoryExtractOutputSchema,
   inventoryTacticSchema,
 } from "@/accuracy/modules/inventory-extract/module";
 import type { AccuracyModuleContext } from "@/accuracy/kernel/contracts";
+
+vi.mock("@/accuracy/store/parse-store", () => {
+  const rows = [{ id: "blk-1", workspace_id: "ws-test", source_file_id: "src-1", index: 0, kind: "prose", heading: null, text: "Phase 3 study ongoing in NSCLC" }];
+  return { readParseBlocks: vi.fn(async () => rows), readParseBlocksByIds: vi.fn(async () => rows) };
+});
 
 function stubCtx(): AccuracyModuleContext {
   return {
@@ -95,6 +100,31 @@ describe("inventory extract module", () => {
       expect(result.output.tactics[0]?.name).toMatch(/Phase 3/);
       expect(result.output.tactics[0]?.origin).toBe("inventory");
       expect(result.summary).toMatch(/1 tactic/);
+    } finally {
+      process.env.SYNAPSE_TEST_STUB_LLM = prev;
+    }
+  });
+
+  it.each([
+    { source_file_id: "src-1", block_id: "blk-1", quote: "Invented evidence never in the source" },
+    { source_file_id: "src-1", block_id: "unknown", quote: "Phase 3 study ongoing in NSCLC" },
+    { source_file_id: "foreign-source", block_id: "blk-1", quote: "Phase 3 study ongoing in NSCLC" },
+  ])("rejects schema-valid unsupported evidence: %j", async (span) => {
+    const prev = process.env.SYNAPSE_TEST_STUB_LLM;
+    process.env.SYNAPSE_TEST_STUB_LLM = "0";
+    try {
+      // Arrange: every model revision repeats evidence unsupported by the supplied blocks.
+      const ctx = stubCtx();
+      ctx.complete = async () => ({
+        raw: JSON.stringify({ tactics: [{ name: "Trial", type: "phase3_trial", status: "ongoing", evidence_question: "OS?", origin: "inventory", provenance: [span] }] }),
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      });
+      // Act: the real extraction critic and judge inspect that evidence.
+      const result = await inventoryExtractModule.run(
+        { workspace_id: "ws-test", source_file_id: "src-1", block_ids: ["blk-1"] }, ctx,
+      );
+      // Assert: a valid JSON shape never authorizes an unsupported quote.
+      expect(result.output.tactics).toEqual([]);
     } finally {
       process.env.SYNAPSE_TEST_STUB_LLM = prev;
     }
