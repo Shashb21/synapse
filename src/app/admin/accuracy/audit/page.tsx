@@ -124,8 +124,8 @@ export default async function AccuracyAuditPage({
 
       rows.sort((a, b) => b.at.localeCompare(a.at));
     }
-  } catch (error) {
-    loadError = error instanceof Error ? error.message : "Could not load audit";
+  } catch {
+    loadError = "Could not load audit. Reload this page to try again. If this continues, contact your Synapse administrator.";
   }
 
   const unknownWorkspace = Boolean(workspaceId) && !active && !loadError;

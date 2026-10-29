@@ -1,3 +1,4 @@
+import { customerErrorMessage } from "@/modules/kernel/stage-errors";
 import { NextResponse } from "next/server";
 import "@/modules";
 import { ownerGate } from "@/modules/auth/owner";
@@ -24,7 +25,7 @@ export async function GET(request: Request) {
       );
     }, workspaceId);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not check the plan.";
-    return NextResponse.json({ error: message }, { status: 400 });
+    const message = customerErrorMessage(error);
+    return NextResponse.json({ safe_error: true, error: message }, { status: 400 });
   }
 }

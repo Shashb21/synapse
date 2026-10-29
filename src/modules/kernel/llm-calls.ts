@@ -1,3 +1,4 @@
+import { HISTORICAL_FAILURE_MESSAGE } from "./failure-presentation";
 import { sql } from "drizzle-orm";
 import { sharedDb } from "./db";
 import { newId } from "./ids";
@@ -142,6 +143,10 @@ type Row = Omit<LlmCallRecord, "created_at" | "cost_usd" | "params" | "usage"> &
 function toRecord(row: Row): LlmCallRecord {
   return {
     ...row,
+    error: row.error === null ? null : HISTORICAL_FAILURE_MESSAGE,
+    reply: row.status === "error" ? null : row.reply === null ? null : redactPromptSecrets(row.reply),
+    system_prompt: redactPromptSecrets(row.system_prompt),
+    user_prompt: redactPromptSecrets(row.user_prompt),
     created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
     cost_usd: row.cost_usd === null ? null : Number(row.cost_usd),
     params: row.params as LlmCallParams,

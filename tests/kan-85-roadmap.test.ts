@@ -119,7 +119,7 @@ describe("KAN-85: dependencies are proposals a person reviews", () => {
       expect(issues.filter((issue) => issue.kind === "proposed_dependency").map((issue) => issue.activity_id).sort()).toEqual(
         [b, c].sort(),
       );
-      await expect(savePlan({ status: "final", note: "Sign off", actor: ACTOR })).rejects.toThrow(/proposed dependency .* nobody has reviewed/);
+      await expect(savePlan({ status: "final", note: "Sign off", actor: ACTOR })).rejects.toMatchObject({ code: "timeline_blocked", message: expect.stringContaining("Accept or reject the proposed dependencies.") });
       expect((await savePlan({ status: "draft", note: "Draft with proposals open", actor: ACTOR })).status).toBe("draft");
 
       // Rebuilding with unchanged inputs does not ask the model again.
@@ -194,7 +194,7 @@ describe("KAN-85: dependencies are proposals a person reviews", () => {
       .where(eq(t.timelineActivities.id, row.id));
     const looped = await timelineModel(ANCHOR);
     expect(looped.problems.some((problem) => problem.kind === "cycle")).toBe(true);
-    await expect(savePlan({ status: "final", note: "Sign off", actor: ACTOR })).rejects.toThrow(/dependency loop/);
+    await expect(savePlan({ status: "final", note: "Sign off", actor: ACTOR })).rejects.toMatchObject({ code: "timeline_blocked", message: expect.stringContaining("Remove circular dependencies between activities.") });
     await setTimelineDependencies({ id: a, depends_on: [], rationale: "Break the loop", actor: ACTOR });
 
     // A dependency on something not on the timeline.
@@ -204,7 +204,7 @@ describe("KAN-85: dependencies are proposals a person reviews", () => {
       .where(eq(t.timelineActivities.id, row.id));
     const dangling = await timelineModel(ANCHOR);
     expect(dangling.problems).toEqual([expect.objectContaining({ kind: "dangling", activity_id: a, upstream_id: "ACT-GONE" })]);
-    await expect(savePlan({ status: "final", note: "Sign off", actor: ACTOR })).rejects.toThrow(/is not on the timeline/);
+    await expect(savePlan({ status: "final", note: "Sign off", actor: ACTOR })).rejects.toMatchObject({ code: "timeline_blocked", message: expect.stringContaining("Remove or replace dependencies on missing activities.") });
     await setTimelineDependencies({ id: a, depends_on: [], rationale: "Drop the stale reference", actor: ACTOR });
   });
 
@@ -217,7 +217,7 @@ describe("KAN-85: dependencies are proposals a person reviews", () => {
       .where(eq(t.timelineActivities.id, row.id));
     const estimated = (await timelineModel(ANCHOR)).activities.find((activity) => activity.id === a)!;
     expect(estimatedFields(estimated.meta.schedule_basis)).toEqual(["start", "end"]);
-    await expect(savePlan({ status: "final", note: "Sign off", actor: ACTOR })).rejects.toThrow(/model-estimated start, end date nobody has reviewed/);
+    await expect(savePlan({ status: "final", note: "Sign off", actor: ACTOR })).rejects.toMatchObject({ code: "timeline_blocked", message: expect.stringContaining("Accept or edit the unreviewed date estimates.") });
 
     // A tactic change after the estimate makes it stale, and the panel says so.
     const { meta: keyed } = await rowMeta(a);

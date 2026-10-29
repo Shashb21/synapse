@@ -1,3 +1,4 @@
+import { HISTORICAL_FAILURE_MESSAGE, projectFailureDiagnostics, projectRunSteps } from "@/modules/kernel/failure-presentation";
 /** Record byte-free run diagnostics and safely read historical module runs. */
 import { and, desc, eq, getTableColumns, inArray, lt, sql } from "drizzle-orm";
 import { accuracyDb, ensureAccuracySchema } from "../store/db";
@@ -259,12 +260,14 @@ export async function listAccuracyRuns(workspace_id: string, limit = 40) {
     .limit(limit);
   return runs.map((run) => ({
     ...run,
-    input: sanitizeRunTelemetry(run.input),
-    output: sanitizeRunTelemetry(run.output),
-    steps: sanitizeRunTelemetry(run.steps),
-    route: sanitizeRunTelemetry(run.route),
-    token_usage: sanitizeRunTelemetry(run.token_usage),
-    evals: sanitizeRunTelemetry(run.evals),
+    error: run.error === null ? null : HISTORICAL_FAILURE_MESSAGE,
+    summary: run.status === "error" || run.status === "abandoned" ? HISTORICAL_FAILURE_MESSAGE : run.summary,
+    input: projectFailureDiagnostics(sanitizeRunTelemetry(run.input)),
+    output: projectFailureDiagnostics(sanitizeRunTelemetry(run.output)),
+    steps: projectRunSteps((sanitizeRunTelemetry(run.steps) ?? []) as RunStep[], run.status === "error" || run.status === "abandoned"),
+    route: projectFailureDiagnostics(sanitizeRunTelemetry(run.route)),
+    token_usage: projectFailureDiagnostics(sanitizeRunTelemetry(run.token_usage)),
+    evals: projectFailureDiagnostics(sanitizeRunTelemetry(run.evals)),
   }));
 }
 

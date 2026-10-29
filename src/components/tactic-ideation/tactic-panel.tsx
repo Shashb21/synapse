@@ -1,5 +1,7 @@
 "use client";
 
+import { requestErrorMessage, RequestOutcomeError } from "@/lib/post-json";
+
 import Link from "next/link";
 import { useEffect, useRef, useState, type ComponentProps, type RefObject } from "react";
 import type { CustomTacticType } from "@/lib/iegp/custom-tactic-type";
@@ -66,11 +68,11 @@ export function TacticPanelRecord({ tacticId, refreshVersion, draftGuardRef, onC
       setError(null); setLoading(true);
       try {
         const response = await fetch(`/api/tactics/${encodeURIComponent(tacticId)}`, { signal: controller.signal, cache: "no-store" });
-        if (!response.ok) throw new Error(response.status === 404 ? "This tactic is missing or unavailable in this workspace." : [401, 403, 409].includes(response.status) ? "You do not currently have access to this tactic. Check your workspace or sign in again." : "Tactic details could not be loaded. Try again.");
+        if (!response.ok) throw new RequestOutcomeError(response.status === 404 ? "This tactic is missing or unavailable in this workspace." : [401, 403, 409].includes(response.status) ? "You do not currently have access to this tactic. Check your workspace or sign in again." : "Tactic details could not be loaded. Try again.", "rejected", response.status);
         const body: TacticRecord = await response.json();
         if (!controller.signal.aborted) setRecord(body);
       } catch (failure) {
-        if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : "Tactic details could not be loaded. Try again.");
+        if (!controller.signal.aborted) setError(requestErrorMessage(failure, "Tactic details could not be loaded. Try again."));
       } finally { if (!controller.signal.aborted) setLoading(false); }
     }
     void load();

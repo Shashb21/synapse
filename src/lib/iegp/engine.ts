@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { assessmentDesignVersion, getRequirementBasisReview, hasSupportedFullConfirmation } from "./requirement-basis";
 import { gapResolutionVersion } from "./relationship-version";
 import { relationshipVersionsForGap } from "./relationship-version";
@@ -169,7 +170,7 @@ export function suggestGapStatus(
 export function requireOverrideReason(reason: string | undefined | null): string {
   const trimmed = (reason ?? "").trim();
   if (!trimmed) {
-    throw new Error("A reason is required to override computed gap status.");
+    throw new TrustedApplicationError("A reason is required to override computed gap status.");
   }
   return trimmed;
 }
@@ -933,12 +934,12 @@ export type RelationshipFitModel = {
  */
 export function relationshipFit(state: IegpState, gapId: string, tacticId: string, expansionId?: string | null): RelationshipFitModel {
   const gap = state.gaps.find(g => g.id === gapId);
-  if (!gap) throw new Error("Gap not found");
+  if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
   const tactic = state.tactics.find(t => t.id === tacticId);
-  if (!tactic) throw new Error("Tactic not found");
+  if (!tactic) throw new TrustedApplicationError("Tactic not found", "not_found", 404);
   const expansion = expansionId ? state.expansions.find(e => e.id === expansionId) : undefined;
   if (expansionId && (!expansion || expansion.tactic_id !== tacticId || !expansion.gap_ids.includes(gapId))) {
-    throw new Error("Expansion scope does not belong to this tactic and gap");
+    throw new TrustedApplicationError("Expansion scope does not belong to this tactic and gap");
   }
   const coverage = state.coverages.find(c => c.gap_id === gapId && c.tactic_id === tacticId && (c.expansion_id ?? null) === (expansionId ?? null));
   const review = getRequirementBasisReview(state, gapId, coverage);

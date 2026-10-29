@@ -57,7 +57,7 @@ describe.each(["reset", "load_demo"])("%s fixed workspace", (action) => {
     expect(schema).not.toHaveBeenCalled();
     schema.mockRestore();
     expect(response.status).toBe(409);
-    expect(await response.json()).toEqual({ code: "workspace_mismatch", error: "The selected workspace changed. Reopen the intended workspace and try again. No contents were changed." });
+    expect(await response.json()).toEqual({ safe_error: true, request_outcome: "rejected", code: "workspace_mismatch", error: "The selected workspace changed. Reopen the intended workspace and try again. No contents were changed." });
     expect(await Promise.all([snapshot(a), snapshot(b)])).toEqual(before);
   });
   it.each([undefined, null, 123, "", [], {}])("rejects malformed target %j before writes", async (target) => {

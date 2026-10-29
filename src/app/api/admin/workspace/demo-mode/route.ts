@@ -1,3 +1,4 @@
+import { customerErrorMessage } from "@/modules/kernel/stage-errors";
 import { NextResponse } from "next/server";
 import "@/modules";
 import { ApiGuardError, readJsonBody } from "@/modules/auth/api-guard";
@@ -22,9 +23,9 @@ export async function POST(request: Request) {
   try {
     const body = await readJsonBody(request);
     const workspaceId = typeof body.workspace_id === "string" ? body.workspace_id.trim() : "";
-    if (typeof body.enabled !== "boolean") return NextResponse.json({ error: "enabled must be true or false" }, { status: 400 });
+    if (typeof body.enabled !== "boolean") return NextResponse.json({ safe_error: true, error: "enabled must be true or false" }, { status: 400 });
     const workspace = workspaceId ? await getWorkspace(workspaceId) : null;
-    if (!workspace) return NextResponse.json({ error: "Choose a workspace." }, { status: 404 });
+    if (!workspace) return NextResponse.json({ safe_error: true, error: "Choose a workspace." }, { status: 404 });
     if (body.enabled) {
       await setWorkspaceDemoMode(workspace.id, true);
       forgetDemoMode(workspace.id);
@@ -44,7 +45,7 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, workspace_id: workspace.id, demo_mode: body.enabled });
   } catch (error) {
-    if (error instanceof ApiGuardError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Could not change demo mode." }, { status: 400 });
+    if (error instanceof ApiGuardError) return NextResponse.json({ safe_error: true, error: error.message, code: error.code }, { status: error.status });
+    return NextResponse.json({ safe_error: true, error: customerErrorMessage(error) }, { status: 400 });
   }
 }

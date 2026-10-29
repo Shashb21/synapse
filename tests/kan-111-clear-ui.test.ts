@@ -27,7 +27,7 @@ describe("clear source inventory confirmation", () => {
     expect(document.querySelector('[role="status"]')?.textContent).toContain("Current sources and their extracted records cleared");
   });
   it("shows a busy response and leaves confirmation available for retry", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, json: async () => ({ error: "An ingestion step is still running." }) }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, json: async () => ({ safe_error: true, request_outcome: "rejected", error: "An ingestion step is still running." }) }));
     act(() => root.render(createElement(ClearIngestedFiles)));
     await act(async () => button("Clear ingested files").click());
     await act(async () => button("Clear files and extracted records").click());

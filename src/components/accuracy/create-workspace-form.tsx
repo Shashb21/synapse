@@ -13,6 +13,7 @@ export function CreateWorkspaceForm() {
   const [slug, setSlug] = useState("");
   const [planLabel, setPlanLabel] = useState<"IEP" | "IEGP">("IEGP");
   const [error, setError] = useState<string | null>(null);
+  const [checkRequired, setCheckRequired] = useState(false);
 
   function onNameChange(value: string) {
     setName(value);
@@ -21,12 +22,14 @@ export function CreateWorkspaceForm() {
 
   function onSubmit(event: React.FormEvent) {
     event.preventDefault();
+    if (pending || checkRequired) return;
     setError(null);
     startTransition(async () => {
       const res = await postJson("/api/accuracy/workspaces", { name, slug, plan_label: planLabel });
       const body = res.json as { ok?: boolean; workspace_id?: string; error?: string };
       if (!res.ok || !body.ok || !body.workspace_id) {
-        setError(body.error ?? "Create failed");
+        setCheckRequired(res.outcome !== "rejected");
+        setError(body.error ?? "We couldn’t confirm the new workspace. Reload the workspace list before creating it again.");
         return;
       }
       // AI off: land on hand entry of gaps (there is nothing to upload or extract).
@@ -72,10 +75,11 @@ export function CreateWorkspaceForm() {
           <option value="IEP">IEP</option>
         </select>
       </label>
-      {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+      {checkRequired ? <button type="button" onClick={() => window.location.reload()} className="text-sm underline">Check workspace list</button> : null}
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
       <button
         type="submit"
-        disabled={pending}
+        disabled={pending || checkRequired}
         className="w-fit border border-foreground bg-foreground px-3 py-1.5 text-[12px] text-background disabled:opacity-50"
       >
         {pending ? "Creating…" : "Create workspace"}

@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { createHash, randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { and, eq } from "drizzle-orm";
@@ -35,7 +36,7 @@ async function idpFetch(url: string, init: RequestInit): Promise<Response> {
   try {
     return await fetch(url, { ...init, signal: AbortSignal.timeout(IDP_TIMEOUT_MS) });
   } catch {
-    throw new Error("Your sign-in provider could not be reached or did not answer in time. Try signing in again.");
+    throw new TrustedApplicationError("Your sign-in provider could not be reached or did not answer in time. Try signing in again.");
   }
 }
 
@@ -422,16 +423,16 @@ export async function completeLogin(args: { code: string; state: string }): Prom
 async function exchangeLogin(args: { code: string; state: string }): Promise<Session> {
   const jar = await cookies();
   const raw = jar.get(PENDING_COOKIE)?.value;
-  if (!raw) throw new Error("No sign-in is in progress.");
+  if (!raw) throw new TrustedApplicationError("No sign-in is in progress.");
   const pending = JSON.parse(raw) as {
     provider_id: string;
     state: string;
     verifier: string;
     redirect_uri: string;
   };
-  if (pending.state !== args.state) throw new Error("Sign-in state mismatch.");
+  if (pending.state !== args.state) throw new TrustedApplicationError("Sign-in state mismatch.");
   const provider = identityProvider(pending.provider_id);
-  if (!provider) throw new Error("Unknown identity provider.");
+  if (!provider) throw new TrustedApplicationError("Unknown identity provider.");
   const refusal = idpRefusal(provider);
   if (refusal) throw new Error(refusal);
   const clientId = process.env[provider.descriptor.client_id_env]?.trim();
@@ -455,7 +456,7 @@ async function exchangeLogin(args: { code: string; state: string }): Promise<Ses
   const tokenText = await tokenRes.text();
   if (!tokenRes.ok) throw new Error(`Token exchange failed (HTTP ${tokenRes.status}).`);
   const token = JSON.parse(tokenText) as { access_token?: string; id_token?: unknown };
-  if (!token.access_token) throw new Error("Token exchange returned no access token.");
+  if (!token.access_token) throw new TrustedApplicationError("Token exchange returned no access token.");
   const profileRes = await idpFetch(provider.userinfo_url, {
     headers: { authorization: `Bearer ${token.access_token}`, accept: "application/json" },
   });
@@ -558,10 +559,10 @@ export async function signInDemo(args: {
   email?: string | null;
 }): Promise<Session> {
   if (!demoSignInAllowed()) {
-    throw new Error("Demo sign-in is not available in production. Sign in with your organisation's account.");
+    throw new TrustedApplicationError("Demo sign-in is not available in production. Sign in with your organisation's account.");
   }
   const name = args.actor_name.trim();
-  if (!name) throw new Error("Enter a name to continue as a demo user.");
+  if (!name) throw new TrustedApplicationError("Enter a name to continue as a demo user.");
   const fn = asFunction(args.actor_function);
   const session = await createSession({
     provider_id: "demo",
@@ -629,13 +630,13 @@ export const DEMO_EMAIL_TAKEN_MESSAGE =
 export async function demoEmailFor(name: string, requested?: string | null): Promise<string> {
   const supplied = requested?.trim().toLowerCase();
   if (!supplied) return demoEmail(name);
-  if (!testOnlyAddress(supplied)) throw new Error(DEMO_EMAIL_DOMAIN_MESSAGE);
+  if (!testOnlyAddress(supplied)) throw new TrustedApplicationError(DEMO_EMAIL_DOMAIN_MESSAGE);
   if (
     ownerEmails().includes(supplied) ||
     (await findAccountByEmail(supplied).then(Boolean, () => true)) ||
     (await hasActiveSeat(supplied).catch(() => true))
   ) {
-    throw new Error(DEMO_EMAIL_TAKEN_MESSAGE);
+    throw new TrustedApplicationError(DEMO_EMAIL_TAKEN_MESSAGE);
   }
   return supplied;
 }

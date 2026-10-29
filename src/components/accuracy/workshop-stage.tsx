@@ -12,7 +12,7 @@ import {
 } from "@/accuracy/modules/workshop/readiness";
 import type { CoverageOverallWrite, WorkshopActionKind } from "@/accuracy/modules/workshop/actions";
 import type { WorkshopSnapshotRecord } from "@/accuracy/store/workshop-store";
-import { postJson } from "@/lib/post-json";
+import { postJson, requestErrorMessage, RequestOutcomeError } from "@/lib/post-json";
 
 type MenuKind = WorkshopActionKind | "split";
 
@@ -112,7 +112,7 @@ export function WorkshopStage({
     const res = await postJson(url, body);
     const json = res.json as { ok?: boolean; error?: string; snapshot?: WorkshopSnapshotRecord };
     if (!res.ok || !json.ok || !json.snapshot) {
-      throw new Error(json.error ?? "Request failed");
+      throw new RequestOutcomeError(json.error ?? "We couldn’t confirm this workshop change. Reload the workshop before repeating it.", res.outcome, res.status);
     }
     setSnapshot(json.snapshot);
     return json.snapshot;
@@ -122,16 +122,12 @@ export function WorkshopStage({
     setError(null);
     setPending(true);
     try {
-      const res = await fetch("/api/accuracy/workshop", {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const res = await postJson("/api/accuracy/workshop", {
           workspace_id: workspaceId,
           snapshot_id: snapshot.id,
           scene: next,
-        }),
-      });
-      const json = (await res.json()) as {
+        }, { method: "PATCH" });
+      const json = res.json as {
         ok?: boolean;
         error?: string;
         snapshot?: WorkshopSnapshotRecord;
@@ -158,13 +154,13 @@ export function WorkshopStage({
         !Object.values(payload.overlays).every((overlay) => overlay && typeof overlay === "object" &&
           (overlay.priority == null || typeof overlay.priority === "string"))
       ) {
-        throw new Error(typeof json?.error === "string" ? json.error : "Could not switch scene");
+        throw new RequestOutcomeError(json?.error ?? "We couldn’t confirm the workshop scene. Reload the workshop before switching again.", res.outcome === "confirmed" ? "unknown" : res.outcome, res.status);
       }
       setSnapshot(updated);
       setBoardIndex(0);
       setSelectedId(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not switch scene");
+      setError(requestErrorMessage(err, "Could not switch scene. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     } finally {
       setPending(false);
     }
@@ -183,7 +179,7 @@ export function WorkshopStage({
       });
       setTagLabel("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not add board");
+      setError(requestErrorMessage(err, "Could not add board. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     } finally {
       setPending(false);
     }
@@ -202,7 +198,7 @@ export function WorkshopStage({
         tag_id,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not move gap");
+      setError(requestErrorMessage(err, "Could not move gap. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     } finally {
       setPending(false);
     }
@@ -227,7 +223,7 @@ export function WorkshopStage({
       setRationale("");
       setSelectedId(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Action failed");
+      setError(requestErrorMessage(err, "Action failed. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     } finally {
       setPending(false);
     }
@@ -314,7 +310,7 @@ export function WorkshopStage({
       ) : null}
 
       {error && !selectedId ? (
-        <p className="px-6 pt-3 text-[13px] text-destructive sm:px-10">{error}</p>
+        <p role="alert" className="px-6 pt-3 text-sm text-destructive sm:px-10">{error}</p>
       ) : null}
 
       <nav aria-label="Workshop boards" className="flex gap-2 overflow-x-auto px-6 pt-6 sm:px-10">
@@ -511,7 +507,7 @@ export function WorkshopStage({
               </label>
             ) : null}
 
-            {error ? <p className="mt-3 text-[13px] text-destructive">{error}</p> : null}
+            {error ? <p role="alert" className="mt-3 text-sm text-destructive">{error}</p> : null}
 
             <div className="mt-6 flex flex-wrap gap-2">
               {menuKind === "split" ? (

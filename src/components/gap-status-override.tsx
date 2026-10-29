@@ -204,12 +204,12 @@ export function GapStatusOverride({
                 }}
               />
               {reasonError ? (
-                <p id={reasonErrorId} role="alert" className="text-[12px] text-destructive">{reasonError}</p>
+                <p id={reasonErrorId} role="alert" className="text-sm text-destructive">{reasonError}</p>
               ) : (
                 <p className="text-[11px] text-muted-foreground">Required. Empty reason does not save.</p>
               )}
             </div>
-            {error ? <p id={saveErrorId} role="alert" className="text-[12px] text-destructive">{error}</p> : null}
+            {error ? <p id={saveErrorId} role="alert" className="text-sm text-destructive">{error}</p> : null}
           </div>
           <DialogFooter>
             <DialogClose render={<Button type="button" size="sm" variant="outline" />}>

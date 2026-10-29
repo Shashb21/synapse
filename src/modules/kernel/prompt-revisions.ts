@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 /** Immutable prompt candidates generated from revalidated lessons and frozen, lineage-separated evidence. */
 import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -159,21 +160,21 @@ export async function getRevisionCohort(id: string, workspace_id: string): Promi
 
 /** Generate another version; no generation outcome changes a live prompt pointer. */
 export async function proposePromptRevision(args: CohortArgs & { actor: Actor }): Promise<PromptRevision> {
-  if (!REVISION_STAGES.includes(args.stage as typeof REVISION_STAGES[number])) throw new Error("This stage has no captured AI decision lessons.");
+  if (!REVISION_STAGES.includes(args.stage as typeof REVISION_STAGES[number])) throw new TrustedApplicationError("This stage has no captured AI decision lessons.");
   const workspace = await getWorkspace(args.workspace_id);
-  if (!workspace && args.workspace_id !== DEFAULT_WORKSPACE_ID) throw new Error("Learning workspace is unavailable.");
+  if (!workspace && args.workspace_id !== DEFAULT_WORKSPACE_ID) throw new TrustedApplicationError("Learning workspace is unavailable.");
   return runInWorkspace({ workspace_id: args.workspace_id, schema: workspace?.schema_name ?? DEFAULT_SCHEMA }, async () => {
     await assertAiEnabled("Prompt revision generation", sectionOfStage(args.stage) ?? undefined);
     const cohort = await freezeRevisionCohort(args);
     const entities = await workspaceEntityNames();
-    if (!entities.length) throw new Error("Learning entity context is empty.");
+    if (!entities.length) throw new TrustedApplicationError("Learning entity context is empty.");
     const training = new Set(cohort.training_ids);
     const lessons = cohort.examples.flatMap(example => {
       if (!training.has(example.id) || example.outcome === "accepted" || example.lesson_status !== "ok" || !example.lesson) return [];
       const lesson = scrubLesson(example.lesson, [JSON.stringify(example.ai_input), JSON.stringify(example.ai_output), JSON.stringify(example.final ?? {}), example.rationale ?? ""], entities);
       return lesson ? [{ id: example.id, lesson }] : [];
     });
-    if (!lessons.length) throw new Error("No validated disagreement lessons remain outside the held-out cohort.");
+    if (!lessons.length) throw new TrustedApplicationError("No validated disagreement lessons remain outside the held-out cohort.");
     const pointer = await activeRevisionPointer(args.workspace_id, args.stage);
     const parent = pointer.revision_id ?? activePromptVersion();
     const stub = isTestStub();
@@ -235,36 +236,36 @@ export async function revisionHistory(workspace_id:string) {
 /** Compare-and-swap the pointer and append history in one transaction. */
 export async function activatePromptRevision(args: {revision_id:string;evaluation_id:string;expected_active_id:string|null;actor:Actor}):Promise<PromptRevision> {
  const workspace_id=await scopedWorkspaceId();
- if(!workspace_id) throw new Error('An authorised workspace is required.');
+ if(!workspace_id) throw new TrustedApplicationError('An authorised workspace is required.');
  const revision=await getPromptRevision(args.revision_id,workspace_id);
- if(!revision) throw new Error('Unknown candidate in this workspace.');
+ if(!revision) throw new TrustedApplicationError('Unknown candidate in this workspace.');
  const {getRevisionEvaluation,promotionEligibility,routeIdentity}=await import('./prompt-revision-evals');
  const evaluation=await getRevisionEvaluation(args.evaluation_id,workspace_id);
- if(!evaluation||evaluation.revision_id!==revision.id||!promotionEligibility(evaluation).eligible) throw new Error('Evaluation is missing or ineligible.');
+ if(!evaluation||evaluation.revision_id!==revision.id||!promotionEligibility(evaluation).eligible) throw new TrustedApplicationError('Evaluation is missing or ineligible.');
  const cohort=await getRevisionCohort(revision.cohort_id,workspace_id);
- if(!cohort?.gold_reservation?.cases.length || evidenceHash(evaluation.gold_cases)!==evidenceHash(cohort.gold_reservation.cases)) throw new Error('Gold facts were not reserved before generation. Generate a new candidate.');
+ if(!cohort?.gold_reservation?.cases.length || evidenceHash(evaluation.gold_cases)!==evidenceHash(cohort.gold_reservation.cases)) throw new TrustedApplicationError('Gold facts were not reserved before generation. Generate a new candidate.');
  const configuredRoute=await routeConfig(revision.stage);
  const route=await resolveRoute(revision.stage,configuredRoute);
- if(routeIdentity(route)!==evaluation.route_hash) throw new Error('Routing changed since evaluation. Evaluate again.');
+ if(routeIdentity(route)!==evaluation.route_hash) throw new TrustedApplicationError('Routing changed since evaluation. Evaluate again.');
  const {activeModule}=await import('./registry');const stageModule=await activeModule(revision.stage);
- if(stageModule.manifest.id!==evaluation.module_id||stageModule.manifest.version!==evaluation.module_version) throw new Error('Stage implementation changed since evaluation.');
+ if(stageModule.manifest.id!==evaluation.module_id||stageModule.manifest.version!==evaluation.module_version) throw new TrustedApplicationError('Stage implementation changed since evaluation.');
  await sharedDb().transaction(async tx=>{
   await tx.execute(sql`insert into prompt_active_revisions(workspace_id,stage) values(${workspace_id},${revision.stage}) on conflict do nothing`);
   const rows=await tx.execute(sql`select * from prompt_active_revisions where workspace_id=${workspace_id} and stage=${revision.stage} for update`);
   const pointer=rows[0];
-  if(pointer.revision_id!==args.expected_active_id||pointer.revision_id!==evaluation.baseline_revision_id||Number(pointer.generation)!==evaluation.pointer_generation) throw new Error('Active prompt changed since evaluation. Evaluate again.');
+  if(pointer.revision_id!==args.expected_active_id||pointer.revision_id!==evaluation.baseline_revision_id||Number(pointer.generation)!==evaluation.pointer_generation) throw new TrustedApplicationError('Active prompt changed since evaluation. Evaluate again.');
   // Lock route config against simultaneous administrative updates through commit.
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`prompt-route:${revision.stage}`}))`);
   const routeRows=await tx.execute(sql`select * from routing_config where stage=${revision.stage}`);
   const lockedConfig=routeRows[0] as RouteConfig | undefined ?? configuredRoute;
-  if(routeIdentity(await resolveRoute(revision.stage,lockedConfig))!==evaluation.route_hash) throw new Error('Routing changed since evaluation.');
-  if(revision.parent_revision!==(pointer.revision_id??'v1.0-baseline')) throw new Error('Candidate was generated from a stale baseline.');
+  if(routeIdentity(await resolveRoute(revision.stage,lockedConfig))!==evaluation.route_hash) throw new TrustedApplicationError('Routing changed since evaluation.');
+  if(revision.parent_revision!==(pointer.revision_id??'v1.0-baseline')) throw new TrustedApplicationError('Candidate was generated from a stale baseline.');
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`prompt-module:${revision.stage}`}))`);
   const moduleRows=await tx.execute(sql`select module_id from stage_modules where stage=${revision.stage}`);
-  if((moduleRows[0]?.module_id??stageModule.manifest.id)!==evaluation.module_id) throw new Error('Stage implementation changed since evaluation.');
+  if((moduleRows[0]?.module_id??stageModule.manifest.id)!==evaluation.module_id) throw new TrustedApplicationError('Stage implementation changed since evaluation.');
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`prompt-evaluation:${revision.id}`}))`);
   const latest=await tx.execute(sql`select id from prompt_revision_evaluations where workspace_id=${workspace_id} and revision_id=${revision.id} order by created_at desc,id desc limit 1`);
-  if(latest[0]?.id!==evaluation.id) throw new Error('A newer evaluation exists. Review the latest evaluation.');
+  if(latest[0]?.id!==evaluation.id) throw new TrustedApplicationError('A newer evaluation exists. Review the latest evaluation.');
   const generation=Number(pointer.generation)+1;
   await tx.execute(sql`update prompt_active_revisions set revision_id=${revision.id}, generation=${generation} where workspace_id=${workspace_id} and stage=${revision.stage}`);
   if(pointer.revision_id) await tx.execute(sql`update prompt_revisions set state='superseded' where id=${pointer.revision_id}`);
@@ -279,14 +280,14 @@ export async function activatePromptRevision(args: {revision_id:string;evaluatio
 }
 /** Restore the revision that preceded the current approval; baseline is represented by null. */
 export async function rollbackPromptRevision(args:{stage:StageId;expected_active_id:string;actor:Actor}):Promise<PromptRevision|null> {
- const workspace_id=await scopedWorkspaceId();if(!workspace_id) throw new Error('An authorised workspace is required.');
+ const workspace_id=await scopedWorkspaceId();if(!workspace_id) throw new TrustedApplicationError('An authorised workspace is required.');
  await ensurePlatformSchema();
  let previous:string|null=null;
  await sharedDb().transaction(async tx=>{
   const rows=await tx.execute(sql`select * from prompt_active_revisions where workspace_id=${workspace_id} and stage=${args.stage} for update`);const pointer=rows[0];
-  if(!pointer||pointer.revision_id!==args.expected_active_id) throw new Error('Active prompt changed. Reload before rollback.');
+  if(!pointer||pointer.revision_id!==args.expected_active_id) throw new TrustedApplicationError('Active prompt changed. Reload before rollback.');
   const history=await tx.execute(sql`select before_id from prompt_revision_history where workspace_id=${workspace_id} and stage=${args.stage} and after_id=${args.expected_active_id} and action='approve' order by generation desc limit 1`);
-  if(!history[0]) throw new Error('No prior approved prompt exists.');previous=history[0].before_id as string|null;
+  if(!history[0]) throw new TrustedApplicationError('No prior approved prompt exists.');previous=history[0].before_id as string|null;
   const generation=Number(pointer.generation)+1;
   await tx.execute(sql`update prompt_active_revisions set revision_id=${previous},generation=${generation} where workspace_id=${workspace_id} and stage=${args.stage}`);
   await tx.execute(sql`update prompt_revisions set state='superseded' where id=${args.expected_active_id}`);

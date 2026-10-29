@@ -65,7 +65,8 @@ test.describe("Control panel provider key status", () => {
   test("connect_provider and disconnect_provider are gone", async ({ request }) => {
     for (const action of ["connect_provider", "disconnect_provider"]) {
       const error = await controlActionExpectingError(request, { action, provider_id: "xai-grok" });
-      expect(error.error).toBe(`Unknown action ${action}`);
+      expect(error.status).toBe(400);
+      expect(error.error).toBe("This action is not available. Reload the page and choose an available action.");
     }
   });
 
@@ -109,7 +110,8 @@ test.describe("Control panel provider key status", () => {
       provider_id: "xai-grok",
       model: "gpt-4o",
     });
-    expect(badModel.error).toMatch(/does not serve/i);
+    expect(badModel.status).toBe(400);
+    expect(badModel.error).toBe("Choose a model listed for the selected provider.");
   });
 
   /*

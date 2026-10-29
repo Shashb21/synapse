@@ -1,5 +1,7 @@
 "use client";
 
+import { requestErrorMessage, postJson } from "@/lib/post-json";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -67,15 +69,12 @@ export function MissFlagInbox({
     if (!current) return;
     setError(null);
     if (rationale.trim().length < 3) {
-      setError("A short rationale is required (hillclimb).");
+      setError("A short rationale is required. Explain why you are making this decision.");
       return;
     }
     setPending(action);
     try {
-      const res = await fetch("/api/accuracy/review", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const res = await postJson("/api/accuracy/review", {
           workspace_id: workspaceId,
           block_id: current.block_id,
           action,
@@ -84,11 +83,10 @@ export function MissFlagInbox({
           ...(action === "promote" && statementDraft?.trim()
             ? { statement: statementDraft.trim() }
             : {}),
-        }),
       });
-      const body = (await res.json()) as { ok?: boolean; error?: string; claim_id?: string };
+      const body = res.json as { ok?: boolean; error?: string; claim_id?: string };
       if (!res.ok || !body.ok) {
-        setError(body.error ?? "Action failed");
+        setError(body.error ?? "We couldn’t complete this change. Check the current state before trying again.");
         return;
       }
       setRationale("");
@@ -97,7 +95,7 @@ export function MissFlagInbox({
       // Keep index; after refresh the resolved flag drops out and the next slides into place.
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Action failed");
+      setError(requestErrorMessage(err, "Action failed. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     } finally {
       setPending(null);
     }
@@ -224,7 +222,7 @@ export function MissFlagInbox({
         </label>
 
         {error ? (
-          <p className="mt-2 text-[12px] text-destructive" role="alert">
+          <p className="mt-2 text-sm text-destructive" role="alert">
             {error}
           </p>
         ) : null}

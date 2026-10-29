@@ -44,13 +44,13 @@ export async function POST(req: Request) {
       workspaceName: body.workspace_name,
       parseSource: body.parse_source,
     });
-    return NextResponse.json({ ok: true, ...result });
+    return NextResponse.json({ ok: true, ...result, parse_error: result.parse_error ? "Reading the reference source did not finish. Open the seeded workspace and review its source text blocks before adding missing content by hand." : null });
   } catch (error) {
     const aiOff = aiOffFromError(error);
     if (aiOff) return aiOff;
     const known = labRequestErrorResponse(error);
     if (known) return known;
-    const message = labErrorMessage(error, "Seed failed");
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    const message = labErrorMessage(error, "We couldn’t confirm creation of the example workspace. Check the workspace list and its contents before seeding again.");
+    return NextResponse.json({ ok: false, safe_error: true, error: message }, { status: 400 });
   }
 }

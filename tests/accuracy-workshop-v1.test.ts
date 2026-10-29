@@ -163,7 +163,7 @@ describe("workshop snapshot store", () => {
         workspace_id,
         actor: { name: "Ada", function: "medical_affairs" },
       }),
-    ).rejects.toThrow(/validated/i);
+    ).rejects.toThrow(/Validate every live gap/i);
   });
 
   it("refuses to freeze validated partial residuals", async () => {
@@ -334,7 +334,7 @@ describe("workshop HTTP routes", () => {
     );
     expect(res.status).toBe(409);
     const body = (await res.json()) as { error?: string };
-    expect(body.error).toMatch(/validated/i);
+    expect(body.error).toMatch(/Validate every live gap/i);
   });
 
   it("GET is workspace-scoped and POST freeze then tag assign works", async () => {

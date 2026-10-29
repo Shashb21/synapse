@@ -114,6 +114,7 @@ export function ActionDialog({
   }
   const [dirty, setDirty] = useState(false);
   const [pending, setPending] = useState(false);
+  const [unconfirmed, setUnconfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [invalidField, setInvalidField] = useState<string | null>(null);
   const errorId = `${formId}-error`;
@@ -121,6 +122,7 @@ export function ActionDialog({
   const [actorFunction, setActorFunction] = useState<ActorFunction>(identity.actor_function);
 
   async function submit(form: HTMLFormElement) {
+    if (pending || refreshing || unconfirmed) return;
     const data = new FormData(form);
     const rationale = String(data.get(rationaleFieldName) ?? "").trim();
     setError(null);
@@ -172,7 +174,8 @@ export function ActionDialog({
     const json = res.json as Record<string, unknown> & { error?: string };
     setPending(false);
     if (!res.ok) {
-      setError(json.error ?? "Action failed");
+      setUnconfirmed(res.outcome === "unknown");
+      setError(json.error ?? "We couldn’t complete this change. Check the current state before trying again.");
       return;
     }
     setError(null);
@@ -310,13 +313,14 @@ export function ActionDialog({
               </div>
             ) : null}
             {error ? (
-              <p id={errorId} role="alert" className="text-[12px] text-destructive">
+              <p id={errorId} role="alert" className="text-sm text-destructive">
                 {error}
               </p>
             ) : null}
           </div>
           <DialogFooter>
-            <Button type="submit" size="sm" disabled={pending || refreshing}>
+            {unconfirmed ? <Button type="button" size="sm" variant="outline" onClick={() => window.location.reload()}>Check current state</Button> : null}
+            <Button type="submit" size="sm" disabled={pending || refreshing || unconfirmed}>
               {pending || refreshing ? "Saving…" : (confirmLabel ?? "Save")}
             </Button>
           </DialogFooter>

@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "./stage-errors";
 import { inspectJudgementReferences, type JudgementReference } from "@/lib/iegp/judgement-references";
 import { desc, eq } from "drizzle-orm";
 import { db, ensurePlatformSchema } from "./db";
@@ -34,7 +35,7 @@ export const RATIONALE_REQUIRED = "A short rationale is required for every edit.
 
 export function requireRationale(rationale: string | null | undefined): string {
   const trimmed = (rationale ?? "").trim();
-  if (trimmed.length < 3) throw new Error(RATIONALE_REQUIRED);
+  if (trimmed.length < 3) throw new TrustedApplicationError(RATIONALE_REQUIRED);
   return trimmed;
 }
 
@@ -69,7 +70,7 @@ export async function recordEdit(args: {
   const references = args.references ?? [];
   if (references.length) {
     const { loadState } = await import("@/lib/iegp/store");
-    if (!args.reference_gap_ids?.length || !inspectJudgementReferences(await loadState(), args.reference_gap_ids, references).length) throw new Error("Supporting references are missing, inaccessible or unrelated to this judgement.");
+    if (!args.reference_gap_ids?.length || !inspectJudgementReferences(await loadState(), args.reference_gap_ids, references).length) throw new TrustedApplicationError("Supporting references are missing, inaccessible or unrelated to this judgement. Choose current references from this workspace.");
   }
   const attribution = args.attribution ?? (await currentAttribution());
   const record: EditRecord = {

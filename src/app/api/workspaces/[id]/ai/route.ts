@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ id: string }> };
 
 function forbidden(message: string) {
-  return NextResponse.json({ error: message, code: "forbidden" }, { status: 403 });
+  return NextResponse.json({ safe_error: true, error: message, code: "forbidden" }, { status: 403 });
 }
 
 /** The workspace's AI assistance setting and the platform switch, for any member. */

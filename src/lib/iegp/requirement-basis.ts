@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 /** Sourced requirement read model and confirmation rules, shared by assessment actions and views. */
 import { COVERAGE_DIMENSIONS, DIMENSION_LABELS, type CoverageDimension } from "./enums";
 import type { EvidenceNeed, GapTacticCoverage, IegpState, RequirementBasis, RequirementDimension, RequirementSource } from "./types";
@@ -17,7 +18,7 @@ const NEED_FIELDS: Partial<Record<CoverageDimension, keyof EvidenceNeed>> = {
 /** Revision token also covers linked source content, so a source edit invalidates an open form. */
 export function requirementSourceVersion(state: IegpState, gapId: string): string {
   const gap = state.gaps.find(g => g.id === gapId);
-  if (!gap) throw new Error("Gap not found");
+  if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
   const ids = new Set(state.need_gap_links.filter(l => l.gap_id === gapId).map(l => l.need_id));
   const objective = state.objectives.find(o => o.id === gap.objective_id);
   // A quote identifies the narrow supporting meaning; block ids and surrounding
@@ -72,7 +73,7 @@ export function fullConfirmationIssues(basis: RequirementBasis | null | undefine
     else if (requirement.applicability === "not_applicable") {
       if ((requirement.rationale?.trim().length ?? 0) < 3) issues.push(`${label}: non-applicability needs a justification.`);
     } else if (requirement.applicability !== "required" || !requirement.requirement?.trim() || coverage.dimensions[dim]?.value !== "yes") {
-      issues.push(`${label}: required information is ${coverage.dimensions[dim]?.value ?? "unknown"}; Full requires Yes.`);
+      issues.push(`${label}: required information has not been confirmed; Full requires Yes.`);
     }
     if (requirement?.conflicts.length && requirement.resolution.trim().length < 3) issues.push(`${label}: unresolved requirement conflicts.`);
   }
@@ -93,8 +94,8 @@ export function coverageReviewVersion(coverage: GapTacticCoverage): string {
 /** User-visible sourced basis, unresolved reasons, and per-relationship Full eligibility. */
 export function getRequirementBasisReview(state: IegpState, gapId: string, coverage?: GapTacticCoverage) {
   const gap = state.gaps.find(g => g.id === gapId);
-  if (!gap) throw new Error("Gap not found");
-  if (coverage && coverage.gap_id !== gapId) throw new Error("Coverage does not belong to this gap");
+  if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
+  if (coverage && coverage.gap_id !== gapId) throw new TrustedApplicationError("Coverage does not belong to this gap");
   const sourceVersion = requirementSourceVersion(state, gapId);
   const saved = gap.requirement_basis;
   const sources = sourcedDimensions(state, gapId);
@@ -113,19 +114,19 @@ export function getRequirementBasisReview(state: IegpState, gapId: string, cover
 
 /** Validates whole-basis human input while sources/conflicts remain owned by the server. */
 export function reviewedRequirementDimensions(state: IegpState, gapId: string, input: RequirementReviewInput): RequirementBasis["dimensions"] {
-  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("Supply requirement dimensions.");
-  if (Object.keys(input).some(key => !(COVERAGE_DIMENSIONS as readonly string[]).includes(key))) throw new Error("Unknown requirement dimension.");
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new TrustedApplicationError("Supply requirement dimensions.");
+  if (Object.keys(input).some(key => !(COVERAGE_DIMENSIONS as readonly string[]).includes(key))) throw new TrustedApplicationError("Unknown requirement dimension.");
   const dimensions = sourcedDimensions(state, gapId);
   for (const dim of COVERAGE_DIMENSIONS) {
     const entry = input[dim];
     if (!entry) { dimensions[dim] = { ...dimensions[dim], applicability: "undetermined" }; continue; }
-    if (!entry || typeof entry !== "object" || Object.keys(entry).some(key => !["applicability", "requirement", "rationale", "resolution"].includes(key))) throw new Error("Requirement source references are server-owned; refresh the sourced basis.");
-    if (!["required", "not_applicable", "undetermined"].includes(entry.applicability)) throw new Error(`Choose applicability for ${dim}.`);
-    for (const field of ["requirement", "rationale", "resolution"] as const) if (entry[field] !== undefined && typeof entry[field] !== "string") throw new Error(`Invalid ${dim} ${field}.`);
+    if (!entry || typeof entry !== "object" || Object.keys(entry).some(key => !["applicability", "requirement", "rationale", "resolution"].includes(key))) throw new TrustedApplicationError("Requirement source references are server-owned; refresh the sourced basis.");
+    if (!["required", "not_applicable", "undetermined"].includes(entry.applicability)) throw new TrustedApplicationError(`Choose applicability for ${dim}.`);
+    for (const field of ["requirement", "rationale", "resolution"] as const) if (entry[field] !== undefined && typeof entry[field] !== "string") throw new TrustedApplicationError(`Invalid ${dim} ${field}.`);
     const rationale = entry.rationale?.trim() ?? "";
     const requirement = entry.requirement?.trim() ?? dimensions[dim].requirement;
-    if (entry.applicability === "not_applicable" && rationale.length < 3) throw new Error(`${dim}: Not applicable requires a justification.`);
-    if (entry.applicability === "required" && !requirement) throw new Error(`${dim}: describe the required information.`);
+    if (entry.applicability === "not_applicable" && rationale.length < 3) throw new TrustedApplicationError(`${dim}: Not applicable requires a justification.`);
+    if (entry.applicability === "required" && !requirement) throw new TrustedApplicationError(`${dim}: describe the required information.`);
     dimensions[dim] = { ...dimensions[dim], applicability: entry.applicability, requirement, rationale, resolution: entry.resolution?.trim() ?? "" };
   }
   return dimensions;
@@ -144,12 +145,12 @@ export function assessmentRequirementVersion(state: IegpState, gapId: string): s
 export function assessmentDesignVersion(state: IegpState, coverage: Pick<GapTacticCoverage, "tactic_id" | "expansion_id">): string {
   if (coverage.expansion_id) {
     const child = state.expansions.find(e => e.id === coverage.expansion_id);
-    if (!child) throw new Error("Expansion not found");
+    if (!child) throw new TrustedApplicationError("Expansion not found", "not_found", 404);
     const { name: _name, cost_effort: _cost, feasibility_risks: _risks, ...design } = child.scope;
     return JSON.stringify(design);
   }
   const tactic = state.tactics.find(t => t.id === coverage.tactic_id);
-  if (!tactic) throw new Error("Tactic not found");
+  if (!tactic) throw new TrustedApplicationError("Tactic not found", "not_found", 404);
   return JSON.stringify([tactic.type, tactic.evidence_question, tactic.description, tactic.population,
     tactic.intervention, tactic.comparator, tactic.outcomes, tactic.study_design, tactic.data_source,
     tactic.geography, tactic.start_date, tactic.evidence_available, tactic.intended_use, tactic.source_quote]);

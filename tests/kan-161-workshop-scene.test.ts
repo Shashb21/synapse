@@ -97,7 +97,7 @@ it.each([
 
 it("shows the server error, preserves scene and selection, then permits a successful retry", async () => {
   vi.stubGlobal("fetch", vi.fn()
-    .mockResolvedValueOnce(new Response(JSON.stringify({ error: "Scene is locked by another facilitator" }), { status: 409 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ safe_error: true, request_outcome: "rejected", error: "Scene is locked by another facilitator" }), { status: 409 }))
     .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, snapshot: snapshot("prioritize", 2) }))));
   render("gaps");
   selectSecondGap("gaps");
@@ -159,7 +159,7 @@ it("shows a network failure while preserving the scene and clearing pending", as
   vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Network connection lost")));
   render("gaps");
   await act(async () => button("Prioritize").click());
-  expect(container.querySelector("p.text-destructive")?.textContent).toBe("Network connection lost");
+  expect(container.querySelector("p.text-destructive")?.textContent).toContain("Check your connection");
   expect(container.querySelector("h2")?.textContent).toBe("First board");
   expect(container.textContent).toContain("frozen v1");
   expect(button("Gaps").disabled).toBe(false);

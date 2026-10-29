@@ -65,7 +65,7 @@ export default async function AccuracyReviewPage({
       // Switched off between the check and the run: show the AI-off note, not an error.
       aiOn = false;
     } else {
-      loadError = error instanceof Error ? error.message : "Could not load review inbox";
+      loadError = "Could not load review inbox. Reload this page to try again. If this continues, contact your Synapse administrator.";
     }
   }
 

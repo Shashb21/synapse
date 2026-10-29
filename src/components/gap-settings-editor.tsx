@@ -47,10 +47,12 @@ export function GapSettingsEditor({
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [checkRequired, setCheckRequired] = useState(false);
 
   const dirty = JSON.stringify(tags) !== JSON.stringify(savedTags);
 
   async function save() {
+    if (pending || checkRequired) return;
     if (reason.trim().length < 3) {
       setError("A meaningful reason is required for the settings change.");
       return;
@@ -58,14 +60,15 @@ export function GapSettingsEditor({
     setPending(true);
     setError(null);
     const res = await postJson("/api/plan", { action: "set_gap_settings", gap_id: gapId, settings: tags, expected_settings: savedTags, rationale: reason });
-    const json = res.json as { settings?: string[]; error?: string };
+    const json = res.json as { ok?: boolean; settings?: string[]; error?: string };
     setPending(false);
-    if (!res.ok) {
-      setError(json.error ?? "Could not save the settings.");
+    if (!res.ok || json.ok !== true || !Array.isArray(json.settings) || !json.settings.every(tag => typeof tag === "string")) {
+      setCheckRequired(res.outcome !== "rejected");
+      setError(json.error ?? "We couldn’t confirm the settings save. Check current settings before saving again.");
       return;
     }
-    setTags(json.settings ?? tags);
-    setSavedTags(json.settings ?? tags);
+    setTags(json.settings);
+    setSavedTags(json.settings);
     setReason("");
     router.refresh();
   }
@@ -96,7 +99,7 @@ export function GapSettingsEditor({
             {tag}
             <button
               type="button"
-              disabled={pending}
+              disabled={pending || checkRequired}
               onClick={() => setTags(tags.filter((existing) => existing !== tag))}
               className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
               aria-label={`Remove ${tag}`}
@@ -115,7 +118,7 @@ export function GapSettingsEditor({
           <input
             value={draft}
             list={listId}
-            disabled={pending}
+            disabled={pending || checkRequired}
             onChange={(event) => {
               const value = event.target.value;
               if (value.endsWith(",")) add(value.slice(0, -1));
@@ -139,18 +142,20 @@ export function GapSettingsEditor({
         <div className="grid gap-2">
           <label className="grid gap-1 text-[12px] text-muted-foreground">
             Reason for settings change (required)
-            <textarea value={reason} onChange={event => setReason(event.target.value)} disabled={pending} className="rounded-lg border border-input bg-card px-2.5 py-1.5" />
+            <textarea value={reason} onChange={event => setReason(event.target.value)} disabled={pending || checkRequired} className="rounded-lg border border-input bg-card px-2.5 py-1.5" />
           </label>
           <div className="flex gap-2">
-            <Button type="button" size="sm" disabled={pending} onClick={() => void save()}>Save settings</Button>
-            <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={() => { setTags(savedTags); setDraft(""); setReason(""); setError(null); }}>Discard settings</Button>
+            <Button type="button" size="sm" disabled={pending || checkRequired} onClick={() => void save()}>Save settings</Button>
+            <Button type="button" size="sm" variant="ghost" disabled={pending || checkRequired} onClick={() => { setTags(savedTags); setDraft(""); setReason(""); setError(null); }}>Discard settings</Button>
           </div>
         </div>
       ) : null}
       {pending ? <p role="status" className="text-[11px] text-muted-foreground">Saving settings…</p> : null}
       {error ? <>
-        <p id={errorId} role="alert" className="text-[11px] text-destructive">{error} Changes have not been saved.</p>
-        <button type="button" disabled={pending} onClick={() => void save()} className="justify-self-start text-[12px] underline focus-visible:outline-2 focus-visible:outline-ring">Retry saving settings</button>
+        <p id={errorId} role="alert" className="text-sm text-destructive">{error}</p>
+        {checkRequired
+          ? <button type="button" onClick={() => window.location.reload()} className="justify-self-start text-sm underline focus-visible:outline-2 focus-visible:outline-ring">Check current settings</button>
+          : <button type="button" disabled={pending} onClick={() => void save()} className="justify-self-start text-[12px] underline focus-visible:outline-2 focus-visible:outline-ring">Retry saving settings</button>}
       </> : null}
     </div>
   );

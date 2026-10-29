@@ -49,7 +49,7 @@ test("edits a shared deadline without references, previews a hidden gap and reco
   await page.getByLabel("Reason for objective changes").fill("Committee papers are needed before the meeting");
 
   // A failed save retains the entered context, reason and current selection.
-  await page.route("**/api/iegp", route => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "Save failed; please retry" }) }), { times: 1 });
+  await page.route("**/api/iegp", route => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ safe_error: true, request_outcome: "rejected", error: "Save failed; please retry" }) }), { times: 1 });
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(page.getByTestId("setup-wizard").getByRole("alert")).toContainText("Save failed");
   await expect(page.getByLabel("Reason for objective changes")).toHaveValue("Committee papers are needed before the meeting");

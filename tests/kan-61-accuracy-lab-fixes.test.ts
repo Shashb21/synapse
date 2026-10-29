@@ -188,7 +188,7 @@ describe("unknown workspace (KAN-61 item 2)", () => {
     for (const [label, handler, method, body] of writes) {
       const res = await call(await handler(request("/api/accuracy/x", method, { workspace_id: missing, ...body })));
       expect({ label, status: res.status }).toEqual({ label, status: 404 });
-      expect(String(res.json.error)).toMatch(/^Unknown workspace/);
+      expect(String(res.json.error)).toMatch(/Unknown workspace|workspace is no longer available/);
     }
   });
 
@@ -406,10 +406,10 @@ describe("accuracy set_route validates its parameters (KAN-61)", () => {
       for (const [body, message] of [
         [{ temperature: 5 }, /Temperature must be a number from 0 to 2/],
         [{ temperature: "warm" }, /Temperature/],
-        [{ max_tokens: 0 }, /Max tokens must be a whole number from 1 to 200000/],
+        [{ max_tokens: 0 }, /Max tokens must be a whole number from 1 to 200,000/],
         [{ max_tokens: 1.5 }, /Max tokens/],
         [{ max_tokens: 300_000 }, /Max tokens/],
-        [{ fallbacks: "anthropic-claude, nope-provider" }, /Unknown fallback provider: nope-provider/],
+        [{ fallbacks: "anthropic-claude, nope-provider" }, /Choose an available fallback provider/],
       ] as const) {
         const res = await call(await routingPost(request("/api/accuracy/routing", "POST", { ...base, ...body })));
         expect(res.status).toBe(400);

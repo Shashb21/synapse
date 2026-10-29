@@ -50,7 +50,7 @@ export function AiSectionToggle({
           <span className={`inline-block size-4 rounded-full bg-primary-foreground transition-transform motion-reduce:transition-none ${enabled ? "translate-x-6" : "translate-x-1"}`} />
         </span>
       </button>
-      {error ? <span role="alert" className="text-[10px] text-destructive">{error}</span> : null}
+      {error ? <span role="alert" className="text-sm text-destructive">{error}</span> : null}
     </div>
   );
 }

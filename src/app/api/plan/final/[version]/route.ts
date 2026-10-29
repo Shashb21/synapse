@@ -19,11 +19,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ver
     const { version } = await params;
     const number = Number(version);
     if (!Number.isInteger(number) || number < 1) {
-      return NextResponse.json({ error: "A plan version is a whole number from 1.", code: "invalid_request" }, { status: 400 });
+      return NextResponse.json({ safe_error: true, error: "A plan version is a whole number from 1.", code: "invalid_request" }, { status: 400 });
     }
     const record = await planVersion(number);
     if (!record) {
-      return NextResponse.json({ error: `No saved plan v${number} in this workspace.`, code: "not_found" }, { status: 404 });
+      return NextResponse.json({ safe_error: true, error: `No saved plan v${number} in this workspace.`, code: "not_found" }, { status: 404 });
     }
     return NextResponse.json(finalPlanView(record), {
       headers: {

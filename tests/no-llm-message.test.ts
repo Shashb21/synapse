@@ -10,6 +10,7 @@ vi.mock("next/headers", () => ({
   }),
 }));
 
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { apiErrorResponse } from "@/modules/auth/api-guard";
 import { TEST_AS_CUSTOMER_COOKIE } from "@/modules/auth/owner";
 import { stageErrorResponse } from "@/app/api/modules/ai-off";
@@ -29,7 +30,7 @@ afterEach(() => jar.values.clear());
 describe("the no-LLM message is chosen by audience", () => {
   it("tells a customer to ask their administrator or carry on by hand, with no admin link", () => {
     const body = noLlmBody(DETAIL, false);
-    expect(body).toEqual({ code: NO_LLM_CODE, error: NO_LLM_CUSTOMER_MESSAGE });
+    expect(body).toEqual({ safe_error: true, code: NO_LLM_CODE, error: NO_LLM_CUSTOMER_MESSAGE });
     expect(body.error).toBe(
       "No AI model is connected. Ask your Synapse administrator to connect one, or carry on by hand.",
     );
@@ -38,7 +39,8 @@ describe("the no-LLM message is chosen by audience", () => {
 
   it("gives the owner the provider-by-provider detail and the /admin/control link", () => {
     const body = noLlmBody(DETAIL, true);
-    expect(body.error).toContain("xAI · Grok: no API key (set XAI_API_KEY");
+    expect(body.error).toContain("Open AI & routing");
+    expect(body.error).not.toContain(DETAIL);
     expect(body.admin_href).toBe(OWNER_CONTROL_HREF);
     expect(OWNER_CONTROL_HREF).toBe("/admin/control");
   });
@@ -56,7 +58,7 @@ describe("API responses for a run with no connected model", () => {
     const response = await apiErrorResponse(new NoRouteError(DETAIL));
     expect(response.status).toBe(409);
     const json = (await response.json()) as Record<string, unknown>;
-    expect(json).toEqual({ code: "no_llm", error: NO_LLM_CUSTOMER_MESSAGE });
+    expect(json).toEqual({ safe_error: true, code: "no_llm", error: NO_LLM_CUSTOMER_MESSAGE });
   });
 
   it("the stage-run route maps it the same way", async () => {
@@ -72,13 +74,13 @@ describe("API responses for a run with no connected model", () => {
     const response = await apiErrorResponse(new NoRouteError(DETAIL));
     const json = (await response.json()) as Record<string, unknown>;
     expect(json.code).toBe("no_llm");
-    expect(json.error).toContain("Anthropic · Claude: no API key (set ANTHROPIC_API_KEY");
+    expect(json.error).toContain("Open AI & routing");
     expect(json.admin_href).toBe("/admin/control");
   });
 
   it("other errors keep their 400 and message", async () => {
-    const response = await apiErrorResponse(new Error("Bad input"));
+    const response = await apiErrorResponse(new TrustedApplicationError("Bad input"));
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: "Bad input" });
+    expect(await response.json()).toEqual({ safe_error: true, error: "Bad input", code: "invalid_request" });
   });
 });

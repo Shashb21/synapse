@@ -21,7 +21,7 @@ import {
   GanttScheduleEditor,
   type GanttTacticSchedule,
 } from "@/components/accuracy/gantt-schedule-editor";
-import { postJson } from "@/lib/post-json";
+import { postJson, requestErrorMessage } from "@/lib/post-json";
 
 function toDay(iso: string): number {
   return Date.parse(`${iso.slice(0, 10)}T00:00:00Z`);
@@ -155,7 +155,7 @@ function GanttBoardContent({
         audit_bundle?: { href: string; snapshot_hash: string };
       };
       if (!res.ok) {
-        setError(body.error ?? "Save final failed");
+        setError(body.error ?? "We couldn’t confirm the saved plan. Reload the timeline and check saved plans before saving again.");
         return;
       }
       const nextHash = body.snapshot_hash ?? body.audit_bundle?.snapshot_hash ?? null;
@@ -182,7 +182,7 @@ function GanttBoardContent({
       setNote("");
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Save final failed");
+      setError(requestErrorMessage(err, "Save final failed. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     } finally {
       setPending(false);
     }
@@ -207,7 +207,7 @@ function GanttBoardContent({
         ganttExportFileName({ workspace_id: workspaceId, version: planVersion, ext: "png" }),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "PNG export failed");
+      setError(requestErrorMessage(err, "PNG export failed. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     } finally {
       setExporting(false);
     }
@@ -319,7 +319,7 @@ function GanttBoardContent({
           className="text-[12px]"
         />
       </label>
-      {error ? <p className="text-[11px] text-destructive">{error}</p> : null}
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
       {message ? <p className="text-[11px] text-[var(--known-foreground)]">{message}</p> : null}
 
       {activities.length === 0 ? (

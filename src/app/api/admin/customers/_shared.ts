@@ -19,15 +19,15 @@ export async function readObject(request: Request): Promise<Record<string, unkno
 }
 
 export function invalidJson(): NextResponse {
-  return NextResponse.json({ error: "The request body must be a JSON object.", code: "invalid_json" }, { status: 400 });
+  return NextResponse.json({ safe_error: true, error: "The request body must be a JSON object.", code: "invalid_json" }, { status: 400 });
 }
 
 export function customerErrorResponse(error: unknown, what: string): NextResponse {
   if (error instanceof CustomerError) {
-    return NextResponse.json({ error: error.message, code: error.code }, { status: STATUS[error.code] });
+    return NextResponse.json({ safe_error: true, error: error.message, code: error.code }, { status: STATUS[error.code] });
   }
   console.error(`admin customers: ${what} failed`, error instanceof Error ? error.message : error);
-  return NextResponse.json({ error: "That did not work. Try again." }, { status: 500 });
+  return NextResponse.json({ safe_error: true, error: what === "list" || what === "read" ? "We couldn’t load the customer details. Reload the customer list and choose the customer again." : "We couldn’t confirm the customer or seat change. Reload the customer details and check the current seats before repeating this action." }, { status: 500 });
 }
 
 /** Who is acting, for `assigned_by`: the owner's email, else their name. */

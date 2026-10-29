@@ -94,7 +94,7 @@ describe("KAN-68 QA polish", () => {
     expect(hasSuggestedSplit("Persistence vs SoC", "Persistence beyond 12 months")).toBe(true);
     const dialog = src("src/components/split-gap-dialog.tsx");
     expect(dialog).toContain('(suggested ? "Accept split" : "Split gap")');
-    expect(dialog).toMatch(/<p role="alert" className="text-\[12px\] text-destructive">\s*\{error\}/);
+    expect(dialog).toMatch(/<p role="alert" className="text-sm text-destructive">\s*\{error\}/);
   });
 
   it("Gaps with no gaps says to add gaps first, not '0 gaps still unconfirmed'", () => {

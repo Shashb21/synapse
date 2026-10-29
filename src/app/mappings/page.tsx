@@ -13,7 +13,7 @@ export default async function MappingsPage() {
   const [state, proposed, ai, rejected] = await Promise.all([
     loadState(),
     latestS4MappingRows(),
-    aiSectionEnabled("mapping").catch(() => false),
+    aiSectionEnabled("mapping"),
     listRejectedMappings(),
   ]);
   const workspace = buildPlanWorkspace(state);

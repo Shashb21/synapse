@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 /**
  * Human merge / unmerge / dismiss of duplicate ledger claims.
  * Every action needs a rationale and is written to both claims' edit_history.
@@ -55,12 +56,12 @@ function restoredStatus(claim: AccuracyClaimRow, meta: AccuracyClaimMetadata): s
 }
 
 async function requirePair(workspace_id: string, a_id: string, b_id: string, transaction?: AccuracyTransaction) {
-  if (a_id === b_id) throw new Error("Pick two different claims.");
+  if (a_id === b_id) throw new TrustedApplicationError("Pick two different claims.");
   const [a, b] = await Promise.all([getClaim(workspace_id, a_id, transaction), getClaim(workspace_id, b_id, transaction)]);
-  if (!a) throw new Error(`Unknown claim: ${a_id}`);
-  if (!b) throw new Error(`Unknown claim: ${b_id}`);
+  if (!a) throw new TrustedApplicationError("Claim not found. Reload the list and choose an available claim.", "not_found", 404);
+  if (!b) throw new TrustedApplicationError("Claim not found. Reload the list and choose an available claim.", "not_found", 404);
   if (a.claim_type !== b.claim_type) {
-    throw new Error("Only claims of the same type (gap↔gap, tactic↔tactic) can be merged.");
+    throw new TrustedApplicationError("Only claims of the same type (gap↔gap, tactic↔tactic) can be merged.");
   }
   return { a, b };
 }
@@ -87,9 +88,9 @@ export async function manualMergeClaims(args: {
       transaction,
     );
     if (survivor.status === "merged") {
-      throw new Error("The surviving claim is itself merged — unmerge it or pick its survivor.");
+      throw new TrustedApplicationError("The surviving claim is itself merged — unmerge it or pick its survivor.");
     }
-    if (duplicate.status === "merged") throw new Error("That claim is already merged.");
+    if (duplicate.status === "merged") throw new TrustedApplicationError("That claim is already merged.");
     const at = nowIso();
 
     const dupMeta = claimMetadata(duplicate);
@@ -186,11 +187,11 @@ export async function unmergeClaim(args: {
   const rationale = requireValidationRationale(args.rationale);
   await ensureAccuracySchema();
   const claim = await getClaim(args.workspace_id, args.claim_id);
-  if (!claim) throw new Error(`Unknown claim: ${args.claim_id}`);
+  if (!claim) throw new TrustedApplicationError("Claim not found. Reload the list and choose an available claim.", "not_found", 404);
   const meta = claimMetadata(claim);
   const survivorId = typeof meta.merged_into === "string" ? meta.merged_into : null;
   if (claim.status !== "merged" && !survivorId) {
-    throw new Error("That claim is not merged.");
+    throw new TrustedApplicationError("That claim is not merged.");
   }
   const at = nowIso();
   const status = restoredStatus(claim, meta);
@@ -267,10 +268,10 @@ export async function dismissMergeProposal(args: {
   const rationale = requireValidationRationale(args.rationale);
   await ensureAccuracySchema();
   const claim = await getClaim(args.workspace_id, args.claim_id);
-  if (!claim) throw new Error(`Unknown claim: ${args.claim_id}`);
+  if (!claim) throw new TrustedApplicationError("Claim not found. Reload the list and choose an available claim.", "not_found", 404);
   const meta = claimMetadata(claim);
   const proposal = meta.merge_proposal;
-  if (!proposal) throw new Error("No merge proposal on this claim.");
+  if (!proposal) throw new TrustedApplicationError("No merge proposal on this claim.");
   const at = nowIso();
   const updated = await writeClaimRow({
     workspace_id: args.workspace_id,

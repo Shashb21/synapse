@@ -21,7 +21,7 @@ export default async function TacticsPage() {
     loadState(),
     sessionContext(),
     listRejectedTacticCandidates(),
-    aiSectionEnabled("tactic_extraction").catch(() => false),
+    aiSectionEnabled("tactic_extraction"),
     listTacticSuggestions(),
   ]);
   const workspace = buildPlanWorkspace(state);

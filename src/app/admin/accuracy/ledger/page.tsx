@@ -145,8 +145,8 @@ export default async function AccuracyLedgerPage({
       ready = workshop.readiness;
       hasSnapshot = Boolean(await latestWorkshopSnapshot(workspaceId));
     }
-  } catch (error) {
-    loadError = error instanceof Error ? error.message : "Could not load ledger";
+  } catch {
+    loadError = "Could not load ledger. Reload this page to try again. If this continues, contact your Synapse administrator.";
   }
 
   const unknownWorkspace = Boolean(workspaceId) && !activeWorkspace && !loadError;

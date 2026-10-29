@@ -67,7 +67,8 @@ test.describe("S0 file upload", () => {
 
     const unknown = await runStageExpectingError(request, "S0", { demo_ids: ["not-a-demo"] });
     expect(unknown.status).toBe(400);
-    expect(unknown.error).toMatch(/Unknown demo source/i);
+    expect(unknown.error).toBe("We couldn’t finish this AI task. Check the current workspace results before running it again. If this continues, contact your Synapse administrator.");
+    expect(unknown.error).not.toContain("not-a-demo");
   });
 
   test("is wired to the upload module and traced", async ({ request }) => {

@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { compareSource } from "@/lib/ingest/compare-source";
 import { relationshipVersion } from "@/lib/iegp/relationship-version";
 import { lockRelationships, requireGapResolutionSnapshot, requireRelationshipSnapshot } from "@/lib/iegp/relationship-change";
@@ -336,7 +337,7 @@ async function atomicAction(request: Request, prepared?: PreparedAction): Promis
     });
   } catch (error) {
     if (error instanceof RolledBack) return error.response;
-    return apiErrorResponse(error, "Failed");
+    return apiErrorResponse(error, "We couldn’t complete this workspace action. Check the current workspace before trying again. If this continues, contact your Synapse administrator.");
   }
 }
 
@@ -346,9 +347,9 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
   try {
     ({ body, identity } = prepared ?? await prepareAction(request));
     const retired = retiredActionMessage(String(body.action ?? ""));
-    if (retired) return NextResponse.json({ error: retired }, { status: 410 });
+    if (retired) return NextResponse.json({ safe_error: true, error: retired }, { status: 410 });
     const capability = iegpActionCapability(String(body.action ?? ""));
-    if (!capability) return NextResponse.json({ error: `Unknown action ${body.action}` }, { status: 400 });
+    if (!capability) return NextResponse.json({ safe_error: true, error: "This action is not available. Reload the page and choose an available action." }, { status: 400 });
     requireCapability(identity, capability);
     if (WORKSPACE_OWNER_ACTIONS.has(String(body.action)) && identity.workspace && identity.workspace.role !== "owner") {
       await recordDenied({
@@ -360,7 +361,7 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
         meta: { code: "forbidden", workspace_role: identity.workspace.role },
       });
       return NextResponse.json(
-        { error: "Only the workspace owner can replace its contents.", code: "forbidden" },
+        { safe_error: true, error: "Only the workspace owner can replace its contents.", code: "forbidden" },
         { status: 403 },
       );
     }
@@ -375,15 +376,15 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
     let libraryRequest: { id: string; payload: string } | undefined;
     if (body.action === "assign_tactic") {
       // This surface previews original parent scope only; never reinterpret child input as parent.
-      if (body.expansion_id) throw new Error("Use the expansion review workflow to link a child scope.");
+      if (body.expansion_id) throw new TrustedApplicationError("Use the expansion review workflow to link a child scope.");
       if (body.link_mode !== undefined) {
-        if (body.link_mode !== "unassessed" && body.link_mode !== "assessed") throw new Error("Choose Link as unassessed or Assess and link.");
+        if (body.link_mode !== "unassessed" && body.link_mode !== "assessed") throw new TrustedApplicationError("Choose Link as unassessed or Assess and link.");
         const verdict = coverageInput(body);
         if (body.link_mode === "unassessed" && (verdict.coverage && verdict.coverage !== "unassessed" || verdict.dimensions)) {
-          throw new Error("Link as unassessed cannot include an assessment.");
+          throw new TrustedApplicationError("Link as unassessed cannot include an assessment.");
         }
         if (body.link_mode === "assessed" && (!verdict.coverage || verdict.coverage === "unassessed" || body.confirm_coverage === "false")) {
-          throw new Error("Assess and link requires an explicit confirmed overall verdict.");
+          throw new TrustedApplicationError("Assess and link requires an explicit confirmed overall verdict.");
         }
         const payload = JSON.stringify({
           principal: identity.principal, actor: identity.actor, workspace: identity.workspace?.id ?? null,
@@ -419,7 +420,7 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
     let createdId: string | undefined;
     switch (body.action) {
       case "retry_source_comparison":
-        if (!body.source_id?.trim()) throw new Error("Choose a parsed source to compare.");
+        if (!body.source_id?.trim()) throw new TrustedApplicationError("Choose a parsed source to compare.");
         await compareSource(body.source_id, identity.actor);
         break;
       case "link_source_support":
@@ -438,7 +439,7 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
           expected_target_version: body.expected_target_version, actor_name, actor_function });
         break;
       case "clear_ingested_files":
-        if (body.confirmation !== "clear_ingested_files") return NextResponse.json({ error: "Confirm clearing all current ingested files first.", code: "invalid_request" }, { status: 400 });
+        if (body.confirmation !== "clear_ingested_files") return NextResponse.json({ safe_error: true, error: "Confirm clearing all current ingested files first.", code: "invalid_request" }, { status: 400 });
         await clearIngestedFiles();
         await recordAudit({ category: "workspace", action: "workspace.clear_ingested_files", entity_type: "workspace", entity_id: identity.workspace?.id ?? null, workspace_id: identity.workspace?.id ?? null });
         break;
@@ -624,9 +625,9 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
         });
         break;
       case "lock_dimension":
-        if (!body.expected_version) return NextResponse.json({ error: "Refresh coverage before reviewing." }, { status: 400 });
+        if (!body.expected_version) return NextResponse.json({ safe_error: true, error: "Refresh coverage before reviewing." }, { status: 400 });
         if (rationaleOf(body).length < 3) {
-          return NextResponse.json({ error: RATIONALE_REQUIRED }, { status: 400 });
+          return NextResponse.json({ safe_error: true, error: RATIONALE_REQUIRED }, { status: 400 });
         }
         await lockCoverageDimension({
           coverage_id: body.coverage_id,
@@ -639,10 +640,10 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
         });
         break;
       case "lock_overall":
-        if (body.overall === "full" && !body.expected_basis_version) return NextResponse.json({ error: "Review the requirement basis before confirming Full." }, { status: 400 });
-        if (!body.expected_version) return NextResponse.json({ error: "Refresh coverage before reviewing." }, { status: 400 });
+        if (body.overall === "full" && !body.expected_basis_version) return NextResponse.json({ safe_error: true, error: "Review the requirement basis before confirming Full." }, { status: 400 });
+        if (!body.expected_version) return NextResponse.json({ safe_error: true, error: "Refresh coverage before reviewing." }, { status: 400 });
         if (rationaleOf(body).length < 3) {
-          return NextResponse.json({ error: RATIONALE_REQUIRED }, { status: 400 });
+          return NextResponse.json({ safe_error: true, error: RATIONALE_REQUIRED }, { status: 400 });
         }
         await lockCoverageOverall({
           coverage_id: body.coverage_id,
@@ -742,11 +743,11 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
       case "assign_tactic": {
         // A person's mapping. A coverage verdict set in the same step is theirs and is locked.
         const verdict = coverageInput(body);
-        if (verdict.coverage === "full" && body.confirm_coverage !== "false" && !body.expected_basis_version) return NextResponse.json({ error: "Review the requirement basis before confirming Full." }, { status: 400 });
+        if (verdict.coverage === "full" && body.confirm_coverage !== "false" && !body.expected_basis_version) return NextResponse.json({ safe_error: true, error: "Review the requirement basis before confirming Full." }, { status: 400 });
         const hasVerdict =
           Boolean(verdict.coverage && verdict.coverage !== "unassessed") || Boolean(verdict.dimensions);
         if (hasVerdict && rationaleOf(body).length < 3) {
-          return NextResponse.json({ error: RATIONALE_REQUIRED }, { status: 400 });
+          return NextResponse.json({ safe_error: true, error: RATIONALE_REQUIRED }, { status: 400 });
         }
         createdId = await assignTacticToGap({
           gap_id: body.gap_id,
@@ -766,7 +767,7 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
       }
       case "unassign_tactic":
         if (rationaleOf(body).length < 3) {
-          return NextResponse.json({ error: RATIONALE_REQUIRED }, { status: 400 });
+          return NextResponse.json({ safe_error: true, error: RATIONALE_REQUIRED }, { status: 400 });
         }
         await unassignTacticFromGap({
           gap_id: body.gap_id,
@@ -778,13 +779,13 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
         break;
       case "accept_mapping": {
         if (rationaleOf(body).length < 3) {
-          return NextResponse.json({ error: RATIONALE_REQUIRED }, { status: 400 });
+          return NextResponse.json({ safe_error: true, error: RATIONALE_REQUIRED }, { status: 400 });
         }
         const suggestion = body.judgement_origin === "model"
           ? (await latestS4MappingRows())?.find(row => row.gap_id === body.gap_id)?.mappings.find(row => row.tactic_id === body.tactic_id)
           : undefined;
         if (body.judgement_origin === "model" && (!suggestion || body.expected_suggestion !== relationshipVersion(suggestion))) {
-          throw new Error("Model suggestion changed or is unavailable. Review the current suggestion or make a manual judgement with a reason.");
+          throw new TrustedApplicationError("Model suggestion changed or is unavailable. Review the current suggestion or make a manual judgement with a reason.");
         }
         await acceptMapping({
           model: body.judgement_origin === "model",
@@ -802,7 +803,7 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
       }
       case "reject_mapping":
         if (rationaleOf(body).length < 3) {
-          return NextResponse.json({ error: RATIONALE_REQUIRED }, { status: 400 });
+          return NextResponse.json({ safe_error: true, error: RATIONALE_REQUIRED }, { status: 400 });
         }
         await rejectMapping({
           gap_id: body.gap_id,
@@ -815,7 +816,7 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
       case "save_mapping_row": {
         const rationale = rationaleOf(body);
         if (rationale.length < 3) {
-          return NextResponse.json({ error: RATIONALE_REQUIRED }, { status: 400 });
+          return NextResponse.json({ safe_error: true, error: RATIONALE_REQUIRED }, { status: 400 });
         }
         const tactic_ids = (body.tactic_ids || "")
           .split(",")
@@ -876,7 +877,7 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
         });
         break;
       case "create_gap":
-        if (!isEvidenceDomain(body.domain)) return NextResponse.json({ error: DOMAIN_REQUIRED }, { status: 400 });
+        if (!isEvidenceDomain(body.domain)) return NextResponse.json({ safe_error: true, error: DOMAIN_REQUIRED }, { status: 400 });
         createdId = await createGap({
           name: body.name,
           statement: body.statement,
@@ -964,7 +965,7 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
       case "save_product_setup": {
         const context = body.context;
         if (!context || typeof context !== "object") {
-          return NextResponse.json({ error: "context is required" }, { status: 400 });
+          return NextResponse.json({ safe_error: true, error: "context is required" }, { status: 400 });
         }
         // The wizard posts JSON booleans; older callers sent the string "true".
         const saved = await saveProductSetup({
@@ -1027,7 +1028,7 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
         });
         break;
       case "create_addressed_gap":
-        if (!isEvidenceDomain(body.domain)) return NextResponse.json({ error: DOMAIN_REQUIRED }, { status: 400 });
+        if (!isEvidenceDomain(body.domain)) return NextResponse.json({ safe_error: true, error: DOMAIN_REQUIRED }, { status: 400 });
         createdId = await createAddressedGap({
           name: body.name,
           statement: body.statement,
@@ -1140,7 +1141,7 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
         break;
       case "create_breakout_groups_by_theme": {
         if (!(BREAKOUT_THEMES as readonly string[]).includes(body.theme)) {
-          return NextResponse.json({ error: "Choose a theme: domain, setting or priority." }, { status: 400 });
+          return NextResponse.json({ safe_error: true, error: "Choose a theme: domain, setting or priority." }, { status: 400 });
         }
         await createBreakoutGroupsByTheme({
           theme: body.theme as BreakoutTheme,
@@ -1159,13 +1160,13 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
         });
         break;
       default:
-        return NextResponse.json({ error: `Unknown action ${body.action}` }, { status: 400 });
+        return NextResponse.json({ safe_error: true, error: "This action is not available. Reload the page and choose an available action." }, { status: 400 });
     }
     await fileGateEdit(body, before, actor_name, actor_function);
     if (libraryRequest && createdId) await completeLibraryLinkRequest(libraryRequest.id, libraryRequest.payload, createdId);
     return NextResponse.json(createdId ? { ok: true, id: createdId } : { ok: true });
   } catch (error) {
-    return apiErrorResponse(error, "Failed");
+    return apiErrorResponse(error, "We couldn’t complete this workspace action. Check the current workspace before trying again. If this continues, contact your Synapse administrator.");
   }
 }
 
@@ -1177,29 +1178,29 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
 function ingestPayloadOf(body: Record<string, string>, title: string): IngestPayload {
   const hasText = typeof body.text === "string" && body.text.length > 0;
   const hasFile = typeof body.content_base64 === "string" && body.content_base64.length > 0;
-  if (hasText && hasFile) throw new Error("Send the source as text or as a file, not both.");
+  if (hasText && hasFile) throw new TrustedApplicationError("Send the source as text or as a file, not both.");
   const filename = typeof body.filename === "string" ? body.filename.trim() : "";
   if (hasFile) {
-    if (!filename) throw new Error("A file upload needs its filename.");
+    if (!filename) throw new TrustedApplicationError("A file upload needs its filename.");
     const kind = uploadKindOf(filename);
-    if (kind.kind === "refused") throw new Error(kind.reason);
-    if (kind.kind === "text") throw new Error(`Send a ${filename} file's contents as text.`);
+    if (kind.kind === "refused") throw new TrustedApplicationError(kind.reason);
+    if (kind.kind === "text") throw new TrustedApplicationError("This is a text file. Upload it again using the text-file option or paste its contents.");
     if (body.mime && body.mime !== kind.mime && body.mime !== "application/octet-stream") {
-      throw new Error(`${filename} does not match its type (${body.mime}).`);
+      throw new TrustedApplicationError("The file type does not match its contents. Save it in a supported format and upload it again.");
     }
     const content_base64 = body.content_base64.replaceAll(/\s+/g, "");
     if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}(?:==)?|[A-Za-z0-9+/]{3}=?)?$/.test(content_base64)) {
-      throw new Error("The file is not valid base64.");
+      throw new TrustedApplicationError("The file is not valid base64.");
     }
-    if (Buffer.byteLength(content_base64, "base64") > MAX_UPLOAD_BYTES) throw new Error(TOO_LARGE);
+    if (Buffer.byteLength(content_base64, "base64") > MAX_UPLOAD_BYTES) throw new TrustedApplicationError(TOO_LARGE);
     return { filename, content_base64, mime: kind.mime };
   }
   const textKind = filename ? uploadKindOf(filename) : null;
-  if (textKind?.kind === "refused") throw new Error(textKind.reason);
+  if (textKind?.kind === "refused") throw new TrustedApplicationError(textKind.reason);
   if (textKind?.kind === "binary") {
-    throw new Error(`Send ${filename} as content_base64, not text.`);
+    throw new TrustedApplicationError("This file needs the file-upload option. Choose it again instead of pasting its encoded contents.");
   }
-  if (hasText && Buffer.byteLength(body.text, "utf8") > MAX_UPLOAD_BYTES) throw new Error(TOO_LARGE);
+  if (hasText && Buffer.byteLength(body.text, "utf8") > MAX_UPLOAD_BYTES) throw new TrustedApplicationError(TOO_LARGE);
   return { filename: filename || `${title.replaceAll(" ", "_")}.txt`, text: body.text };
 }
 

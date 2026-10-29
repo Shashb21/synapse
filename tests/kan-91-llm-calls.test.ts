@@ -185,7 +185,8 @@ describe("KAN-91 llm_calls", () => {
     await closeRun({ recorder, status: "error", error: "bad model", route: route() });
     const [call] = await listLlmCalls(recorder.id);
     expect(call).toMatchObject({ status: "error", reply: null, usage: null, cost_usd: null });
-    expect(call!.error).toMatch(/bad model|400/);
+    expect(call!.error).toMatch(/could not finish.*Review the workspace/);
+    expect(call!.error).not.toMatch(/bad model|400/);
     const step = (await getRun(recorder.id))!.steps.find((row) => row.name === "llm:gap-extract");
     expect(step!.data).toMatchObject({ llm_call_id: call!.id });
   });

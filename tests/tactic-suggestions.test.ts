@@ -9,6 +9,7 @@ import { commitExtractedRecords, createProposedTactic, loadState, persistState }
 import { tacticVersion } from "@/lib/iegp/tactic-expansions";
 import type { ExpansionScope } from "@/lib/iegp/types";
 import * as suggestions from "@/modules/stages/s3-tactic-extract/suggestions";
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 
 const actor = {name: "Source reviewer", function: "medical_affairs" as const};
 const scope: ExpansionScope = {name: "Added subgroup analysis", evidence_question: "What is safety in the subgroup?", population: "Subgroup", outcomes: "", geography: "", data_cut: "", analysis: "Post-hoc subgroup analysis", instrument: "", study_design: "Retrospective analysis", gap_coverage: "Subgroup safety", cost_effort: "Two analyst weeks", timing: "Next quarter", feasibility_risks: "Small subgroup", post_hoc: true, prospective_enrolment: false, protocol_amendment: false, start_date: null, evidence_available: null};
@@ -120,7 +121,13 @@ describe("S3 source matching", () => {
     await db().execute(sql`CREATE FUNCTION fail_source_decision() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.status = 'expanded' THEN RAISE EXCEPTION 'injected source failure'; END IF; RETURN NEW; END $$`);
     await db().execute(sql`CREATE TRIGGER fail_source_decision BEFORE UPDATE ON tactic_suggestions FOR EACH ROW EXECUTE FUNCTION fail_source_decision()`);
     try {
-      await expect(suggestions.decideTacticSuggestion({id: row.id, decision: "expand", rationale: "Accept addition", actor})).rejects.toMatchObject({cause: {message: "injected source failure"}});
+      const action = suggestions.decideTacticSuggestion({id: row.id, decision: "expand", rationale: "Accept addition", actor});
+      await expect(action).rejects.toBeInstanceOf(TrustedApplicationError);
+      await expect(action).rejects.toMatchObject({
+        code: "invalid_request", status: 400,
+        message: "Could not save the relationship and its history. Keep your input and reason, and check the relationship before trying again.",
+      });
+      await expect(action).rejects.not.toHaveProperty("cause");
       expect(await loadState()).toEqual(before); expect((await suggestions.listTacticSuggestions())[0]!.status).toBe("pending");
     } finally {
       await db().execute(sql`DROP TRIGGER fail_source_decision ON tactic_suggestions`); await db().execute(sql`DROP FUNCTION fail_source_decision()`);

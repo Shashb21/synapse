@@ -8,14 +8,14 @@ import { ACTOR_FUNCTIONS, FUNCTION_LABELS } from "@/lib/iegp/enums";
 import { ROLE_LABELS, ROLES, type Role } from "@/modules/auth/roles";
 import type { AdminUserView } from "@/modules/auth/admin-users";
 import { formatUtc } from "@/lib/format-time";
-import { postJson } from "@/lib/post-json";
+import { postJson, requestErrorMessage, RequestOutcomeError } from "@/lib/post-json";
 
 type Result = { user: AdminUserView; temporary_password?: string; deleted?: boolean; error?: string };
 
 async function call(body: Record<string, unknown>): Promise<Result> {
   const res = await postJson("/api/admin/users", body);
   const json = res.json as Result;
-  if (!res.ok) throw new Error(json.error ?? `Request failed (HTTP ${res.status}).`);
+  if (!res.ok) throw new RequestOutcomeError(json.error ?? "We couldn’t confirm this action. Check the current state before repeating it.", res.outcome, res.status);
   return json;
 }
 
@@ -27,6 +27,7 @@ function when(iso: string | null): string {
 export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserView[]; selfId: string | null }) {
   const [users, setUsers] = useState(initialUsers);
   const [busy, setBusy] = useState<string | null>(null);
+  const [checkRequired, setCheckRequired] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [secret, setSecret] = useState<{ email: string; password: string } | null>(null);
   const [email, setEmail] = useState("");
@@ -41,6 +42,7 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
   }
 
   async function run(key: string, body: Record<string, unknown>) {
+    if (busy !== null || checkRequired) return false;
     setBusy(key);
     setError(null);
     try {
@@ -52,7 +54,8 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
       setSecret(result.temporary_password ? { email: result.user.email, password: result.temporary_password } : null);
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "That did not work.");
+      setCheckRequired(!(err instanceof RequestOutcomeError) || err.outcome === "unknown");
+      setError(requestErrorMessage(err, "We couldn’t confirm this account change. Reload the user list before repeating it. For an unconfirmed password reset, check the account before issuing another password."));
       return false;
     } finally {
       setBusy(null);
@@ -61,8 +64,9 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
 
   return (
     <div className="grid gap-6">
+      {checkRequired ? <Button variant="outline" onClick={() => window.location.reload()}>Check user list</Button> : null}
       {error ? (
-        <p role="alert" data-testid="users-error" className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
+        <p role="alert" data-testid="users-error" className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </p>
       ) : null}
@@ -131,7 +135,7 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
           <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} />
           Admin
         </label>
-        <Button type="submit" disabled={busy !== null || !email.trim() || !name.trim()}>
+        <Button type="submit" disabled={busy !== null || checkRequired || !email.trim() || !name.trim()}>
           {busy === "create" ? <Loader2 className="size-4 animate-spin" /> : <UserPlus className="size-4" aria-hidden />}
           Create user
         </Button>
@@ -174,7 +178,7 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
                       aria-label={`Role for ${user.email}`}
                       className="h-7 rounded-md border border-input bg-background px-1 text-[12px] text-foreground disabled:opacity-60"
                       value={user.role}
-                      disabled={self || busy !== null}
+                      disabled={self || busy !== null || checkRequired}
                       title={self ? "You can't change your own role." : undefined}
                       onChange={(e) => void run(`role:${user.id}`, { action: "set_role", id: user.id, role: e.target.value })}
                     >
@@ -198,19 +202,19 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
                         <Button
                           size="sm"
                           variant="outline"
-                          disabled={busy !== null}
+                          disabled={busy !== null || checkRequired}
                           onClick={() => void run(`reset:${user.id}`, { action: "reset_password", id: user.id })}
                         >
                           Reset password
                         </Button>
                       ) : null}
                       {!user.email_verified ? (
-                        <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void run(`verify:${user.id}`, { action: "verify", id: user.id })}>
+                        <Button size="sm" variant="outline" disabled={busy !== null || checkRequired} onClick={() => void run(`verify:${user.id}`, { action: "verify", id: user.id })}>
                           Verify email
                         </Button>
                       ) : null}
                       {user.locked ? (
-                        <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void run(`unlock:${user.id}`, { action: "unlock", id: user.id })}>
+                        <Button size="sm" variant="outline" disabled={busy !== null || checkRequired} onClick={() => void run(`unlock:${user.id}`, { action: "unlock", id: user.id })}>
                           Unlock
                         </Button>
                       ) : null}
@@ -218,7 +222,7 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
                         <Button
                           size="sm"
                           variant="outline"
-                          disabled={busy !== null}
+                          disabled={busy !== null || checkRequired}
                           onClick={() => void run(`admin:${user.id}`, { action: "set_admin", id: user.id, is_admin: !user.is_admin })}
                         >
                           {user.is_admin ? "Remove admin" : "Make admin"}
@@ -228,7 +232,7 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
                         <Button
                           size="sm"
                           variant={user.disabled ? "outline" : "destructive"}
-                          disabled={busy !== null}
+                          disabled={busy !== null || checkRequired}
                           onClick={() => void run(`disable:${user.id}`, { action: "set_disabled", id: user.id, disabled: !user.disabled })}
                         >
                           {user.disabled ? "Enable" : "Disable"}
@@ -238,7 +242,7 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
                         <Button
                           size="sm"
                           variant="outline"
-                          disabled={busy !== null}
+                          disabled={busy !== null || checkRequired}
                           aria-label={`Delete ${user.email}`}
                           onClick={() => setConfirmDelete(user.id)}
                         >
@@ -252,12 +256,12 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
                           <Button
                             size="sm"
                             variant="destructive"
-                            disabled={busy !== null}
+                            disabled={busy !== null || checkRequired}
                             onClick={() => void run(`delete:${user.id}`, { action: "delete", id: user.id })}
                           >
                             Yes, delete
                           </Button>
-                          <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => setConfirmDelete(null)}>
+                          <Button size="sm" variant="ghost" disabled={busy !== null || checkRequired} onClick={() => setConfirmDelete(null)}>
                             Cancel
                           </Button>
                         </span>

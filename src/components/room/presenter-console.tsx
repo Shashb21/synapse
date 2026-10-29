@@ -1,5 +1,7 @@
 "use client";
 
+import { requestErrorMessage } from "@/lib/post-json";
+
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -169,6 +171,7 @@ export function PresenterConsole({
   const locationRef = useRef(initialState.href);
   const arrivingRef = useRef<string | null>(null);
   const scrollRef = useRef(0);
+  const noteUnconfirmed = useRef(false);
   const pendingNote = useRef<{ slide_id: string; notes: string } | null>(null);
   const noteTimer = useRef<number | null>(null);
   const bumpTimer = useRef<number | null>(null);
@@ -192,7 +195,7 @@ export function PresenterConsole({
         if (state) publish(state);
       } catch (error) {
         // No server state (e.g. database down): still move same-browser audiences.
-        setSyncError(error instanceof Error ? error.message : "Could not save the current slide.");
+        setSyncError(requestErrorMessage(error, "Could not save the current slide. Check the current state before trying again. If this continues, contact your Synapse administrator."));
         publish({ ...fallback, rev: stateRef.current.rev + 1, updated_at: null });
       }
     },
@@ -203,13 +206,15 @@ export function PresenterConsole({
     if (noteTimer.current) window.clearTimeout(noteTimer.current);
     noteTimer.current = null;
     const pending = pendingNote.current;
-    if (!pending) return;
+    if (!pending || noteUnconfirmed.current) return;
     pendingNote.current = null;
     setNoteStatus("saving");
     try {
       await postRoom({ op: "note", ...pending });
       setNoteStatus(pendingNote.current ? "saving" : "saved");
     } catch {
+      // Keep the visible draft and pause autosave until the saved room is checked.
+      noteUnconfirmed.current = true;
       setNoteStatus("error");
     }
   }, []);
@@ -350,6 +355,7 @@ export function PresenterConsole({
 
   function onNotesChange(value: string) {
     setNotes((all) => ({ ...all, [slideId]: value }));
+    if (noteUnconfirmed.current) return;
     pendingNote.current = { slide_id: slideId, notes: value };
     setNoteStatus("saving");
     if (noteTimer.current) window.clearTimeout(noteTimer.current);
@@ -362,7 +368,7 @@ export function PresenterConsole({
   }
 
   const noteLabel =
-    noteStatus === "saving" ? "Saving…" : noteStatus === "saved" ? "Saved" : noteStatus === "error" ? "Not saved — retry by typing" : "";
+    noteStatus === "saving" ? "Saving…" : noteStatus === "saved" ? "Saved" : noteStatus === "error" ? "Save unconfirmed. Your draft is still here. Check the room before saving this note again." : "";
 
   return (
     <div
@@ -399,7 +405,7 @@ export function PresenterConsole({
       </header>
 
       {syncError ? (
-        <p role="alert" className="border-b border-border bg-destructive/10 px-4 py-1 text-[12px] text-destructive">
+        <p role="alert" className="border-b border-border bg-destructive/10 px-4 py-1 text-sm text-destructive">
           {syncError} Audience windows in this browser still follow; a projector on another machine will not.
         </p>
       ) : null}
@@ -462,6 +468,7 @@ export function PresenterConsole({
               <span>Speaker notes · {slide.title}</span>
               <span data-testid="room-notes-status" aria-live="polite">
                 {noteLabel}
+                {noteStatus === "error" ? <button type="button" className="ml-2 underline" onClick={() => window.location.reload()}>Check saved room</button> : null}
               </span>
             </span>
             <textarea

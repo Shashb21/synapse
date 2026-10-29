@@ -292,7 +292,7 @@ export function DragRescheduleDialog({
                 <Input value={actorName} placeholder="Your name" onChange={(event) => setActorName(event.target.value)} />
               </label>
             ) : null}
-            {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+            {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
           </div>
           <DialogFooter>
             <Button type="button" size="sm" variant="outline" onClick={onClose}>
@@ -334,6 +334,8 @@ export function ActivitySheetEditor({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actorName, setActorName] = useState(identity.signed_in ? identity.actor_name : "");
+  const [scheduleSaved, setScheduleSaved] = useState(false);
+  const [checkRequired, setCheckRequired] = useState(false);
   // The panel leaves edit mode with the refreshed values, not the stale ones for a moment.
   const [refreshing, startRefresh] = useTransition();
 
@@ -345,10 +347,12 @@ export function ActivitySheetEditor({
       });
     if (res.ok) return null;
     const json = res.json as { error?: string };
-    return json.error ?? "Saving failed";
+    if (res.outcome === "unknown") setCheckRequired(true);
+    return json.error ?? "We couldn’t confirm the activity change. Reload the timeline before repeating it.";
   }
 
   async function submit(form: HTMLFormElement) {
+    if (pending || checkRequired) return;
     const data = new FormData(form);
     const value = (name: string) => String(data.get(name) ?? "").trim();
     const rationale = value("rationale");
@@ -399,13 +403,15 @@ export function ActivitySheetEditor({
       return;
     }
     setPending(true);
-    const failed =
-      (Object.keys(schedule).length > 0
-        ? await post("/api/plan", { action: "move_activity", id: activity.id, ...schedule, rationale })
-        : null) ??
-      (Object.keys(details).length > 0
-        ? await post("/api/iegp", { action: "modify_tactic", tactic_id: activity.tactic_id, expected_tactic: expectedTactic, ...details, rationale })
-        : null);
+    let failed: string | null = null;
+    if (!scheduleSaved && Object.keys(schedule).length > 0) {
+      failed = await post("/api/plan", { action: "move_activity", id: activity.id, ...schedule, rationale });
+      if (!failed) setScheduleSaved(true);
+    }
+    if (!failed && Object.keys(details).length > 0) {
+      failed = await post("/api/iegp", { action: "modify_tactic", tactic_id: activity.tactic_id, expected_tactic: expectedTactic, ...details, rationale });
+      if (failed && (scheduleSaved || Object.keys(schedule).length > 0)) failed = `Schedule saved, but activity details could not be confirmed. Your detail edits are still here. Check the current activity before continuing. ${failed}`;
+    }
     setPending(false);
     if (failed) {
       setError(failed);
@@ -458,7 +464,8 @@ export function ActivitySheetEditor({
         </fieldset>
       ) : null}
 
-      <fieldset className="grid gap-3">
+      {scheduleSaved ? <p role="status" className="text-sm text-muted-foreground">The schedule is saved. These fields are fixed while you finish saving the details. To change the schedule again, finish this edit and reopen the activity.</p> : null}
+      <fieldset className="grid gap-3" disabled={pending || scheduleSaved || checkRequired}>
         <legend className="mb-1 text-[12px] font-medium text-foreground">Schedule</legend>
         <div className="grid grid-cols-2 gap-2">
           <label className={label}>
@@ -502,16 +509,17 @@ export function ActivitySheetEditor({
         Rationale for the change
         <Textarea name="rationale" rows={2} placeholder="Stored with the edit" />
       </label>
+      {checkRequired ? <Button type="button" size="sm" variant="outline" onClick={() => window.location.reload()}>Check timeline</Button> : null}
       {error ? (
-        <p role="alert" className="text-[12px] text-destructive">
+        <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
       ) : null}
       <div className="flex gap-2">
-        <Button type="submit" size="sm" disabled={pending || refreshing}>
+        <Button type="submit" size="sm" disabled={pending || refreshing || checkRequired}>
           {pending || refreshing ? "Saving…" : "Save changes"}
         </Button>
-        <Button type="button" size="sm" variant="ghost" onClick={onDone} disabled={pending || refreshing}>
+        <Button type="button" size="sm" variant="ghost" onClick={onDone} disabled={pending || refreshing || checkRequired}>
           Cancel
         </Button>
       </div>

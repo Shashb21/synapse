@@ -183,9 +183,10 @@ describe("S10 by hand", () => {
 
     // b waits on a but starts before a ends: a final save explains it and refuses (KAN-85).
     const upstream = output.activities.find((row) => row.id === a)!;
-    await expect(savePlan({ status: "final", note: "Signed off without a model", actor: ACTOR })).rejects.toThrow(
-      new RegExp(`starts ${dependent.start_date}, before .* ends \\(${upstream.end_date}\\)`),
-    );
+    await expect(savePlan({ status: "final", note: "Signed off without a model", actor: ACTOR })).rejects.toMatchObject({
+      code: "timeline_blocked",
+      message: expect.stringContaining("Move conflicting activities or change their dependencies."),
+    });
     expect((await savePlan({ status: "draft", note: "Draft with the conflict open", actor: ACTOR })).status).toBe("draft");
     await updateTimelineActivity({
       id: b,

@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { randomBytes } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { ensureWorkspaceSchema, setWorkspaceSchemaLookup, sharedDb } from "@/lib/iegp/db";
@@ -154,9 +155,9 @@ export const WORKSPACE_NAME_MAX = 80;
 
 function workspaceName(raw: string): string {
   const name = raw.trim();
-  if (name.length < 2) throw new Error("Give the workspace a name.");
+  if (name.length < 2) throw new TrustedApplicationError("Give the workspace a name.");
   if (name.length > WORKSPACE_NAME_MAX) {
-    throw new Error(`Keep the workspace name to ${WORKSPACE_NAME_MAX} characters or fewer.`);
+    throw new TrustedApplicationError(`Keep the workspace name to ${WORKSPACE_NAME_MAX} characters or fewer.`);
   }
   return name;
 }
@@ -275,7 +276,7 @@ export async function setWorkspaceAiColumn(workspaceId: string, enabled: boolean
 }
 
 export async function renameWorkspace(args: { workspace_id: string; name: string; by: string }): Promise<void> {
-  if ((await memberRole(args.workspace_id, args.by)) !== "owner") throw new Error("Only the workspace owner can rename it.");
+  if ((await memberRole(args.workspace_id, args.by)) !== "owner") throw new TrustedApplicationError("Only the workspace owner can rename it. Ask the owner to make this change.", "forbidden", 403);
   const name = workspaceName(args.name);
   const before = await getWorkspace(args.workspace_id);
   await rows(sql`update workspaces set name = ${name} where id = ${args.workspace_id}`);
@@ -284,9 +285,9 @@ export async function renameWorkspace(args: { workspace_id: string; name: string
 
 /** Any member may invite; the invitee sees the workspace on their next sign-in. */
 export async function inviteMember(args: { workspace_id: string; email: string; by: string }): Promise<void> {
-  if (!(await memberRole(args.workspace_id, args.by))) throw new Error("You are not a member of this workspace.");
+  if (!(await memberRole(args.workspace_id, args.by))) throw new TrustedApplicationError("Your workspace access has changed. Choose another workspace or ask its owner for access.", "not_member", 403);
   const email = args.email.trim().toLowerCase();
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error("Enter a valid email address.");
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new TrustedApplicationError("Enter a valid email address.");
   const before = await memberRole(args.workspace_id, email);
   await addMember({ workspace_id: args.workspace_id, principal: email, role: "member", added_by: args.by });
   await auditWorkspace(
@@ -299,10 +300,10 @@ export async function inviteMember(args: { workspace_id: string; email: string; 
 }
 
 export async function removeMember(args: { workspace_id: string; principal: string; by: string }): Promise<void> {
-  if ((await memberRole(args.workspace_id, args.by)) !== "owner") throw new Error("Only the workspace owner can remove people.");
+  if ((await memberRole(args.workspace_id, args.by)) !== "owner") throw new TrustedApplicationError("Only the workspace owner can remove people. Ask the owner to make this change.", "forbidden", 403);
   const target = normalizePrincipal(args.principal);
   const role = await memberRole(args.workspace_id, target);
-  if (role === "owner") throw new Error("The owner cannot be removed.");
+  if (role === "owner") throw new TrustedApplicationError("The owner cannot be removed.");
   const gone = await rows(sql`
     delete from workspace_members where workspace_id = ${args.workspace_id} and principal = ${target} returning principal`);
   if (gone.length > 0) {
@@ -336,5 +337,5 @@ export async function learningSharingEligible(workspaceId: string): Promise<bool
 /** Persist explicit eligibility through workspace settings. No production caller enables it. */
 export async function setLearningSharingEligible(workspaceId: string, eligible: boolean): Promise<void> {
   const changed = await rows(sql`update workspaces set learning_sharing_eligible = ${eligible} where id = ${workspaceId} returning id`);
-  if (!changed.length) throw new Error("Learning workspace no longer exists.");
+  if (!changed.length) throw new TrustedApplicationError("Learning workspace no longer exists.");
 }

@@ -38,7 +38,7 @@ export function AiToggle({ enabled, actorName }: { enabled: boolean; actorName: 
           <span className={`inline-block size-4 rounded-full bg-background transition-transform motion-reduce:transition-none ${enabled ? "translate-x-6" : "translate-x-1"}`} />
         </span>
       </button>
-      {error ? <p role="alert" className="text-[11px] text-destructive">{error}</p> : null}
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
     </div>
   );
 }

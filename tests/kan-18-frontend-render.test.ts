@@ -234,7 +234,7 @@ describe("gap panel priority draft continuity", () => {
     vi.stubGlobal("fetch", vi.fn(async (_url: string, options?: RequestInit) => {
       if (options?.method === "POST") {
         submitted = JSON.parse(String(options.body));
-        return new Response(JSON.stringify({ error: "Priority changed; retain your draft" }), { status: 400 });
+        return new Response(JSON.stringify({ safe_error: true, request_outcome: "rejected", error: "Priority changed; retain your draft" }), { status: 400 });
       }
       if (revalidating) {
         await hold;
@@ -599,7 +599,7 @@ it.each(["requirement", "source"])("reloads gap panel data and write tokens afte
   vi.stubGlobal("fetch", vi.fn(async (_url: string, options?: RequestInit) => {
     if (options?.method === "POST") {
       submitted.push(JSON.parse(String(options.body)));
-      return submitted.length === 1 ? Response.json({ ok: true }) : Response.json({ error: "Keep this proof dialog open" }, { status: 400 });
+      return submitted.length === 1 ? Response.json({ ok: true }) : Response.json({ safe_error: true, request_outcome: "rejected", error: "Keep this proof dialog open" }, { status: 400 });
     }
     reads += 1;
     return Response.json(reads === 1 ? initial : updated);

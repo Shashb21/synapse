@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 /**
  * A custom tactic type (KAN-51, from the design): a label and a colour a person gives a
  * tactic. It sits on top of the standard type, which the engine still uses for mapping,
@@ -37,7 +38,7 @@ export function normalizeCustomType(value: unknown): CustomTacticType | null {
     throw new Error(`A custom type name can be at most ${CUSTOM_TYPE_LABEL_MAX} characters.`);
   }
   const color = typeof raw.color === "string" ? raw.color.trim().toLowerCase() : "";
-  if (!HEX.test(color)) throw new Error("A custom type colour must be a hex colour like #4f46e5.");
+  if (!HEX.test(color)) throw new TrustedApplicationError("A custom type colour must be a hex colour like #4f46e5.");
   return { label, color };
 }
 

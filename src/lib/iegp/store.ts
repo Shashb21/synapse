@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { assessmentBasis, coverageReviewVersion, fullConfirmationIssues, getRequirementBasisReview, reviewedRequirementDimensions, type RequirementReviewInput } from "./requirement-basis";
 import type { RequirementBasis } from "./types";
 import { requireGapResolutionSnapshot, relationshipReason, withRelationshipChange } from "./relationship-change";
@@ -676,7 +677,7 @@ async function insertNeedForGap(args: {
   const gap = state.gaps.find((g) => g.id === args.gapId);
   // Linked to the first objective once setup has named one; a blank plan has none yet.
   const obj = state.objectives[0];
-  if (!gap) throw new Error("Gap not found");
+  if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
   const statement = args.statement.trim();
   if (!statement) return;
   const needId = await allocateId(
@@ -864,7 +865,7 @@ export const lockNeed = atomic(async function lockNeed(args: {
   const assessmentGapIds = await lockAssessmentOwners({ need_ids: [args.need_id], gap_ids: args.gap_id ? [args.gap_id] : [] });
   const state = await loadState();
   const need = state.needs.find((n) => n.id === args.need_id);
-  if (!need) throw new Error("Need not found");
+  if (!need) throw new TrustedApplicationError("Need not found", "not_found", 404);
   const lk = makeLock(args.actor_name, args.actor_function, args.note);
   await db()
     .update(t.needs)
@@ -960,15 +961,15 @@ export const editNeed = atomic(async function editNeed(args: {
   const assessmentGapIds = await lockAssessmentOwners({ need_ids: [args.need_id] });
   const state = await loadState();
   const need = state.needs.find((n) => n.id === args.need_id);
-  if (!need) throw new Error("Need not found");
+  if (!need) throw new TrustedApplicationError("Need not found", "not_found", 404);
   const statement = args.statement === undefined ? undefined : args.statement.trim();
-  if (statement !== undefined && !statement) throw new Error("Need statement is required.");
+  if (statement !== undefined && !statement) throw new TrustedApplicationError("Need statement is required.");
   const quote = args.source_quote === undefined ? undefined : args.source_quote.trim();
   const changes = diffFields(need, { statement, source_quote: quote });
   const citationChanged = quote !== undefined && quote !== need.source_quote;
   const citedBlock = citationChanged && quote ? state.blocks.find(block =>
     block.source_id === need.source_id && block.text.replace(/\s+/g, " ").includes(quote.replace(/\s+/g, " "))) : undefined;
-  if (changes.length === 0) throw new Error("Nothing changed.");
+  if (changes.length === 0) throw new TrustedApplicationError("Nothing changed.");
   await db()
     .update(t.needs)
     .set({
@@ -1014,11 +1015,11 @@ export const createNeed = atomic(async function createNeed(args: {
 }): Promise<string> {
   const rationale = requireRationale(args.rationale);
   const statement = args.statement.trim();
-  if (!statement) throw new Error("Need statement is required.");
+  if (!statement) throw new TrustedApplicationError("Need statement is required.");
   const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [args.gap_id] });
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
-  if (!gap || gap.retired) throw new Error("Gap not found");
+  if (!gap || gap.retired) throw new TrustedApplicationError("Gap not found", "not_found", 404);
   const sourceId =
     args.source_id && state.sources.some((s) => s.id === args.source_id)
       ? args.source_id
@@ -1034,7 +1035,7 @@ export const createNeed = atomic(async function createNeed(args: {
     actor_function: args.actor_function,
   });
   const created = (await loadState()).needs.find((n) => !before.has(n.id));
-  if (!created) throw new Error("The need was not saved.");
+  if (!created) throw new TrustedApplicationError("The need was not saved.");
   await db()
     .update(t.needs)
     .set({ status: "accepted", lock: makeLock(args.actor_name, args.actor_function, rationale) })
@@ -1088,7 +1089,7 @@ export const unlinkNeedFromGap = atomic(async function unlinkNeedFromGap(args: {
   const assessmentGapIds = await lockAssessmentOwners({ need_ids: [args.need_id], gap_ids: [args.gap_id] });
   const state = await loadState();
   const need = state.needs.find((n) => n.id === args.need_id);
-  if (!need) throw new Error("Need not found");
+  if (!need) throw new TrustedApplicationError("Need not found", "not_found", 404);
   await dropNeedLink(state, args.need_id, args.gap_id);
   await db()
     .update(t.needs)
@@ -1137,13 +1138,13 @@ export const moveNeedToGap = atomic(async function moveNeedToGap(args: {
   const assessmentGapIds = await lockAssessmentOwners({ need_ids: [args.need_id], gap_ids: [args.from_gap_id, ...(args.to_gap_id ? [args.to_gap_id] : [])] });
   const state = await loadState();
   const need = state.needs.find((n) => n.id === args.need_id);
-  if (!need) throw new Error("Need not found");
+  if (!need) throw new TrustedApplicationError("Need not found", "not_found", 404);
   const toId = args.to_gap_id?.trim() || "";
-  if (!toId && !args.new_gap) throw new Error("Choose the gap to move this need onto.");
-  if (toId === args.from_gap_id) throw new Error("The need is already on that gap.");
+  if (!toId && !args.new_gap) throw new TrustedApplicationError("Choose the gap to move this need onto.");
+  if (toId === args.from_gap_id) throw new TrustedApplicationError("The need is already on that gap.");
   if (toId) {
     const target = state.gaps.find((g) => g.id === toId);
-    if (!target || target.retired) throw new Error("Target gap not found");
+    if (!target || target.retired) throw new TrustedApplicationError("Target gap not found", "not_found", 404);
   }
   await dropNeedLink(state, args.need_id, args.from_gap_id);
   let targetId = toId;
@@ -1352,12 +1353,12 @@ export async function lockGapStatus(args: {
 }) {
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
-  if (!gap) throw new Error("Gap not found");
+  if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
   if (args.status === "validated_partial") {
-    throw new Error("Partially Addressed cannot stay. Split or rewrite the gap instead.");
+    throw new TrustedApplicationError("Partially Addressed cannot stay. Split or rewrite the gap instead.");
   }
   if (displayedGapStatus(gap) === "validated_partial" && args.status !== "excluded") {
-    throw new Error("Partially Addressed cannot stay. Split or rewrite the gap instead.");
+    throw new TrustedApplicationError("Partially Addressed cannot stay. Split or rewrite the gap instead.");
   }
   if (args.status === "validated_addressed") {
     const cov = state.coverages.filter((c) => c.gap_id === args.gap_id);
@@ -1428,12 +1429,12 @@ export async function overrideGapStatus(args: {
 }) {
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
-  if (!gap) throw new Error("Gap not found");
+  if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
   if (args.status === "validated_partial" || displayedGapStatus(gap) === "validated_partial") {
-    throw new Error("Partially Addressed cannot stay. Split or rewrite the gap instead.");
+    throw new TrustedApplicationError("Partially Addressed cannot stay. Split or rewrite the gap instead.");
   }
   if (gap.status === "candidate" || gap.status === "excluded" || gap.retired) {
-    throw new Error("Only live Open or Addressed gaps can be overridden.");
+    throw new TrustedApplicationError("Only live Open or Addressed gaps can be overridden.");
   }
   const reason = requireOverrideReason(args.reason ?? args.note);
   const coverages = state.coverages.filter((c) => c.gap_id === args.gap_id);
@@ -1487,7 +1488,7 @@ export async function clearGapStatusOverride(args: {
 }) {
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
-  if (!gap) throw new Error("Gap not found");
+  if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
   await db()
     .update(t.gaps)
     .set({ status_override: null, lock: unlocked() })
@@ -1511,12 +1512,12 @@ export async function parkGap(args: {
 }) {
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
-  if (!gap) throw new Error("Gap not found");
-  if (gap.retired) throw new Error("A retired gap cannot be parked.");
-  if (gap.status === "excluded") throw new Error("An excluded gap cannot be parked.");
-  if (gap.parked_at) throw new Error("This gap is already parked.");
+  if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
+  if (gap.retired) throw new TrustedApplicationError("A retired gap cannot be parked.");
+  if (gap.status === "excluded") throw new TrustedApplicationError("An excluded gap cannot be parked.");
+  if (gap.parked_at) throw new TrustedApplicationError("This gap is already parked.");
   const reason = (args.reason ?? "").trim();
-  if (!reason) throw new Error("A reason is required to park a gap.");
+  if (!reason) throw new TrustedApplicationError("A reason is required to park a gap.");
   await db()
     .update(t.gaps)
     .set({ parked_at: now(), parked_reason: reason })
@@ -1540,11 +1541,11 @@ export const setGapSettings = atomic(async function setGapSettings(args: {
     const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [args.gap_id] });
     const state = await readState();
     const gap = state.gaps.find((g) => g.id === args.gap_id);
-    if (!gap) throw new Error("Gap not found");
-    if (gap.retired) throw new Error("A retired gap cannot be re-tagged.");
+    if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
+    if (gap.retired) throw new TrustedApplicationError("A retired gap cannot be re-tagged.");
     const settings = normalizeSettings(args.settings);
     if (!Array.isArray(args.expected_settings) || JSON.stringify(args.expected_settings) !== JSON.stringify(gap.settings)) {
-      throw new Error("Gap settings changed or their snapshot is missing. Your settings and reason have not been saved. Reload the latest settings and retry.");
+      throw new TrustedApplicationError("Gap settings changed or their snapshot is missing. Your settings and reason have not been saved. Reload the latest settings and retry.");
     }
     if (JSON.stringify(settings) === JSON.stringify(gap.settings)) return settings;
     const reason = requireRationale(args.rationale);
@@ -1590,11 +1591,11 @@ export const setGapMetadata = atomic(async function setGapMetadata(args: {
     const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [args.gap_id] });
     const state = await readState();
     const gap = state.gaps.find((g) => g.id === args.gap_id);
-    if (!gap) throw new Error("Gap not found");
-    if (gap.retired) throw new Error("A retired gap cannot be edited.");
+    if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
+    if (gap.retired) throw new TrustedApplicationError("A retired gap cannot be edited.");
     const metadata = normalizeGapMetadata(args.metadata);
     if (!args.expected_metadata || JSON.stringify(normalizeGapMetadata(args.expected_metadata)) !== JSON.stringify(gap.metadata)) {
-      throw new Error("Gap details changed or their snapshot is missing. Your values and reason have not been saved. Reload the latest details and retry.");
+      throw new TrustedApplicationError("Gap details changed or their snapshot is missing. Your values and reason have not been saved. Reload the latest details and retry.");
     }
     if (JSON.stringify(metadata) === JSON.stringify(gap.metadata)) return metadata;
     const reason = requireRationale(args.rationale);
@@ -1660,15 +1661,15 @@ export const setGapObjective = atomic(async function setGapObjective(args: {
     const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [args.gap_id] });
     const state = await readState();
     const gap = state.gaps.find((g) => g.id === args.gap_id);
-    if (!gap) throw new Error("Gap not found");
-    if (gap.retired) throw new Error("A retired gap cannot be edited. Edit the live gap.");
+    if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
+    if (gap.retired) throw new TrustedApplicationError("A retired gap cannot be edited. Edit the live gap.");
     const objective = state.objectives.find((o) => o.id === args.objective_id);
-    if (!objective) throw new Error("Choose one of the plan's objectives.");
+    if (!objective) throw new TrustedApplicationError("Choose one of the plan's objectives.");
     if (typeof args.expected_objective_id !== "string" || args.expected_objective_id !== gap.objective_id) {
-      throw new Error("Objective assignment changed or its snapshot is missing. Your selected objective and reason have not been saved. Close this dialog, reload the latest assignment and retry.");
+      throw new TrustedApplicationError("Objective assignment changed or its snapshot is missing. Your selected objective and reason have not been saved. Close this dialog, reload the latest assignment and retry.");
     }
     requireGapEditSnapshot(gap, args.expected_gap);
-    if (gap.objective_id === objective.id) throw new Error("The gap already serves that objective.");
+    if (gap.objective_id === objective.id) throw new TrustedApplicationError("The gap already serves that objective.");
     const reason = requireRationale(args.rationale);
     const label = (id: string) => {
       const found = state.objectives.find((o) => o.id === id);
@@ -1702,8 +1703,8 @@ export async function unparkGap(args: {
 }) {
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
-  if (!gap) throw new Error("Gap not found");
-  if (!gap.parked_at) throw new Error("This gap is not parked.");
+  if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
+  if (!gap.parked_at) throw new TrustedApplicationError("This gap is not parked.");
   await db()
     .update(t.gaps)
     .set({ parked_at: null, parked_reason: null })
@@ -1821,11 +1822,11 @@ export async function reviewRequirementBasis(args: {
   const rationale = requireRationale(args.rationale);
   const origin = args.origin ?? "human";
   const confirm = args.confirm !== false;
-  if (confirm && origin !== "human") throw new Error("Only a human coverage reviewer can confirm requirements.");
+  if (confirm && origin !== "human") throw new TrustedApplicationError("Only a human coverage reviewer can confirm requirements.");
   await db().execute(sql`select id from gaps where id = ${args.gap_id} for update`);
   const state = await loadState();
   const review = getRequirementBasisReview(state, args.gap_id);
-  if (!args.expected_version || args.expected_version !== review.version) throw new Error("Requirement basis changed; refresh before reviewing.");
+  if (!args.expected_version || args.expected_version !== review.version) throw new TrustedApplicationError("Requirement basis changed; refresh before reviewing.");
   const dimensions = reviewedRequirementDimensions(state, args.gap_id, args.dimensions);
   const previous = state.gaps.find(g => g.id === args.gap_id)!.requirement_basis;
   const history = previous ? [...previous.history, (({ history: _history, ...entry }) => entry)(previous)] : [];
@@ -1843,24 +1844,24 @@ export async function reviewRequirementBasis(args: {
 /** Rejects stale forms before any field is written. Row locks serialize competing reviewers. */
 async function reviewedCoverage(coverage_id: string, expected_version?: string) {
   const initial = (await loadState()).coverages.find(c => c.id === coverage_id);
-  if (!initial) throw new Error("Coverage not found");
+  if (!initial) throw new TrustedApplicationError("Coverage not found", "not_found", 404);
   // Serialize sibling warnings with other reviews and design edits before any gap/coverage lock.
   await db().execute(sql`select id from tactics where id = ${initial.tactic_id} for update`);
   await db().execute(sql`select id from gaps where id = ${initial.gap_id} for update`);
   await db().execute(sql`select id from coverages where id = ${coverage_id} for update`);
   const state = await loadState();
   const row = state.coverages.find(c => c.id === coverage_id);
-  if (!row) throw new Error("Coverage not found");
-  if (expected_version !== undefined && coverageReviewVersion(row) !== expected_version) throw new Error("Coverage changed; refresh before reviewing.");
+  if (!row) throw new TrustedApplicationError("Coverage not found", "not_found", 404);
+  if (expected_version !== undefined && coverageReviewVersion(row) !== expected_version) throw new TrustedApplicationError("Coverage changed; refresh before reviewing.");
   return { state, row };
 }
 
 /** Full needs an explicit human basis and Yes for every required dimension. */
 function requireSupportedFull(state: IegpState, gap_id: string, dimensions: IegpState["coverages"][0]["dimensions"], expected_basis_version?: string) {
   const review = getRequirementBasisReview(state, gap_id);
-  if (expected_basis_version !== undefined && expected_basis_version !== review.version) throw new Error("Requirement basis changed; refresh before confirming coverage.");
+  if (expected_basis_version !== undefined && expected_basis_version !== review.version) throw new TrustedApplicationError("Requirement basis changed; refresh before confirming coverage.");
   const issues = fullConfirmationIssues(review.basis, { dimensions });
-  if (issues.length) throw new Error(issues.join(" "));
+  if (issues.length) throw new TrustedApplicationError(issues.join(" "));
   return review.basis;
 }
 
@@ -1916,7 +1917,7 @@ async function lockCoverageOverallChange(args: {
   const rationale = requireRationale(args.rationale);
   const { row } = await reviewedCoverage(args.coverage_id, args.expected_version);
   const state = await loadState();
-  if (args.expected_basis_version !== undefined && args.expected_basis_version !== getRequirementBasisReview(state, row.gap_id).version) throw new Error("Requirement basis changed; refresh before reviewing coverage.");
+  if (args.expected_basis_version !== undefined && args.expected_basis_version !== getRequirementBasisReview(state, row.gap_id).version) throw new TrustedApplicationError("Requirement basis changed; refresh before reviewing coverage.");
   const basis = args.overall === "full" ? requireSupportedFull(state, row.gap_id, row.dimensions, args.expected_basis_version) : null;
   if (row.overall === args.overall && row.overall_lock.locked && !row.needs_review && !row.stale) return;
   await db()
@@ -1963,7 +1964,7 @@ async function confirmCoverageReviewChange(args: {
   requireRationale(args.note);
   const state = await loadState();
   const row = state.coverages.find((c) => c.id === args.coverage_id);
-  if (!row) throw new Error("Coverage not found");
+  if (!row) throw new TrustedApplicationError("Coverage not found", "not_found", 404);
   if (!row.needs_review) return;
   await db()
     .update(t.coverages)
@@ -1991,7 +1992,7 @@ function optionalCatchUpReason(value?: string | null): CatchUpReason | undefined
   const trimmed = value?.trim();
   if (!trimmed) return undefined;
   if (!(CATCH_UP_REASONS as readonly string[]).includes(trimmed)) {
-    throw new Error("Unknown catch-up reason.");
+    throw new TrustedApplicationError("Unknown catch-up reason.");
   }
   return trimmed as CatchUpReason;
 }
@@ -2031,14 +2032,14 @@ type LibraryTacticDraft = {
 /** A tactic date as stored: a real YYYY-MM or YYYY-MM-DD, or null when blank. */
 export function optionalTacticDate(field: TacticDateField, value: string | null | undefined): string | null {
   const error = tacticDateError(field, value);
-  if (error) throw new Error(error);
+  if (error) throw new TrustedApplicationError(error);
   return (value ?? "").trim() || null;
 }
 
 /** Refuses evidence that arrives before the tactic starts (KAN-68). */
 function assertTacticDateOrder(start: string | null | undefined, evidence: string | null | undefined) {
   const error = tacticDateOrderError(start, evidence);
-  if (error) throw new Error(error);
+  if (error) throw new TrustedApplicationError(error);
 }
 
 /** A blank status keeps the default, proposed. Anything else must be a known creatable status. */
@@ -2046,7 +2047,7 @@ export function createTacticStatus(value: string | null | undefined): CreateTact
   const trimmed = (value ?? "").trim();
   if (!trimmed) return "proposed";
   if (!(CREATE_TACTIC_STATUSES as readonly string[]).includes(trimmed)) {
-    throw new Error("Status must be Proposed, Planned, Ongoing or Completed.");
+    throw new TrustedApplicationError("Status must be Proposed, Planned, Ongoing or Completed.");
   }
   return trimmed as CreateTacticStatus;
 }
@@ -2076,10 +2077,10 @@ export async function insertLibraryTactic(args: LibraryTacticDraft, transaction?
   const state = transaction ? await readState(transaction) : await loadState();
   const d = transaction ?? db();
   const custom_type = args.custom_type ?? null;
-  if (custom_type && transaction) throw new Error("Transactional source tactics cannot assign a custom type.");
-  if (!args.name.trim()) throw new Error("Tactic name is required.");
-  if (!args.evidence_question.trim()) throw new Error("Evidence question is required.");
-  if (!TACTIC_TYPES.includes(args.type)) throw new Error("Tactic type is required.");
+  if (custom_type && transaction) throw new TrustedApplicationError("Transactional source tactics cannot assign a custom type.");
+  if (!args.name.trim()) throw new TrustedApplicationError("Tactic name is required.");
+  if (!args.evidence_question.trim()) throw new TrustedApplicationError("Evidence question is required.");
+  if (!TACTIC_TYPES.includes(args.type)) throw new TrustedApplicationError("Tactic type is required.");
   const start_date = optionalTacticDate("start_date", args.start_date);
   const evidence_available = optionalTacticDate("evidence_available", args.evidence_available);
   assertTacticDateOrder(start_date, evidence_available);
@@ -2334,14 +2335,14 @@ export function humanRejectedPairs(state: IegpState): Set<string> {
  */
 export async function beginLibraryLinkRequest(requestId: string, payload: string): Promise<string | null> {
   if (!inWorkspaceTransaction()) throw new Error("Library linking requires a workspace transaction.");
-  if (!/^[a-zA-Z0-9_-]{16,100}$/.test(requestId)) throw new Error("A valid library request ID is required.");
+  if (!/^[a-zA-Z0-9_-]{16,100}$/.test(requestId)) throw new TrustedApplicationError("A valid library request ID is required.");
   // Advisory transaction locks coordinate identical requests even before a receipt exists.
   // The workspace name prevents unrelated workspaces from contending on the same request ID.
   const scope = `${await currentSchemaName()}:library-link:${requestId}`;
   await db().execute(sql`select pg_advisory_xact_lock(hashtextextended(${scope}, 0))`);
   const [receipt] = await db().select().from(t.libraryLinkRequests).where(eq(t.libraryLinkRequests.request_id, requestId));
   if (!receipt) return null;
-  if (receipt.payload !== payload) throw new Error("This request ID already belongs to a different library decision. Reopen the chooser and try again.");
+  if (receipt.payload !== payload) throw new TrustedApplicationError("This request ID already belongs to a different library decision. Reopen the chooser and try again.");
   return receipt.coverage_id;
 }
 
@@ -2395,18 +2396,18 @@ async function assignTacticToGapChange(args: {
   const overall = coverageVerdict(args.coverage) ?? "unassessed";
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
-  if (!gap) throw new Error("Gap not found");
+  if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
   const tactic = state.tactics.find((x) => x.id === args.tactic_id);
-  if (!tactic) throw new Error("Tactic not found");
+  if (!tactic) throw new TrustedApplicationError("Tactic not found", "not_found", 404);
   if (tactic.review_status !== "accepted") {
-    throw new Error("Only accepted tactics can be assigned to a gap.");
+    throw new TrustedApplicationError("Only accepted tactics can be assigned to a gap.");
   }
   if (args.expansion_id) {
     const child = state.expansions.find((e) => e.id === args.expansion_id);
     if (!child || child.tactic_id !== args.tactic_id || !child.gap_ids.includes(args.gap_id)) {
-      throw new Error("Expansion scope does not belong to this parent and gap in this workspace.");
+      throw new TrustedApplicationError("Expansion scope does not belong to this parent and gap in this workspace.");
     }
-    if (child.status === "cancelled") throw new Error("Cancelled expansion cannot be mapped.");
+    if (child.status === "cancelled") throw new TrustedApplicationError("Cancelled expansion cannot be mapped.");
   }
   const rejection = humanRejection(state, args.gap_id, args.tactic_id);
   if (rejection && !args.human && !(args.expansion_id && humanAcceptedExpansionScope(state, args.gap_id, args.tactic_id, args.expansion_id))) {
@@ -2418,14 +2419,14 @@ async function assignTacticToGapChange(args: {
     (c) => c.gap_id === args.gap_id && c.tactic_id === args.tactic_id && (c.expansion_id ?? null) === (args.expansion_id ?? null),
   );
   if (existing && !(args.expansion_id && existing.overall === "unassessed" && !existing.overall_lock.locked && Object.values(existing.dimensions).every((d) => !d.lock.locked))) {
-    throw new Error("That tactic is already assigned to this gap.");
+    throw new TrustedApplicationError("That tactic is already assigned to this gap.");
   }
   if (args.require_preview_basis) {
     if (!args.expected_basis_version || args.expected_basis_version !== getRequirementBasisReview(state, args.gap_id).version) {
-      throw new Error("Requirement basis changed; refresh the preview before assessing and linking.");
+      throw new TrustedApplicationError("Requirement basis changed; refresh the preview before assessing and linking.");
     }
     if (!args.expected_design_version || args.expected_design_version !== assessmentBasis(state, args).design) {
-      throw new Error("Tactic design changed; refresh the preview before assessing and linking.");
+      throw new TrustedApplicationError("Tactic design changed; refresh the preview before assessing and linking.");
     }
   }
   const givenDimensions = Object.keys(args.dimensions ?? {}) as CoverageDimension[];
@@ -2466,7 +2467,7 @@ async function assignTacticToGapChange(args: {
       eq(t.coverages.overall_lock, existing.overall_lock), eq(t.coverages.dimensions, existing.dimensions),
       sql`exists (select 1 from tactic_expansions e where e.id = ${args.expansion_id} and e.status <> 'cancelled')`,
     )).returning({id: t.coverages.id});
-    if (!written.length) throw new Error("Expansion assessment changed or was locked; refresh before mapping.");
+    if (!written.length) throw new TrustedApplicationError("Expansion assessment changed or was locked; refresh before mapping.");
   }
   else await db().insert(t.coverages).values(row);
   if (args.human) {
@@ -2490,8 +2491,8 @@ export async function reuseTacticForGap(args: {gap_id: string; tactic_id: string
   await tx.select().from(t.gaps).where(eq(t.gaps.id, args.gap_id)).for("update");
   const state = await readState(tx);
   const tactic = state.tactics.find(row => row.id === args.tactic_id);
-  if (!tactic || tactic.review_status !== "accepted" || tactic.status === "cancelled") throw new Error("Reuse requires an eligible accepted tactic.");
-  if (humanRejection(state, args.gap_id, args.tactic_id)) throw new Error("This relationship was rejected or removed; restore it through the mapping review before reusing evidence.");
+  if (!tactic || tactic.review_status !== "accepted" || tactic.status === "cancelled") throw new TrustedApplicationError("Reuse requires an eligible accepted tactic.");
+  if (humanRejection(state, args.gap_id, args.tactic_id)) throw new TrustedApplicationError("This relationship was rejected or removed; restore it through the mapping review before reusing evidence.");
   const existing = state.coverages.find(row => row.gap_id === args.gap_id && row.tactic_id === args.tactic_id && !row.expansion_id);
   if (existing) {
     await tx.update(t.coverages).set({needs_review: true, review_version: newId("coverage")}).where(eq(t.coverages.id, existing.id));
@@ -2517,9 +2518,9 @@ async function unassignTacticFromGapChange(args: {
   const rationale = requireRationale(args.rationale);
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
-  if (!gap) throw new Error("Gap not found");
+  if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
   const row = state.coverages.find((c) => !c.expansion_id && c.gap_id === args.gap_id && c.tactic_id === args.tactic_id);
-  if (!row) throw new Error("That tactic is not mapped to this gap.");
+  if (!row) throw new TrustedApplicationError("That tactic is not mapped to this gap.");
   await db().delete(t.coverages).where(eq(t.coverages.id, row.id));
   await upsertMappingSuggestion({
     gap_id: args.gap_id,
@@ -2584,14 +2585,14 @@ async function acceptMappingChange(args: {
 }) {
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
-  if (!gap) throw new Error("Gap not found");
+  if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
   if (!gapEligibleForMapping(gap.status)) {
-    throw new Error("Only accepted open or partial gaps can receive a mapping.");
+    throw new TrustedApplicationError("Only accepted open or partial gaps can receive a mapping.");
   }
   const tactic = state.tactics.find((x) => x.id === args.tactic_id);
-  if (!tactic) throw new Error("Tactic not found");
+  if (!tactic) throw new TrustedApplicationError("Tactic not found", "not_found", 404);
   if (!tacticEligibleForMapping(tactic)) {
-    throw new Error("Only accepted, non-cancelled tactics can be mapped.");
+    throw new TrustedApplicationError("Only accepted, non-cancelled tactics can be mapped.");
   }
   const note = requireRationale(args.note);
   const covered = state.coverages.some((c) => !c.expansion_id && c.gap_id === args.gap_id && c.tactic_id === args.tactic_id);
@@ -2683,12 +2684,12 @@ async function saveMappingTableRowChange(args: {
   });
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
-  if (!gap) throw new Error("Gap not found");
+  if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
   if (!gapEligibleForMapping(gap.status)) {
-    throw new Error("Only live gaps eligible for mapping can be edited here.");
+    throw new TrustedApplicationError("Only live gaps eligible for mapping can be edited here.");
   }
   if (mapping_status !== "open" && uniqueIds.length === 0) {
-    throw new Error("Addressed or partially addressed rows need at least one tactic.");
+    throw new TrustedApplicationError("Addressed or partially addressed rows need at least one tactic.");
   }
   for (const tactic_id of uniqueIds) {
     const tactic = state.tactics.find((x) => x.id === tactic_id);
@@ -2745,9 +2746,9 @@ async function rejectMappingChange(args: {
 }) {
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
-  if (!gap) throw new Error("Gap not found");
+  if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
   const tactic = state.tactics.find((x) => x.id === args.tactic_id);
-  if (!tactic) throw new Error("Tactic not found");
+  if (!tactic) throw new TrustedApplicationError("Tactic not found", "not_found", 404);
   const covered = state.coverages.find(
     (c) => !c.expansion_id && c.gap_id === args.gap_id && c.tactic_id === args.tactic_id,
   );
@@ -2869,22 +2870,22 @@ export async function acceptResidualGap(args: {
 }) {
   const state = await loadState();
   const parent = state.gaps.find((g) => g.id === args.parent_gap_id);
-  if (!parent) throw new Error("Parent gap not found");
+  if (!parent) throw new TrustedApplicationError("Parent gap not found", "not_found", 404);
   const rejected = state.residual_gap_suggestions.find(
     (row) => row.parent_gap_id === args.parent_gap_id && row.status === "rejected",
   );
   if (rejected) {
-    throw new Error("That leftover was rejected. It will not be suggested again.");
+    throw new TrustedApplicationError("That leftover was rejected. It will not be suggested again.");
   }
   if (state.gaps.some((g) => g.parent_gap_id === args.parent_gap_id)) {
-    throw new Error("A child gap already exists for this leftover.");
+    throw new TrustedApplicationError("A child gap already exists for this leftover.");
   }
   const saved = savedResidualDraft(state, args.parent_gap_id);
   if (!saved && !args.statement?.trim()) {
-    throw new Error("No leftover residual to accept.");
+    throw new TrustedApplicationError("No leftover residual to accept.");
   }
   const statement = (args.statement || saved?.statement || "").trim();
-  if (!statement) throw new Error("Statement is required.");
+  if (!statement) throw new TrustedApplicationError("Statement is required.");
   const childId = await createGap({
     statement,
     domain: parent.domain,
@@ -2966,13 +2967,13 @@ export async function modifyResidualGap(args: {
   note?: string;
 }) {
   const statement = args.statement.trim();
-  if (!statement) throw new Error("Statement is required.");
+  if (!statement) throw new TrustedApplicationError("Statement is required.");
   const state = await loadState();
   const parent = state.gaps.find((g) => g.id === args.parent_gap_id);
-  if (!parent) throw new Error("Parent gap not found");
+  if (!parent) throw new TrustedApplicationError("Parent gap not found", "not_found", 404);
   const existing = state.residual_gap_suggestions.find((row) => row.parent_gap_id === args.parent_gap_id);
   if (existing?.status === "accepted" || existing?.status === "rejected") {
-    throw new Error("That leftover is already locked.");
+    throw new TrustedApplicationError("That leftover is already locked.");
   }
   await upsertResidualGapSuggestion({
     parent_gap_id: args.parent_gap_id,
@@ -3013,9 +3014,9 @@ export async function rejectResidualGap(args: {
 }) {
   const state = await loadState();
   const parent = state.gaps.find((g) => g.id === args.parent_gap_id);
-  if (!parent) throw new Error("Parent gap not found");
+  if (!parent) throw new TrustedApplicationError("Parent gap not found", "not_found", 404);
   if (state.gaps.some((g) => g.parent_gap_id === args.parent_gap_id)) {
-    throw new Error("A child gap already exists for this leftover.");
+    throw new TrustedApplicationError("A child gap already exists for this leftover.");
   }
   const saved = savedResidualDraft(state, args.parent_gap_id);
   await upsertResidualGapSuggestion({
@@ -3082,13 +3083,13 @@ export async function createGap(args: {
   await db().execute(sql`LOCK TABLE gaps IN ROW EXCLUSIVE MODE`);
   // The description is what evidence is missing; a person may give only the title (KAN-52).
   const statement = (args.statement ?? "").trim() || (args.name ?? "").trim();
-  if (!statement) throw new Error("Give the gap a title or a description.");
+  if (!statement) throw new TrustedApplicationError("Give the gap a title or a description.");
   const domain = args.domain && EVIDENCE_DOMAINS.includes(args.domain) ? args.domain : "unmet_need";
   const state = transaction ? await readState(transaction) : await loadState();
   // Linked to the first objective once setup has named one; a blank plan has none yet.
   const obj = state.objectives[0];
   if (args.objective_id && !state.objectives.some(objective => objective.id === args.objective_id)) {
-    throw new Error("Choose one of the plan's objectives.");
+    throw new TrustedApplicationError("Choose one of the plan's objectives.");
   }
   // Split and rewrite children carry the parent's settings through.
   let settings = normalizeSettings(args.settings ?? []);
@@ -3096,7 +3097,7 @@ export async function createGap(args: {
   let objectiveId = obj?.id ?? "";
   if (args.parent_gap_id) {
     const parent = state.gaps.find((g) => g.id === args.parent_gap_id);
-    if (!parent) throw new Error("Parent gap not found");
+    if (!parent) throw new TrustedApplicationError("Parent gap not found", "not_found", 404);
     // A child answers the same objective as its parent (KAN-97).
     if (parent.objective_id) objectiveId = parent.objective_id;
     if (!args.settings) settings = parent.settings;
@@ -3176,19 +3177,19 @@ export const modifyGap = atomic(async function modifyGap(args: {
     const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [args.gap_id] });
     const state = await readState();
     const gap = state.gaps.find((g) => g.id === args.gap_id);
-    if (!gap) throw new Error("Gap not found");
-    if (gap.retired) throw new Error("This gap was retired by a split or rewrite. Edit the live gap.");
+    if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
+    if (gap.retired) throw new TrustedApplicationError("This gap was retired by a split or rewrite. Edit the live gap.");
     const name = args.name === undefined ? undefined : args.name.trim();
     const statement = args.statement === undefined ? undefined : args.statement.trim();
-    if (name !== undefined && !name) throw new Error("Gap name is required.");
-    if (statement !== undefined && !statement) throw new Error("Statement is required.");
+    if (name !== undefined && !name) throw new TrustedApplicationError("Gap name is required.");
+    if (statement !== undefined && !statement) throw new TrustedApplicationError("Statement is required.");
     const domain = args.domain === undefined || args.domain === "" ? undefined : args.domain;
     if (domain !== undefined && !EVIDENCE_DOMAINS.includes(domain as EvidenceDomain)) {
-      throw new Error("Unknown evidence domain.");
+      throw new TrustedApplicationError("Unknown evidence domain.");
     }
     requireGapEditSnapshot(gap, args.expected_gap);
     const changes = diffFields(gap, { name, statement, domain });
-    if (changes.length === 0) throw new Error("Nothing changed.");
+    if (changes.length === 0) throw new TrustedApplicationError("Nothing changed.");
     await db()
       .update(t.gaps)
       .set({
@@ -3241,7 +3242,7 @@ async function applyTacticStatus(args: {
 }) {
   const state = await loadState();
   const tactic = state.tactics.find((x) => x.id === args.tactic_id);
-  if (!tactic) throw new Error("Tactic not found");
+  if (!tactic) throw new TrustedApplicationError("Tactic not found", "not_found", 404);
   const prev = tactic.status;
   await db()
     .update(t.tactics)
@@ -3671,11 +3672,11 @@ type SuggestionDecision = {
 async function pendingSuggestion(id: string) {
   const state = await loadState();
   const suggestion = state.gap_suggestions.find((row) => row.id === id);
-  if (!suggestion) throw new Error("Suggestion not found.");
-  if (suggestion.status !== "pending") throw new Error("This suggestion was already decided.");
+  if (!suggestion) throw new TrustedApplicationError("Suggestion not found.", "not_found", 404);
+  if (suggestion.status !== "pending") throw new TrustedApplicationError("This suggestion was already decided.");
   const gap = state.gaps.find((row) => row.id === suggestion.gap_id);
   if (!gap || gap.retired) {
-    throw new Error("The gap this suggestion is about was split or rewritten. Reject it, or add the source by hand.");
+    throw new TrustedApplicationError("The gap this suggestion is about was split or rewritten. Reject it, or add the source by hand.");
   }
   return { state, suggestion, gap };
 }
@@ -3722,8 +3723,8 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
   const before = await loadState();
   const name = (args.name ?? suggestion.merged_name).trim();
   const statement = (args.statement ?? suggestion.merged_statement).trim();
-  if (!name) throw new Error("Give the merged gap a name.");
-  if (!statement) throw new Error("Give the merged gap a statement.");
+  if (!name) throw new TrustedApplicationError("Give the merged gap a name.");
+  if (!statement) throw new TrustedApplicationError("Give the merged gap a statement.");
   const changes = diffFields(gap, { name, statement });
   if (changes.length > 0) {
     // The wording before the merge is kept as a version of the gap (KAN-90).
@@ -3809,8 +3810,8 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
   const before = await loadState();
   const name = (args.name ?? suggestion.split_name).trim();
   const statement = (args.statement ?? suggestion.split_statement).trim();
-  if (!name) throw new Error("Give the new gap a name.");
-  if (!statement) throw new Error("Give the new gap a statement.");
+  if (!name) throw new TrustedApplicationError("Give the new gap a name.");
+  if (!statement) throw new TrustedApplicationError("Give the new gap a statement.");
   // The new gap comes from the existing one (KAN-97): same objective, settings and who
   // it affects, a link back to it, and its source's provenance. Both stay live.
   const newGapId = await createGap({
@@ -3887,8 +3888,8 @@ export async function rejectGapSuggestion(args: SuggestionDecision): Promise<Gap
   const rationale = requireRationale(args.rationale);
   const state = await loadState();
   const suggestion = state.gap_suggestions.find((row) => row.id === args.suggestion_id);
-  if (!suggestion) throw new Error("Suggestion not found.");
-  if (suggestion.status !== "pending") throw new Error("This suggestion was already decided.");
+  if (!suggestion) throw new TrustedApplicationError("Suggestion not found.", "not_found", 404);
+  if (suggestion.status !== "pending") throw new TrustedApplicationError("This suggestion was already decided.");
   await closeSuggestion(suggestion.id, "rejected", { ...args, rationale });
   await appendAudit(args.actor_name, args.actor_function, "gap", suggestion.gap_id, "reject_suggestion", `${suggestion.id}: ${rationale}`);
   await recordEdit({
@@ -3916,8 +3917,8 @@ export async function clearNewSourceFlag(args: {
   const rationale = requireRationale(args.rationale);
   const state = await loadState();
   const gap = state.gaps.find((row) => row.id === args.gap_id);
-  if (!gap) throw new Error("Gap not found");
-  if (!gap.new_source_at) throw new Error("This gap has no new source to review.");
+  if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
+  if (!gap.new_source_at) throw new TrustedApplicationError("This gap has no new source to review.");
   await db()
     .update(t.gaps)
     .set({ new_source_at: null, new_source_need_id: null })
@@ -3945,14 +3946,14 @@ export async function lockTacticReview(args: {
   note?: string;
 }) {
   const rationale = requireRationale(args.note);
-  if (!["accepted", "rejected"].includes(args.review_status)) throw new Error("Invalid tactic review status.");
+  if (!["accepted", "rejected"].includes(args.review_status)) throw new TrustedApplicationError("Invalid tactic review status.");
   await loadState();
   return withWorkspaceTransaction(async () => {
     await db().execute(sql`SELECT id FROM tactics WHERE id = ${args.tactic_id} FOR UPDATE`);
     const tactic = (await readState()).tactics.find(row => row.id === args.tactic_id);
-    if (!tactic) throw new Error("Tactic not found");
+    if (!tactic) throw new TrustedApplicationError("Tactic not found", "not_found", 404);
     if (args.expected_tactic !== undefined && args.expected_tactic !== tacticEditVersion(tactic)) {
-      throw new Error("Tactic changed since you opened it. Your decision and reason have not been saved. Reopen the latest record before retrying.");
+      throw new TrustedApplicationError("Tactic changed since you opened it. Your decision and reason have not been saved. Reopen the latest record before retrying.");
     }
     if (tactic.review_status === args.review_status) return;
     await db().update(t.tactics).set({ review_status: args.review_status, lock: makeLock(args.actor_name, args.actor_function, rationale) }).where(eq(t.tactics.id, args.tactic_id));
@@ -4014,9 +4015,9 @@ export const modifyTactic = atomic(async function modifyTactic(args: {
     const assessmentGapIds = await lockAssessmentOwners({ tactic_ids: [args.tactic_id] });
     const state = await readState();
     const tactic = state.tactics.find((x) => x.id === args.tactic_id);
-    if (!tactic) throw new Error("Tactic not found");
+    if (!tactic) throw new TrustedApplicationError("Tactic not found", "not_found", 404);
     if (args.expected_tactic !== undefined && args.expected_tactic !== tacticEditVersion(tactic)) {
-      throw new Error("Tactic changed since you opened it. Your values and reason have not been saved. Keep your draft or close and reopen the latest record before retrying.");
+      throw new TrustedApplicationError("Tactic changed since you opened it. Your values and reason have not been saved. Keep your draft or close and reopen the latest record before retrying.");
     }
     const draft: Partial<Record<TacticEditField, string | null>> = {
       ...(args.name !== undefined ? { name: args.name } : {}),
@@ -4036,14 +4037,14 @@ export const modifyTactic = atomic(async function modifyTactic(args: {
         throw new Error(field === "name" ? "Tactic name is required." : "Evidence question is required.");
       }
       if (field === "type" && !TACTIC_TYPES.includes(value as IegpState["tactics"][0]["type"])) {
-        throw new Error("Tactic type is required.");
+        throw new TrustedApplicationError("Tactic type is required.");
       }
       if (field === "function" && !ACTOR_FUNCTIONS.includes(value as ActorFunction)) {
-        throw new Error("Lead function must be one of the listed functions.");
+        throw new TrustedApplicationError("Lead function must be one of the listed functions.");
       }
-      if (field === "owner" && !value) throw new Error("Lead (owner) is required.");
+      if (field === "owner" && !value) throw new TrustedApplicationError("Lead (owner) is required.");
       if (field === "budget") {
-        if (value.length > 60) throw new Error("Budget can be at most 60 characters.");
+        if (value.length > 60) throw new TrustedApplicationError("Budget can be at most 60 characters.");
         clean[field] = value || null;
         continue;
       }
@@ -4055,7 +4056,7 @@ export const modifyTactic = atomic(async function modifyTactic(args: {
       "evidence_available" in clean ? clean.evidence_available : tactic.evidence_available,
     );
     if (args.status !== undefined) {
-      if (!(TACTIC_STATUSES as readonly string[]).includes(args.status)) throw new Error("Choose a valid tactic status.");
+      if (!(TACTIC_STATUSES as readonly string[]).includes(args.status)) throw new TrustedApplicationError("Choose a valid tactic status.");
       clean.status = args.status;
     }
     const changes = diffFields(tactic, clean);
@@ -4066,7 +4067,7 @@ export const modifyTactic = atomic(async function modifyTactic(args: {
     if (customChanged) {
       changes.push({ field: "custom_type", before: customLabel(tactic.custom_type), after: customLabel(args.custom_type) });
     }
-    if (changes.length === 0) throw new Error("Nothing changed.");
+    if (changes.length === 0) throw new TrustedApplicationError("Nothing changed.");
     const set: Record<string, unknown> = {};
     for (const change of changes) if (change.field !== "custom_type" && change.field !== "status") set[change.field] = change.after;
     if (customChanged) set.custom_type = args.custom_type ?? null;
@@ -4135,10 +4136,11 @@ export const saveProductSetup = atomic(async function saveProductSetup(args: {
     const ctx = parsePlanningContext(args.context);
     const previous = parsePlanningContext(state.asset.planning_context);
     if (ctx.saved_at !== previous.saved_at) {
-      throw new Error("Setup context changed. Your answers and reason are still here. Reload the latest context before retrying.");
+      throw new TrustedApplicationError("Setup context changed. Your answers and reason are still here. Reload the latest context before retrying.");
     }
     const issues = setupIssues(ctx, { required: Boolean(args.mark_complete) });
-    if (issues.length > 0) throw new Error(issues[0]!.message);
+    // setupIssues owns fixed correction text and numeric objective positions.
+    if (issues.length > 0) throw new TrustedApplicationError(issues[0]!.message);
     const objectives = await syncSetupObjectives(state, ctx, args);
     const content = parsePlanningContext({ ...ctx, objectives, saved_at: previous.saved_at });
     const complete = Boolean(args.mark_complete) || state.asset.setup_complete;
@@ -4188,7 +4190,7 @@ async function syncSetupObjectives(state: IegpState, ctx: PlanningContext, args:
   const existing = new Map(state.objectives.map(objective => [objective.id, objective]));
   const seen = new Set<string>();
   for (const objective of listed) {
-    if (objective.id && (!existing.has(objective.id) || seen.has(objective.id))) throw new Error("Objective context changed. Reload Setup and review the latest objectives.");
+    if (objective.id && (!existing.has(objective.id) || seen.has(objective.id))) throw new TrustedApplicationError("Objective context changed. Reload Setup and review the latest objectives.");
     if (objective.id) seen.add(objective.id);
   }
   const actor = { name: args.actor_name, function: args.actor_function };
@@ -4233,7 +4235,7 @@ async function syncSetupObjectives(state: IegpState, ctx: PlanningContext, args:
   for (const objective of state.objectives) {
     if (kept.has(objective.id)) continue;
     const inUse = state.gaps.some(gap => gap.objective_id === objective.id) || state.needs.some(need => need.objective_id === objective.id);
-    if (inUse) throw new Error(`“${objective.name}” is linked to gaps or needs in this plan. Keep it in the list, or move those first.`);
+    if (inUse) throw new TrustedApplicationError("This objective is linked to gaps or needs in this plan. Keep it in the list, or move those first.");
     const reason = requireRationale(args.reason);
     await db().delete(t.objectives).where(eq(t.objectives.id, objective.id));
     await recordEdit({ stage: "S8", entity_type: "objective", entity_id: objective.id,
@@ -4249,10 +4251,10 @@ export async function completeWizard(args: {
 }) {
   const state = await loadState();
   if (state.sources.length === 0) {
-    throw new Error("Ingest at least one source before entering the plan.");
+    throw new TrustedApplicationError("Ingest at least one source before entering the plan.");
   }
   if (!gapsReadyForPrioritize(state)) {
-    throw new Error(
+    throw new TrustedApplicationError(
       "Validate every live gap first. Partially Addressed gaps must be split or rewritten — they cannot stay.",
     );
   }
@@ -4277,7 +4279,7 @@ export async function unlockTacticsStage(args: {
 }) {
   const state = await loadState();
   if (!state.asset.wizard_complete) {
-    throw new Error("Finish Gaps first: on Gaps, choose Continue to prioritize, then come back to Tactics.");
+    throw new TrustedApplicationError("Finish Gaps first: on Gaps, choose Continue to prioritize, then come back to Tactics.");
   }
   // The same rule the Prioritize footer applies before it offers "Continue to
   // tactics": every live Open gap has a validated band. Loaded lazily because
@@ -4285,13 +4287,10 @@ export async function unlockTacticsStage(args: {
   const { prioritizationProgress } = await import("@/modules/stages/s8-prioritization/module");
   const progress = await prioritizationProgress(state);
   if (progress.open === 0) {
-    throw new Error("There are no Open gaps to prioritize yet, so Tactics can't open. Validate at least one gap as Open on Gaps.");
+    throw new TrustedApplicationError("There are no Open gaps to prioritize yet, so Tactics can't open. Validate at least one gap as Open on Gaps.");
   }
   if (progress.validated < progress.open) {
-    const left = progress.open - progress.validated;
-    throw new Error(
-      `Validate every Open gap's band on Prioritize first: ${progress.validated} of ${progress.open} validated, ${left} to go.`,
-    );
+    throw new TrustedApplicationError(`${progress.validated} of ${progress.open} validated, ${progress.open - progress.validated} to go. Validate every Open gap's band on Prioritize first, then return to Tactics.`);
   }
   await db()
     .update(t.assets)
@@ -4561,13 +4560,13 @@ export async function validateGap(args: {
 }) {
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
-  if (!gap || !isLiveGap(gap)) throw new Error("Gap not found");
+  if (!gap || !isLiveGap(gap)) throw new TrustedApplicationError("Gap not found", "not_found", 404);
   const shown = displayedGapStatus(gap);
   if (shown === "validated_partial") {
-    throw new Error("Partially Addressed cannot stay. Split or rewrite this gap first.");
+    throw new TrustedApplicationError("Partially Addressed cannot stay. Split or rewrite this gap first.");
   }
   if (shown !== "validated_open" && shown !== "validated_addressed") {
-    throw new Error("Only Open or Addressed gaps can be validated.");
+    throw new TrustedApplicationError("Only Open or Addressed gaps can be validated.");
   }
   await db()
     .update(t.gaps)
@@ -4627,15 +4626,15 @@ function splitEvidenceScope(state: IegpState, sourceGapId: string, id: string, a
   const child = state.expansions.find(e => e.id === id);
   const tacticId = child?.tactic_id ?? id;
   const tactic = state.tactics.find(tactic => tactic.id === tacticId);
-  if (!tactic || tactic.review_status !== "accepted") throw new Error("Select a known accepted tactic or expansion scope.");
+  if (!tactic || tactic.review_status !== "accepted") throw new TrustedApplicationError("Select a known accepted tactic or expansion scope.");
   const source = state.coverages.find(c => c.gap_id === sourceGapId && c.tactic_id === tacticId && (c.expansion_id ?? null) === (child?.id ?? null));
-  if (child && (!source || !child.gap_ids.includes(sourceGapId) || child.status === "cancelled")) throw new Error("Expansion scope is unavailable for this gap.");
+  if (child && (!source || !child.gap_ids.includes(sourceGapId) || child.status === "cancelled")) throw new TrustedApplicationError("Expansion scope is unavailable for this gap.");
   if (addressed && (child ? !countingCoverages([source!], state.tactics, state.expansions).length : !tacticCountsTowardAddressing(tactic))) {
-    throw new Error("Only counting evidence scope can close the addressed slice.");
+    throw new TrustedApplicationError("Only counting evidence scope can close the addressed slice.");
   }
   // A supplied parent ID remains parent scope, never an alias for its child.
   if (!child && !source && state.coverages.some(c => c.gap_id === sourceGapId && c.tactic_id === tacticId && c.expansion_id)) {
-    throw new Error("Select the expansion scope explicitly; its parent is not mapped evidence here.");
+    throw new TrustedApplicationError("Select the expansion scope explicitly; its parent is not mapped evidence here.");
   }
   return {tactic_id: tacticId, expansion_id: child?.id ?? null, source};
 }
@@ -4646,7 +4645,7 @@ async function inheritSplitScope(selected: SplitEvidenceScope, sourceGapId: stri
   if (!selected.expansion_id) return;
   const [row] = await transaction.select().from(t.tacticExpansions).where(eq(t.tacticExpansions.id, selected.expansion_id));
   const child = row as IegpState["expansions"][0] | undefined;
-  if (!child || !selected.source) throw new Error("Expansion lineage is unavailable.");
+  if (!child || !selected.source) throw new TrustedApplicationError("Expansion lineage is unavailable.");
   const version = newId("EXV"), at = nowIso();
   const rationale = actor.note?.trim() || "Human authorized split/rewrite scope inheritance.";
   await transaction.update(t.tacticExpansions).set({gap_ids: [...new Set([...child.gap_ids, targetGapId])], version, updated_at: at,
@@ -4677,11 +4676,11 @@ async function splitPartialGapChange(args: {
   const open_name = args.open_name.trim();
   const addressed_statement = (args.addressed_statement ?? addressed_name).trim();
   const open_statement = (args.open_statement ?? open_name).trim();
-  if (!addressed_name || !open_name) throw new Error("Both split titles are required.");
-  if (!addressed_statement || !open_statement) throw new Error("Both split statements are required.");
+  if (!addressed_name || !open_name) throw new TrustedApplicationError("Both split titles are required.");
+  if (!addressed_statement || !open_statement) throw new TrustedApplicationError("Both split statements are required.");
   const addressedTacticIds = uniqueIds([...(args.tactic_ids ?? []), args.tactic_id]);
   if (addressedTacticIds.length === 0) {
-    throw new Error("Select at least one tactic that addresses the closed slice.");
+    throw new TrustedApplicationError("Select at least one tactic that addresses the closed slice.");
   }
   const reviewedState = await loadState(); // Resolve lock targets before reserving the transaction.
   return db().transaction(async transaction => {
@@ -4701,9 +4700,9 @@ async function splitPartialGapChange(args: {
     requireGapResolutionSnapshot(state, args.parent_gap_id, args.expected_resolution);
     if (args.expected_proposal_resolution !== undefined) requireGapResolutionSnapshot(state, args.parent_gap_id, args.expected_proposal_resolution);
     const parent = state.gaps.find((g) => g.id === args.parent_gap_id);
-    if (!parent || !isLiveGap(parent)) throw new Error("Gap not found");
+    if (!parent || !isLiveGap(parent)) throw new TrustedApplicationError("Gap not found", "not_found", 404);
     if (displayedGapStatus(parent) !== "validated_partial") {
-      throw new Error("Only Partially Addressed gaps can split.");
+      throw new TrustedApplicationError("Only Partially Addressed gaps can split.");
     }
     const addressedScopes = addressedTacticIds.map(id => splitEvidenceScope(state, parent.id, id, true));
     const addressedSet = new Set(addressedTacticIds);
@@ -4811,11 +4810,11 @@ async function rewritePartialGapChange(args: {
 }) {
   const name = args.name.trim();
   const statement = (args.statement ?? name).trim();
-  if (!name) throw new Error("Rewritten gap title is required.");
-  if (!statement) throw new Error("Rewritten gap statement is required.");
+  if (!name) throw new TrustedApplicationError("Rewritten gap title is required.");
+  if (!statement) throw new TrustedApplicationError("Rewritten gap statement is required.");
   const tacticIds = uniqueIds([...(args.tactic_ids ?? []), args.tactic_id]);
   if (args.status === "validated_addressed" && tacticIds.length === 0) {
-    throw new Error("Addressed gaps need an accompanying tactic.");
+    throw new TrustedApplicationError("Addressed gaps need an accompanying tactic.");
   }
   const reviewedState = await loadState(); // Resolve lock targets before reserving the transaction.
   return db().transaction(async transaction => {
@@ -4835,9 +4834,9 @@ async function rewritePartialGapChange(args: {
     requireGapResolutionSnapshot(state, args.gap_id, args.expected_resolution);
     if (args.expected_proposal_resolution !== undefined) requireGapResolutionSnapshot(state, args.gap_id, args.expected_proposal_resolution);
     const original = state.gaps.find((g) => g.id === args.gap_id);
-    if (!original || !isLiveGap(original)) throw new Error("Gap not found");
+    if (!original || !isLiveGap(original)) throw new TrustedApplicationError("Gap not found", "not_found", 404);
     if (displayedGapStatus(original) !== "validated_partial") {
-      throw new Error("Only Partially Addressed gaps can be rewritten this way.");
+      throw new TrustedApplicationError("Only Partially Addressed gaps can be rewritten this way.");
     }
     const scopes = tacticIds.map(id => splitEvidenceScope(state, original.id, id, args.status === "validated_addressed"));
     const liveId = await createGap({
@@ -4938,11 +4937,11 @@ async function createAddressedGapChange(args: {
   }
   if (!tacticId) {
     if (!args.missed_name?.trim()) {
-      throw new Error("Addressed gaps need an accompanying tactic.");
+      throw new TrustedApplicationError("Addressed gaps need an accompanying tactic.");
     }
     // The missed study's type and question are the person's; none is assumed.
-    if (!args.missed_type) throw new Error("Choose the missed tactic's type.");
-    if (!args.missed_evidence_question?.trim()) throw new Error("Enter the missed tactic's evidence question.");
+    if (!args.missed_type) throw new TrustedApplicationError("Choose the missed tactic's type.");
+    if (!args.missed_evidence_question?.trim()) throw new TrustedApplicationError("Enter the missed tactic's evidence question.");
     tacticId = await recordMissedTactic({
       name: args.missed_name,
       type: args.missed_type,
@@ -4986,11 +4985,11 @@ export async function createBreakoutGroup(args: {
   actor_function: ActorFunction;
 }): Promise<string> {
   const name = args.name.trim();
-  if (!name) throw new Error("A breakout group needs a name.");
+  if (!name) throw new TrustedApplicationError("A breakout group needs a name.");
   const state = await loadState();
   const gapIds = [...new Set(args.gap_ids ?? [])];
   const known = new Set(state.gaps.map((gap) => gap.id));
-  if (gapIds.some((id) => !known.has(id))) throw new Error("Gap not found");
+  if (gapIds.some((id) => !known.has(id))) throw new TrustedApplicationError("Gap not found", "not_found", 404);
   const id = await allocateId(
     "BRK",
     state.breakout_groups.map((g) => g.id),
@@ -5030,7 +5029,7 @@ export async function deleteBreakoutGroup(args: {
 }) {
   const state = await loadState();
   const group = state.breakout_groups.find((g) => g.id === args.group_id);
-  if (!group) throw new Error("Breakout group not found");
+  if (!group) throw new TrustedApplicationError("Breakout group not found", "not_found", 404);
   await db().delete(t.breakoutGroupGaps).where(eq(t.breakoutGroupGaps.group_id, args.group_id));
   await db().delete(t.breakoutGroups).where(eq(t.breakoutGroups.id, args.group_id));
   await appendAudit(
@@ -5051,9 +5050,9 @@ export async function assignGapToBreakoutGroup(args: {
 }) {
   const state = await loadState();
   const group = state.breakout_groups.find((g) => g.id === args.group_id);
-  if (!group) throw new Error("Breakout group not found");
+  if (!group) throw new TrustedApplicationError("Breakout group not found", "not_found", 404);
   const gap = state.gaps.find((g) => g.id === args.gap_id);
-  if (!gap) throw new Error("Gap not found");
+  if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
   const existing = state.breakout_group_gaps.find(
     (row) => row.group_id === args.group_id && row.gap_id === args.gap_id,
   );
@@ -5100,9 +5099,9 @@ export async function updateBreakoutGroup(args: {
 }) {
   const state = await loadState();
   const group = state.breakout_groups.find((g) => g.id === args.group_id);
-  if (!group) throw new Error("Breakout group not found");
+  if (!group) throw new TrustedApplicationError("Breakout group not found", "not_found", 404);
   const name = args.name === undefined ? group.name : args.name.trim();
-  if (!name) throw new Error("A breakout group needs a name.");
+  if (!name) throw new TrustedApplicationError("A breakout group needs a name.");
   const note = args.note === undefined ? group.note : args.note.trim() || null;
   await db().update(t.breakoutGroups).set({ name, note }).where(eq(t.breakoutGroups.id, args.group_id));
   await appendAudit(args.actor_name, args.actor_function, "breakout_group", args.group_id, "update", name);
@@ -5117,11 +5116,11 @@ export async function assignGapsToBreakoutGroup(args: {
 }): Promise<number> {
   const state = await loadState();
   const group = state.breakout_groups.find((g) => g.id === args.group_id);
-  if (!group) throw new Error("Breakout group not found");
+  if (!group) throw new TrustedApplicationError("Breakout group not found", "not_found", 404);
   const already = new Set(state.breakout_group_gaps.filter((row) => row.group_id === args.group_id).map((row) => row.gap_id));
   const known = new Set(state.gaps.map((gap) => gap.id));
   const fresh = [...new Set(args.gap_ids)].filter((id) => known.has(id) && !already.has(id));
-  if (args.gap_ids.some((id) => !known.has(id))) throw new Error("Gap not found");
+  if (args.gap_ids.some((id) => !known.has(id))) throw new TrustedApplicationError("Gap not found", "not_found", 404);
   if (fresh.length === 0) return 0;
   await db().insert(t.breakoutGroupGaps).values(fresh.map((gap_id) => ({ group_id: args.group_id, gap_id })));
   await appendAudit(
@@ -5181,7 +5180,7 @@ export function confirmCoverageReview(args: Parameters<typeof confirmCoverageRev
 export function acceptMapping(args: Parameters<typeof acceptMappingChange>[0]) {
   return withRelationshipChange({ ...args, adoption: { gap_id: args.gap_id, tactic_ids: [args.tactic_id] } }, () => {
     if (args.model && (!args.supplied_records?.length || !args.expected_tactic_version)) {
-      throw new Error("Model judgement context is unavailable. Regenerate it or make a manual judgement with a reason.");
+      throw new TrustedApplicationError("Model judgement context is unavailable. Regenerate it or make a manual judgement with a reason.");
     }
     return acceptMappingChange(args);
   });

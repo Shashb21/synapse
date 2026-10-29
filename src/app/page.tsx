@@ -14,7 +14,7 @@ import { AiOnly } from "@/components/platform/ai-status";
 import { StepWaiting } from "@/components/step-waiting";
 import { RejectedTactics, SetAsideGaps } from "@/components/restore-actions";
 import { aiSections } from "@/modules/kernel/ai-switch";
-import { noAiSections, type AiSections } from "@/modules/kernel/ai-sections";
+import { type AiSections } from "@/modules/kernel/ai-sections";
 import { currentWorkspace } from "@/modules/workspaces/session";
 import { loadState } from "@/lib/iegp/store";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
@@ -91,10 +91,10 @@ export default async function HomePage({
   const workspace = buildPlanWorkspace(state);
   const gates = planGates(state);
   // Each place follows its own AI section (KAN-53): Upload ingestion, Matrix prioritization, Ideation.
-  const sections = await aiSections().catch(() => noAiSections());
+  const sections = await aiSections();
   const ai = sections.ingestion;
   // Demo source files are offered only in a workspace that holds the Velmara demo.
-  const selectedWorkspace = await currentWorkspace().catch(() => null);
+  const selectedWorkspace = await currentWorkspace();
   const demo = selectedWorkspace?.demo === true;
   // With AI off nothing is ingested, so Gaps never waits for a source.
   const gapsUnlocked = gates.gapsUnlocked || !ai;

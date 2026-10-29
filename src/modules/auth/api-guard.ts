@@ -9,7 +9,7 @@ import { principalOf } from "@/modules/workspaces/session";
 import { getWorkspace, memberRole, type WorkspaceWithRole } from "@/modules/workspaces/store";
 import { currentSession, SESSION_COOKIE, type Session } from "./session";
 import { NoRouteError, ProviderError } from "@/modules/llm/provider";
-import { customerErrorMessage, isAdminOnlyError, stageOf } from "@/modules/kernel/stage-errors";
+import { customerErrorMessage, ownerErrorMessage, TrustedApplicationError, IncompleteAnswerError, stageOf } from "@/modules/kernel/stage-errors";
 import { noLlmBody } from "@/modules/kernel/no-llm";
 import { ownerAccess } from "./owner";
 import { BodyTooLargeError, readBodyText } from "@/lib/http/body-limit";
@@ -172,16 +172,7 @@ export async function readJsonBody(
   return parsed as Record<string, unknown>;
 }
 
-/**
- * Guard and role failures keep their status (401/403/409), AI-off is 409, and
- * anything else is a 400 with its message.
- */
-/**
- * A 409 `no_llm` for an AI step with no connected model. Customers get the plain
- * "ask your administrator, or carry on by hand" text; only the platform owner
- * (checked the way the admin pages check it) gets the provider detail and the
- * /admin/control link.
- */
+/** A missing model returns role-appropriate setup recovery without raw diagnostics. */
 export async function noLlmResponse(detail: string): Promise<NextResponse> {
   return NextResponse.json(noLlmBody(detail, await requestIsOwner()), { status: 409 });
 }
@@ -192,18 +183,14 @@ async function requestIsOwner(): Promise<boolean> {
     .catch(() => false);
 }
 
-/**
- * The body for a failed AI step (KAN-68). The owner gets the technical message
- * (route remedies, provider and key detail); anyone else gets customer wording
- * from stage-errors.ts, never /admin/control or a provider's raw reply. `stage`
- * says which step failed, so a page can offer to run it again.
- */
-export function stageFailureBody(error: unknown, owner: boolean, fallback = "Request failed") {
-  const message = error instanceof Error ? error.message : fallback;
-  const customer = customerErrorMessage(error);
+/** Safe failure body for either audience; fallback must be fixed application-owned copy. */
+export function stageFailureBody(error: unknown, owner: boolean, fallback = "We couldn't complete this action. Check the current state before trying again. If this continues, contact your Synapse administrator.") {
+  const trusted = error instanceof ProviderError || error instanceof TrustedApplicationError || error instanceof IncompleteAnswerError;
+  const message = trusted ? (owner ? ownerErrorMessage(error) : customerErrorMessage(error)) : fallback;
   const stage = stageOf(error);
   return {
-    error: owner || customer === null ? message : customer,
+    error: message,
+    safe_error: true,
     ...(error instanceof ProviderError ? { code: "provider_error", provider_error: error.kind } : {}),
     ...(stage ? { stage } : {}),
   };
@@ -216,9 +203,6 @@ async function logRefusal(error: ApiGuardError | ForbiddenError): Promise<void> 
   await recordDenied({ category: "workspace", action: "permission.denied", reason: error.message, meta: { code } });
 }
 
-/** "Gap not found", "Breakout group not found", "Activity GAP-1 not found." and the like. */
-const NOT_FOUND = /^[\w\s'-]{1,60} not found\.?$/i;
-
 /** The first problem in a schema failure, in words: "stage: Invalid option". */
 function zodMessage(error: ZodError): string {
   const issue = error.issues[0];
@@ -227,37 +211,33 @@ function zodMessage(error: ZodError): string {
   return path ? `${path}: ${issue.message}` : issue.message;
 }
 
-export async function apiErrorResponse(error: unknown, fallback = "Request failed"): Promise<NextResponse> {
+export async function apiErrorResponse(error: unknown, fallback = "We couldn't complete this action. Check the current state before trying again. If this continues, contact your Synapse administrator."): Promise<NextResponse> {
   if ((error instanceof ApiGuardError && error.status === 403) || error instanceof ForbiddenError) await logRefusal(error);
   if (error instanceof ApiGuardError) {
-    return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+    return NextResponse.json({ safe_error: true, error: error.message, code: error.code, ...(["no_session", "no_workspace", "not_member", "forbidden", "invalid_json", "workspace_mismatch"].includes(error.code) ? { request_outcome: "rejected" } : {}) }, { status: error.status });
   }
   if (error instanceof ForbiddenError) {
-    return NextResponse.json({ error: error.message, code: "forbidden" }, { status: 403 });
+    return NextResponse.json({ safe_error: true, error: error.message, code: "forbidden" }, { status: 403 });
   }
   if (error instanceof BodyTooLargeError) {
-    return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+    return NextResponse.json({ safe_error: true, error: error.message, code: error.code }, { status: error.status });
   }
   if (error instanceof NoWorkspaceError) {
-    return NextResponse.json({ error: error.message, code: "no_workspace" }, { status: 409 });
+    return NextResponse.json({ safe_error: true, error: error.message, code: "no_workspace" }, { status: 409 });
   }
   if (error instanceof AiDisabledError) {
-    return NextResponse.json({ error: error.message || AI_OFF_MESSAGE, code: "ai_off" }, { status: 409 });
+    return NextResponse.json({ safe_error: true, error: error.message || AI_OFF_MESSAGE, code: "ai_off" }, { status: 409 });
   }
   if (error instanceof NoRouteError) return noLlmResponse(error.message);
-  // A body that is not JSON is the caller's mistake, never a 500 (KAN-18).
-  if (error instanceof SyntaxError) {
-    return NextResponse.json({ error: "The request body is not valid JSON.", code: "invalid_json" }, { status: 400 });
-  }
   if (error instanceof ZodError) {
-    return NextResponse.json({ error: zodMessage(error), code: "invalid_request" }, { status: 400 });
+    return NextResponse.json({ safe_error: true, error: zodMessage(error), code: "invalid_request" }, { status: 400 });
   }
-  // A record that does not exist is a 404, not a generic 400 (KAN-18).
-  if (error instanceof Error && NOT_FOUND.test(error.message)) {
-    return NextResponse.json({ error: error.message, code: "not_found" }, { status: 404 });
+  if (error instanceof TrustedApplicationError) {
+    return NextResponse.json({ ...stageFailureBody(error, false), code: error.code }, { status: error.status });
   }
-  // Only an owner-worded error needs the audience check.
-  const owner = isAdminOnlyError(error) ? await requestIsOwner() : true;
+  // Log classification only: exception payloads can contain credentials or other workspace data.
+  console.error("API action failed", { category: error instanceof ProviderError ? error.kind : "unexpected", stage: stageOf(error) });
+  const owner = await requestIsOwner();
   const status = error instanceof ProviderError ? 502 : 400;
   return NextResponse.json(stageFailureBody(error, owner, fallback), { status });
 }

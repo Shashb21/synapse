@@ -25,10 +25,10 @@ export async function POST(request: Request) {
   }
   const stage = String(body.stage ?? "") as StageId;
   if (!STAGE_IDS.includes(stage)) {
-    return NextResponse.json({ error: `Unknown stage ${body.stage}` }, { status: 400 });
+    return NextResponse.json({ safe_error: true, error: "Choose an available AI task and try again." }, { status: 400 });
   }
   if (!HILLCLIMB_STAGES.includes(stage)) {
-    return NextResponse.json({ error: `${stage} does not participate in the hillclimb loop yet.` }, { status: 400 });
+    return NextResponse.json({ safe_error: true, error: `${stage} does not participate in the hillclimb loop yet.` }, { status: 400 });
   }
   // Hillclimbing scores prompt variants, which only exist to be sent to a model.
   if (!(await aiEnabled())) return aiOffResponse();
@@ -36,7 +36,7 @@ export async function POST(request: Request) {
   try {
     const implementation = await activeModule(stage);
     if (!implementation.evals) {
-      return NextResponse.json({ error: `${implementation.manifest.id} has no eval harness.` }, { status: 400 });
+      return NextResponse.json({ safe_error: true, error: `${implementation.manifest.id} has no eval harness.` }, { status: 400 });
     }
     const sweep = await runHillclimbSweep(stage, implementation, async (input) => {
       const result = await runStage({

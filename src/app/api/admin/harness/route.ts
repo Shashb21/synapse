@@ -1,10 +1,11 @@
+import { ownerErrorMessage } from "@/modules/kernel/stage-errors";
 import { NextResponse } from "next/server";
 import "@/modules";
 import { ownerGate } from "@/modules/auth/owner";
 import { requestIdentity } from "@/modules/auth/request";
 import { isAiSectionId } from "@/modules/kernel/ai-sections";
 import { AiDisabledError } from "@/modules/kernel/ai-switch";
-import { HarnessNoModelError, HarnessNotBuiltError, harnessPartialGaps, runHarness } from "@/modules/harness/harness";
+import { HARNESS_AI_OFF_MESSAGE, HarnessNoModelError, HarnessNotBuiltError, harnessPartialGaps, runHarness } from "@/modules/harness/harness";
 import { EVIDENCE_DOMAINS, type EvidenceDomain } from "@/lib/iegp/enums";
 
 export const runtime = "nodejs";
@@ -21,7 +22,7 @@ export async function GET() {
   try {
     return NextResponse.json({ partial_gaps: await harnessPartialGaps() }, { headers: NO_STORE });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+    return NextResponse.json({ safe_error: true, error: ownerErrorMessage(error) }, { status: 500 });
   }
 }
 
@@ -33,10 +34,10 @@ export async function POST(request: Request) {
   try {
     body = (await request.json()) as Record<string, unknown> | null;
   } catch {
-    return NextResponse.json({ error: "Invalid JSON", code: "invalid_json" }, { status: 400, headers: NO_STORE });
+    return NextResponse.json({ safe_error: true, error: "Invalid JSON", code: "invalid_json" }, { status: 400, headers: NO_STORE });
   }
   if (!body || typeof body !== "object" || !isAiSectionId(body.case)) {
-    return NextResponse.json({ error: "Choose an AI use case." }, { status: 400 });
+    return NextResponse.json({ safe_error: true, error: "Choose an AI use case." }, { status: 400 });
   }
   const text = (key: string) => (typeof body[key] === "string" ? (body[key] as string) : undefined);
   const domain = text("gap_domain");
@@ -58,7 +59,13 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, result }, { headers: NO_STORE });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = error instanceof AiDisabledError
+      ? HARNESS_AI_OFF_MESSAGE
+      : error instanceof HarnessNoModelError
+        ? "No live model is available for this use case. Check the provider connection in AI & routing, then try again."
+        : error instanceof HarnessNotBuiltError
+          ? "This AI use case is not available yet. Choose another use case."
+          : ownerErrorMessage(error);
     const code =
       error instanceof HarnessNotBuiltError
         ? "not_built"
@@ -67,6 +74,6 @@ export async function POST(request: Request) {
           : error instanceof AiDisabledError
             ? "ai_off"
             : "failed";
-    return NextResponse.json({ error: message, code }, { status: code === "failed" ? 500 : 409, headers: NO_STORE });
+    return NextResponse.json({ safe_error: true, error: message, code }, { status: code === "failed" ? 500 : 409, headers: NO_STORE });
   }
 }

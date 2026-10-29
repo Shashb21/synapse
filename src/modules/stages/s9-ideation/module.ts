@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { buildIdeationGapBrief, ideationAcceptanceBasis, type IdeationGapBrief } from "./context";
 import { ideationRecommendationSchema, ideationGapOutcomeSchema, type IdeationGapOutcome, type IdeationRecommendation } from "./recommendation-contract";
 import { relationshipVersion } from "@/lib/iegp/relationship-version";
@@ -428,7 +429,7 @@ function parseTactic(raw: Record<string, unknown>, library: LibraryTactic[], sup
   if (kind === "new" && (raw.target_tactic_id !== null || raw.expansion_scope !== null)) problems.push("New tactics cannot carry expansion target or scope");
   if (kind === "expansion") {
     try {
-      if (!target?.trim()) throw new Error("Expansion requires an explicit nonempty target_tactic_id");
+      if (!target?.trim()) throw new TrustedApplicationError("Expansion requires an explicit nonempty target_tactic_id");
       scope = expansionScopeSchema.parse(modelExpansionScope(raw.expansion_scope));
       assertExpansionDesign({name: fields.name, evidence_question: fields.evidence_question, type, design: fields}, scope);
       validateExpansion(library.find(t => t.id === target), scope, text(raw.comparative_rationale));
@@ -962,7 +963,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
         };
         await db().transaction(async tx => {
           const references = inspectSuppliedJudgementReferences(supportFor(proposal.gap_id), proposal.references);
-          if (!references.length || !inspectJudgementReferences(await readState(tx), [proposal.gap_id], proposal.references).length) throw new Error("Supporting references are missing, inaccessible or unrelated to this option.");
+          if (!references.length || !inspectJudgementReferences(await readState(tx), [proposal.gap_id], proposal.references).length) throw new TrustedApplicationError("Supporting references are missing, inaccessible or unrelated to this option.");
           await tx.insert(t.ideationProposals).values(values);
           await recordEdit({ stage: "S9", entity_type: "ideation_proposal", entity_id: values.id,
             field: "model_suggestion", action: "add", before: null, after: JSON.stringify(proposal),
@@ -1369,14 +1370,14 @@ function applyFields(
   if (fields.duration_months !== undefined) {
     const value = fields.duration_months;
     if (value !== null && (!finite(value) || value <= 0)) {
-      throw new Error("duration_months must be a positive number of months.");
+      throw new TrustedApplicationError("duration_months must be a positive number of months.");
     }
     next.design.duration_months = value;
   }
   if (fields.readout_lag_months !== undefined) {
     const value = fields.readout_lag_months;
     if (value !== null && (!finite(value) || value < 0)) {
-      throw new Error("readout_lag_months must be zero or a positive number of months.");
+      throw new TrustedApplicationError("readout_lag_months must be zero or a positive number of months.");
     }
     next.design.readout_lag_months = value;
   }
@@ -1391,7 +1392,7 @@ async function recordById(id: string): Promise<IdeationProposalRecord> {
 
 /** Reuse cannot alter canonical scientific design or add scope. */
 function assertReuseDesign(value: {type: string; evidence_question: string; design: StoredDesign}, target: Tactic | undefined) {
-  if (!target || target.review_status !== "accepted" || target.status === "cancelled") throw new Error("Reuse target not found or no longer eligible.");
+  if (!target || target.review_status !== "accepted" || target.status === "cancelled") throw new TrustedApplicationError("Reuse target not found or no longer eligible.", "not_found", 404);
   for (const key of ["type", "evidence_question"] as const) if (value[key] !== target[key]) throw new Error(`Reuse must preserve existing ${key}; added work needs an expansion or new tactic.`);
   for (const key of ["population", "comparator", "outcomes", "data_source", "study_design"] as const) if (value.design[key] !== target[key]) throw new Error(`Reuse must preserve existing ${key}; added work needs an expansion or new tactic.`);
 }
@@ -1436,17 +1437,17 @@ function reconcileExpansionDesign(next: ReturnType<typeof applyFields>, scope: E
 /** Enforce credible additional scope before generation, editing or acceptance. */
 function validateExpansion(parent: Tactic | undefined, scope: ExpansionScope, comparison: string) {
     if (!parent)
-        throw new Error("Expansion target not found in this workspace.");
+        throw new TrustedApplicationError("Expansion target not found in this workspace.", "not_found", 404);
     if (parent.review_status !== "accepted" || parent.status === "cancelled")
-        throw new Error("Expansion requires an accepted active target.");
+        throw new TrustedApplicationError("Expansion requires an accepted active target.");
     if (!comparison.trim())
-        throw new Error("Expansion comparative rationale is required.");
+        throw new TrustedApplicationError("Expansion comparative rationale is required.");
     if (parent.status === "completed" && (scope.prospective_enrolment || !scope.post_hoc))
-        throw new Error("Completed study expansions must be post-hoc using existing data; prospective enrolment requires a new study.");
+        throw new TrustedApplicationError("Completed study expansions must be post-hoc using existing data; prospective enrolment requires a new study.");
     if (scope.prospective_enrolment && (!scope.protocol_amendment || !/amend/i.test(scope.study_design + scope.feasibility_risks)))
-        throw new Error("Prospective additions require a credible protocol amendment design and feasibility review.");
+        throw new TrustedApplicationError("Prospective additions require a credible protocol amendment design and feasibility review.");
     if (/post[- ]?hoc/i.test(scope.analysis) && !scope.post_hoc)
-        throw new Error("Post-hoc analysis must be identified as post_hoc.");
+        throw new TrustedApplicationError("Post-hoc analysis must be identified as post_hoc.");
 }
 
 /** Check the same shared priority owner inside a source mutation transaction. */
@@ -1455,7 +1456,7 @@ async function eligibleGap(id: string, tx?: ExpansionTransaction) {
     const placements = tx ? await tx.select().from(t.priorityPlacements).where(eq(t.priorityPlacements.gap_id, id)).for("update") : await listPlacements();
     const gap = state.gaps.find(g => g.id === id);
     if (!gap || !isLiveGap(gap) || displayedGapStatus(gap) !== "validated_open" || !ideationBandOrder(placements as Parameters<typeof ideationBandOrder>[0]).has(id)) {
-        throw new Error("Ideation requires an open gap with human-validated High priority.");
+        throw new TrustedApplicationError("Ideation requires an open gap with human-validated High priority.");
     }
     return state;
 }
@@ -1467,7 +1468,7 @@ function proposalVersion(row: ProposalRow): string {
 function requireProposalVersion(row: ProposalRow, expected?: string) {
   // Trusted internal callers can omit a browser token, like the tactic editor owner.
   if (expected === undefined) return;
-  if (!expected || expected !== proposalVersion(row)) throw new Error("Proposal changed or its opening snapshot is missing. Your fields and reason have not been saved. Reopen the latest proposal before retrying.");
+  if (!expected || expected !== proposalVersion(row)) throw new TrustedApplicationError("Proposal changed or its opening snapshot is missing. Your fields and reason have not been saved. Reopen the latest proposal before retrying.");
 }
 
 /** Validate the original supplied records; never reconstruct missing model provenance. */
@@ -1475,22 +1476,22 @@ async function optionSupport(row: ProposalRow, tx: ExpansionTransaction): Promis
   const { meta } = splitDesign(row.design);
   const records = meta.supplied_records ?? [];
   const references = meta.supporting_references ?? [];
-  if (!records.length || !inspectSuppliedJudgementReferences(records, references).length) throw new Error("Supporting references or the original supplied context are missing. Make an explicit manual judgement with a reason instead.");
+  if (!records.length || !inspectSuppliedJudgementReferences(records, references).length) throw new TrustedApplicationError("Supporting references or the original supplied context are missing. Make an explicit manual judgement with a reason instead.");
   for (const [kind, table] of [["objective", core.objectives], ["source", core.sources], ["gap", core.gaps]] as const) {
     for (const id of [...new Set(records.filter(record => record.entity_type === kind).map(record => record.entity_id))].sort()) await tx.select({ id: table.id }).from(table).where(eq(table.id, id)).for("update");
   }
   const state = await readState(tx);
-  if (!inspectJudgementReferences(state, [row.gap_id], references).length) throw new Error("Supporting references are missing, inaccessible or unrelated to this option. Make a manual judgement with a reason instead.");
-  if (!matchesSuppliedJudgementRecords(state, [row.gap_id], records)) throw new Error("Model option context changed. Regenerate it or make a manual judgement with a reason.");
+  if (!inspectJudgementReferences(state, [row.gap_id], references).length) throw new TrustedApplicationError("Supporting references are missing, inaccessible or unrelated to this option. Make a manual judgement with a reason instead.");
+  if (!matchesSuppliedJudgementRecords(state, [row.gap_id], records)) throw new TrustedApplicationError("Model option context changed. Regenerate it or make a manual judgement with a reason.");
   return references;
 }
 
 /** Apply edits without refreshing the immutable reviewed parent or original AI baseline. */
 async function editPending(row: ProposalRow, fields: ProposalFields, rationale: string, actor: Actor, workspace_id: string | undefined, tx: ExpansionTransaction) {
     if (row.status !== "proposed")
-        throw new Error(`${row.id} was already ${row.status}; decided ideas are not edited.`);
+        throw new TrustedApplicationError("This idea was already decided. Review its current decision; edit an accepted idea on the tactic instead.");
     if (fields.proposal_kind !== undefined && fields.proposal_kind !== row.proposal_kind || fields.target_tactic_id !== undefined && fields.target_tactic_id !== row.target_tactic_id)
-        throw new Error("Proposal kind and target identity are fixed; create a separate proposal to change them.");
+        throw new TrustedApplicationError("Proposal kind and target identity are fixed; create a separate proposal to change them.");
     const { design, meta } = splitDesign(row.design);
     const before = { name: row.name, type: row.type, evidence_question: row.evidence_question, rationale: row.rationale, design };
     const next = applyFields(before, fields);
@@ -1501,10 +1502,10 @@ async function editPending(row: ProposalRow, fields: ProposalFields, rationale: 
         const state = await readState(tx);
         validateExpansion(state.tactics.find(t => t.id === row.target_tactic_id), expansionScopeSchema.parse(scope), comparison);
         if (next.design.duration_months === null || next.design.readout_lag_months === null)
-            throw new Error("Expansion numeric timing is required.");
+            throw new TrustedApplicationError("Expansion numeric timing is required.");
     }
     else if (fields.expansion_scope)
-        throw new Error("New tactics cannot carry expansion scope.");
+        throw new TrustedApplicationError("New tactics cannot carry expansion scope.");
     if (row.proposal_kind === "reuse") {
       const state = await readState(tx);
       assertReuseDesign(next, state.tactics.find(tactic => tactic.id === row.target_tactic_id));
@@ -1571,9 +1572,9 @@ export async function addIdeationProposal(args: {
   let scope = kind === "expansion" ? expansionScopeSchema.parse(args.fields.expansion_scope) : null;
   if (kind === "expansion") validateExpansion(target ?? undefined, scope!, args.fields.comparative_rationale ?? "");
   else if (kind === "reuse") {
-    if (!target || target.review_status !== "accepted" || target.status === "cancelled" || args.fields.expansion_scope) throw new Error("Reuse requires an accepted eligible target and no added scope.");
+    if (!target || target.review_status !== "accepted" || target.status === "cancelled" || args.fields.expansion_scope) throw new TrustedApplicationError("Reuse requires an accepted eligible target and no added scope.");
   }
-  else if (args.fields.target_tactic_id || args.fields.expansion_scope) throw new Error("New tactics cannot carry expansion target or scope.");
+  else if (args.fields.target_tactic_id || args.fields.expansion_scope) throw new TrustedApplicationError("New tactics cannot carry expansion target or scope.");
   const empty: StoredDesign = {
     population: "",
     comparator: "",
@@ -1590,10 +1591,10 @@ export async function addIdeationProposal(args: {
   const recommendation = args.fields.recommendation === undefined ? undefined : ideationRecommendationSchema.parse(args.fields.recommendation);
   const conditions = z.array(z.string().trim().min(1)).parse(args.fields.conditions ?? []);
   if (scope) scope = reconcileExpansionDesign(next, scope, args.fields);
-  if (kind === "expansion" && (next.design.duration_months === null || next.design.readout_lag_months === null)) throw new Error("Expansion numeric timing is required.");
-  if (!next.name) throw new Error("Name is required.");
-  if (!next.type) throw new Error("Type is required.");
-  if (!next.evidence_question) throw new Error("Evidence question is required.");
+  if (kind === "expansion" && (next.design.duration_months === null || next.design.readout_lag_months === null)) throw new TrustedApplicationError("Expansion numeric timing is required.");
+  if (!next.name) throw new TrustedApplicationError("Name is required.");
+  if (!next.type) throw new TrustedApplicationError("Type is required.");
+  if (!next.evidence_question) throw new TrustedApplicationError("Evidence question is required.");
   const id = newId("idea");
   const at = nowIso();
   await db().transaction(async tx => {
@@ -1659,7 +1660,7 @@ export async function decideIdeationProposal(args: {
             throw new Error(`Unknown proposal ${args.id}`);
         requireProposalVersion(pending, args.expected_version);
         if (pending.status !== "proposed")
-            throw new Error(`${args.id} was already ${pending.status}.`);
+            throw new TrustedApplicationError(pending.status === "accepted" ? "This idea was already accepted. Open the linked tactic to make further changes." : "This idea was already decided. Refresh the idea list before making another decision.");
         const originalMeta = splitDesign(pending.design).meta;
         const original = originalMeta.original_ai;
         // Match the relationship owner's scientific lock order: tactic, then supplied context.
@@ -1673,11 +1674,11 @@ export async function decideIdeationProposal(args: {
         if (args.decision === "accept") {
             await tx.select().from(core.gaps).where(eq(core.gaps.id, proposal.gap_id)).for("update");
             state = await eligibleGap(proposal.gap_id, tx);
-            if (proposal.proposal_kind !== "new" && !state.tactics.some(tactic => tactic.id === proposal.target_tactic_id)) throw new Error("Proposal target not found in this workspace.");
+            if (proposal.proposal_kind !== "new" && !state.tactics.some(tactic => tactic.id === proposal.target_tactic_id)) throw new TrustedApplicationError("Proposal target not found in this workspace.", "not_found", 404);
             const placements = await tx.select().from(t.priorityPlacements).for("update");
             const currentBasis = ideationAcceptanceBasis(state, proposal.gap_id, placements as Parameters<typeof ideationAcceptanceBasis>[2]);
             const stale = originalMeta.supporting_context_basis && originalMeta.supporting_context_basis !== currentBasis;
-            if (stale && (!manual || args.reviewed_context_basis !== currentBasis)) throw new Error("Ideation context changed; this proposal is stale. Review the current requirements, coverage, priority and tactic lifecycle, then submit its current review token with a manual judgement.");
+            if (stale && (!manual || args.reviewed_context_basis !== currentBasis)) throw new TrustedApplicationError("Ideation context changed; this proposal is stale. Review the current requirements, coverage, priority and tactic lifecycle, then submit its current review token with a manual judgement.");
             if (stale) {
               proposal.design = { ...(proposal.design as Record<string, unknown>), renewed_review: { basis: currentBasis, actor: args.actor.name, at: nowIso(), rationale } };
               await recordEdit({workspace_id: args.workspace_id, stage: "S9", entity_type: "ideation_proposal", entity_id: proposal.id, field: "renewed_context_review", action: "validate", before: originalMeta.supporting_context_basis!, after: currentBasis, rationale, actor: args.actor}, tx);
@@ -1690,10 +1691,10 @@ export async function decideIdeationProposal(args: {
             else if (proposal.proposal_kind === "expansion") {
                 const parent = proposal.reviewed_parent as Tactic | null;
                 if (!parent || parent.id !== proposal.target_tactic_id)
-                    throw new Error("Reviewed expansion target snapshot is unavailable.");
+                    throw new TrustedApplicationError("Reviewed expansion target snapshot is unavailable.");
                 const timing = splitDesign(proposal.design).design;
                 if (timing.duration_months === null || timing.duration_months <= 0 || timing.readout_lag_months === null || timing.readout_lag_months < 0)
-                    throw new Error("Expansion requires valid numeric duration and readout lag.");
+                    throw new TrustedApplicationError("Expansion requires valid numeric duration and readout lag.");
                 const scope = expansionScopeSchema.parse(proposal.expansion_scope);
                 assertExpansionDesign({...proposal, design: timing}, scope);
                 const acceptedScope = {...scope, type: proposal.type as TacticType, comparator: timing.comparator, data_source: timing.data_source};

@@ -54,7 +54,7 @@ export async function POST(request: Request) {
   } catch (error) {
     const known = labRequestErrorResponse(error);
     if (known) return known;
-    const message = labErrorMessage(error, "Workshop action failed");
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    const message = labErrorMessage(error, "We couldn’t confirm the workshop change. Check the current workshop before repeating this action.");
+    return NextResponse.json({ ok: false, safe_error: true, error: message }, { status: 400 });
   }
 }

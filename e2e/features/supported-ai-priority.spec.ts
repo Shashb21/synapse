@@ -54,7 +54,7 @@ test("inspects supplied support, accepts atomically, offers manual legacy review
   await article.getByRole("button", { name: "Accept supported AI suggestion", exact: true }).click();
   let dialog = page.getByRole("dialog", { name: "Accept AI priority for Supported comparison", exact: true });
   await dialog.getByLabel("Reason for acceptance (required)").fill("Inspected the comparison and committee context");
-  await page.route("**/api/plan", route => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "Acceptance failed; retry safely" }) }), { times: 1 });
+  await page.route("**/api/plan", route => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ safe_error: true, request_outcome: "rejected", error: "Acceptance failed; retry safely" }) }), { times: 1 });
   await dialog.getByRole("button", { name: "Accept supported AI suggestion", exact: true }).click();
   await expect(dialog.getByRole("alert")).toContainText("Acceptance failed");
   await expect(dialog.getByLabel("Reason for acceptance (required)")).toHaveValue("Inspected the comparison and committee context");

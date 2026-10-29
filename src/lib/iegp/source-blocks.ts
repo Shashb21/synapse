@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { boolean, doublePrecision, pgTable, text } from "drizzle-orm/pg-core";
 import { db, ensureCurrentSchemaTables, withWorkspaceTransaction } from "./db";
@@ -292,7 +293,7 @@ function assessmentSourceEdit<A extends { source_id?: string; block_id?: string;
       const sourceId = args.source_id ?? (args.block_id
         ? (await db().select().from(t.sourceBlocks).where(eq(t.sourceBlocks.id, args.block_id)))[0]?.source_id
         : undefined);
-      if (!sourceId) throw new Error("Source block not found.");
+      if (!sourceId) throw new TrustedApplicationError("Source block not found.", "not_found", 404);
       await db().execute(sql`select id from sources where id = ${sourceId} for update`);
       const assessmentGapIds = await lockAssessmentOwners({ source_ids: [sourceId] });
       const before = await loadState();
@@ -340,14 +341,14 @@ export const editSourceBlock = assessmentSourceEdit(async function editSourceBlo
   const { block, blocks } = await requireBlock(args.block_id);
   const patch: Partial<Pick<BlockRow, "text" | "heading" | "location">> = {};
   if (args.text !== undefined && args.text.trim() !== block.text) {
-    if (!args.text.trim()) throw new Error("Block text is required.");
+    if (!args.text.trim()) throw new TrustedApplicationError("Block text is required.");
     patch.text = args.text.trim();
   }
   if (args.heading !== undefined && args.heading.trim() !== block.heading) patch.heading = args.heading.trim();
   if (args.location !== undefined && args.location.trim() && args.location.trim() !== block.location) {
     patch.location = args.location.trim();
   }
-  if (Object.keys(patch).length === 0) throw new Error("Nothing changed: the block already has these values.");
+  if (Object.keys(patch).length === 0) throw new TrustedApplicationError("Nothing changed: the block already has these values.");
   if (patch.text !== undefined) {
     await guardQuotes(block.source_id, blocks, blocks.map((b) => (b.id === block.id ? patch.text! : b.text)));
   }
@@ -383,7 +384,7 @@ export const addSourceBlock = assessmentSourceEdit(async function addSourceBlock
   const rationale = requireEditRationale(args.rationale);
   const source = await requireSourceRow(args.source_id);
   const text = args.text.trim();
-  if (!text) throw new Error("Block text is required.");
+  if (!text) throw new TrustedApplicationError("Block text is required.");
   const blocks = await listSourceBlocks(args.source_id);
   let position: number;
   if (args.after_block_id === null) position = (blocks[0]?.position ?? 1) - 1;
@@ -471,7 +472,7 @@ export const mergeSourceBlocks = assessmentSourceEdit(async function mergeSource
   const rationale = requireEditRationale(args.rationale);
   const { block, blocks } = await requireBlock(args.block_id);
   const next = blocks[blocks.findIndex((b) => b.id === block.id) + 1];
-  if (!next) throw new Error("This is the last block: there is nothing after it to merge.");
+  if (!next) throw new TrustedApplicationError("This is the last block: there is nothing after it to merge.");
   const merged = `${block.text}\n\n${next.text}`;
   await db().update(t.sourceBlocks).set({ text: merged }).where(eq(t.sourceBlocks.id, block.id));
   await db().delete(t.sourceBlocks).where(eq(t.sourceBlocks.id, next.id));
@@ -679,7 +680,7 @@ export async function createManualSource(args: {
 }) {
   const rationale = requireEditRationale(args.rationale);
   const title = args.title.trim();
-  if (!title) throw new Error("A title is required.");
+  if (!title) throw new TrustedApplicationError("A title is required.");
   if (!(SOURCE_TYPES as readonly string[]).includes(args.source_type)) {
     throw new Error(`Unknown source type "${args.source_type}".`);
   }
@@ -687,7 +688,7 @@ export async function createManualSource(args: {
     throw new Error(`Unknown stakeholder function "${args.stakeholder_function}".`);
   }
   const blocks = args.blocks.map((b) => ({ text: b.text.trim(), heading: b.heading?.trim() || title })).filter((b) => b.text);
-  if (blocks.length === 0) throw new Error("Add at least one block of text.");
+  if (blocks.length === 0) throw new TrustedApplicationError("Add at least one block of text.");
   await ensureSourceBlocksSchema();
   const created = await persistSourceAndBlocks({
     title,

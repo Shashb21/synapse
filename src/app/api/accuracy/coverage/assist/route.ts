@@ -49,10 +49,10 @@ export async function POST(req: Request) {
     const gap = claims.find((c) => c.id === body.gap_id);
     const tactic = claims.find((c) => c.id === body.tactic_id);
     if (!gap || gap.claim_type !== "gap") {
-      return NextResponse.json({ ok: false, error: "Unknown gap_id" }, { status: 400 });
+      return NextResponse.json({ ok: false, safe_error: true, error: "Unknown gap_id" }, { status: 400 });
     }
     if (!tactic || tactic.claim_type !== "tactic") {
-      return NextResponse.json({ ok: false, error: "Unknown tactic_id" }, { status: 400 });
+      return NextResponse.json({ ok: false, safe_error: true, error: "Unknown tactic_id" }, { status: 400 });
     }
 
     const block_bundle_ids =
@@ -99,7 +99,7 @@ export async function POST(req: Request) {
     if (aiOff) return aiOff;
     const known = labRequestErrorResponse(error);
     if (known) return known;
-    const message = labErrorMessage(error, "Coverage assist failed");
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    const message = labErrorMessage(error, "We couldn’t finish the AI coverage review. Check current coverage before requesting another review.");
+    return NextResponse.json({ ok: false, safe_error: true, error: message }, { status: 400 });
   }
 }

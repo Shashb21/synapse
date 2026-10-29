@@ -58,7 +58,7 @@ export default async function RunDetailPage({
         kicker={`${run.stage} · ${STAGES[run.stage as StageId]?.title ?? ""}`}
         title={run.module_id}
       >
-        {run.summary ?? run.error ?? "No summary recorded."}
+        {run.status === "error" ? "This run could not finish. Review the workspace before running this task again." : run.summary ?? "No summary recorded."}
       </PageIntro>
 
       <AdminWorkspaceBar workspace={workspace} path="/admin/runs" />
@@ -94,7 +94,7 @@ export default async function RunDetailPage({
               </dd>
             </div>
           </dl>
-          {run.error ? <p className="mt-2 text-[12px] text-destructive">{run.error}</p> : null}
+          {run.error ? <p role="alert" className="mt-2 text-sm text-destructive">{"This run could not finish. Review the workspace and AI settings before running this task again."}</p> : null}
         </article>
 
         <article className="border border-border bg-card p-3 rounded-lg md:col-span-2" data-testid="run-llm-totals">

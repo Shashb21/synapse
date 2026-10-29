@@ -51,6 +51,7 @@ export function ManualSourceForm({
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [checkRequired, setCheckRequired] = useState(false);
   const defaultKind = kindOptions?.[0] ?? "";
 
   function split() {
@@ -64,6 +65,7 @@ export function ManualSourceForm({
   }
 
   async function save() {
+    if (pending || checkRequired) return;
     setError(null);
     const kept = blocks.filter((b) => b.text.trim());
     if (kept.length === 0) return setError("Split the text into blocks (or add one) before saving.");
@@ -88,8 +90,19 @@ export function ManualSourceForm({
       });
     const json = res.json as { error?: string; source_id?: string; source_file_id?: string };
     setPending(false);
-    if (!res.ok) return setError(json.error ?? "Save failed");
-    const id = json.source_id ?? json.source_file_id ?? "";
+    if (!res.ok) {
+      setCheckRequired(res.outcome === "unknown");
+      setError(res.outcome === "unknown"
+        ? [json.error, "We couldn’t confirm creation of this source. Check current sources before saving it again. Your text and blocks are still here until you leave or reload."].filter(Boolean).join(" ")
+        : json.error ?? "We couldn’t save this source. Check the source details before trying again.");
+      return;
+    }
+    const id = json.source_id ?? json.source_file_id;
+    if (typeof id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(id)) {
+      setCheckRequired(true);
+      setError("We couldn’t confirm creation of this source. Check current sources before saving it again. Your text and blocks are still here until you leave or reload.");
+      return;
+    }
     setSaved(id);
     setBlocks([]);
     setRaw("");
@@ -215,10 +228,11 @@ export function ManualSourceForm({
           </label>
         </div>
       ) : null}
-      {error ? <p className="text-destructive">{error}</p> : null}
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+      {checkRequired ? <Button type="button" size="sm" variant="outline" onClick={() => { if (endpoint === "/api/sources/blocks") router.push("/sources"); else window.location.reload(); }}>Check current sources</Button> : null}
       {saved ? <p className="text-muted-foreground">Saved as human-entered source {saved}.</p> : null}
       <div>
-        <Button type="button" size="sm" onClick={() => void save()} disabled={pending || blocks.length === 0}>
+        <Button type="button" size="sm" onClick={() => void save()} disabled={pending || checkRequired || blocks.length === 0}>
           {pending ? "Saving…" : `Save ${plural(blocks.length, "human-entered block")}`}
         </Button>
       </div>

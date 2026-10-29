@@ -30,7 +30,7 @@ export async function GET(request: Request) {
   if (workspaceId) {
     const workspace = await getWorkspace(workspaceId);
     if (!workspace) {
-      return NextResponse.json({ error: "Unknown workspace" }, { status: 404 });
+      return NextResponse.json({ safe_error: true, error: "Unknown workspace" }, { status: 404 });
     }
     return NextResponse.json({ workspace: withPlanLabel(workspace) });
   }
@@ -75,7 +75,7 @@ export async function POST(req: Request) {
   } catch (error) {
     const known = labRequestErrorResponse(error);
     if (known) return known;
-    const message = labErrorMessage(error, "Could not create workspace");
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    const message = labErrorMessage(error, "We couldn’t confirm creation of this workspace. Check the workspace list before creating it again.");
+    return NextResponse.json({ ok: false, safe_error: true, error: message }, { status: 400 });
   }
 }

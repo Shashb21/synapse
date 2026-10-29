@@ -20,7 +20,7 @@ export default async function WorkspaceSettingsPage({ params }: { params: Promis
   const me = principalOf(session);
   const [workspace, role] = await Promise.all([getWorkspace(id), memberRole(id, me)]);
   if (!workspace || !role) notFound();
-  const [members, selected] = await Promise.all([listMembers(id), selectedWorkspaceId().catch(() => null)]);
+  const [members, selected] = await Promise.all([listMembers(id), selectedWorkspaceId()]);
 
   return (
     <WorkspacesFrame person={{ name: session.actor.name, email: session.email }}>

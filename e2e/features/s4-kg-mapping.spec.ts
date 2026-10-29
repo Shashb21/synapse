@@ -60,7 +60,8 @@ test.describe("S4 LLM mapping table", () => {
 
     const rejected = await runStageExpectingError(request, "S4", { max_per_gap: 99 });
     expect(rejected.status).toBe(400);
-    expect(rejected.error).toMatch(/rejected its input/i);
+    expect(rejected.error).toBe("We couldn’t finish this AI task. Check the current workspace results before running it again. If this continues, contact your Synapse administrator.");
+    expect(rejected.error).not.toContain("rejected its input");
   });
 
   test("scores the table against its gold cases", async ({ request }) => {

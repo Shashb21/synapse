@@ -33,7 +33,7 @@ export default async function BreakoutRoomPage({
 }) {
   if (!BREAKOUTS_ENABLED) redirect("/");
   const { id } = await params;
-  const [state, session, placements] = await Promise.all([loadState(), sessionContext(), listPlacements().catch(() => [])]);
+  const [state, session, placements] = await Promise.all([loadState(), sessionContext(), listPlacements()]);
   const group = state.breakout_groups.find((g) => g.id === id);
   if (!group) notFound();
 

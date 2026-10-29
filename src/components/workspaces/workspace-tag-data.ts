@@ -23,8 +23,8 @@ export async function loadWorkspaceTag(): Promise<WorkspaceTagState> {
     if (!current) return { state: "no_workspace" };
     const [workspaces, access, platform] = await Promise.all([
       listWorkspacesFor(principalOf(session)),
-      ownerAccess().catch(() => ({ owner: false })),
-      platformAiEnabled().catch(() => true),
+      ownerAccess(),
+      platformAiEnabled(),
     ]);
     return {
       state: "ready",

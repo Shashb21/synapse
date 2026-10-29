@@ -29,7 +29,7 @@ export default async function RootLayout({
 }: {
   children: ReactNode;
 }) {
-  // The page must render before Postgres exists; AI counts as off until it is read.
+  // Unavailable AI settings disable affected controls and remain visibly unknown.
   // Effective AI, per section: the admin's master switch AND that section's switch (KAN-53).
   const ai = await aiState().catch(() => null);
   return (
@@ -40,6 +40,7 @@ export default async function RootLayout({
       <body className="flex min-h-full flex-col bg-background font-sans text-foreground">
         <AiStatusProvider enabled={ai?.enabled ?? false} offBy={ai?.off_by ?? null} sections={ai?.sections}>
           <AiOffBanner />
+          {!ai ? <p role="alert" className="m-3 text-sm text-destructive">AI settings are unavailable. Reload this page to check them again. If this continues, contact your Synapse administrator.</p> : null}
           <TooltipProvider>{children}</TooltipProvider>
           <WalkthroughHost />
         </AiStatusProvider>

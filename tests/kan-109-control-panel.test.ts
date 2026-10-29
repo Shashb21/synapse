@@ -100,7 +100,7 @@ describe("KAN-109 server results and permissions", () => {
   });
   it("announces validation failure and succeeds on retry without losing the draft", async () => {
     const fetch = vi.fn()
-      .mockResolvedValueOnce({ ok: false, json: async () => ({ error: "Choose an available model." }) })
+      .mockResolvedValueOnce({ ok: false, json: async () => ({ safe_error: true, request_outcome: "rejected", error: "Choose an available model." }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetch);
     render(); selectProvider("anthropic-claude"); await act(async () => saveButton().click());

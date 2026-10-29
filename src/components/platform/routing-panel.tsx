@@ -167,7 +167,7 @@ function StageRouteCard({
     };
     setPending(false);
     if (!res.ok) {
-      setError(json.error ?? "Could not save this route");
+      setError(json.error ?? "We couldn’t confirm the AI preferences. Refresh configuration to check saved settings before saving again.");
       return;
     }
     // Show what was stored: a blank number comes back as the value it kept.
@@ -188,7 +188,7 @@ function StageRouteCard({
     const json = res.json as { error?: string };
     setPending(false);
     if (!res.ok) {
-      setError(json.error ?? "Could not activate that module");
+      setError(json.error ?? "We couldn’t confirm the active implementation. Refresh configuration before changing it again.");
       return;
     }
     setSaved("Active implementation updated.");
@@ -214,7 +214,7 @@ function StageRouteCard({
       {route.agentic ? <p className="break-words text-[12px] text-muted-foreground">
         {route.resolution_state === "unavailable"
           ? "Route preview unavailable. Retry configuration to confirm which provider can run this stage."
-          : <>{route.resolved_label ? <>Resolves to <span className="text-foreground">{route.resolved_label}</span>{route.degraded_reason ? " · " : ""}</> : null}{route.degraded_reason}</>}
+          : <>{route.resolved_label ? <>Resolves to <span className="text-foreground">{route.resolved_label}</span>. </> : null}{route.resolution_state === "fallback" ? "The preferred provider is unavailable. Check its credentials and model here before restoring it." : route.resolution_state === "no_provider" ? "No provider is ready. Add a provider credential and select a compatible model here." : route.resolution_state === "off" ? "AI is off for this task. Enable it here when you are ready to use AI." : null}</>}
       </p> : null}
 
       {route.agentic ? (
@@ -333,7 +333,7 @@ function StageRouteCard({
           {saved ? `${saved}${saved === "Saved preferences." ? ` ${readiness}` : ""}` : (pending ? "Saving…" : route.config_available === false ? "Saved route unavailable" : `Last set by ${route.updated_by}`)}
         </span>
       </div>
-      {error ? <p role="alert" className="text-[11px] text-destructive">{error}</p> : null}
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
     </article>
   );
 }

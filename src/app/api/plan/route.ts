@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { ideationRecommendationSchema } from "@/modules/stages/s9-ideation/recommendation-contract";
 import { expansionScopeSchema } from "@/lib/iegp/tactic-expansions";
 import { NextResponse } from "next/server";
@@ -12,7 +13,7 @@ import {
   setPlacement,
   validatePlacement,
 } from "@/modules/stages/s8-prioritization/module";
-import { loadAxes, saveScopeAxes } from "@/modules/stages/s8-prioritization/axes";
+import { DEFAULT_AXES, loadAxes, saveScopeAxes } from "@/modules/stages/s8-prioritization/axes";
 import { setGapMetadata, setGapSettings } from "@/lib/iegp/store";
 import {
   acceptedIdeationContexts,
@@ -147,7 +148,7 @@ export async function POST(request: Request) {
         assertCan(identity.role, "validate");
         const id = field(z.string().trim().min(1), body.suggestion_id, "suggestion_id");
         const row = (await listTacticSuggestions()).find(r => r.id === id);
-        if (!row) throw new Error("Tactic suggestion not found in this workspace.");
+        if (!row) throw new TrustedApplicationError("Tactic suggestion not found in this workspace.", "not_found", 404);
         const option = field(z.enum(["expansion", "separate"]), body.option, "option");
         const expansion = {...row.expansion};
         const separate = {...row.separate};
@@ -210,26 +211,25 @@ export async function POST(request: Request) {
         const xAxis = String(body.x_axis ?? "").trim() || undefined;
         const yAxis = String(body.y_axis ?? "").trim() || undefined;
         // Errors name a score by its axis ("Payer / HTA relevance score …"), not the request field.
-        const catalog = await loadAxes();
         const scoreLabel = (axisId: string | undefined, fallback: string) => {
-          const axis = catalog.axes.find((candidate) => candidate.id === axisId);
+          const axis = DEFAULT_AXES.axes.find((candidate) => candidate.id === axisId);
           return axis ? `${axis.label} score` : fallback;
         };
         const axis_scores: Record<string, number> = {};
         if (body.axis_scores && typeof body.axis_scores === "object") {
           for (const [id, value] of Object.entries(body.axis_scores as Record<string, unknown>)) {
-            const score = optionalScore(value, scoreLabel(id, `${fieldLabel(id)} score`));
+            const score = optionalScore(value, scoreLabel(id, "Selected axis score"));
             if (score !== undefined) axis_scores[id] = score;
           }
         }
         const xScore = optionalScore(body.x_score, scoreLabel(xAxis, fieldLabel("x_score")));
         const yScore = optionalScore(body.y_score, scoreLabel(yAxis, fieldLabel("y_score")));
         if (xScore !== undefined) {
-          if (!xAxis) throw new Error("Pick the horizontal axis before scoring it.");
+          if (!xAxis) throw new TrustedApplicationError("Pick the horizontal axis before scoring it.");
           axis_scores[xAxis] = xScore;
         }
         if (yScore !== undefined) {
-          if (!yAxis) throw new Error("Pick the vertical axis before scoring it.");
+          if (!yAxis) throw new TrustedApplicationError("Pick the vertical axis before scoring it.");
           axis_scores[yAxis] = yScore;
         }
         const placement = await setPlacement({
@@ -448,23 +448,17 @@ export async function POST(request: Request) {
           const plan = await savePlan({ status, note: rationale, actor: identity.actor, workspace_id: identity.workspace?.id });
           return NextResponse.json({ ok: true, plan });
         } catch (error) {
-          // With AI off nothing rebuilds or estimates: the remedy is by hand.
-          const message = error instanceof Error ? error.message : "";
-          if (/Rebuild the timeline before saving/.test(message) && !(await aiEnabled().catch(() => true))) {
-            throw new Error(
-              message.replace(
-                /Rebuild the timeline before saving it as final\.?/,
-                "Date them by hand or remove them before saving it as final.",
-              ),
-            );
+          // The typed code identifies a known blocker without inspecting stored text.
+          if (error instanceof TrustedApplicationError && error.code === "timeline_unscheduled" && !(await aiEnabled().catch(() => true))) {
+            throw new TrustedApplicationError("Some activities have no schedule yet. Date them by hand or remove them before saving it as final. You can still save a draft.", "timeline_unscheduled");
           }
           throw error;
         }
       }
       default:
-        return NextResponse.json({ error: `Unknown action ${action}` }, { status: 400 });
+        return NextResponse.json({ safe_error: true, error: "This action is not available. Reload the page and choose an available action." }, { status: 400 });
     }
   } catch (error) {
-    return apiErrorResponse(error, "Plan action failed");
+    return apiErrorResponse(error, "We couldn’t complete this plan change. Check the current plan before trying again. If this continues, contact your Synapse administrator.");
   }
 }

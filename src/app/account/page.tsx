@@ -23,7 +23,7 @@ function signInMethod(providerId: string): string {
 
 /** Who you are signed in as, and (for an email and password account) a password change. */
 export default async function AccountPage() {
-  const session = await currentSession().catch(() => null);
+  const session = await currentSession();
   if (!session) redirect("/login?next=/account");
   const [account, access] = await Promise.all([accountForSession(session), ownerAccess()]);
 

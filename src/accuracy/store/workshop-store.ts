@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { and, desc, eq } from "drizzle-orm";
 import type { Actor } from "@/accuracy/kernel/contracts";
 import {
@@ -215,7 +216,7 @@ export async function createWorkshopSnapshot(args: {
 }): Promise<WorkshopSnapshotRecord> {
   const { inventory, readiness } = await workshopReadiness(args.workspace_id);
   if (!readiness.ready) {
-    throw new Error(readiness.blockers[0] ?? "Workspace is not ready for workshop.");
+    throw new TrustedApplicationError("The workshop snapshot cannot be saved yet. Validate every live gap and split or rewrite Partially Addressed gaps, then try again.", "workshop_not_ready", 409);
   }
   const previous = await latestWorkshopSnapshot(args.workspace_id);
   const payload = emptyWorkshopPayload(inventory);
@@ -269,7 +270,7 @@ export async function setWorkshopScene(args: {
   scene: WorkshopScene;
 }): Promise<WorkshopSnapshotRecord> {
   const snapshot = await getWorkshopSnapshot(args.workspace_id, args.snapshot_id);
-  if (!snapshot) throw new Error("Workshop snapshot not found in this workspace.");
+  if (!snapshot) throw new TrustedApplicationError("Workshop snapshot not found in this workspace.", "not_found", 404);
   const payload = { ...snapshot.payload, scene: args.scene };
   await persistPayload(snapshot, payload);
   return { ...snapshot, scene: args.scene, payload };
@@ -281,12 +282,12 @@ export async function addFacilitatorTag(args: {
   label: string;
 }): Promise<WorkshopSnapshotRecord> {
   const snapshot = await getWorkshopSnapshot(args.workspace_id, args.snapshot_id);
-  if (!snapshot) throw new Error("Workshop snapshot not found in this workspace.");
+  if (!snapshot) throw new TrustedApplicationError("Workshop snapshot not found in this workspace.", "not_found", 404);
   const label = normalizeTagLabel(args.label);
-  if (label.length < 2) throw new Error("Facilitator tag needs a short label.");
+  if (label.length < 2) throw new TrustedApplicationError("Facilitator tag needs a short label.");
   const tags = snapshot.payload.facilitator_tags;
   if (tags.tags.some((tag) => tag.label.toLowerCase() === label.toLowerCase())) {
-    throw new Error("A board with that tag already exists.");
+    throw new TrustedApplicationError("A board with that tag already exists.");
   }
   const next: FacilitatorTagState = {
     tags: [...tags.tags, { id: newId("wtag"), label }],
@@ -304,9 +305,9 @@ export async function assignFacilitatorTag(args: {
   tag_id: string;
 }): Promise<WorkshopSnapshotRecord> {
   const snapshot = await getWorkshopSnapshot(args.workspace_id, args.snapshot_id);
-  if (!snapshot) throw new Error("Workshop snapshot not found in this workspace.");
+  if (!snapshot) throw new TrustedApplicationError("Workshop snapshot not found in this workspace.", "not_found", 404);
   const gap = snapshot.payload.inventory.gaps.find((row) => row.id === args.gap_id);
-  if (!gap) throw new Error("Gap is not in this workshop snapshot.");
+  if (!gap) throw new TrustedApplicationError("Gap is not in this workshop snapshot.");
   const facilitator_tags = assignGapToTag(
     snapshot.payload.facilitator_tags,
     args.gap_id,
@@ -319,13 +320,13 @@ export async function assignFacilitatorTag(args: {
 
 function requireSnapshotGap(snapshot: WorkshopSnapshotRecord, gap_id: string): WorkshopGapLite {
   const gap = snapshot.payload.inventory.gaps.find((row) => row.id === gap_id);
-  if (!gap) throw new Error("Gap is not in this workshop snapshot.");
+  if (!gap) throw new TrustedApplicationError("Gap is not in this workshop snapshot.");
   return gap;
 }
 
 function requireSnapshotTactic(snapshot: WorkshopSnapshotRecord, tactic_id: string): WorkshopTacticLite {
   const tactic = snapshot.payload.inventory.tactics.find((row) => row.id === tactic_id);
-  if (!tactic) throw new Error("Tactic is not in this workshop snapshot.");
+  if (!tactic) throw new TrustedApplicationError("Tactic is not in this workshop snapshot.");
   return tactic;
 }
 
@@ -337,7 +338,7 @@ export async function applyWorkshopAction(args: {
 }): Promise<WorkshopSnapshotRecord> {
   const parsed = assertWorkshopAction(args.action);
   const snapshot = await getWorkshopSnapshot(args.workspace_id, args.snapshot_id);
-  if (!snapshot) throw new Error("Workshop snapshot not found in this workspace.");
+  if (!snapshot) throw new TrustedApplicationError("Workshop snapshot not found in this workspace.", "not_found", 404);
   requireSnapshotGap(snapshot, parsed.gap_id);
 
   const overlays: Record<string, WorkshopGapOverlay> = { ...snapshot.payload.overlays };
@@ -373,7 +374,7 @@ export async function applyWorkshopAction(args: {
     detail.ledger = "coverage";
   } else if (parsed.kind === "set_priority" && parsed.priority) {
     const claim = await getClaim(args.workspace_id, parsed.gap_id);
-    if (!claim) throw new Error("Gap not found in this workspace.");
+    if (!claim) throw new TrustedApplicationError("Gap not found in this workspace.", "not_found", 404);
     const meta = claimMetadata(claim);
     await updateClaimMetadata({
       workspace_id: args.workspace_id,

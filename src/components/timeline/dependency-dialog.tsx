@@ -87,7 +87,7 @@ export function DependencyDialog({
     const json = res.json as { error?: string };
     setPending(false);
     if (!res.ok) {
-      setError(json.error ?? "Action failed");
+      setError(json.error ?? "We couldn’t complete this change. Check the current state before trying again.");
       return;
     }
     setOpen(false);
@@ -177,7 +177,7 @@ export function DependencyDialog({
                 </label>
               </div>
             ) : null}
-            {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+            {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
           </div>
           <DialogFooter>
             <Button type="submit" size="sm" disabled={pending}>

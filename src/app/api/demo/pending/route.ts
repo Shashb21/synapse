@@ -21,7 +21,7 @@ export async function GET() {
   try {
     await requireCustomerContext();
     if (!(await isDemoModeWorkspace())) {
-      return NextResponse.json({ error: "Only a client-demo workspace has demo shortcuts.", code: "not_demo" }, { status: 403 });
+      return NextResponse.json({ safe_error: true, error: "Only a client-demo workspace has demo shortcuts.", code: "not_demo" }, { status: 403 });
     }
     const [state, placements, proposals, timeline] = await Promise.all([
       loadState(),

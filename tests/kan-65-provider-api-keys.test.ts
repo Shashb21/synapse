@@ -273,7 +273,7 @@ describe("a stored route whose model the provider no longer lists", () => {
   it("set_route refuses the retired model and accepts a listed one (KAN-63 stays consistent)", async () => {
     const refused = await control({ action: "set_route", stage: "S2", provider_id: "anthropic-claude", model: "claude-sonnet-4-5" });
     expect(refused.status).toBe(400);
-    expect(((await refused.json()) as { error: string }).error).toBe("Anthropic · Claude does not serve claude-sonnet-4-5");
+    expect(((await refused.json()) as { error: string }).error).toBe("Choose a model listed for the selected provider.");
     const accepted = await control({ action: "set_route", stage: "S2", provider_id: "anthropic-claude", model: "claude-opus-5-5" });
     expect(accepted.status).toBe(200);
     expect((await routeConfig("S2")).model).toBe("claude-opus-5-5");
@@ -296,7 +296,7 @@ describe("provider OAuth is gone", () => {
     for (const action of ["connect_provider", "disconnect_provider"]) {
       const res = await control({ action, provider_id: "xai-grok" });
       expect(res.status, action).toBe(400);
-      expect(((await res.json()) as { error: string }).error).toBe(`Unknown action ${action}`);
+      expect(((await res.json()) as { error: string }).error).toBe("This action is not available. Reload the page and choose an available action.");
     }
   });
 

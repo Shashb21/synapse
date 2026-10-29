@@ -51,8 +51,8 @@ export default async function AccuracyRunsPage({
         summarizeAccuracyRunCost(workspaceId),
       ]);
     }
-  } catch (error) {
-    loadError = error instanceof Error ? error.message : "Could not load runs";
+  } catch {
+    loadError = "Could not load runs. Reload this page to try again. If this continues, contact your Synapse administrator.";
   }
 
   const unknownWorkspace = Boolean(workspaceId) && !activeWorkspace && !loadError;
@@ -149,7 +149,7 @@ export default async function AccuracyRunsPage({
                     </span>
                   </div>
                   <p className="mt-1 text-[12px] text-muted-foreground">
-                    {run.summary ?? run.error ?? "no summary"}
+                    {run.status === "error" ? "This run could not finish. Review the workspace before running this task again." : run.summary ?? "no summary"}
                   </p>
                   <p className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
                     <span>{run.started_at.slice(0, 16).replace("T", " ")}</span>

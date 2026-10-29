@@ -99,8 +99,11 @@ describe("frozen Gantt read semantics", () => {
     stores.claims.mockRejectedValue(new Error("Projection unavailable"));
     const response = await read();
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: "Projection unavailable" });
+    const body = await response.json();
+    expect(body).toMatchObject({ safe_error: true, error: expect.stringContaining("Check the current state") });
+    expect(body.error).not.toContain("Projection unavailable");
     const tree = await TimelinePage({ searchParams: Promise.resolve({ workspace_id: "ws" }) });
-    expect(treeText(tree)).toContain("Projection unavailable");
+    expect(treeText(tree)).toContain("Could not load timeline. Reload this page to try again.");
+    expect(treeText(tree)).not.toContain("Projection unavailable");
   });
 });

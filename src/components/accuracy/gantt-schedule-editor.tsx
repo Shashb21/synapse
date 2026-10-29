@@ -111,7 +111,7 @@ export function GanttScheduleEditor({
         </p>
       ) : null}
       {error ? (
-        <p className="text-[11px] text-destructive" role="alert">
+        <p className="text-sm text-destructive" role="alert">
           {error}
         </p>
       ) : null}

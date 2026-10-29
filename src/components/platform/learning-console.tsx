@@ -1,5 +1,7 @@
 "use client";
 
+import { postJson, RequestOutcomeError, requestErrorMessage } from "@/lib/post-json";
+
 /** Accessible agreement chart/table and an explicit owner action to create a candidate. */
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -7,6 +9,7 @@ import type { AgreementBucket } from "@/modules/kernel/learning-agreement";
 import type { Actor, StageId } from "@/modules/kernel/contracts";
 
 const STAGES = ["S2", "S3", "S4", "S6", "S8", "S9"] as const;
+const TASK_NAMES = { S2: "Gap extraction", S3: "Tactic extraction", S4: "Evidence mapping", S6: "Partial gap review", S8: "Gap prioritization", S9: "Tactic ideation" };
 import type { RevisionEvaluation } from "@/modules/kernel/prompt-revision-evals";
 type RevisionMetadata = { id: string; stage: StageId; parent_revision: string; instruction_text?: string; creator: Actor; created_at: string; state: string; training_count: number; heldout_count: number };
 export type LearningReport = { bucket: "day" | "week"; agreement: AgreementBucket[]; total: number; date_range: { from: string; to: string } | null; revisions: RevisionMetadata[]; evaluations?: Omit<RevisionEvaluation,"gold_cases">[]; history?: {id:string;stage:string;before_id:string|null;after_id:string|null;action:string;created_at:string;actor:Actor}[] };
@@ -18,45 +21,63 @@ export function LearningConsole({ initial }: { initial: LearningReport }) {
   const [stage, setStage] = useState<typeof STAGES[number]>("S2");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [checkRequired, setCheckRequired] = useState(false);
   const [created, setCreated] = useState<{ id: string; instruction_text: string } | null>(null);
   const rows = report.agreement.filter(row => row.stage === stage);
   async function load(bucket: "day" | "week") {
-    const response = await fetch(`/api/admin/learning?bucket=${bucket}`);
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.error ?? "Learning report could not load.");
-    setReport(body);
+    const response = await postJson<LearningReport>(`/api/admin/learning?bucket=${bucket}`, undefined, { method: "GET" });
+    const body = response.json;
+    if (!response.ok || !Array.isArray(body.agreement) || !Array.isArray(body.revisions)) throw new RequestOutcomeError("The learning report could not load. Reload the report to see the latest candidates and approval state.", "unknown", response.status);
+    setReport(body as LearningReport);
   }
   async function changeBucket(bucket: "day" | "week") {
+    if (busy) return;
     setBusy(true); setError("");
-    try { await load(bucket); } catch (err) { setError(err instanceof Error ? err.message : "Learning report could not load."); }
+    try { await load(bucket); } catch (err) { setError(requestErrorMessage(err, "The learning report could not load. Reload the report to try again.")); }
     finally { setBusy(false); }
   }
   async function propose() {
+    if (busy || checkRequired) return;
     setBusy(true); setError(""); setCreated(null);
+    let completed = false;
     try {
-      const response = await fetch("/api/admin/learning", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "propose", stage }) });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Prompt candidate could not be created.");
-      setCreated(body.revision);
+      const response = await postJson<{ revision: { id: string; instruction_text: string } }>("/api/admin/learning", { action: "propose", stage });
+      if (!response.ok) throw new RequestOutcomeError(response.json.error!, response.outcome, response.status);
+      if (!response.json.revision?.id) throw new RequestOutcomeError("Candidate creation could not be confirmed. Reload the learning report before creating another candidate.", "unknown", response.status);
+      completed = true;
+      setCreated(response.json.revision);
       await load(report.bucket);
-    } catch (err) { setError(err instanceof Error ? err.message : "Prompt candidate could not be created."); }
-    finally { setBusy(false); }
+    } catch (err) {
+      setCheckRequired(completed || !(err instanceof RequestOutcomeError) || err.outcome === "unknown");
+      setError(completed ? "The candidate was created, but the updated learning report could not load. Reload the learning report before making another change." : requestErrorMessage(err, "Candidate creation could not be confirmed. Reload the learning report before creating another candidate."));
+    } finally { setBusy(false); }
   }
   async function act(body: Record<string, unknown>) {
+    if (busy || checkRequired) return;
     setBusy(true); setError("");
-    try { const response = await fetch("/api/admin/learning", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}); const result=await response.json(); if(!response.ok) throw new Error(result.error ?? "Learning action failed."); await load(report.bucket); }
-    catch(err) {setError(err instanceof Error ? err.message : "Learning action failed.");} finally {setBusy(false);}
+    let completed = false;
+    try {
+      const result = await postJson("/api/admin/learning", body);
+      if (!result.ok) throw new RequestOutcomeError(result.json.error!, result.outcome, result.status);
+      if (!("revision" in result.json) && !("evaluation" in result.json)) throw new RequestOutcomeError("This learning change could not be confirmed. Reload the learning report before repeating it.", "unknown", result.status);
+      completed = true;
+      await load(report.bucket);
+    } catch(err) {
+      setCheckRequired(completed || !(err instanceof RequestOutcomeError) || err.outcome === "unknown");
+      setError(completed ? "The learning change completed, but the updated report could not load. Reload the learning report before making another change." : requestErrorMessage(err, "This learning change could not be confirmed. Reload the learning report before repeating it."));
+    } finally { setBusy(false); }
   }
   return <div className="space-y-6" aria-busy={busy}>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    {error && <Button variant="outline" onClick={() => window.location.reload()}>Reload learning report</Button>}
     <section aria-labelledby="agreement-heading">
       <h2 id="agreement-heading" className="text-base font-semibold">Reviewer agreement</h2>
       <p className="mt-1 text-sm text-muted-foreground" data-testid="learning-summary">
         {report.total} decisions · {report.date_range ? `${report.date_range.from.slice(0, 10)} to ${report.date_range.to.slice(0, 10)} (UTC)` : "No decisions recorded"}
       </p>
       <div className="my-4 flex flex-wrap gap-4 text-sm">
-        <label className="flex items-center gap-2">Stage<select aria-label="Stage" value={stage} onChange={event => setStage(event.target.value as typeof stage)} className="rounded-md border border-input bg-background px-2 py-1">{STAGES.map(value => <option key={value}>{value}</option>)}</select></label>
-        <label className="flex items-center gap-2">Group by<select aria-label="Group by" disabled={busy} value={report.bucket} onChange={event => void changeBucket(event.target.value as "day" | "week")} className="rounded-md border border-input bg-background px-2 py-1"><option value="day">Day</option><option value="week">Week</option></select></label>
+        <label className="flex items-center gap-2">Stage<select aria-label="Stage" value={stage} onChange={event => setStage(event.target.value as typeof stage)} className="rounded-md border border-input bg-background px-2 py-1">{STAGES.map(value => <option key={value} value={value}>{TASK_NAMES[value]}</option>)}</select></label>
+        <label className="flex items-center gap-2">Group by<select aria-label="Group by" disabled={busy || checkRequired} value={report.bucket} onChange={event => void changeBucket(event.target.value as "day" | "week")} className="rounded-md border border-input bg-background px-2 py-1"><option value="day">Day</option><option value="week">Week</option></select></label>
       </div>
       {rows.length === 0 ? <p className="py-4 text-sm text-muted-foreground">No decisions recorded for {stage}.</p> : <>
         <figure aria-labelledby="agreement-chart-caption" className="mb-4 border border-border p-3 rounded-lg">
@@ -71,7 +92,7 @@ export function LearningConsole({ initial }: { initial: LearningReport }) {
     <section aria-labelledby="candidate-heading" className="border-t border-border pt-5">
       <h2 id="candidate-heading" className="text-base font-semibold">Prompt candidates</h2>
       <p className="my-2 text-sm text-muted-foreground">Create a version from validated disagreement lessons in this workspace. Decisions reserved for evaluation stay excluded. A candidate needs evaluation and approval before use.</p>
-      <Button onClick={() => void propose()} disabled={busy}>{busy ? "Working…" : `Create ${stage} candidate`}</Button>
+      <Button onClick={() => void propose()} disabled={busy || checkRequired}>{busy ? "Working…" : `Create ${TASK_NAMES[stage]} candidate`}</Button>
       {created && <div role="status" className="mt-3 text-sm" data-testid="learning-created"><p>Candidate created: {created.id}. The active prompt is unchanged.</p><p className="mt-2 whitespace-pre-wrap">{created.instruction_text}</p></div>}
       {report.revisions.length === 0 ? <p className="mt-4 text-sm text-muted-foreground">No prompt candidates created.</p> : <div className="mt-4 overflow-x-auto"><table className="w-full text-left text-sm"><caption className="sr-only">Prompt revision history</caption><thead><tr className="border-b border-border">{["Version", "Stage", "State", "Parent", "Training / held out", "Creator / time"].map(label => <th scope="col" key={label} className="p-2 font-medium">{label}</th>)}</tr></thead><tbody>{report.revisions.map(revision => <tr key={revision.id} className="border-b border-border"><th scope="row" className="p-2 font-mono text-xs font-normal">{revision.id}</th><td className="p-2">{revision.stage}</td><td className="p-2">{revision.state}</td><td className="p-2 text-xs">{revision.parent_revision}</td><td className="p-2">{revision.training_count} / {revision.heldout_count}</td><td className="p-2">{revision.creator.name}<br />{revision.created_at.slice(0, 16).replace("T", " ")} UTC</td></tr>)}</tbody></table></div>}
       <p className="mt-4 text-sm text-muted-foreground">A sweep champion is only the best score in a sweep. Only an explicitly approved active revision changes live instructions.</p>
@@ -83,8 +104,8 @@ export function LearningConsole({ initial }: { initial: LearningReport }) {
           <div className="mt-3 space-y-3 text-sm">
             <p>Previous additional instructions</p><pre className="whitespace-pre-wrap break-words font-sans">{parent?.instruction_text || "Baseline — no additional approved instructions."}</pre>
             <p>Candidate additional instructions</p><pre className="whitespace-pre-wrap break-words font-sans">{revision.instruction_text}</pre>
-            <div className="flex flex-wrap gap-2"><Button disabled={busy} onClick={()=>void act({action:"evaluate",revision_id:revision.id})}>Evaluate {revision.id}</Button>
-              {revision.state==='active' ? <Button disabled={busy} variant="outline" onClick={()=>void act({action:"rollback",stage:revision.stage,expected_active_id:revision.id})}>Roll back {revision.id}</Button> : <Button disabled={busy||!evaluation?.eligible} variant="outline" onClick={()=>void act({action:"approve",revision_id:revision.id,evaluation_id:evaluation!.id,expected_active_id:evaluation!.baseline_revision_id})}>Approve {revision.id}</Button>}
+            <div className="flex flex-wrap gap-2"><Button disabled={busy || checkRequired} onClick={()=>void act({action:"evaluate",revision_id:revision.id})}>Evaluate {revision.id}</Button>
+              {revision.state==='active' ? <Button disabled={busy || checkRequired} variant="outline" onClick={()=>void act({action:"rollback",stage:revision.stage,expected_active_id:revision.id})}>Roll back {revision.id}</Button> : <Button disabled={busy || checkRequired || !evaluation?.eligible} variant="outline" onClick={()=>void act({action:"approve",revision_id:revision.id,evaluation_id:evaluation!.id,expected_active_id:evaluation!.baseline_revision_id})}>Approve {revision.id}</Button>}
             </div>
             {evaluation && <div aria-label={`Evaluation ${revision.id}`}>
               <p>{evaluation.eligible ? "Eligible for explicit approval" : "Not eligible for approval"}. Gold cases: {evaluation.baseline.gold_count} / {evaluation.candidate.gold_count}; replay cases: {evaluation.baseline.replay_count} / {evaluation.candidate.replay_count} (baseline / candidate).</p>
@@ -93,7 +114,7 @@ export function LearningConsole({ initial }: { initial: LearningReport }) {
               {evaluation.reasons.map(reason=><p key={reason}>{reason}</p>)}
               <div className="overflow-x-auto"><table className="w-full text-left text-sm"><caption className="sr-only">Individual evaluation metrics</caption><thead><tr><th className="p-2">Evidence / metric</th><th className="p-2">Baseline</th><th className="p-2">Candidate</th><th className="p-2">Scored cases</th></tr></thead><tbody>{(['gold','replay'] as const).flatMap(kind=>evaluation.baseline[kind].map(metric=>{const candidate=evaluation.candidate[kind].find(m=>m.name===metric.name);return <tr key={`${kind}-${metric.name}`} className="border-t border-border"><th className="p-2 font-normal">{kind} / {metric.name}</th><td className="p-2">{metric.value.toFixed(4)}</td><td className="p-2">{candidate?.value.toFixed(4)??'Missing'}</td><td className="p-2">{metric.denominator} / {candidate?.denominator??0}</td></tr>}))}</tbody></table></div>
               <p>Excluded cases: {Object.keys(evaluation.excluded).length}</p>{Object.entries(evaluation.excluded).map(([id,reason])=><p key={id} className="break-words">{id}: {reason}</p>)}
-              {evaluation.failures.map((failure,i)=><p key={i} className="break-words">{failure}</p>)}
+              {evaluation.failures.map((_,i)=><p key={i} className="break-words">{"An evaluation case could not finish. Check AI settings and rerun evaluation before approval."}</p>)}
             </div>}
           </div>
         </details>;
