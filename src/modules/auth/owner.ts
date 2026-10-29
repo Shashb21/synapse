@@ -32,12 +32,20 @@ async function testOptOut(): Promise<boolean> {
   }
 }
 
-/** Whether the current request is the platform owner's. */
-export async function ownerAccess(): Promise<OwnerAccess> {
+/**
+ * Whether the current request is the platform owner's; optionally reuse its confirmed session context.
+ * Normal callers deny access when a lookup fails. Configuration readers can require a confirmed
+ * lookup, letting their own unavailable-state handling distinguish an outage from a denied owner.
+ */
+export async function ownerAccess(
+  preloadedContext?: Awaited<ReturnType<typeof sessionContext>>,
+  options: { requireConfirmedLookup?: boolean } = {},
+): Promise<OwnerAccess> {
   let context: Awaited<ReturnType<typeof sessionContext>>;
   try {
-    context = await sessionContext();
-  } catch {
+    context = preloadedContext ?? await sessionContext();
+  } catch (error) {
+    if (options.requireConfirmedLookup) throw error;
     // Outside a request (unit tests calling a handler directly, scripts): only the
     // test bypass admits; anything else is refused.
     const owner = testOwnerBypass() && !(await testOptOut());
@@ -52,7 +60,10 @@ export async function ownerAccess(): Promise<OwnerAccess> {
   }
   const session = context.session;
   const admin_account =
-    session?.provider_id === PASSWORD_PROVIDER ? await isAdminAccount(session.subject).catch(() => false) : false;
+    session?.provider_id === PASSWORD_PROVIDER ? await isAdminAccount(session.subject).catch((error: unknown) => {
+      if (options.requireConfirmedLookup) throw error;
+      return false;
+    }) : false;
   const decision = ownerDecision(
     {
       admin_account,

@@ -26,14 +26,17 @@ export type StageRouteView = {
   module_version: string | null;
   available_modules: { id: string; version: string; title: string }[];
   agentic: boolean;
-  provider_id: string;
-  model: string;
-  temperature: number;
-  max_tokens: number;
-  fallbacks: string[];
-  updated_by: string;
-  updated_at: string;
-  resolved_label: string;
+  config_available?: boolean;
+  wiring_available?: boolean;
+  provider_id: string | null;
+  model: string | null;
+  temperature: number | null;
+  max_tokens: number | null;
+  fallbacks: string[] | null;
+  updated_by: string | null;
+  updated_at: string | null;
+  resolved_label: string | null;
+  resolution_state?: "resolved" | "fallback" | "no_provider" | "off" | "unavailable";
   degraded_reason: string | null;
 };
 
@@ -45,15 +48,18 @@ export function RoutingPanel({
   canActivate,
   credentials = null,
   aiKnown = true,
+  masterEnabled,
 }: {
   routes: StageRouteView[];
+  masterEnabled?: boolean | null;
   providers: ProviderOption[];
   canRoute: boolean;
   canActivate: boolean;
   credentials?: CredentialProvider[] | null;
   aiKnown?: boolean;
 }) {
-  const ai = useAiEnabled();
+  const inheritedAi = useAiEnabled();
+  const ai = masterEnabled === undefined ? inheritedAi : masterEnabled;
   return (
     <section className="grid gap-3" aria-labelledby="routing">
       <div>
@@ -64,7 +70,7 @@ export function RoutingPanel({
           Choose the provider and model for each AI stage. A provider needs a server API key;
           if neither it nor a fallback is available, the run stops and links back here.
         </p>
-        {!aiKnown ? <p className="mt-1 text-[12px] text-muted-foreground">Master switch status unavailable; whether saved routes are in use is unknown.</p> : ai ? null : (
+        {!aiKnown || ai === null ? <p className="mt-1 text-[12px] text-muted-foreground">Master AI state unavailable; whether saved routes are in use is unknown. Confirmed routes can still be edited.</p> : ai ? null : (
           <p className="mt-1 text-[12px] text-[var(--unknown-foreground)]" data-testid="routing-ai-off">
             AI is off, so these routes are not used. You can still edit them; they take effect when
             an admin turns AI back on.
@@ -78,8 +84,8 @@ export function RoutingPanel({
             route={route}
             providers={providers}
             credentials={credentials}
-            canRoute={canRoute}
-            canActivate={canActivate}
+            canRoute={canRoute && route.config_available !== false}
+            canActivate={canActivate && route.wiring_available !== false}
           />
         ))}
       </div>
@@ -101,11 +107,11 @@ function StageRouteCard({
   credentials?: CredentialProvider[] | null;
 }) {
   const router = useRouter();
-  const [providerId, setProviderId] = useState(route.provider_id);
-  const [model, setModel] = useState(route.model);
-  const [temperature, setTemperature] = useState(String(route.temperature));
-  const [maxTokens, setMaxTokens] = useState(String(route.max_tokens));
-  const [fallbacks, setFallbacks] = useState(route.fallbacks.join(", "));
+  const [providerId, setProviderId] = useState(route.provider_id ?? "");
+  const [model, setModel] = useState(route.model ?? "");
+  const [temperature, setTemperature] = useState(route.temperature === null ? "" : String(route.temperature));
+  const [maxTokens, setMaxTokens] = useState(route.max_tokens === null ? "" : String(route.max_tokens));
+  const [fallbacks, setFallbacks] = useState(route.fallbacks?.join(", ") ?? "");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
@@ -115,17 +121,19 @@ function StageRouteCard({
     route.fallbacks, route.updated_at,
   ]);
   const [previousPersisted, setPreviousPersisted] = useState(persisted);
-  if (previousPersisted !== persisted) {
+  // Unknown saved settings retire confirmations, while the editable draft survives recovery.
+  if (route.config_available === false && saved !== null) setSaved(null);
+  if (route.config_available !== false && previousPersisted !== persisted) {
     setPreviousPersisted(persisted);
-    setProviderId(route.provider_id);
-    setModel(route.model);
+    setProviderId(route.provider_id ?? "");
+    setModel(route.model ?? "");
     setTemperature(String(route.temperature));
     setMaxTokens(String(route.max_tokens));
-    setFallbacks(route.fallbacks.join(", "));
+    setFallbacks((route.fallbacks?.join(", ") ?? ""));
     setError(null);
     if (providerId !== route.provider_id || model !== route.model ||
         temperature !== String(route.temperature) || maxTokens !== String(route.max_tokens) ||
-        fallbacks !== route.fallbacks.join(", ")) setSaved(null);
+        fallbacks !== (route.fallbacks?.join(", ") ?? "")) setSaved(null);
   }
 
   function clearFeedback() {
@@ -134,10 +142,11 @@ function StageRouteCard({
   }
 
   const provider = providers.find((candidate) => candidate.id === providerId);
-  const models = provider?.models ?? [route.model];
+  const models = provider?.models ?? (model ? [model] : []);
   const readiness = credentialFeedback({ provider_id: providerId, model, fallbacks: fallbacks.split(",").map(id => id.trim()).filter(Boolean) }, credentials);
 
   async function save() {
+    if (!canRoute) return;
     setPending(true);
     setError(null);
     setSaved(null);
@@ -172,6 +181,7 @@ function StageRouteCard({
   }
 
   async function activate(moduleId: string) {
+    if (!canActivate) return;
     clearFeedback();
     setPending(true);
     const res = await postJson("/api/control", { action: "activate_module", stage: route.stage, module_id: moduleId });
@@ -191,7 +201,7 @@ function StageRouteCard({
         <div className="min-w-0">
           <h3 className="text-[12px] font-semibold text-foreground">{route.stage_title}</h3>
           <p className="mt-0.5 break-all text-[11px] text-muted-foreground">
-            {route.module_id ?? "no module registered"}
+            {route.wiring_available === false ? "Module configuration unavailable. Retry before changing the active implementation." : route.module_id ?? "no module registered"}
             {route.module_version ? ` · v${route.module_version}` : ""}
           </p>
         </div>
@@ -200,9 +210,11 @@ function StageRouteCard({
         </Badge>
       </div>
 
+      {route.config_available === false ? <p className="text-sm text-[var(--unknown-foreground)]">Saved route unavailable. Retry configuration before saving this stage. Existing unsaved edits are kept.</p> : null}
       {route.agentic ? <p className="break-words text-[12px] text-muted-foreground">
-        Resolves to <span className="text-foreground">{route.resolved_label}</span>
-        {route.degraded_reason ? ` · ${route.degraded_reason}` : ""}
+        {route.resolution_state === "unavailable"
+          ? "Route preview unavailable. Retry configuration to confirm which provider can run this stage."
+          : <>{route.resolved_label ? <>Resolves to <span className="text-foreground">{route.resolved_label}</span>{route.degraded_reason ? " · " : ""}</> : null}{route.degraded_reason}</>}
       </p> : null}
 
       {route.agentic ? (
@@ -222,6 +234,7 @@ function StageRouteCard({
                 if (picked) setModel(picked.default_model);
               }}
             >
+              {!providerId ? <option value="" disabled>Unavailable — retry configuration</option> : null}
               {providers.map((option) => (
                 <option key={option.id} value={option.id}>
                   {option.label}
@@ -237,6 +250,7 @@ function StageRouteCard({
               disabled={!canRoute || pending}
               onChange={(event) => setModel(event.target.value)}
             >
+              {!model ? <option value="" disabled>Unavailable — retry configuration</option> : null}
               {models.map((option) => (
                 <option key={option} value={option}>
                   {option}
@@ -316,7 +330,7 @@ function StageRouteCard({
           </Button>
         ) : null}
         <span role="status" className="text-[12px] text-muted-foreground">
-          {saved ? `${saved}${saved === "Saved preferences." ? ` ${readiness}` : ""}` : (pending ? "Saving…" : `Last set by ${route.updated_by}`)}
+          {saved ? `${saved}${saved === "Saved preferences." ? ` ${readiness}` : ""}` : (pending ? "Saving…" : route.config_available === false ? "Saved route unavailable" : `Last set by ${route.updated_by}`)}
         </span>
       </div>
       {error ? <p role="alert" className="text-[11px] text-destructive">{error}</p> : null}

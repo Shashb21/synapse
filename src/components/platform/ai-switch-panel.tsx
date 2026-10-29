@@ -15,9 +15,9 @@ export function AiSwitchPanel({
   mayToggle,
   identity,
 }: {
-  ai: AiSwitch;
+  ai: AiSwitch | null;
   /** The stored per-section switches (the master switch still has to be on). */
-  sections: AiSections;
+  sections: AiSections | null;
   mayToggle: boolean;
   identity: ActionIdentity;
 }) {
@@ -29,33 +29,34 @@ export function AiSwitchPanel({
             AI for all customers (master switch)
           </h2>
           <p className="mt-1 text-[13px] text-foreground" data-testid="ai-switch-state">
-            AI is {ai.enabled ? "on" : "off"}
-            {ai.enabled ? " — each section below decides where it runs" : " for every customer"}
+            {ai ? <>AI is {ai.enabled ? "on" : "off"}
+            {ai.enabled ? " — each section below decides where it runs" : " for every customer"}</> : "Master AI switch unavailable. Retry configuration to read its saved state."}
           </p>
           <p className="mt-1 max-w-2xl text-[12px] text-muted-foreground">
-            {ai.enabled
+            {ai?.enabled
               ? "Stages may call the routed models: extraction, mapping, suggestions, critics and schedules."
-              : "No model is called and there is no upload or parsing. Work starts at Add gaps and Add tactics; mappings, needs, priorities, ideas and dates are all entered by hand."}
+              : ai ? "No model is called and there is no upload or parsing. Work starts at Add gaps and Add tactics; mappings, needs, priorities, ideas and dates are all entered by hand." : "The saved master state could not be confirmed. Master and section changes are disabled until it is available."}
           </p>
           <p className="mt-1 max-w-2xl text-[11px] text-muted-foreground" data-testid="ai-switch-workspace-note">
             Customers have no AI switch. Where a section is off they see the manual flow only, with no AI buttons or
             suggestions. While this master switch is off, every section is off.
           </p>
-          {ai.updated_by ? (
+          {ai?.updated_by ? (
             <p className="mt-1 text-[11px] text-muted-foreground">
               Last set by {ai.updated_by} · {ai.updated_at}
             </p>
           ) : null}
         </div>
-        {mayToggle ? (
+        {mayToggle && ai ? (
           <AiToggle enabled={ai.enabled} actorName={identity.actor_name} />
         ) : (
-          <p className="text-[11px] text-muted-foreground">Only an admin can change this.</p>
+          <p className="text-[11px] text-muted-foreground">{ai ? "Only an admin can change this." : "Master changes unavailable."}</p>
         )}
       </div>
 
       <div className="mt-4 border-t border-border pt-3" data-testid="ai-sections">
         <h3 className="text-sm font-semibold text-foreground">AI by section</h3>
+        {!sections ? <p className="mt-1 text-sm text-[var(--unknown-foreground)]">Section switches unavailable. Retry configuration to read their saved states.</p> : null}
         <ul className="mt-2 grid gap-1.5">
           {AI_SECTIONS.map((section) => (
             <li
@@ -73,15 +74,15 @@ export function AiSwitchPanel({
                 <span className="rounded-sm bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:text-amber-300">
                   No AI module developed yet
                 </span>
-              ) : mayToggle ? (
+              ) : mayToggle && sections ? (
                 <AiSectionToggle
                   section={section.id}
                   label={section.label}
                   enabled={sections[section.id]}
-                  disabled={!ai.enabled}
+                  disabled={!ai || !ai.enabled}
                 />
               ) : (
-                <span className="text-[11px] text-muted-foreground">{sections[section.id] ? "On" : "Off"}</span>
+                <span className="text-[11px] text-muted-foreground">{sections ? sections[section.id] ? "On" : "Off" : "Unavailable"}</span>
               )}
             </li>
           ))}

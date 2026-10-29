@@ -41,27 +41,32 @@ export function ProviderPanel({
   routedTo = null,
   routingKnown = true,
   aiKnown = true,
+  routesAvailable = true,
+  masterEnabled,
 }: {
   connections: ProviderKeyCardView[];
   defaults: { primary: string; alternate: string; chain?: readonly string[] };
   canRoute: boolean;
   /** Serialized persisted routing config; null when its server read failed. Excludes credentials. */
-  routingSnapshot: string | null;
+  routingSnapshot?: string | null;
+  routesAvailable?: boolean;
+  masterEnabled?: boolean | null;
   /** The provider every stage routes to; null when stages use a mix (KAN-60). */
   routedTo?: string | null;
   routingKnown?: boolean;
   aiKnown?: boolean;
 }) {
-  const ai = useAiEnabled();
+  const inheritedAi = useAiEnabled();
+  const ai = masterEnabled === undefined ? inheritedAi : masterEnabled;
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string; providerId: string; snapshot: string; confirmed: boolean } | null>(null);
-  const persisted = JSON.stringify([routingKnown, routedTo, routingSnapshot]);
+  const persisted = JSON.stringify([routingKnown && routesAvailable, routedTo, routingSnapshot]);
   // Keep immediate feedback until the saved target arrives. Once confirmed,
   // any later routing change retires it permanently; key-only refreshes do not.
   if (notice && notice.snapshot !== persisted) {
-    setNotice(!notice.confirmed && routingKnown && routedTo === notice.providerId
+    setNotice(!notice.confirmed && routingKnown && routesAvailable && routedTo === notice.providerId
       ? { ...notice, snapshot: persisted, confirmed: true }
       : null);
   }
@@ -97,12 +102,13 @@ export function ProviderPanel({
             Each provider uses an API key set in the server environment (.env.local or your host&apos;s
             settings). Keys are never shown or entered here.
           </p>
-          {!aiKnown ? <p className="mt-1 text-[12px] text-muted-foreground">Master switch status unavailable; provider use is unknown.</p> : ai ? null : (
+          {!aiKnown || ai === null ? <p className="mt-1 text-[12px] text-muted-foreground">Master switch status unavailable; provider use is unknown.</p> : ai ? null : (
             <p className="mt-1 text-[12px] text-[var(--unknown-foreground)]" data-testid="providers-ai-off">
               AI is off, so no provider is called. Keys stay in place for when AI is turned back on.
             </p>
           )}
         </div>
+
         {canRoute ? (
           <div className="grid justify-items-end gap-1">
             <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Route every stage to">
@@ -112,7 +118,7 @@ export function ProviderPanel({
                 { connection: alternate, id: defaults.alternate, fallback: "Claude", key: "switch-alternate" },
               ].map((choice) => {
                 const label = choice.connection?.label ?? choice.fallback;
-                const active = routedTo === choice.id;
+                const active = routingKnown && routesAvailable && routedTo === choice.id;
                 return (
                   <Button
                     key={choice.key}
@@ -120,7 +126,7 @@ export function ProviderPanel({
                     className="min-h-11 max-w-full whitespace-normal text-left"
                     variant={active ? "default" : "outline"}
                     aria-pressed={active}
-                    disabled={busy !== null}
+                    disabled={!routingKnown || !routesAvailable || busy !== null}
                     onClick={() =>
                       void post(
                         { action: "set_default_provider", provider_id: choice.id },
@@ -136,7 +142,7 @@ export function ProviderPanel({
               })}
             </div>
             <p className="text-[11px] text-muted-foreground" data-testid="providers-routed-to">
-              {!routingKnown ? "Routing configuration unavailable." : routedTo
+              {!routingKnown ? "Routing configuration unavailable." : !routesAvailable ? "Saved routes unavailable. Retry configuration before replacing every route." : routedTo
                 ? `Every stage routes to ${connections.find((connection) => connection.provider_id === routedTo)?.label ?? routedTo}.`
                 : "Stages use a mix of providers. See Routing below."}
             </p>
@@ -174,7 +180,7 @@ export function ProviderPanel({
                 <div className="min-w-0">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <h3 className="break-words text-sm font-semibold text-foreground">{connection.label}</h3>
-                    {routedTo === connection.provider_id ? (
+                    {routingKnown && routesAvailable && routedTo === connection.provider_id ? (
                       <Badge className="text-[10px]" data-testid="provider-routing-every-stage">
                         Routing every stage
                       </Badge>

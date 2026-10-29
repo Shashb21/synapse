@@ -132,3 +132,24 @@ it("drops a provider from its own draft fallback list when it becomes primary", 
   selectProvider("anthropic-claude");
   expect([...container.querySelectorAll("input")].at(-1)?.value).toBe("");
 });
+
+it("retires a route-save confirmation on unknown settings without losing the draft", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) }));
+  render(); selectProvider("anthropic-claude");
+  await act(async () => [...container.querySelectorAll("button")].find(button => button.textContent?.includes("Save route"))!.click());
+  expect(container.querySelector('[role="status"]')?.textContent).toContain("Saved preferences");
+  render({ ...route, config_available: false, provider_id: null, model: null, fallbacks: null });
+  expect(container.querySelector("select")!.value).toBe("anthropic-claude");
+  expect(container.querySelector('[role="status"]')?.textContent).toContain("Saved route unavailable");
+  render(route);
+  expect(container.querySelector("select")!.value).toBe("anthropic-claude");
+  expect(container.querySelector('[role="status"]')?.textContent).not.toContain("Saved preferences");
+});
+it("disables bulk replacement and retires its notice when a refreshed route list is incomplete", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) }));
+  renderBulk(null, mixedSnapshot);
+  await saveBulkClaude();
+  act(() => root.render(createElement(ProviderPanel, { connections, defaults: { primary: "xai-grok", alternate: "anthropic-claude" }, canRoute: true, routedTo: "anthropic-claude", routingSnapshot: claudeSnapshot, routesAvailable: false })));
+  expect([...container.querySelectorAll("button")].every(button => button.disabled)).toBe(true);
+  expect(container.querySelector('[role="status"]')).toBeNull();
+});

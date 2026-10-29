@@ -210,3 +210,53 @@ test("availability summary links to the priority control and updates after a rou
     await controlAction(request, { action: "set_ai_sections", enabled: true });
   }
 });
+
+// KAN-192: only the disposable suite database is changed, always restored in finally.
+// A temporary column rename causes real settings-read failures without production hooks.
+test("keyboard retry preserves drafts through a real settings outage and confirms recovery", async ({ page, request }, testInfo) => {
+  test.setTimeout(90_000);
+  const { default: postgres } = await import("postgres");
+  const { requireDisposableDatabase } = await import("../support/disposable-database");
+  const pg = postgres(requireDisposableDatabase(process.env.E2E_DATABASE_URL), { max: 1 });
+  let renamed = false;
+  try {
+    await controlAction(request, { action: "set_ai_enabled", enabled: true });
+    await page.goto("/admin/control");
+    const stage = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "S2 · Evidence gap extraction", exact: true }) });
+    const provider = stage.getByRole("combobox", { name: "Provider", exact: true });
+    await provider.selectOption("openai");
+    await pg`alter table public.platform_settings rename column value to kan192_test_unavailable_value`;
+    renamed = true;
+    await page.getByRole("button", { name: "Refresh configuration", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("ai-switch-state")).toContainText("Master AI switch unavailable");
+    await expect(page.getByTestId("ai-availability-summary")).toContainText("Status unavailable");
+    await expect(page.getByTestId("ai-availability-summary")).toContainText("Customer permission unavailable");
+    await expect(provider).toHaveValue("openai");
+    await expect(stage.getByRole("button", { name: "Save route" })).toBeEnabled();
+    await expect(page.getByTestId("provider-card-xai-grok").getByTestId("provider-key-env")).toContainText("XAI_API_KEY");
+    await expect(page.getByTestId("providers-ai-off")).toHaveCount(0);
+    await expect(page.getByRole("status").filter({ hasText: "Configuration is still unavailable" })).toBeVisible();
+    await page.getByRole("button", { name: "Retry configuration", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("button", { name: "Retry configuration", exact: true })).toBeEnabled();
+    await expect(provider).toHaveValue("openai");
+    await page.screenshot({ path: testInfo.outputPath("configuration-unavailable-desktop.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+    await page.screenshot({ path: testInfo.outputPath("configuration-unavailable-narrow.png"), fullPage: true });
+    await pg`alter table public.platform_settings rename column kan192_test_unavailable_value to value`;
+    renamed = false;
+    await page.getByRole("button", { name: "Retry configuration", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("status").filter({ hasText: "Configuration refreshed. Saved settings are available." })).toBeVisible();
+    await expect(page.getByTestId("ai-switch-state")).toContainText("AI is on");
+    await expect(page.getByTestId("ai-availability-summary")).not.toContainText("Status unavailable");
+    await expect(page.getByTestId("ai-availability-summary")).not.toContainText("Customer permission unavailable");
+    await expect(provider).toHaveValue("openai");
+    await page.screenshot({ path: testInfo.outputPath("configuration-recovered-narrow.png"), fullPage: true });
+  } finally {
+    if (renamed) await pg`alter table public.platform_settings rename column kan192_test_unavailable_value to value`;
+    await pg.end({ timeout: 5 });
+  }
+});
