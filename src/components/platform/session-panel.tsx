@@ -62,7 +62,7 @@ export function SessionPanel({
     <section className="grid gap-3 border border-border bg-card p-3 rounded-lg" aria-labelledby="session">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h2 id="session" className="text-[13px] font-semibold text-foreground">
+          <h2 id="session" className="text-base font-semibold text-foreground">
             Who is acting
           </h2>
           <p className="mt-1 text-[12px] text-muted-foreground">
@@ -164,7 +164,7 @@ export function SessionPanel({
         </form>
       ) : null}
 
-      {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+      {error ? <p role="alert" className="text-[12px] text-destructive">{error}</p> : null}
     </section>
   );
 }

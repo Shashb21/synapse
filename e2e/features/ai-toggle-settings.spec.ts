@@ -86,7 +86,9 @@ test("the master switch turns every section off", async ({ page, request }) => {
   await page.goto("/?place=plan&setting=all");
   await expect(page.getByRole("heading", { name: "Prioritization Matrix", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Re-suggest unvalidated", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Section assistance comparison: High, priority validated. Arrow keys move it.", exact: true })).toBeVisible();
+  // Validating priority does not place a gap on the selected matrix axes.
+  // AI being off must keep the manual gap available regardless of placement.
+  await expect(page.getByRole("button", { name: /^Section assistance comparison:/ })).toBeVisible();
   await page.goto("/ideation");
   await expect(page.getByRole("button", { name: /generate (more )?ideas/i })).toHaveCount(0);
   await control(request, { action: "set_ai_enabled", enabled: true, rationale: "e2e" });

@@ -4,14 +4,16 @@ import { SessionPanel } from "@/components/platform/session-panel";
 import { AiSwitchPanel } from "@/components/platform/ai-switch-panel";
 import { AiStatusProvider } from "@/components/platform/ai-status";
 import { aiSwitch, storedAiSections, type AiSwitch } from "@/modules/kernel/ai-switch";
-import { noAiSections } from "@/modules/kernel/ai-sections";
+import { AiAvailabilitySummary } from "./ai-availability-summary";
+import { selectCredentialRoute } from "@/modules/kernel/credential-route";
 import { STAGES, STAGE_IDS } from "@/modules/kernel/contracts";
 import { stageWiring, type StageWiring } from "@/modules/kernel/registry";
-import { previewRoute, routeConfigs, type RouteConfig } from "@/modules/kernel/routing";
+import { routeConfigs, type RouteConfig } from "@/modules/kernel/routing";
 import { listProviderKeys } from "@/modules/llm/api-keys";
 import {
   ALTERNATE_ROUTE_PROVIDER,
   DEFAULT_ROUTE_PROVIDER,
+  DEFAULT_ROUTE_FALLBACKS,
   PROVIDERS,
 } from "@/modules/llm/provider";
 import { capabilitiesOf, can } from "@/modules/auth/roles";
@@ -25,68 +27,38 @@ export type ControlPanelSearchParams = {
 
 /** Owner control panel (/admin/control): the AI switch, provider key status and per-stage routing. Five LLM providers, Grok default, Claude one-click; keys come from the server environment and are never shown or entered here. */
 export async function ControlPanelView({ params }: { params: ControlPanelSearchParams }) {
-  let wiring: StageWiring[] = STAGE_IDS.map((stage) => ({
-    stage,
-    active: null,
-    available: [],
-    activated_by: null,
-    activated_at: null,
-    has_evals: false,
-  }));
-  let configs: RouteConfig[] = STAGE_IDS.map((stage) => ({
-    stage,
-    provider_id: DEFAULT_ROUTE_PROVIDER,
-    model: "grok-4",
-    params: { temperature: 0, max_tokens: 8192 },
-    fallbacks: [ALTERNATE_ROUTE_PROVIDER],
-    updated_by: "default (locked: Grok)",
-    updated_at: "—",
-  }));
-  let identity = await sessionContext().catch(() => ({
+  // Each read retains its own unknown state: one failure must not hide successful reads.
+  const [wiringRead, configRead, identityRead, aiRead, sectionsRead] = await Promise.allSettled([
+    stageWiring(), routeConfigs(), sessionContext(), aiSwitch(), storedAiSections(),
+  ]);
+  const wiring: StageWiring[] | null = wiringRead.status === "fulfilled" ? wiringRead.value : null;
+  const configs: RouteConfig[] | null = configRead.status === "fulfilled" ? configRead.value : null;
+  const ai: AiSwitch | null = aiRead.status === "fulfilled" ? aiRead.value : null;
+  const sections = sectionsRead.status === "fulfilled" ? sectionsRead.value.sections : null;
+  const identity = identityRead.status === "fulfilled" ? identityRead.value : {
     session: null,
     actor: { name: "Unsigned (demo)", function: "medical_affairs" as const },
-    role: "medical_affairs" as const,
-    demo: true,
-    signed_in: false,
-  }));
-
-  try {
-    [wiring, configs, identity] = await Promise.all([stageWiring(), routeConfigs(), sessionContext()]);
-  } catch {
-    // Control panel must render before Postgres is ready.
-  }
-  // Key presence only, read from the environment; never a key's value.
-  const keys = listProviderKeys();
-
-  const ai: AiSwitch = await aiSwitch().catch(() => ({
-    enabled: true,
-    updated_by: null,
-    updated_at: null,
-    rationale: null,
-  }));
-  const sections = await storedAiSections()
-    .then((row) => row.sections)
-    .catch(() => noAiSections());
-  // Platform configuration follows the master switch, not the owner's open workspace.
-  const resolved = await Promise.all(STAGE_IDS.map((stage) => previewRoute(stage, ai.enabled)));
+    role: "medical_affairs" as const, demo: true, signed_in: false,
+  };
+  // Presence metadata only; never send credentials or exception messages to the browser.
+  let keys: ReturnType<typeof listProviderKeys> | null = null;
+  try { keys = listProviderKeys(); } catch { /* Unknown remains explicit in the summary. */ }
+  const credentialProviders = keys?.map(key => ({ ...key, id: key.provider_id })) ?? null;
   // The owner holds every platform capability, whatever their plan role.
   const owner = (await ownerAccess()).owner;
   const may = (capability: Parameters<typeof can>[1]) => owner || can(identity.role, capability);
 
-  const routes: StageRouteView[] = STAGE_IDS.map((stage, index) => {
-    const config = configs.find((row) => row.stage === stage)!;
-    const wired = wiring.find((row) => row.stage === stage)!;
-    const route = resolved[index]!;
-    return {
+  const routes: StageRouteView[] = configs && wiring ? STAGE_IDS.flatMap((stage) => {
+    const config = configs.find((row) => row.stage === stage);
+    const wired = wiring.find((row) => row.stage === stage);
+    if (!config || !wired) return [];
+    const selected = credentialProviders ? selectCredentialRoute(config, credentialProviders).selected : null;
+    return [{
       stage,
       stage_title: `${stage} · ${STAGES[stage].title}`,
       module_id: wired.active?.id ?? null,
       module_version: wired.active?.version ?? null,
-      available_modules: wired.available.map((manifest) => ({
-        id: manifest.id,
-        version: manifest.version,
-        title: manifest.title,
-      })),
+      available_modules: wired.available.map((manifest) => ({ id: manifest.id, version: manifest.version, title: manifest.title })),
       agentic: wired.active?.agentic ?? STAGES[stage].kind === "agentic",
       provider_id: config.provider_id,
       model: config.model,
@@ -95,15 +67,15 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
       fallbacks: config.fallbacks,
       updated_by: config.updated_by,
       updated_at: config.updated_at,
-      resolved_label: `${route.provider_label} · ${route.model}`,
-      // The owner gets owner copy, not the customer's "ask your administrator" text.
-      degraded_reason: !ai.enabled
-        ? AI_OFF_OWNER_MESSAGE
-        : route.degraded
-          ? (route.reason ?? "degraded to a fallback")
-          : null,
-    };
-  });
+      resolved_label: credentialProviders === null ? "Credential status unavailable"
+        : selected ? `${selected.provider.label} · ${selected.model}` : "No configured provider",
+      degraded_reason: ai === null ? "Master switch status unavailable."
+        : !ai.enabled ? AI_OFF_OWNER_MESSAGE
+        : !credentialProviders ? "Credential status unavailable."
+        : selected?.fallback ? "Primary key missing; a configured fallback would be used."
+        : selected ? null : "Set a permitted provider's API key in the server environment.",
+    }];
+  }) : [];
 
   return (
     <>
@@ -114,12 +86,13 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
       ) : null}
       {params.sign_in_error ? (
         <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
-          Sign-in failed: {params.sign_in_error}
+          Sign-in failed. Please try signing in again.
         </p>
       ) : null}
 
-      <div className="grid gap-8">
-        <AiSwitchPanel
+      <div className="control-panel grid min-w-0 gap-8">
+        <AiAvailabilitySummary input={{ master: ai?.enabled ?? null, sections, routes: configs, providers: credentialProviders }} />
+        {ai && sections ? <AiSwitchPanel
           ai={ai}
           sections={sections}
           mayToggle={may("toggle_ai")}
@@ -128,26 +101,21 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
             actor_name: identity.actor.name,
             actor_function: identity.actor.function,
           }}
-        />
-        <SessionPanel
-          actorName={identity.actor.name}
-          role={identity.role}
-          signedIn={identity.signed_in}
-          demo={identity.demo}
-          providers={loginOptions().providers}
-          capabilities={capabilitiesOf(identity.role)}
-        />
+        /> : <p id="ai-switch" role="status" className="text-sm text-muted-foreground">AI settings unavailable. Refresh to try again.</p>}
 
         {/* Providers and routes follow the master switch, not the owner's open workspace. */}
-        <AiStatusProvider enabled={ai.enabled} offBy={ai.enabled ? null : "platform"}>
-        <ProviderPanel
+        <AiStatusProvider enabled={ai?.enabled ?? false} offBy={ai?.enabled ? null : "platform"}>
+        {keys ? <ProviderPanel
           connections={keys.map((key) => ({ ...key, tier: key.tier ?? null }))}
-          defaults={{ primary: DEFAULT_ROUTE_PROVIDER, alternate: ALTERNATE_ROUTE_PROVIDER }}
+          defaults={{ primary: DEFAULT_ROUTE_PROVIDER, alternate: ALTERNATE_ROUTE_PROVIDER, chain: [DEFAULT_ROUTE_PROVIDER, ...DEFAULT_ROUTE_FALLBACKS] }}
           canRoute={may("configure_routing")}
-          routedTo={routedToEveryStage(configs)}
-        />
+          routedTo={configs ? routedToEveryStage(configs) : null}
+          routingSnapshot={configs ? JSON.stringify(configs) : null}
+          routingKnown={configs !== null}
+          aiKnown={ai !== null}
+        /> : <p id="providers" role="status">Provider credential status unavailable. Refresh to try again.</p>}
 
-        <RoutingPanel
+        {configs && wiring ? <RoutingPanel
           routes={routes}
           providers={PROVIDERS.map((provider) => ({
               id: provider.id,
@@ -157,10 +125,20 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
               auth: provider.auth,
             }),
           )}
+          credentials={credentialProviders}
+          aiKnown={ai !== null}
           canRoute={may("configure_routing")}
           canActivate={may("activate_module")}
-        />
+        /> : <p id="routing" role="status">Routing configuration unavailable. Refresh to try again.</p>}
         </AiStatusProvider>
+        <SessionPanel
+          actorName={identity.actor.name}
+          role={identity.role}
+          signedIn={identity.signed_in}
+          demo={identity.demo}
+          providers={loginOptions().providers}
+          capabilities={capabilitiesOf(identity.role)}
+        />
       </div>
     </>
   );

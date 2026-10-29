@@ -148,6 +148,7 @@ describe("AI off: platform, pipeline, runs, control and setup", () => {
         connections: [],
         defaults: { primary: "xai", alternate: "anthropic" },
         canRoute: true,
+        routingSnapshot: "[]",
       }),
       false,
     );
@@ -162,6 +163,7 @@ describe("AI off: platform, pipeline, runs, control and setup", () => {
         defaults: { primary: "xai", alternate: "anthropic" },
         canRoute: true,
         routedTo: "anthropic",
+        routingSnapshot: "[]",
       }),
       true,
     );

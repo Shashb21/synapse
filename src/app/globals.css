@@ -150,3 +150,21 @@
     @apply text-foreground underline-offset-4;
   }
 }
+
+/* Control Panel fields need a visible boundary in either theme (WCAG 1.4.11). */
+.control-panel {
+  --input: #6b7280;
+}
+.dark .control-panel {
+  --input: #9ca3af;
+}
+.control-panel :is(section, article, label) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.control-panel :is(input, select) {
+  min-height: 44px;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 16px;
+}

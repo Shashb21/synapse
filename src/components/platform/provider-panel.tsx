@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import { postJson } from "@/lib/post-json";
+import { credentialFeedback } from "./ai-availability";
 
 /** What the panel knows about a provider's key: whether it is set and where from. Never its value. */
 export type ProviderKeyCardView = {
@@ -36,19 +37,36 @@ export function ProviderPanel({
   connections,
   defaults,
   canRoute,
+  routingSnapshot,
   routedTo = null,
+  routingKnown = true,
+  aiKnown = true,
 }: {
   connections: ProviderKeyCardView[];
-  defaults: { primary: string; alternate: string };
+  defaults: { primary: string; alternate: string; chain?: readonly string[] };
   canRoute: boolean;
+  /** Serialized persisted routing config; null when its server read failed. Excludes credentials. */
+  routingSnapshot: string | null;
   /** The provider every stage routes to; null when stages use a mix (KAN-60). */
   routedTo?: string | null;
+  routingKnown?: boolean;
+  aiKnown?: boolean;
 }) {
   const ai = useAiEnabled();
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ text: string; providerId: string; snapshot: string; confirmed: boolean } | null>(null);
+  const persisted = JSON.stringify([routingKnown, routedTo, routingSnapshot]);
+  // Keep immediate feedback until the saved target arrives. Once confirmed,
+  // any later routing change retires it permanently; key-only refreshes do not.
+  if (notice && notice.snapshot !== persisted) {
+    setNotice(!notice.confirmed && routingKnown && routedTo === notice.providerId
+      ? { ...notice, snapshot: persisted, confirmed: true }
+      : null);
+  }
+  const metadata = connections.map(connection => ({ ...connection, id: connection.provider_id }));
+  const bulkReadiness = (id: string) => credentialFeedback({ provider_id: id, model: metadata.find(provider => provider.id === id)?.default_model ?? "", fallbacks: (defaults.chain ?? [defaults.primary, defaults.alternate]).filter(provider => provider !== id) }, metadata);
 
   async function post(body: Record<string, unknown>, key: string, done?: string) {
     setBusy(key);
@@ -61,7 +79,7 @@ export function ProviderPanel({
       setError(json.error ?? "Action failed");
       return;
     }
-    if (done) setNotice(done);
+    if (done) setNotice({ text: done, providerId: String(body.provider_id), snapshot: persisted, confirmed: false });
     router.refresh();
   }
 
@@ -72,14 +90,14 @@ export function ProviderPanel({
     <section className="grid gap-3" aria-labelledby="providers">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 id="providers" className="text-[13px] font-semibold text-foreground">
+          <h2 id="providers" className="text-base font-semibold text-foreground">
             LLM providers
           </h2>
           <p className="mt-1 text-[12px] text-muted-foreground">
             Each provider uses an API key set in the server environment (.env.local or your host&apos;s
             settings). Keys are never shown or entered here.
           </p>
-          {ai ? null : (
+          {!aiKnown ? <p className="mt-1 text-[12px] text-muted-foreground">Master switch status unavailable; provider use is unknown.</p> : ai ? null : (
             <p className="mt-1 text-[12px] text-[var(--unknown-foreground)]" data-testid="providers-ai-off">
               AI is off, so no provider is called. Keys stay in place for when AI is turned back on.
             </p>
@@ -99,6 +117,7 @@ export function ProviderPanel({
                   <Button
                     key={choice.key}
                     size="sm"
+                    className="min-h-11 max-w-full whitespace-normal text-left"
                     variant={active ? "default" : "outline"}
                     aria-pressed={active}
                     disabled={busy !== null}
@@ -106,31 +125,37 @@ export function ProviderPanel({
                       void post(
                         { action: "set_default_provider", provider_id: choice.id },
                         choice.key,
-                        `Every stage now routes to ${label}.`,
+                        `Saved preferences: every stage routes to ${label}.`,
                       )
                     }
                   >
-                    {busy === choice.key ? <Loader2 className="size-3.5 animate-spin" /> : active ? <CircleCheck className="size-3.5" aria-hidden /> : null}
+                    {busy === choice.key ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : active ? <CircleCheck className="size-3.5" aria-hidden /> : null}
                     {label}
                   </Button>
                 );
               })}
             </div>
             <p className="text-[11px] text-muted-foreground" data-testid="providers-routed-to">
-              {routedTo
+              {!routingKnown ? "Routing configuration unavailable." : routedTo
                 ? `Every stage routes to ${connections.find((connection) => connection.provider_id === routedTo)?.label ?? routedTo}.`
                 : "Stages use a mix of providers. See Routing below."}
             </p>
+            <p className="max-w-xl text-[11px] text-muted-foreground" data-testid="bulk-credential-readiness">
+              Key presence only; provider access, quota and connectivity are unverified. You can save routes for later.
+            </p>
+            <ul className="max-w-xl space-y-1 text-[11px] text-muted-foreground" aria-label="Bulk route credential readiness">
+              {[primary, alternate].filter(connection => connection !== undefined).map(connection => <li key={connection.provider_id}>{connection.label}: {bulkReadiness(connection.provider_id)}</li>)}
+            </ul>
           </div>
         ) : null}
       </div>
 
       {notice ? (
         <p role="status" className="text-[12px] text-[var(--known-foreground)]">
-          {notice}
+          {notice.text} {bulkReadiness(notice.providerId)}
         </p>
       ) : null}
-      {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+      {error ? <p role="alert" className="text-[12px] text-destructive">{error}</p> : null}
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {connections.map((connection) => {
@@ -147,8 +172,8 @@ export function ProviderPanel({
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h3 className="truncate text-[12px] font-semibold text-foreground">{connection.label}</h3>
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <h3 className="break-words text-sm font-semibold text-foreground">{connection.label}</h3>
                     {routedTo === connection.provider_id ? (
                       <Badge className="text-[10px]" data-testid="provider-routing-every-stage">
                         Routing every stage
@@ -176,7 +201,7 @@ export function ProviderPanel({
               </div>
 
               <dl className="grid gap-1 text-[11px] text-muted-foreground">
-                <div className="flex justify-between gap-2">
+                <div className="grid min-w-0 grid-cols-[6rem_minmax(0,1fr)] gap-2">
                   <dt>Status</dt>
                   <dd
                     className={configured ? "text-foreground" : "text-[var(--unknown-foreground)]"}
@@ -185,13 +210,13 @@ export function ProviderPanel({
                     {STATUS_COPY[connection.status]}
                   </dd>
                 </div>
-                <div className="flex justify-between gap-2">
+                <div className="grid min-w-0 grid-cols-[6rem_minmax(0,1fr)] gap-2">
                   <dt>Default model</dt>
-                  <dd className="truncate text-foreground">{connection.default_model}</dd>
+                  <dd className="min-w-0 break-all text-foreground">{connection.default_model}</dd>
                 </div>
-                <div className="flex justify-between gap-2">
+                <div className="grid min-w-0 grid-cols-[6rem_minmax(0,1fr)] gap-2">
                   <dt>Credential</dt>
-                  <dd className="truncate text-foreground" data-testid="provider-key-env">
+                  <dd className="min-w-0 break-all text-foreground" data-testid="provider-key-env">
                     {connection.key_env ? (
                       <>
                         <code className="font-mono">{connection.key_env}</code> (server environment)

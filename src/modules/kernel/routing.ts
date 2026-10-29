@@ -1,4 +1,6 @@
 import { sql } from "drizzle-orm";
+import { selectCredentialRoute, stageHasRoute } from "./credential-route";
+export { stageHasRoute } from "./credential-route";
 import { ensurePlatformSchema, sharedDb } from "./db";
 import { AI_OFF_MESSAGE, aiEnabled } from "./ai-switch";
 import * as t from "./schema";
@@ -13,6 +15,7 @@ import {
   DEFAULT_ROUTE_FALLBACKS,
   DEFAULT_ROUTE_PROVIDER,
   NoRouteError,
+  PROVIDERS,
   findProvider,
   providerServes,
   servedModel,
@@ -50,11 +53,6 @@ export const ROUTE_LIMITS = {
   temperature: { min: 0, max: 2 },
   max_tokens: { min: 1, max: 200_000 },
 } as const;
-
-/** Only stages that call a model have a route; mechanical and human stages do not. */
-export function stageHasRoute(stage: StageId): boolean {
-  return STAGES[stage].kind === "agentic";
-}
 
 /**
  * A route parameter from a request body. Blank (missing, null or "") means
@@ -211,32 +209,26 @@ export async function resolveRoute(stage: StageId, frozenConfig?: RouteConfig): 
       reason: null,
     };
   }
-  const candidates = scrubFallbacks([config.provider_id, ...config.fallbacks]);
-  const reasons: string[] = [];
-  for (const [index, id] of candidates.entries()) {
+  const { selected, rejected } = selectCredentialRoute(config, PROVIDERS.map(provider => ({
+    ...provider, status: providerConfigured(provider) ? "configured" : "missing",
+  })));
+  const reasons = rejected.map(({ id, reason }) => {
     const provider = findProvider(id);
-    if (!provider) {
-      reasons.push(`${id}: unknown provider`);
-      continue;
-    }
-    if (provider.auth === "none") {
-      reasons.push(`${provider.label}: not an LLM provider`);
-      continue;
-    }
-    if (!providerConfigured(provider)) {
-      reasons.push(missingKeyReason(provider));
-      continue;
-    }
+    if (reason === "unknown") return `${id}: unknown provider`;
+    if (reason === "not_llm") return `${provider!.label}: not an LLM provider`;
+    return missingKeyReason(provider!);
+  });
+  if (selected) {
     return {
       stage,
-      provider_id: provider.id,
-      provider_label: provider.label,
-      model: index === 0 ? config.model : provider.default_model,
+      provider_id: selected.provider.id,
+      provider_label: selected.provider.label,
+      model: selected.model,
       auth: "api_key",
       connected: true,
       params: config.params,
       fallbacks: config.fallbacks,
-      degraded: index > 0,
+      degraded: selected.fallback,
       reason: reasons.length ? reasons.join("; ") : null,
     };
   }

@@ -25,7 +25,7 @@ export function AiSwitchPanel({
     <section className="border border-border bg-card p-4 rounded-lg" data-testid="ai-switch-panel" aria-labelledby="ai-switch">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 id="ai-switch" className="text-[13px] font-semibold text-foreground">
+          <h2 id="ai-switch" className="text-base font-semibold text-foreground">
             AI for all customers (master switch)
           </h2>
           <p className="mt-1 text-[13px] text-foreground" data-testid="ai-switch-state">
@@ -55,7 +55,7 @@ export function AiSwitchPanel({
       </div>
 
       <div className="mt-4 border-t border-border pt-3" data-testid="ai-sections">
-        <h3 className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">AI by section</h3>
+        <h3 className="text-sm font-semibold text-foreground">AI by section</h3>
         <ul className="mt-2 grid gap-1.5">
           {AI_SECTIONS.map((section) => (
             <li

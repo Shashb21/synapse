@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import { postJson } from "@/lib/post-json";
+import { credentialFeedback } from "./ai-availability";
+import type { CredentialProvider } from "@/modules/kernel/credential-route";
 
 export type ProviderOption = {
   id: string;
@@ -41,25 +43,28 @@ export function RoutingPanel({
   providers,
   canRoute,
   canActivate,
+  credentials = null,
+  aiKnown = true,
 }: {
   routes: StageRouteView[];
   providers: ProviderOption[];
   canRoute: boolean;
   canActivate: boolean;
+  credentials?: CredentialProvider[] | null;
+  aiKnown?: boolean;
 }) {
   const ai = useAiEnabled();
   return (
     <section className="grid gap-3" aria-labelledby="routing">
       <div>
-        <h2 id="routing" className="text-[13px] font-semibold text-foreground">
+        <h2 id="routing" className="text-base font-semibold text-foreground">
           Per-stage routing
         </h2>
         <p className="mt-1 text-[12px] text-muted-foreground">
-          Each stage resolves its own provider, model and parameters. Agentic stages need a
-          provider whose API key is set in the server environment, or the run blocks with a link
-          back here.
+          Choose the provider and model for each AI stage. A provider needs a server API key;
+          if neither it nor a fallback is available, the run stops and links back here.
         </p>
-        {ai ? null : (
+        {!aiKnown ? <p className="mt-1 text-[12px] text-muted-foreground">Master switch status unavailable; whether saved routes are in use is unknown.</p> : ai ? null : (
           <p className="mt-1 text-[12px] text-[var(--unknown-foreground)]" data-testid="routing-ai-off">
             AI is off, so these routes are not used. You can still edit them; they take effect when
             an admin turns AI back on.
@@ -72,6 +77,7 @@ export function RoutingPanel({
             key={route.stage}
             route={route}
             providers={providers}
+            credentials={credentials}
             canRoute={canRoute}
             canActivate={canActivate}
           />
@@ -86,11 +92,13 @@ function StageRouteCard({
   providers,
   canRoute,
   canActivate,
+  credentials = null,
 }: {
   route: StageRouteView;
   providers: ProviderOption[];
   canRoute: boolean;
   canActivate: boolean;
+  credentials?: CredentialProvider[] | null;
 }) {
   const router = useRouter();
   const [providerId, setProviderId] = useState(route.provider_id);
@@ -100,15 +108,39 @@ function StageRouteCard({
   const [fallbacks, setFallbacks] = useState(route.fallbacks.join(", "));
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState<string | null>(null);
+  // Compare stored values, not object identity: an unrelated refresh keeps drafts.
+  const persisted = JSON.stringify([
+    route.provider_id, route.model, route.temperature, route.max_tokens,
+    route.fallbacks, route.updated_at,
+  ]);
+  const [previousPersisted, setPreviousPersisted] = useState(persisted);
+  if (previousPersisted !== persisted) {
+    setPreviousPersisted(persisted);
+    setProviderId(route.provider_id);
+    setModel(route.model);
+    setTemperature(String(route.temperature));
+    setMaxTokens(String(route.max_tokens));
+    setFallbacks(route.fallbacks.join(", "));
+    setError(null);
+    if (providerId !== route.provider_id || model !== route.model ||
+        temperature !== String(route.temperature) || maxTokens !== String(route.max_tokens) ||
+        fallbacks !== route.fallbacks.join(", ")) setSaved(null);
+  }
+
+  function clearFeedback() {
+    setSaved(null);
+    setError(null);
+  }
 
   const provider = providers.find((candidate) => candidate.id === providerId);
   const models = provider?.models ?? [route.model];
+  const readiness = credentialFeedback({ provider_id: providerId, model, fallbacks: fallbacks.split(",").map(id => id.trim()).filter(Boolean) }, credentials);
 
   async function save() {
     setPending(true);
     setError(null);
-    setSaved(false);
+    setSaved(null);
     const res = await postJson("/api/control", {
         action: "set_route",
         stage: route.stage,
@@ -135,52 +167,57 @@ function StageRouteCard({
       setMaxTokens(String(json.config.params.max_tokens));
       setFallbacks(json.config.fallbacks.join(", "));
     }
-    setSaved(true);
+    setSaved("Saved preferences.");
     router.refresh();
   }
 
   async function activate(moduleId: string) {
-    setError(null);
+    clearFeedback();
+    setPending(true);
     const res = await postJson("/api/control", { action: "activate_module", stage: route.stage, module_id: moduleId });
     const json = res.json as { error?: string };
+    setPending(false);
     if (!res.ok) {
       setError(json.error ?? "Could not activate that module");
       return;
     }
+    setSaved("Active implementation updated.");
     router.refresh();
   }
 
   return (
-    <article className="grid gap-2 border border-border bg-card p-3 rounded-lg">
+    <article className="grid min-w-0 content-start gap-3 border border-border bg-card p-3 rounded-lg">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <h3 className="text-[12px] font-semibold text-foreground">{route.stage_title}</h3>
-          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+          <p className="mt-0.5 break-all text-[11px] text-muted-foreground">
             {route.module_id ?? "no module registered"}
             {route.module_version ? ` · v${route.module_version}` : ""}
           </p>
         </div>
         <Badge variant="outline" className="text-[10px]">
-          {route.agentic ? "agentic" : "mechanical"}
+          {route.agentic ? "Uses AI" : "Does not use AI"}
         </Badge>
       </div>
 
-      <p className="text-[11px] text-muted-foreground">
+      {route.agentic ? <p className="break-words text-[12px] text-muted-foreground">
         Resolves to <span className="text-foreground">{route.resolved_label}</span>
         {route.degraded_reason ? ` · ${route.degraded_reason}` : ""}
-      </p>
+      </p> : null}
 
       {route.agentic ? (
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="grid min-w-0 gap-3 sm:grid-cols-2" onChange={clearFeedback}>
           <label className="grid gap-1 text-[11px] text-muted-foreground">
             Provider
             <select
-              className="h-8 rounded-lg border border-input bg-transparent px-2 text-[12px] text-foreground"
+              className="h-11 w-full min-w-0 rounded-lg border border-input bg-card px-2 text-base text-foreground focus-visible:outline-2 focus-visible:outline-ring sm:text-sm"
               value={providerId}
-              disabled={!canRoute}
+              disabled={!canRoute || pending}
               onChange={(event) => {
                 const next = event.target.value;
                 setProviderId(next);
+                // A primary cannot also be its own fallback (same rule as the server).
+                setFallbacks(current => current.split(",").map(id => id.trim()).filter(id => id && id !== next).join(", "));
                 const picked = providers.find((candidate) => candidate.id === next);
                 if (picked) setModel(picked.default_model);
               }}
@@ -195,9 +232,9 @@ function StageRouteCard({
           <label className="grid gap-1 text-[11px] text-muted-foreground">
             Model
             <select
-              className="h-8 rounded-lg border border-input bg-transparent px-2 text-[12px] text-foreground"
+              className="h-11 w-full min-w-0 rounded-lg border border-input bg-card px-2 text-base text-foreground focus-visible:outline-2 focus-visible:outline-ring sm:text-sm"
               value={model}
-              disabled={!canRoute}
+              disabled={!canRoute || pending}
               onChange={(event) => setModel(event.target.value)}
             >
               {models.map((option) => (
@@ -207,39 +244,44 @@ function StageRouteCard({
               ))}
             </select>
           </label>
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
-            Temperature (0 to 2)
-            <Input
-              value={temperature}
-              inputMode="decimal"
-              placeholder="Blank keeps the current value"
-              disabled={!canRoute}
-              onChange={(event) => setTemperature(event.target.value)}
-            />
-          </label>
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
-            Max tokens (1 to 200,000)
-            <Input
-              value={maxTokens}
-              inputMode="numeric"
-              placeholder="Blank keeps the current value"
-              disabled={!canRoute}
-              onChange={(event) => setMaxTokens(event.target.value)}
-            />
-          </label>
-          <label className="grid gap-1 text-[11px] text-muted-foreground sm:col-span-2">
-            Fallbacks, in order
-            <Input
-              value={fallbacks}
-              disabled={!canRoute}
-              placeholder="No fallbacks"
-              onChange={(event) => setFallbacks(event.target.value)}
-            />
-            <span>
-              Provider ids, comma-separated ({providers.map((option) => option.id).join(", ")}). Leave
-              blank for no fallbacks: the stage then fails rather than switch providers.
-            </span>
-          </label>
+          <details className="min-w-0 sm:col-span-2">
+            <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium text-foreground focus-visible:outline-2 focus-visible:outline-ring">Advanced routing settings</summary>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="grid gap-1 text-[11px] text-muted-foreground">
+                Temperature (0 to 2)
+                <Input
+                  value={temperature}
+                  inputMode="decimal"
+                  placeholder="Blank keeps the current value"
+                  disabled={!canRoute || pending}
+                  onChange={(event) => setTemperature(event.target.value)}
+                />
+              </label>
+              <label className="grid gap-1 text-[11px] text-muted-foreground">
+                Max tokens (1 to 200,000)
+                <Input
+                  value={maxTokens}
+                  inputMode="numeric"
+                  placeholder="Blank keeps the current value"
+                  disabled={!canRoute || pending}
+                  onChange={(event) => setMaxTokens(event.target.value)}
+                />
+              </label>
+              <label className="grid gap-1 text-[11px] text-muted-foreground sm:col-span-2">
+                Fallbacks, in order
+                <Input
+                  value={fallbacks}
+                  disabled={!canRoute || pending}
+                  placeholder="No fallbacks"
+                  onChange={(event) => setFallbacks(event.target.value)}
+                />
+                <span>
+                  Provider ids, comma-separated ({providers.map((option) => option.id).join(", ")}). Leave
+                  blank for no fallbacks: the stage then fails rather than switch providers.
+                </span>
+              </label>
+            </div>
+          </details>
         </div>
       ) : (
         <p className="text-[11px] text-muted-foreground">
@@ -251,9 +293,9 @@ function StageRouteCard({
         <label className="grid gap-1 text-[11px] text-muted-foreground">
           Active implementation
           <select
-            className="h-8 rounded-lg border border-input bg-transparent px-2 text-[12px] text-foreground"
+            className="h-11 w-full min-w-0 rounded-lg border border-input bg-card px-2 text-base text-foreground focus-visible:outline-2 focus-visible:outline-ring sm:text-sm"
             value={route.module_id ?? ""}
-            disabled={!canActivate}
+            disabled={!canActivate || pending}
             onChange={(event) => void activate(event.target.value)}
           >
             {route.available_modules.map((option) => (
@@ -265,18 +307,19 @@ function StageRouteCard({
         </label>
       ) : null}
 
-      <div className="flex items-center gap-2">
+      {route.agentic ? <p data-testid="route-credential-readiness" className="break-words text-[12px] text-muted-foreground">{readiness}</p> : null}
+      <div className="flex flex-wrap items-center gap-2">
         {route.agentic ? (
-          <Button size="sm" variant="outline" disabled={!canRoute || pending} onClick={() => void save()}>
-            {pending ? <Loader2 className="size-3.5 animate-spin" /> : null}
+          <Button className="min-h-11" size="sm" variant="outline" disabled={!canRoute || pending} onClick={() => void save()}>
+            {pending ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : null}
             Save route
           </Button>
         ) : null}
-        <span className="text-[11px] text-muted-foreground">
-          {saved ? "Saved." : `Last set by ${route.updated_by}`}
+        <span role="status" className="text-[12px] text-muted-foreground">
+          {saved ? `${saved}${saved === "Saved preferences." ? ` ${readiness}` : ""}` : (pending ? "Saving…" : `Last set by ${route.updated_by}`)}
         </span>
       </div>
-      {error ? <p className="text-[11px] text-destructive">{error}</p> : null}
+      {error ? <p role="alert" className="text-[11px] text-destructive">{error}</p> : null}
     </article>
   );
 }
