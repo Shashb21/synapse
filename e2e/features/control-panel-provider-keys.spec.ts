@@ -137,3 +137,86 @@ test.describe("Control panel provider key status", () => {
     await expect(reason).not.toContainText(/log in|OAuth/i);
   });
 });
+
+// KAN-109: browser proof covers persisted refreshes as well as the API response.
+test("bulk routing updates an unsaved stage form without a page reload", async ({ page }) => {
+  await page.goto("/admin/control");
+  const stage = page.locator("article").filter({ has: page.getByRole("heading", { name: "S2 · Evidence gap extraction", exact: true }) });
+  await stage.getByRole("combobox", { name: "Provider", exact: true }).selectOption("openai");
+  await page.getByRole("button", { name: "Anthropic · Claude", exact: true }).click();
+  await expect(stage.getByRole("combobox", { name: "Provider", exact: true })).toHaveValue("anthropic-claude");
+  await page.getByRole("button", { name: "xAI · Grok", exact: true }).click();
+  await expect(stage.getByRole("combobox", { name: "Provider", exact: true })).toHaveValue("xai-grok");
+});
+
+test("Control Panel fits phone, tablet and desktop in both themes", async ({ page }, testInfo) => {
+  await page.goto("/admin/control");
+  for (const theme of ["light", "dark"]) {
+    await page.evaluate(theme => document.documentElement.classList.toggle("dark", theme === "dark"), theme);
+    for (const width of [390, 768, 1440]) {
+      await page.setViewportSize({ width, height: 1000 });
+      const overflow = await page.evaluate(() => {
+        const panel = document.querySelector(".control-panel")!;
+        return {
+          page: document.documentElement.scrollWidth > window.innerWidth,
+          cards: [...panel.querySelectorAll("article")].some(card => card.scrollWidth > card.clientWidth + 1),
+        };
+      });
+      expect(overflow).toEqual({ page: false, cards: false });
+      for (const toggle of await page.getByRole("switch").all()) {
+        const bounds = await toggle.boundingBox();
+        expect(bounds?.width).toBeGreaterThanOrEqual(44);
+        expect(bounds?.height).toBeGreaterThanOrEqual(44);
+      }
+      await page.screenshot({ path: testInfo.outputPath(`control-${theme}-${width}.png`), fullPage: true });
+    }
+  }
+  const providers = page.getByRole("region", { name: "LLM providers" });
+  await providers.screenshot({ path: testInfo.outputPath("providers-desktop-dark.png") });
+});
+
+// KAN-192: only the disposable suite database is changed, always restored in finally.
+// A temporary column rename causes real settings-read failures without production hooks.
+test("keyboard retry preserves drafts through a real settings outage and confirms recovery", async ({ page, request }, testInfo) => {
+  test.setTimeout(90_000);
+  const { default: postgres } = await import("postgres");
+  const { requireDisposableDatabase } = await import("../support/disposable-database");
+  const pg = postgres(requireDisposableDatabase(process.env.E2E_DATABASE_URL), { max: 1 });
+  let renamed = false;
+  try {
+    await controlAction(request, { action: "set_ai_enabled", enabled: true });
+    await page.goto("/admin/control");
+    const stage = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "S2 · Evidence gap extraction", exact: true }) });
+    const provider = stage.getByRole("combobox", { name: "Provider", exact: true });
+    await provider.selectOption("openai");
+    await pg`alter table public.platform_settings rename column value to kan192_test_unavailable_value`;
+    renamed = true;
+    await page.getByRole("button", { name: "Refresh configuration", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("ai-switch-state")).toContainText("Master AI switch unavailable");
+    await expect(provider).toHaveValue("openai");
+    await expect(stage.getByRole("button", { name: "Save route" })).toBeEnabled();
+    await expect(page.getByTestId("provider-card-xai-grok").getByTestId("provider-key-env")).toContainText("XAI_API_KEY");
+    await expect(page.getByTestId("providers-ai-off")).toHaveCount(0);
+    await expect(page.getByRole("status").filter({ hasText: "Configuration is still unavailable" })).toBeVisible();
+    await page.getByRole("button", { name: "Retry configuration", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("button", { name: "Retry configuration", exact: true })).toBeEnabled();
+    await expect(provider).toHaveValue("openai");
+    await page.screenshot({ path: testInfo.outputPath("configuration-unavailable-desktop.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+    await page.screenshot({ path: testInfo.outputPath("configuration-unavailable-narrow.png"), fullPage: true });
+    await pg`alter table public.platform_settings rename column kan192_test_unavailable_value to value`;
+    renamed = false;
+    await page.getByRole("button", { name: "Retry configuration", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("status").filter({ hasText: "Configuration refreshed. Saved settings are available." })).toBeVisible();
+    await expect(page.getByTestId("ai-switch-state")).toContainText("AI is on");
+    await expect(provider).toHaveValue("openai");
+    await page.screenshot({ path: testInfo.outputPath("configuration-recovered-narrow.png"), fullPage: true });
+  } finally {
+    if (renamed) await pg`alter table public.platform_settings rename column kan192_test_unavailable_value to value`;
+    await pg.end({ timeout: 5 });
+  }
+});

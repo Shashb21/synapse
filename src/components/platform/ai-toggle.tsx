@@ -32,17 +32,13 @@ export function AiToggle({ enabled, actorName }: { enabled: boolean; actorName: 
         disabled={pending}
         onClick={flip}
         data-testid="ai-toggle"
-        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border border-border transition-colors disabled:opacity-60 ${
-          enabled ? "bg-foreground" : "bg-muted"
-        }`}
+        className="inline-flex h-11 w-11 shrink-0 items-center rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50"
       >
-        <span
-          className={`inline-block h-4 w-4 rounded-full bg-background transition-transform ${
-            enabled ? "translate-x-6" : "translate-x-1"
-          }`}
-        />
+        <span aria-hidden className={`inline-flex h-6 w-11 items-center rounded-full border border-input transition-colors ${enabled ? "bg-foreground" : "bg-muted"}`}>
+          <span className={`inline-block size-4 rounded-full bg-background transition-transform motion-reduce:transition-none ${enabled ? "translate-x-6" : "translate-x-1"}`} />
+        </span>
       </button>
-      {error ? <p className="text-[11px] text-destructive">{error}</p> : null}
+      {error ? <p role="alert" className="text-[11px] text-destructive">{error}</p> : null}
     </div>
   );
 }

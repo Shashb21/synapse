@@ -37,14 +37,19 @@ export function ProviderPanel({
   defaults,
   canRoute,
   routedTo = null,
+  routesAvailable = true,
+  masterEnabled,
 }: {
   connections: ProviderKeyCardView[];
   defaults: { primary: string; alternate: string };
   canRoute: boolean;
+  routesAvailable?: boolean;
+  masterEnabled?: boolean | null;
   /** The provider every stage routes to; null when stages use a mix (KAN-60). */
   routedTo?: string | null;
 }) {
-  const ai = useAiEnabled();
+  const inheritedAi = useAiEnabled();
+  const ai = masterEnabled === undefined ? inheritedAi : masterEnabled;
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -72,19 +77,20 @@ export function ProviderPanel({
     <section className="grid gap-3" aria-labelledby="providers">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 id="providers" className="text-[13px] font-semibold text-foreground">
+          <h2 id="providers" className="text-base font-semibold text-foreground">
             LLM providers
           </h2>
           <p className="mt-1 text-[12px] text-muted-foreground">
             Each provider uses an API key set in the server environment (.env.local or your host&apos;s
             settings). Keys are never shown or entered here.
           </p>
-          {ai ? null : (
+          {ai !== false ? null : (
             <p className="mt-1 text-[12px] text-[var(--unknown-foreground)]" data-testid="providers-ai-off">
               AI is off, so no provider is called. Keys stay in place for when AI is turned back on.
             </p>
           )}
         </div>
+        {ai === null ? <p className="text-sm text-[var(--unknown-foreground)]">Master AI state unavailable. Key presence below is confirmed from the server environment.</p> : null}
         {canRoute ? (
           <div className="grid justify-items-end gap-1">
             <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Route every stage to">
@@ -99,9 +105,10 @@ export function ProviderPanel({
                   <Button
                     key={choice.key}
                     size="sm"
+                    className="min-h-11 max-w-full whitespace-normal text-left"
                     variant={active ? "default" : "outline"}
                     aria-pressed={active}
-                    disabled={busy !== null}
+                    disabled={!routesAvailable || busy !== null}
                     onClick={() =>
                       void post(
                         { action: "set_default_provider", provider_id: choice.id },
@@ -110,14 +117,14 @@ export function ProviderPanel({
                       )
                     }
                   >
-                    {busy === choice.key ? <Loader2 className="size-3.5 animate-spin" /> : active ? <CircleCheck className="size-3.5" aria-hidden /> : null}
+                    {busy === choice.key ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : active ? <CircleCheck className="size-3.5" aria-hidden /> : null}
                     {label}
                   </Button>
                 );
               })}
             </div>
             <p className="text-[11px] text-muted-foreground" data-testid="providers-routed-to">
-              {routedTo
+              {!routesAvailable ? "Saved routes unavailable. Retry configuration before replacing every route." : routedTo
                 ? `Every stage routes to ${connections.find((connection) => connection.provider_id === routedTo)?.label ?? routedTo}.`
                 : "Stages use a mix of providers. See Routing below."}
             </p>
@@ -130,7 +137,7 @@ export function ProviderPanel({
           {notice}
         </p>
       ) : null}
-      {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+      {error ? <p role="alert" className="text-[12px] text-destructive">{error}</p> : null}
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {connections.map((connection) => {
@@ -147,9 +154,9 @@ export function ProviderPanel({
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h3 className="truncate text-[12px] font-semibold text-foreground">{connection.label}</h3>
-                    {routedTo === connection.provider_id ? (
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <h3 className="break-words text-sm font-semibold text-foreground">{connection.label}</h3>
+                    {routesAvailable && routedTo === connection.provider_id ? (
                       <Badge className="text-[10px]" data-testid="provider-routing-every-stage">
                         Routing every stage
                       </Badge>
@@ -176,7 +183,7 @@ export function ProviderPanel({
               </div>
 
               <dl className="grid gap-1 text-[11px] text-muted-foreground">
-                <div className="flex justify-between gap-2">
+                <div className="grid min-w-0 grid-cols-[6rem_minmax(0,1fr)] gap-2">
                   <dt>Status</dt>
                   <dd
                     className={configured ? "text-foreground" : "text-[var(--unknown-foreground)]"}
@@ -185,13 +192,13 @@ export function ProviderPanel({
                     {STATUS_COPY[connection.status]}
                   </dd>
                 </div>
-                <div className="flex justify-between gap-2">
+                <div className="grid min-w-0 grid-cols-[6rem_minmax(0,1fr)] gap-2">
                   <dt>Default model</dt>
-                  <dd className="truncate text-foreground">{connection.default_model}</dd>
+                  <dd className="min-w-0 break-all text-foreground">{connection.default_model}</dd>
                 </div>
-                <div className="flex justify-between gap-2">
+                <div className="grid min-w-0 grid-cols-[6rem_minmax(0,1fr)] gap-2">
                   <dt>Credential</dt>
-                  <dd className="truncate text-foreground" data-testid="provider-key-env">
+                  <dd className="min-w-0 break-all text-foreground" data-testid="provider-key-env">
                     {connection.key_env ? (
                       <>
                         <code className="font-mono">{connection.key_env}</code> (server environment)
