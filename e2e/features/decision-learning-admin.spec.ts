@@ -35,7 +35,7 @@ test("supported S8 candidate earns owner approval and rollback restores baseline
     expect(accountResponse.ok(), "Create disposable operator account").toBe(true);
     const account = await accountResponse.json();
     accountId = account.user.id as string;
-    fixture = await startLearningBrowserServer(Number(new URL(baseURL!).port) + 1);
+    fixture = await startLearningBrowserServer();
     const url = fixture.url;
     async function post(path: string, data: Record<string, unknown>) {
       const response = await owner.request.post(`${url}${path}`, { data });
