@@ -141,7 +141,7 @@ test.describe("Control panel provider key status", () => {
 // KAN-109: browser proof covers persisted refreshes as well as the API response.
 test("bulk routing updates an unsaved stage form without a page reload", async ({ page }) => {
   await page.goto("/admin/control");
-  const stage = page.locator("article").filter({ has: page.getByRole("heading", { name: "S2 · Evidence gap extraction", exact: true }) });
+  const stage = page.locator("article").filter({ has: page.getByRole("heading", { name: "Evidence gap extraction", exact: true }) });
   await stage.getByRole("combobox", { name: "Provider", exact: true }).selectOption("openai");
   await page.getByRole("button", { name: "Anthropic · Claude", exact: true }).click();
   await expect(stage.getByRole("combobox", { name: "Provider", exact: true })).toHaveValue("anthropic-claude");
@@ -199,9 +199,12 @@ test("availability summary links to the priority control and updates after a rou
     await page.getByRole("button", { name: "Anthropic · Claude", exact: true }).click();
     await expect(summary).toContainText("Anthropic · Claude");
     await expect(page.getByRole("status").filter({ hasText: "Saved preferences: every stage" })).toContainText("No configured provider");
-    const stage = page.locator("article").filter({ has: page.getByRole("heading", { name: "S2 · Evidence gap extraction", exact: true }) });
+    const stage = page.locator("article").filter({ has: page.getByRole("heading", { name: "Evidence gap extraction", exact: true }) });
     await stage.getByRole("combobox", { name: "Provider", exact: true }).selectOption("openai");
     await expect(stage.getByTestId("route-credential-readiness")).toContainText("No configured provider");
+    // OpenAI is already a saved backup; explicitly correct the new primary conflict.
+    await stage.getByText("Advanced routing settings", { exact: true }).click();
+    await stage.getByRole("button", { name: /^Remove backup \d+: OpenAI · ChatGPT$/ }).click();
     await stage.getByRole("button", { name: "Save route", exact: true }).click();
     await expect(stage.getByRole("status")).toContainText("Saved preferences");
     await expect(summary).toContainText("Mixed providers and models");
@@ -221,10 +224,19 @@ test("keyboard retry preserves drafts through a real settings outage and confirm
   let renamed = false;
   try {
     await controlAction(request, { action: "set_ai_enabled", enabled: true });
+    // Keep the unsaved OpenAI draft valid independently of earlier bulk-route tests.
+    await controlAction(request, {
+      action: "set_route",
+      stage: "S2",
+      provider_id: "xai-grok",
+      model: "grok-4",
+      fallbacks: ["anthropic-claude"],
+    });
     await page.goto("/admin/control");
-    const stage = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "S2 · Evidence gap extraction", exact: true }) });
+    const stage = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "Evidence gap extraction", exact: true }) });
     const provider = stage.getByRole("combobox", { name: "Provider", exact: true });
     await provider.selectOption("openai");
+    await expect(stage.getByRole("button", { name: "Save route" })).toBeEnabled();
     await pg`alter table public.platform_settings rename column value to kan192_test_unavailable_value`;
     renamed = true;
     await page.getByRole("button", { name: "Refresh configuration", exact: true }).focus();
@@ -259,4 +271,44 @@ test("keyboard retry preserves drafts through a real settings outage and confirm
     if (renamed) await pg`alter table public.platform_settings rename column kan192_test_unavailable_value to value`;
     await pg.end({ timeout: 5 });
   }
+});
+
+
+// KAN-194: native controls work from the keyboard and persist explicit order/empty.
+test("keyboard orders backups, saves an empty chain, and fits narrow screens", async ({ page, request }, testInfo) => {
+  await controlAction(request, { action: "set_route", stage: "S2", provider_id: "xai-grok", model: "grok-4", fallbacks: [] });
+  await page.goto("/admin/control");
+  const stage = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "Evidence gap extraction", exact: true }) });
+  await stage.getByText("Advanced routing settings", { exact: true }).click();
+  await expect(stage.getByText("No backup provider; the stage fails if the chosen provider cannot run", { exact: true })).toBeVisible();
+  for (const provider of ["anthropic-claude", "openai"]) {
+    await stage.getByRole("combobox", { name: "Backup provider to add" }).selectOption(provider);
+    await expect(stage.getByRole("button", { name: "Add backup", exact: true })).toBeEnabled();
+    await stage.getByRole("button", { name: "Add backup", exact: true }).focus();
+    await page.keyboard.press("Enter");
+  }
+  await stage.getByRole("button", { name: "Move backup 2: OpenAI · ChatGPT up", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await stage.getByRole("button", { name: "Save route", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await expect.poll(async () => (await controlState(request)).routes.find(row => row.stage === "S2")!.fallbacks).toEqual(["openai", "anthropic-claude"]);
+  await page.reload();
+  await stage.getByText("Advanced routing settings", { exact: true }).click();
+  await expect(stage.getByRole("listitem").first()).toContainText("1. OpenAI · ChatGPT");
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+    expect(await stage.evaluate(element => element.scrollWidth > element.clientWidth + 1)).toBe(false);
+    await stage.screenshot({ path: testInfo.outputPath(`ordered-backups-${width}.png`) });
+  }
+  for (const label of ["OpenAI · ChatGPT", "Anthropic · Claude"]) {
+    await stage.getByRole("button", { name: `Remove backup 1: ${label}`, exact: true }).focus();
+    await page.keyboard.press("Enter");
+  }
+  await stage.getByRole("button", { name: "Save route", exact: true }).click();
+  await expect.poll(async () => (await controlState(request)).routes.find(row => row.stage === "S2")!.fallbacks).toEqual([]);
+  await page.reload();
+  await stage.getByText("Advanced routing settings", { exact: true }).click();
+  await expect(stage.getByRole("listitem")).toHaveCount(0);
+  await expect(stage.getByText("No backup provider; the stage fails if the chosen provider cannot run", { exact: true })).toBeVisible();
 });

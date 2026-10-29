@@ -82,7 +82,7 @@ describe("KAN-192 independent safe edits", () => {
     routes({ ...route, wiring_available: false });
     expect(provider().disabled).toBe(false);
     expect(button("Save route").disabled).toBe(false);
-    expect(container.querySelectorAll("select")[2].disabled).toBe(true);
+    expect((container.querySelector('select[aria-label="Active implementation"]') as HTMLSelectElement).disabled).toBe(true);
     expect(container.textContent).not.toContain("AI is off,");
     expect(container.textContent).toContain("Master AI state unavailable");
   });
@@ -94,7 +94,7 @@ describe("KAN-192 independent safe edits", () => {
   it("keeps activation usable when routing is unavailable", () => {
     routes({ ...route, config_available: false, provider_id: null, model: null, temperature: null, max_tokens: null, fallbacks: null });
     expect(button("Save route").disabled).toBe(true);
-    expect(container.querySelectorAll("select")[2].disabled).toBe(false);
+    expect((container.querySelector('select[aria-label="Active implementation"]') as HTMLSelectElement).disabled).toBe(false);
   });
   it("retains drafts across an unrelated unavailable refresh", () => {
     routes(); changeProvider(); routes({ ...route, wiring_available: false });
