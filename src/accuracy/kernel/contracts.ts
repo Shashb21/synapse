@@ -180,6 +180,8 @@ export type RunStep = {
 export type RunStatus = "running" | "ok" | "error" | "abandoned";
 
 export type TokenUsage = {
+  /** Origin of token counts; absent on historical records. */
+  source?: "provider" | "estimated" | "mixed";
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
@@ -190,8 +192,8 @@ export type CostEstimate = {
   model: string;
   usage: TokenUsage;
   /** USD estimate from live price table */
-  cost_usd: number;
-  price_source: string;
+  cost_usd: number | null;
+  price_source: string | null;
 };
 
 export type ResolvedAccuracyRoute = {

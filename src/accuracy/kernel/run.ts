@@ -14,7 +14,6 @@ import type {
   EvalScore,
   Actor,
 } from "./contracts";
-import { estimateCostUsd } from "./cost";
 import { isTestStub } from "@/modules/kernel/llm";
 
 export type AccuracyRunResult<O> = {
@@ -25,7 +24,7 @@ export type AccuracyRunResult<O> = {
   summary: string;
   output: O;
   evals: EvalScore[];
-  cost_usd: number;
+  cost_usd: number | null;
   token_usage: CostEstimate["usage"];
 };
 
@@ -128,17 +127,13 @@ export async function runAccuracyModule<O = unknown>(args: {
       ? accuracyCompletionFor({
           route: route!,
           run: recorder,
-          onUsage: (usage, cost_usd) => {
+          onUsage: (usage, cost_usd, provenance) => {
             const c: CostEstimate = {
               provider_id: route!.provider_id,
               model: route!.model,
               usage,
               cost_usd,
-              price_source: estimateCostUsd({
-                provider_id: route!.provider_id,
-                model: route!.model,
-                usage,
-              }).price_source,
+              price_source: provenance.price_source,
             };
             costs.push(c);
             recorder.addCost(c);

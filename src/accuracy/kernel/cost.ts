@@ -73,10 +73,14 @@ export function estimateCostUsd(args: {
   provider_id: string;
   model: string;
   usage: { prompt_tokens: number; completion_tokens: number };
-}): { cost_usd: number; price_source: string } {
-  const row = priceForModel(args.provider_id, args.model);
+}): { cost_usd: number | null; price_source: string | null } {
+  if (args.provider_id === "openrouter" && (args.model.endsWith(":free") || args.model === "openrouter/free")) {
+    return { cost_usd: 0, price_source: "openrouter_free_model" };
+  }
+  const key = priceKeyFor(args.provider_id, args.model);
+  const row = priceForModel(key.provider_id, key.model);
   if (!row) {
-    return { cost_usd: 0, price_source: "unknown_model" };
+    return { cost_usd: null, price_source: null };
   }
   const cost_usd =
     (args.usage.prompt_tokens / 1_000_000) * row.input_per_million +
@@ -113,15 +117,9 @@ export function estimateCallCost(args: {
   usage: { input_tokens: number | null; output_tokens: number | null };
 }): { cost_usd: number | null; price_source: string | null } {
   if (args.usage.input_tokens === null && args.usage.output_tokens === null) return { cost_usd: null, price_source: null };
-  // OpenRouter's ":free" variants are billed at zero (https://openrouter.ai/docs/api-reference/limits).
-  if (args.provider_id === "openrouter" && args.model.endsWith(":free")) {
-    return { cost_usd: 0, price_source: "openrouter_free_model" };
-  }
-  const key = priceKeyFor(args.provider_id, args.model);
-  if (!priceForModel(key.provider_id, key.model)) return { cost_usd: null, price_source: null };
-  const { cost_usd, price_source } = estimateCostUsd({
-    ...key,
+  return estimateCostUsd({
+    provider_id: args.provider_id,
+    model: args.model,
     usage: { prompt_tokens: args.usage.input_tokens ?? 0, completion_tokens: args.usage.output_tokens ?? 0 },
   });
-  return { cost_usd, price_source };
 }

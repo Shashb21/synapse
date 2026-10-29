@@ -7,6 +7,7 @@ import {
   CALL_KINDS_META,
   type AgentRole,
   type CallKind,
+  type CostEstimate,
   type JsonCompletion,
   type ResolvedAccuracyRoute,
   type RunHandle,
@@ -19,8 +20,8 @@ import {
   NoRouteError,
   findProvider,
   servedModel,
+  type LlmUsage,
 } from "@/modules/llm/provider";
-import { estimateCostUsd, usageFromMessages } from "./cost";
 import { tracedCompletion } from "@/modules/kernel/llm-calls";
 import { DEFAULT_MAX_TOKENS } from "@/modules/kernel/routing";
 import { isTestStub } from "@/modules/kernel/llm";
@@ -189,7 +190,7 @@ export async function resolveAccuracyRoute(args: {
 export function accuracyCompletionFor(args: {
   route: ResolvedAccuracyRoute;
   run: RunHandle;
-  onUsage: (usage: ReturnType<typeof usageFromMessages>, cost_usd: number) => void;
+  onUsage: (usage: CostEstimate["usage"], cost_usd: number | null, provenance: Pick<CostEstimate, "price_source">) => void;
 }): JsonCompletion {
   return async ({ system, user, purpose, maxTokens }) => {
     if (args.route.auth !== "api_key" || !args.route.connected) {
@@ -199,7 +200,17 @@ export function accuracyCompletionFor(args: {
     // Read at call time and handed straight to the provider; never logged or traced.
     const api_key = providerApiKey(args.route.provider_id);
     if (!api_key) throw new NoRouteError(missingKeyReason(provider));
-    // Kept whole in llm_calls with the provider's token counts (KAN-91).
+    const reportUsage = (counts: LlmUsage | null, cost_usd: number | null, price_source: string | null) => {
+      const usage: CostEstimate["usage"] = {
+        prompt_tokens: counts?.input_tokens ?? 0,
+        completion_tokens: counts?.output_tokens ?? 0,
+        total_tokens: counts?.total_tokens ?? (counts?.input_tokens ?? 0) + (counts?.output_tokens ?? 0),
+        ...(counts?.source ? { source: counts.source } : {}),
+      };
+      args.onUsage(usage, cost_usd, { price_source });
+      return usage;
+    };
+    // Recorded usage retains reported counts and labels successful-call estimates.
     const traced = await tracedCompletion({
       provider,
       request: {
@@ -217,22 +228,10 @@ export function accuracyCompletionFor(args: {
       attempt: 1,
       stage: `accuracy:${args.route.call_kind}`,
       workspace_id: args.run.workspace_id ?? null,
+      onFailure: ({ usage, cost_usd, price_source }) => { reportUsage(usage, cost_usd, price_source); },
     });
     const raw = traced.text;
-    // The provider's counts when it sent them; an estimate from the text otherwise.
-    const usage = traced.usage && traced.usage.input_tokens !== null && traced.usage.output_tokens !== null
-      ? {
-          prompt_tokens: traced.usage.input_tokens,
-          completion_tokens: traced.usage.output_tokens,
-          total_tokens: traced.usage.total_tokens ?? traced.usage.input_tokens + traced.usage.output_tokens,
-        }
-      : usageFromMessages(system, user, raw);
-    const cost_usd = traced.cost_usd ?? estimateCostUsd({
-      provider_id: args.route.provider_id,
-      model: args.route.model,
-      usage,
-    }).cost_usd;
-    args.onUsage(usage, cost_usd);
+    const usage = reportUsage(traced.usage, traced.cost_usd, traced.price_source);
     return { raw, usage };
   };
 }

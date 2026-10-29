@@ -19,12 +19,18 @@ export type LlmRequest = {
 };
 
 /**
- * Token counts the provider reported for one call (KAN-91): Anthropic `usage`,
- * OpenAI/OpenRouter/xAI `usage`, Gemini `usageMetadata`. Input includes cached
- * prompt tokens; output includes reasoning ("thinking") tokens, which are billed
- * as output. A count the provider left out is null.
+ * Token usage from raw provider parsing or resolved call recording. Raw parsers
+ * leave missing counts null. Successful recorded calls fill missing counts from
+ * text estimates and label their origin; failed calls retain reported counts only.
+ * Input includes cached prompt tokens; output includes billed reasoning tokens.
+ * Origin fields are optional so historical records remain readable. Estimates
+ * describe approximate usage, not confirmed provider billing.
  */
 export type LlmUsage = {
+  /** Count origin; absent on historical records and raw provider payloads. */
+  source?: "provider" | "estimated" | "mixed";
+  input_tokens_source?: "provider" | "estimated";
+  output_tokens_source?: "provider" | "estimated";
   input_tokens: number | null;
   output_tokens: number | null;
   total_tokens: number | null;
