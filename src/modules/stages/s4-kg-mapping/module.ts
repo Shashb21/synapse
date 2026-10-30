@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { lockRelationships } from "@/lib/iegp/relationship-change";
 import { withWorkspaceTransaction } from "@/lib/iegp/db";
 import { tacticEditVersion } from "@/lib/iegp/tactic-edit-version";
-import { judgementReferenceSchema, suppliedJudgementRecordSchema, suppliedJudgementRecords } from "@/lib/iegp/judgement-references";
+import { judgementReferenceSchema, suppliedJudgementRecordSchema, suppliedJudgementRecords, inspectSuppliedJudgementReferences } from "@/lib/iegp/judgement-references";
 import { desc } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
@@ -13,7 +13,7 @@ import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import { NoRouteError } from "@/modules/llm/provider";
 import type { ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
 import { assignTacticToGap, humanAcceptedExpansionScope, humanRejectedPairs, loadState, lockAssessmentOwners } from "@/lib/iegp/store";
-import { gapEligibleForMapping, tacticEligibleForMapping } from "@/lib/iegp/engine";
+import { gapEligibleForMapping, tacticEligibleForMapping, emptyDimensions, unlocked } from "@/lib/iegp/engine";
 import { COVERAGE_DIMENSIONS, DIMENSION_VALUES, OVERALL_COVERAGE } from "@/lib/iegp/enums";
 import { MAPPING_SCORE_FLOOR, scoreGapTacticMapping } from "@/lib/iegp/mapping";
 import type { IegpState } from "@/lib/iegp/types";
@@ -161,16 +161,16 @@ function subjectOf(row: Row): string {
   return row.gap_id;
 }
 
-function candidateSets(state: IegpState, input: MappingInput) {
+function candidateSets(state: IegpState, input: MappingInput, development = false) {
   const gaps = state.gaps.filter(
     (gap) =>
-      gapEligibleForMapping(gap.status) &&
+      (gapEligibleForMapping(gap.status) || (development && gap.status === "candidate")) &&
       !gap.retired &&
       (!input.gap_ids?.length || input.gap_ids.includes(gap.id)),
   );
   const parents = state.tactics.filter(
     (tactic) =>
-      tacticEligibleForMapping(tactic) &&
+      (tacticEligibleForMapping(tactic) || (development && tactic.review_status === "candidate" && tactic.status !== "cancelled")) &&
       (!input.tactic_ids?.length || input.tactic_ids.includes(tactic.id)),
   );
   const children = (state.expansions ?? []).flatMap((child) => {
@@ -426,6 +426,7 @@ async function llmProposals(
   args: { gapIds: string[]; previous: Map<string, Row>; objections: Map<string, string>; retry: boolean },
 ): Promise<Map<string, Row>> {
   const payload = (await shared.ctx.complete({
+    role: args.previous.size ? "reviser" : "proposer",
     system: MAPPING_TABLE_PROPOSER_SYSTEM,
     user: JSON.stringify({
       worked_examples: shared.hints || undefined,
@@ -467,6 +468,7 @@ async function llmReviews(
   args: { rows: Row[]; round: number; retry: boolean },
 ): Promise<Map<string, Review>> {
   const payload = (await shared.ctx.complete({
+    role: "critic",
     system: MAPPING_CRITIC_SYSTEM,
     user: JSON.stringify({
       worked_examples: shared.hints || undefined,
@@ -526,6 +528,7 @@ async function llmVerdicts(
   args: { rows: Row[]; revised: Set<string>; retry: boolean },
 ): Promise<Map<string, JudgeVerdict>> {
   const payload = (await shared.ctx.complete({
+    role: "internal_judge",
     system: MAPPING_JUDGE_SYSTEM,
     user: JSON.stringify({
       worked_examples: shared.hints || undefined,
@@ -571,7 +574,7 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
   async run(input, ctx) {
     requireLlm(ctx, "Mapping");
     const { state } = (ctx.replay?.facts as Awaited<ReturnType<typeof freezeFacts>> | undefined) ?? await freezeFacts(input);
-    const { gaps, tactics } = candidateSets(state, input);
+    const { gaps, tactics } = candidateSets(state, input, ctx.execution_scope === "development" && ctx.replay?.evaluation === true);
     const gapById = new Map(gaps.map((gap) => [gap.id, gap]));
     const describeGap = (id: string) => gapById.get(id)?.name ?? id;
     // The kernel hands similar past reviewer decisions (worked examples, KAN-79) to the proposer; the critic and judge see them too.
@@ -700,6 +703,11 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
         }),
     }, { kinds: ["s4_mapping"], text: gaps.map((gap) => `${gap.name} ${gap.statement}`).join(" ") });
 
+    if (ctx.execution_policy === "single_pass") return {
+      output: { mode: outcome.mode, proposed: outcome.proposed.length, rows: outcome.unreviewed, accepted: [], rejected: [], withdrawn: [], committed: [], table: { gaps: gaps.length, tactics: tactics.length, rows_accepted: 0, gaps_still_open: 0 } },
+      agentic: outcome, summary: `${outcome.unreviewed.length} unreviewed mapping row(s)`, evals: outcome.metrics,
+    };
+
     const created_at = nowIso();
     const rows = outcome.judged.flatMap((item) => {
       const base = {
@@ -799,6 +807,7 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
     );
 
     return {
+      agentic: outcome,
       output: {
         mode: outcome.mode,
         proposed: outcome.proposed.length,
@@ -905,4 +914,19 @@ export async function listMappingCandidates(limit = 300) {
 /** Freeze the source facts this stage consumes, before any proposal or human decision. */
 async function freezeFacts(input: z.infer<typeof inputSchema>) {
   return { state: await loadState() };
+}
+
+/** Build isolated coverage using the real dimension and citation contracts, without human adoption. */
+export function developmentMappingCoverages(state: IegpState, rows: MappingTableRow[], runId: string): IegpState["coverages"] {
+  return rows.flatMap(row => {
+    if (!state.gaps.some(gap => gap.id === row.gap_id)) throw new Error("Mapping names an unknown gap.");
+    return row.mappings.map(mapping => {
+      if (!state.tactics.some(tactic => tactic.id === (mapping.parent_tactic_id ?? mapping.tactic_id))) throw new Error("Mapping names an unknown tactic.");
+      const referencesRequired = mapping.coverage !== "not_relevant" || Boolean(mapping.references?.length);
+      if (referencesRequired && !inspectSuppliedJudgementReferences(suppliedJudgementRecords(state, [row.gap_id]), mapping.references).length) throw new Error("Mappings require valid supplied-record references; relevant mappings require at least one.");
+      const dimensions = emptyDimensions();
+      if (mapping.dimensions) for (const dimension of COVERAGE_DIMENSIONS) dimensions[dimension] = { value: mapping.dimensions[dimension], rationale: mapping.rationale, lock: unlocked() };
+      return { id: `${runId}:${row.gap_id}:${mapping.tactic_id}`, creation_run_id: runId, human_adopted: false, assessment_origin: "ai" as const, gap_id: row.gap_id, tactic_id: mapping.parent_tactic_id ?? mapping.tactic_id, expansion_id: mapping.expansion_id ?? null, dimensions, overall: mapping.coverage, overall_rationale: mapping.rationale, overall_lock: unlocked(), stale: false, needs_review: false };
+    });
+  });
 }

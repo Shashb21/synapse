@@ -221,6 +221,9 @@ export async function tracedCompletion(args: {
   attempt: number;
   stage: string | null;
   workspace_id: string | null;
+  /** Optional single-send execution policy; ordinary callers retain provider defaults. */
+  maxAttempts?: number;
+  beforeSend?: () => Promise<void>;
   /** Failed attempts still contribute reported usage or an explicitly unknown cost. */
   onFailure?: (attempt: Pick<LlmCallRecord, "usage" | "cost_usd" | "price_source">) => void;
 }): Promise<{ text: string; usage: LlmUsage | null; llm_call_id: string | null; cost_usd: number | null; price_source: string | null }> {
@@ -265,7 +268,8 @@ export async function tracedCompletion(args: {
           await new Promise((resolve) => setTimeout(resolve, replayDelayMs()));
           text = replayReply({ stage: args.stage, purpose: args.purpose, system: args.request.system, user: args.request.user });
         } else {
-          text = await args.provider.complete(args.request, { api_key: args.api_key }, { onUsage: (reported) => (usage = reported) });
+          await args.beforeSend?.();
+          text = await args.provider.complete(args.request, { api_key: args.api_key }, { maxAttempts: args.maxAttempts, onUsage: (reported) => (usage = reported) });
         }
       } catch (error) {
         usage = callUsage({ usage, status: "error", reply: null, system_prompt: args.request.system, user_prompt: args.request.user });

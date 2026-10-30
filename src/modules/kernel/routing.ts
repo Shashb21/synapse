@@ -314,30 +314,33 @@ export function canPrompt(route: ResolvedRoute): boolean {
 }
 
 /** Builds the JSON completion the module receives, bound to route + run trace. */
-export function completionFor(route: ResolvedRoute, run: RunHandle): JsonCompletion {
-  return async ({ system, user, purpose, maxTokens }) => {
+export type RawCompletionCall = { request: import("@/modules/llm/provider").LlmRequest; purpose: string; attempt: number; role?: import("./contracts").CompletionRole };
+export type RawCompletionExecutor = (call: RawCompletionCall) => Promise<string>;
+
+export function completionFor(route: ResolvedRoute, run: RunHandle, options?: { completeRaw?: RawCompletionExecutor }): JsonCompletion {
+  return async ({ system, user, purpose, maxTokens, role }) => {
     if (!canPrompt(route)) {
       throw new NoRouteError(`${route.provider_label} cannot serve ${purpose}. ${KEY_PROMPT}`);
     }
     const replay = isDemoReplayProvider(route.provider_id);
     const provider = replay ? DEMO_REPLAY_PROVIDER : findProvider(route.provider_id)!;
     // Read at call time and handed straight to the provider; never logged or traced.
-    const api_key = replay ? DEMO_REPLAY_PROVIDER.id : providerApiKey(route.provider_id);
-    if (!api_key) throw new NoRouteError(`${missingKeyReason(provider)}. ${KEY_PROMPT}`);
+    const api_key = options?.completeRaw ? "" : replay ? DEMO_REPLAY_PROVIDER.id : providerApiKey(route.provider_id);
+    if (!options?.completeRaw && !api_key) throw new NoRouteError(`${missingKeyReason(provider)}. ${KEY_PROMPT}`);
     let invalid: string | null = null;
     for (let attempt = 1; attempt <= JSON_REPLY_ATTEMPTS; attempt += 1) {
       // Every call is kept whole in llm_calls; the trace step names it (KAN-91).
-      const { text } = await tracedCompletion({
-        provider,
-        request: {
+      const request = {
           // A reply that wasn't valid JSON is asked for again, saying why (KAN-66).
           system: invalid ? `${system}\n\n${invalidJsonNote(invalid)}` : system,
           user,
           model: route.model,
           temperature: route.params.temperature,
           max_tokens: maxTokens ?? route.params.max_tokens,
-        },
-        api_key,
+        };
+      const text = options?.completeRaw ? await options.completeRaw({ request, purpose, attempt, role }) : (await tracedCompletion({
+        provider, request,
+        api_key: api_key!,
         run,
         step: `llm:${purpose}`,
         detail: `${route.provider_label} · ${route.model}`,
@@ -345,7 +348,7 @@ export function completionFor(route: ResolvedRoute, run: RunHandle): JsonComplet
         attempt,
         stage: route.stage,
         workspace_id: run.workspace_id ?? null,
-      });
+      })).text;
       try {
         return extractJsonObject(text);
       } catch (error) {

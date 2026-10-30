@@ -131,3 +131,6 @@ export async function documentContent(
     content_base64: String(rows[0].content_base64),
   };
 }
+
+/** Initialize parent draft tables before additive execution-table installation. */
+export { ensureTables as ensureDevelopmentTables };
