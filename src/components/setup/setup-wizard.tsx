@@ -280,10 +280,8 @@ export function SetupWizard({
             <div className="grid gap-1">
               <h2 className="text-[15px] font-bold tracking-tight">Welcome to your new workspace</h2>
               <p className="max-w-2xl text-[13px] leading-relaxed text-muted-foreground">
-                This workspace holds one Integrated Evidence Generation Plan. The next six short steps capture its context:
-                the asset, the company and plan, strategic objectives and key decisions, the evidence landscape, the people
-                involved and the treatment settings. Everything is saved to this workspace only; you can save and come back,
-                and edit it any time from Get started. Afterwards a short walkthrough shows you around.
+                This workspace holds one Integrated Evidence Generation Plan. The next steps capture its context.
+                Your work is saved to this workspace only; you can return to edit it from Get started. A short walkthrough follows setup.
               </p>
             </div>
           </div>

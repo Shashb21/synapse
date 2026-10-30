@@ -33,7 +33,38 @@ it("groups the sequence around axes and placement, with AI off", () => {
   const headings = [...host.querySelectorAll("h2")].map(node => node.textContent);
   expect(headings).toEqual(expect.arrayContaining(["1. Choose axes", "2. Review placement"]));
   expect(host.textContent).toContain("Changing axes changes the plotted view");
+  const help = [...host.querySelectorAll("details")].find(node => node.querySelector("summary")?.textContent === "How matrix placement works")!;
+  expect(help).toBeTruthy();
+  expect(help.open).toBe(false);
+  const axisChoices = [...host.querySelectorAll('[data-testid="matrix-axes"] select')].map(node => (node as HTMLSelectElement).value);
+  expect(axisChoices).toHaveLength(2);
+  act(() => help.querySelector("summary")!.click());
+  expect(help.open).toBe(true);
+  expect(help.textContent).toContain("The quadrant only suggests a priority");
+  expect([...host.querySelectorAll('[data-testid="matrix-axes"] select')].map(node => (node as HTMLSelectElement).value)).toEqual(axisChoices);
+  expect(router.refresh).not.toHaveBeenCalled();
   expect(host.textContent).not.toMatch(/Re-suggest|AI/);
+});
+it("keeps axis choices mounted when optional placement help opens and closes", () => {
+  act(() => root.render(createElement(AxisChooser, { scope: "all", scopeLabel: "all settings", axes, gapIds: ["g1"], identity, mayPrioritize: true, submitLabel: "Place gaps" })));
+  const details = host.querySelector("details")!;
+  const summary = details.querySelector("summary")!;
+  const selects = host.querySelectorAll("select");
+  expect(details.open).toBe(false);
+  expect(host.textContent).toContain("Saved priorities apply across all settings");
+  act(() => {
+    selects[0]!.value = "impact";
+    selects[0]!.dispatchEvent(new Event("change", { bubbles: true }));
+    selects[1]!.value = "urgency";
+    selects[1]!.dispatchEvent(new Event("change", { bubbles: true }));
+    summary.click();
+  });
+  expect(details.open).toBe(true);
+  act(() => summary.click());
+  expect(details.open).toBe(false);
+  expect(host.querySelectorAll("select")[0]?.value).toBe("impact");
+  expect(host.querySelectorAll("select")[1]?.value).toBe("urgency");
+  expect(router.refresh).not.toHaveBeenCalled();
 });
 it.each([false, true])("reports a successful placement distinctly when confirm=%s", async confirm => {
   actions(); await submit(confirm);

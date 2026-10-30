@@ -195,7 +195,6 @@ export function ProviderPanel({
                       </Badge>
                     ) : null}
                   </div>
-                  <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{connection.summary}</p>
                 </div>
                 <Icon
                   className={cn(
@@ -206,33 +205,17 @@ export function ProviderPanel({
                 />
               </div>
 
-              <dl className="grid gap-1 text-[11px] text-muted-foreground">
-                <div className="grid min-w-0 grid-cols-[6rem_minmax(0,1fr)] gap-2">
-                  <dt>Status</dt>
-                  <dd
-                    className={configured ? "text-foreground" : "text-[var(--unknown-foreground)]"}
-                    data-testid="provider-key-status"
-                  >
-                    {STATUS_COPY[connection.status]}
-                  </dd>
-                </div>
-                <div className="grid min-w-0 grid-cols-[6rem_minmax(0,1fr)] gap-2">
-                  <dt>Default model</dt>
-                  <dd className="min-w-0 break-all text-foreground">{connection.default_model}</dd>
-                </div>
-                <div className="grid min-w-0 grid-cols-[6rem_minmax(0,1fr)] gap-2">
-                  <dt>Credential</dt>
-                  <dd className="min-w-0 break-all text-foreground" data-testid="provider-key-env">
-                    {connection.key_env ? (
-                      <>
-                        <code className="font-mono">{connection.key_env}</code> (server environment)
-                      </>
-                    ) : (
-                      "none needed"
-                    )}
-                  </dd>
-                </div>
-              </dl>
+              <p className={cn("text-sm", configured ? "text-foreground" : "text-[var(--unknown-foreground)]")} data-testid="provider-key-status">
+                {STATUS_COPY[connection.status]}
+              </p>
+              <details className="min-w-0 text-sm text-muted-foreground">
+                <summary className="w-fit max-w-full cursor-pointer break-words rounded-sm text-sm font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">Setup instructions</summary>
+                <p className="mt-2 break-words leading-relaxed">{connection.summary}</p>
+                <dl className="mt-2 grid gap-2 break-words">
+                  <div><dt className="font-medium text-foreground">Default model</dt><dd className="min-w-0 break-all">{connection.default_model}</dd></div>
+                  <div><dt className="font-medium text-foreground">Credential</dt><dd className="min-w-0 break-all" data-testid="provider-key-env">{connection.key_env ? <><code className="font-mono">{connection.key_env}</code> (server environment)</> : "none needed"}</dd></div>
+                </dl>
+              </details>
             </article>
           );
         })}

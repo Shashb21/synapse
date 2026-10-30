@@ -32,14 +32,13 @@ export function AiSwitchPanel({
             {ai ? <>AI is {ai.enabled ? "on" : "off"}
             {ai.enabled ? " — each section below decides where it runs" : " for every customer"}</> : "Master AI switch unavailable. Retry configuration to read its saved state."}
           </p>
-          <p className="mt-1 max-w-2xl text-[12px] text-muted-foreground">
-            {ai?.enabled
-              ? "Stages may call the routed models: extraction, mapping, suggestions, critics and schedules."
-              : ai ? "No model is called and there is no upload or parsing. Work starts at Add gaps and Add tactics; mappings, needs, priorities, ideas and dates are all entered by hand." : "The saved master state could not be confirmed. Master and section changes are disabled until it is available."}
-          </p>
-          <p className="mt-1 max-w-2xl text-[11px] text-muted-foreground" data-testid="ai-switch-workspace-note">
-            Customers have no AI switch. Where a section is off they see the manual flow only, with no AI buttons or
-            suggestions. While this master switch is off, every section is off.
+          {ai?.enabled ? null : (
+            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+              {ai ? "No model is called and there is no upload or parsing. Work starts at Add gaps and Add tactics; mappings, needs, priorities, ideas and dates are all entered by hand." : "The saved master state could not be confirmed. Master and section changes are disabled until it is available."}
+            </p>
+          )}
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground" data-testid="ai-switch-workspace-note">
+            This setting applies to every customer. Customers have no AI switch; where a section is off, they see the manual flow only. Master off turns every section off.
           </p>
           {ai?.updated_by ? (
             <p className="mt-1 text-[11px] text-muted-foreground">
@@ -54,6 +53,16 @@ export function AiSwitchPanel({
         )}
       </div>
 
+      <details className="mt-3 min-w-0 text-sm text-muted-foreground">
+        <summary className="w-fit max-w-full cursor-pointer break-words rounded-sm text-sm font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">How AI settings work</summary>
+        <div className="mt-2 grid max-w-2xl gap-2 break-words leading-relaxed">
+          <p>Stages may call the routed models: extraction, mapping, suggestions, critics and schedules. The master switch must be on before an enabled section can use AI.</p>
+          <ul className="list-disc pl-5">
+            {AI_SECTIONS.map(section => <li key={section.id}><strong className="font-medium text-foreground">{section.label}</strong> ({section.stages.join(" · ")}): {section.detail}</li>)}
+          </ul>
+        </div>
+      </details>
+
       <div className="mt-4 border-t border-border pt-3" data-testid="ai-sections">
         <h3 className="text-sm font-semibold text-foreground">AI by section</h3>
         {!sections ? <p className="mt-1 text-sm text-[var(--unknown-foreground)]">Section switches unavailable. Retry configuration to read their saved states.</p> : null}
@@ -65,10 +74,8 @@ export function AiSwitchPanel({
             >
               <div className="min-w-0 flex-1">
                 <p className="text-[12px] font-semibold text-foreground">
-                  {section.label}{" "}
-                  <span className="font-mono text-[10px] font-normal text-muted-foreground">{section.stages.join(" · ")}</span>
+                  {section.label}
                 </p>
-                <p className="text-[11px] leading-4 text-muted-foreground">{section.detail}</p>
               </div>
               {!section.built ? (
                 <span className="rounded-sm bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:text-amber-300">
