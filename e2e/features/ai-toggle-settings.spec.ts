@@ -93,3 +93,61 @@ test("the master switch turns every section off", async ({ page, request }) => {
   await expect(page.getByRole("button", { name: /generate (more )?ideas/i })).toHaveCount(0);
   await control(request, { action: "set_ai_enabled", enabled: true, rationale: "e2e" });
 });
+
+test("admin switches announce saves and retain section preferences across master off and on", async ({ page, request }, testInfo) => {
+  await control(request, { action: "set_ai_enabled", enabled: true });
+  await control(request, { action: "set_ai_section", section: "ingestion", enabled: true });
+  await page.goto("/admin/control");
+  const panel = page.getByTestId("ai-switch-panel");
+  const master = panel.getByTestId("ai-toggle");
+  const ingestion = panel.getByTestId("ai-section-ingestion");
+  const sectionFeedback = ingestion.locator("..").getByRole("status");
+  const masterFeedback = master.locator("..").getByRole("status");
+
+  // Hold a real POST so the pending state is observable before persistence.
+  let release!: () => void;
+  const delayed = new Promise<void>(resolve => { release = resolve; });
+  await page.route("**/api/control", async route => {
+    if (route.request().postDataJSON()?.action === "set_ai_section") await delayed;
+    await route.continue();
+  });
+  await ingestion.click();
+  await expect(sectionFeedback).toHaveText("Saving AI for Ingestion…");
+  await expect(ingestion).toBeDisabled();
+  await expect(ingestion).toHaveAttribute("aria-checked", "true");
+  release();
+  await expect(sectionFeedback).toHaveText("AI for Ingestion is off. Saved.");
+  await expect(ingestion).toHaveAttribute("aria-checked", "false");
+  await page.unroute("**/api/control");
+
+  await master.click();
+  await expect(masterFeedback).toContainText("AI for all workspaces is off. Saved.");
+  await expect(panel.getByTestId("ai-switch-state")).toContainText("AI is off");
+  await expect(ingestion).toBeDisabled();
+  await page.reload();
+  await expect(master).toHaveAttribute("aria-checked", "false");
+  await expect(ingestion).toHaveAttribute("aria-checked", "false");
+  await expect(ingestion).toBeDisabled();
+
+  await master.click();
+  await expect(masterFeedback).toContainText("AI for all workspaces is on. Saved.");
+  await expect(ingestion).toBeEnabled();
+  await expect(ingestion).toHaveAttribute("aria-checked", "false");
+  await ingestion.click();
+  await expect(sectionFeedback).toHaveText("AI for Ingestion is on. Saved.");
+  await page.reload();
+  await expect(master).toHaveAttribute("aria-checked", "true");
+  await expect(ingestion).toHaveAttribute("aria-checked", "true");
+
+  // Capture real copy, wrapping and the 44px targets at both common sizes.
+  for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await master.click();
+    await expect(masterFeedback).toContainText("Saved.");
+    await expect(ingestion).toBeDisabled();
+    await expect.poll(() => panel.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await panel.screenshot({ path: testInfo.outputPath(`ai-switch-feedback-${viewport.width}.png`) });
+    await master.click();
+    await expect(ingestion).toBeEnabled();
+  }
+});

@@ -108,3 +108,43 @@ Fresh verification of the follow-up:
 - `npm run typecheck`: exit 0; `/private/tmp/kan197-resumed-types.log`. Changed-file ESLint with `--max-warnings 0`: exit 0; `/private/tmp/kan197-resumed-lint.log`; the final tactic test edit also passed its separate lint check. `git diff --check`: exit 0.
 
 The fresh full Vitest run uses a newly created disposable `synapse_kan197_verify` database on port 55497; its result and latest-head CI are still pending at publication of this follow-up. Jira remains In Progress until the required checks succeed. GitHub and Jira connectivity have recovered.
+
+## Main conflict resolution (2026-10-30)
+
+Merged main `71e2fda` (KAN-194 ordered backups and KAN-195 switch feedback) into KAN-197 at `55b2e05`. The three conflicts preserve the shared switch save hook, pending/confirmed state and accessible announcements, with `text-sm` error copy. Fallback validation preserves ordered duplicate rejection using `TrustedApplicationError` and safe correction guidance. The duplicate API test also verifies the stored route remains unchanged. The KAN-197 browser locator now uses the current business-first “Evidence gap extraction” heading; all recovery assertions are retained. Independent focused conflict review approved with no findings.
+
+Fresh verification:
+
+```sh
+DATABASE_URL=postgres://synapse:synapse@127.0.0.1:55497/synapse_kan197_verify \
+npx vitest run --project application \
+  tests/kan-63-admin-validation.test.ts \
+  tests/kan-192-control-panel-load.test.ts \
+  tests/kan-192-control-panel-recovery.test.ts \
+  tests/kan-192-owner-context.test.ts \
+  tests/kan-193-feedback.test.ts \
+  tests/kan-193-server-state.test.ts \
+  tests/kan-193-summary.test.ts \
+  tests/kan-194-route-preview.test.ts \
+  tests/kan-195-ai-switch-feedback.test.ts \
+  tests/kan-197-errors.test.ts \
+  tests/kan-197-presentation.test.tsx \
+  tests/kan-197-route-regressions.test.ts
+```
+
+Exit 0: 12 files / 143 tests passed. Log: `/private/tmp/kan197-merge-tests.log`. The sandbox initially blocked local database connections; that attempt was stopped and is not counted as passing evidence.
+
+```sh
+E2E_DATABASE_URL=postgres://synapse:synapse@127.0.0.1:55497/synapse_e2e \
+E2E_PORT=43397 npx playwright test \
+  e2e/features/ai-toggle-settings.spec.ts \
+  e2e/features/control-panel-provider-keys.spec.ts \
+  e2e/features/kan-197-actionable-errors.spec.ts \
+  --project=chromium --output=/private/tmp/kan197-merge-browser-results
+```
+
+Exit 0: all 26 tests passed, including setup, in 44.3 seconds. Log: `/private/tmp/kan197-merge-browser.log`. The initial run passed 17 tests and failed on the outdated stage-heading locator (8 subsequent tests skipped); after updating that locator the complete batch passed. Desktop, 390px and 200% CSS layout zoom acceptance, keyboard recovery, unknown-write duplicate prevention, partial saves, resumable imports and historical error suppression are covered.
+
+`npm run typecheck`: exit 0. Focused `npx eslint` on the two switch components, shared save hook, routing module, validation test and KAN-197 browser spec with `--max-warnings 0`: exit 0. `git diff --check`: exit 0. Static logs: `/private/tmp/kan197-merge-types.log` and `/private/tmp/kan197-merge-lint.log` (final browser locator also linted separately).
+
+This is focused integration verification, not a fresh full application-suite run. Actual screen-reader speech and browser-menu zoom remain untested. PR #137 remains open; this conflict resolution does not merge it into main or deploy it. Jira was already Done when re-fetched for this follow-up.

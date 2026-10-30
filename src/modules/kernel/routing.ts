@@ -77,7 +77,7 @@ export function parseRouteParam(value: unknown, field: keyof typeof ROUTE_LIMITS
 /**
  * A route's fallbacks from a request body: a comma-separated string or an
  * array. Blank means "no fallbacks". Unknown providers and the stage's own
- * provider are refused; repeats are dropped.
+ * provider are refused, as are repeated entries.
  */
 export function parseFallbacks(value: unknown, provider_id: string): string[] | undefined {
   if (value === undefined || value === null) return undefined;
@@ -89,7 +89,8 @@ export function parseFallbacks(value: unknown, provider_id: string): string[] | 
   for (const id of ids.map((candidate) => candidate.trim()).filter(Boolean)) {
     if (!findProvider(id)) throw new TrustedApplicationError("Choose an available fallback provider from the provider list.");
     if (id === provider_id) throw new TrustedApplicationError("The primary provider cannot also be its fallback. Choose a different provider.");
-    if (!out.includes(id)) out.push(id);
+    if (out.includes(id)) throw new TrustedApplicationError("Duplicate fallback provider. Remove the repeated entry.");
+    out.push(id);
   }
   return out;
 }
@@ -106,25 +107,65 @@ function defaultConfig(stage: StageId): RouteConfig {
   };
 }
 
-export async function routeConfigs(): Promise<RouteConfig[]> {
+/**
+ * Read stage routes, retaining historical runtime normalization by default.
+ *
+ * Parameters
+ * ----------
+ * options : { preserveStored?: boolean }
+ *   Preserve stale provider/model/backup values for explicit owner correction.
+ *
+ * Returns
+ * -------
+ * Promise<RouteConfig[]>
+ *   Stored routes, or the locked defaults for stages without saved rows.
+ *
+ * Raises
+ * ------
+ * Error
+ *   If the platform schema or saved routes cannot be read.
+ */
+export async function routeConfigs(options: { preserveStored?: boolean } = {}): Promise<RouteConfig[]> {
   await ensurePlatformSchema();
   const rows = await sharedDb().select().from(t.routingConfig);
   return STAGE_IDS.map((stage) => {
     const row = rows.find((candidate) => candidate.stage === stage);
     if (!row) return defaultConfig(stage);
-    const provider_id = row.provider_id === LEGACY_OFFLINE_PROVIDER ? DEFAULT_PROVIDER_ID : row.provider_id;
-    const provider = findProvider(provider_id);
-    return {
+    const config: RouteConfig = {
       stage,
-      provider_id,
-      // A model the provider no longer lists reads as its default (KAN-65).
-      model: provider ? servedModel(provider, row.model) : row.model,
+      provider_id: row.provider_id,
+      model: row.model,
       params: row.params as RouteConfig["params"],
-      fallbacks: scrubFallbacks((row.fallbacks as string[]) ?? DEFAULT_FALLBACKS),
+      fallbacks: (row.fallbacks as string[]) ?? (options.preserveStored ? [] : DEFAULT_FALLBACKS),
       updated_by: row.updated_by,
       updated_at: row.updated_at,
     };
+    return options.preserveStored ? config : normalizeRouteConfig(config);
   });
+}
+
+/**
+ * Interpret a confirmed saved snapshot using the runtime's existing legacy policy.
+ *
+ * Parameters
+ * ----------
+ * config : RouteConfig
+ *   Saved values to interpret without changing the owner's editable snapshot.
+ *
+ * Returns
+ * -------
+ * RouteConfig
+ *   A new configuration with legacy providers, stale models and backups normalized.
+ */
+export function normalizeRouteConfig(config: RouteConfig): RouteConfig {
+  const provider_id = config.provider_id === LEGACY_OFFLINE_PROVIDER ? DEFAULT_PROVIDER_ID : config.provider_id;
+  const provider = findProvider(provider_id);
+  return {
+    ...config,
+    provider_id,
+    model: provider ? servedModel(provider, config.model) : config.model,
+    fallbacks: scrubFallbacks(config.fallbacks),
+  };
 }
 
 export async function routeConfig(stage: StageId): Promise<RouteConfig> {

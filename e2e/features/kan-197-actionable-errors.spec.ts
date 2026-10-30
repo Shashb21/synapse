@@ -44,7 +44,7 @@ test.describe("owner control panel", () => {
       await page.goto("/admin/control");
       await page.waitForLoadState("networkidle");
       await setView(page, view);
-      const stage = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "S2 · Evidence gap extraction", exact: true }) });
+      const stage = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "Evidence gap extraction", exact: true }) });
       await expect(stage).toContainText("Add a provider credential and select a compatible model here.");
       const provider = stage.getByRole("combobox", { name: "Provider", exact: true });
       await provider.selectOption("openai");

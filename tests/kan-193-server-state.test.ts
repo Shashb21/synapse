@@ -6,7 +6,8 @@ import { STAGE_IDS } from "@/modules/kernel/contracts";
 import { noAiSections } from "@/modules/kernel/ai-sections";
 const reads = vi.hoisted(() => ({ ai: vi.fn(), sections: vi.fn(), routes: vi.fn(), resolve: vi.fn(), wiring: vi.fn(), keys: vi.fn() }));
 vi.mock("@/modules/kernel/ai-switch", () => ({ aiSwitch: reads.ai, storedAiSections: reads.sections }));
-vi.mock("@/modules/kernel/routing", () => ({ routeConfigs: reads.routes, resolveRoute: reads.resolve }));
+vi.mock("@/modules/kernel/routing", async importOriginal => ({
+  ...await importOriginal<typeof import("@/modules/kernel/routing")>(), routeConfigs: reads.routes, resolveRoute: reads.resolve }));
 vi.mock("@/modules/kernel/registry", () => ({ stageWiring: reads.wiring }));
 vi.mock("@/modules/llm/api-keys", () => ({ listProviderKeys: reads.keys }));
 vi.mock("@/modules/auth/owner", () => ({ ownerAccess: async () => ({ owner: true }) }));

@@ -2,7 +2,7 @@
 import { aiSwitch, storedAiSections } from "@/modules/kernel/ai-switch";
 import { STAGE_IDS, type StageId } from "@/modules/kernel/contracts";
 import { stageWiring } from "@/modules/kernel/registry";
-import { resolveRoute, routeConfigs } from "@/modules/kernel/routing";
+import { normalizeRouteConfig, resolveRoute, routeConfigs } from "@/modules/kernel/routing";
 import { sessionContext } from "@/modules/auth/session";
 import { ownerAccess } from "@/modules/auth/owner";
 import { NoRouteError } from "@/modules/llm/provider";
@@ -33,7 +33,7 @@ export async function loadControlPanel() {
   const [master, sections, configs, wiring, identity] = await Promise.all([
     read("master", aiSwitch),
     read("sections", async () => (await storedAiSections()).sections),
-    read("routes", routeConfigs),
+    read("routes", () => routeConfigs({ preserveStored: true })),
     read("wiring", stageWiring),
     read("identity", sessionContext),
   ]);
@@ -41,13 +41,16 @@ export async function loadControlPanel() {
   const owner = identity.status === "ready"
     ? await read("owner", () => ownerAccess(identity.value, { requireConfirmedLookup: true }))
     : { status: "unavailable" as const };
+  // Interpret the confirmed snapshot once for runtime consequences, retaining raw saved values.
+  const runtimeConfigs = configs.status === "ready"
+    ? { status: "ready" as const, value: configs.value.map(normalizeRouteConfig) }
+    : configs;
   const resolutions = Object.fromEntries(await Promise.all(STAGE_IDS.map(async stage => {
-    const config = configs.status === "ready" ? configs.value.find(row => row.stage === stage) : undefined;
+    const config = runtimeConfigs.status === "ready" ? runtimeConfigs.value.find(row => row.stage === stage) : undefined;
     if (master.status !== "ready" || !config) return [stage, { status: "unavailable" as const }];
     if (!master.value.enabled) return [stage, { status: "ready" as const, value: { state: "off", label: null, message: AI_OFF_OWNER_MESSAGE } }];
     const result = await read(`resolution:${stage}`, async (): Promise<RoutePreview> => {
       try {
-        // Use the same confirmed settings displayed by the form. Runtime policy stays in resolveRoute.
         const route = await resolveRoute(stage, config);
         return {
           state: route.degraded ? "fallback" : "resolved",
@@ -64,5 +67,5 @@ export async function loadControlPanel() {
     });
     return [stage, result];
   }))) as Record<StageId, LoadResult<RoutePreview>>;
-  return { master, sections, configs, wiring, identity, owner, resolutions };
+  return { master, sections, configs, runtimeConfigs, wiring, identity, owner, resolutions };
 }

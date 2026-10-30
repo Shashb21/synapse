@@ -51,6 +51,7 @@ import {
   parseFallbacks,
   parseRouteParam,
   routeConfig,
+  routeConfigs,
   setRouteConfig,
   stageHasRoute,
   type RouteConfig,
@@ -201,10 +202,23 @@ describe("KAN-63: set_route validates fallbacks", () => {
     expect(await routeConfig("S9")).toEqual(before);
   });
 
-  it("drops repeats, and an empty field means no fallbacks (not the defaults)", async () => {
-    const deduped = await control({ ...base, fallbacks: "openai, anthropic-claude, openai,  ,anthropic-claude" });
-    expect(deduped.status).toBe(200);
-    expect((await routeConfig("S9")).fallbacks).toEqual(["openai", "anthropic-claude"]);
+  it("preserves stale stored routes for owner correction while runtime reads retain normalization", async () => {
+    await control({ ...base, fallbacks: [] });
+    await sharedDb().execute(sql`update public.routing_config set provider_id = 'deterministic-local', model = 'removed-model', fallbacks = '["deterministic-local", "openai", "openai"]'::jsonb where stage = 'S9'`);
+    const raw = (await routeConfigs({ preserveStored: true })).find(row => row.stage === "S9")!;
+    expect(raw).toMatchObject({ provider_id: "deterministic-local", model: "removed-model", fallbacks: ["deterministic-local", "openai", "openai"] });
+    const runtime = await routeConfig("S9");
+    expect(runtime.provider_id).toBe("xai-grok");
+    expect(runtime.model).not.toBe("removed-model");
+    expect(runtime.fallbacks).not.toContain("deterministic-local");
+  });
+
+  it("rejects repeats, and an empty field means no fallbacks (not the defaults)", async () => {
+    const before = await routeConfig("S9");
+    const rejected = await control({ ...base, fallbacks: "openai, anthropic-claude, openai,  ,anthropic-claude" });
+    expect(rejected.status).toBe(400);
+    expect(rejected.body).toMatchObject({ safe_error: true, error: "Duplicate fallback provider. Remove the repeated entry." });
+    expect(await routeConfig("S9")).toEqual(before);
 
     expect((await control({ ...base, fallbacks: "" })).status).toBe(200);
     expect((await routeConfig("S9")).fallbacks).toEqual([]);

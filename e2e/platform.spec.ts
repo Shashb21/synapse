@@ -103,7 +103,9 @@ test.describe("platform surfaces", () => {
     // Nothing on the panel accepts a pasted credential.
     await expect(page.getByRole("textbox", { name: /api key|secret|credential/i })).toHaveCount(0);
     await expect(page.getByPlaceholder(/api key|secret|sk-/i)).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: /S2 · Evidence gap extraction/ })).toBeVisible();
+    const extractionHeading = page.getByRole("heading", { name: "Evidence gap extraction", exact: true });
+    await expect(extractionHeading).toBeVisible();
+    await expect(page.getByRole("article").filter({ has: extractionHeading }).getByText("S2", { exact: true })).toBeVisible();
   });
 
   test("saving the IEGP as final versions it and repaints in place", async ({ page }) => {

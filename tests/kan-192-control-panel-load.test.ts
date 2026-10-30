@@ -11,7 +11,8 @@ const reads = vi.hoisted(() => ({
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("@/modules/kernel/ai-switch", () => ({ aiSwitch: reads.master, storedAiSections: reads.sections }));
-vi.mock("@/modules/kernel/routing", () => ({ routeConfigs: reads.routes, resolveRoute: reads.resolve, previewRoute: reads.resolve }));
+vi.mock("@/modules/kernel/routing", async importOriginal => ({
+  ...await importOriginal<typeof import("@/modules/kernel/routing")>(), routeConfigs: reads.routes, resolveRoute: reads.resolve, previewRoute: reads.resolve }));
 vi.mock("@/modules/kernel/registry", () => ({ stageWiring: reads.wiring }));
 vi.mock("@/modules/auth/session", () => ({ sessionContext: reads.identity, loginOptions: () => ({ providers: [] }) }));
 vi.mock("@/modules/auth/owner", () => ({ ownerAccess: reads.owner }));
@@ -60,14 +61,16 @@ describe("KAN-192 server reads", () => {
   it("uses the real successful loader defaults", async () => {
     const result = await html();
     expect(result).toContain('value="16000"');
-    expect(result).toContain('value="anthropic-claude, openai"');
+    expect(result).toContain("Remove backup 1: Anthropic · Claude");
+    expect(result).toContain("Remove backup 2: OpenAI · ChatGPT");
+    expect(reads.routes).toHaveBeenCalledWith({ preserveStored: true });
     expect(reads.identity).toHaveBeenCalledTimes(1);
   });
   it("does not invent defaults or crash when successful lists omit a stage", async () => {
     reads.routes.mockResolvedValue(configs.filter(row => row.stage !== "S2"));
     reads.wiring.mockResolvedValue(wiring.filter(row => row.stage !== "S3"));
     const result = await html();
-    expect(result).toContain("S2 · Evidence gap extraction");
+    expect(result).toContain("Evidence gap extraction");
     expect(result).toContain("Saved route unavailable");
     expect(result).toContain("Module configuration unavailable");
   });
