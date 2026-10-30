@@ -202,7 +202,7 @@ test("dirty keyboard matrix moves retain the proposed move and reason through Es
   await page.route("**/api/plan", async route => {
     if (route.request().method() === "POST" && route.request().postDataJSON().action === "move_placement") {
       submissions.push(route.request().postDataJSON());
-      if (submissions.length === 1) return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "Matrix save failed; retry" }) });
+      if (submissions.length === 1) return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ safe_error: true, request_outcome: "rejected", error: "Matrix save failed; retry" }) });
     }
     await route.continue();
   });

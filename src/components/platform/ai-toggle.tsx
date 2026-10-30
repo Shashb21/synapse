@@ -36,7 +36,7 @@ export function AiToggle({ enabled, actorName }: { enabled: boolean; actorName: 
         </span>
       </button>
       <p id={`${save.feedbackId}-status`} role="status" aria-live="polite" aria-atomic="true" className="max-w-64 text-right text-xs text-muted-foreground">{status}</p>
-      <p id={`${save.feedbackId}-error`} role="alert" aria-atomic="true" className="max-w-64 text-right text-xs text-destructive">{save.error}</p>
+      <p id={`${save.feedbackId}-error`} role="alert" aria-atomic="true" className="max-w-64 text-right text-sm text-destructive">{save.error}</p>
     </div>
   );
 }

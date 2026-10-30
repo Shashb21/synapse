@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 /** Durable extraction pages: bind progress to source content and save each kind exactly once. */
 import { createHash } from "node:crypto";
 import { and, asc, eq, sql } from "drizzle-orm";
@@ -188,11 +189,11 @@ export async function saveExtractBatch(args: {
     }
     const allowed = new Map(page.blocks.map((block) => [block.id, block]));
     for (const claim of args.claims) {
-      if (!claim.provenance.length) throw new Error("Extraction requires a source quote for every claim.");
+      if (!claim.provenance.length) throw new TrustedApplicationError("Extraction requires a source quote for every claim.");
       for (const span of claim.provenance) {
         const block = allowed.get(span.block_id);
         if (!block || block.workspace_id !== page.workspace_id || !validateProvenance({ block, span }).ok) {
-          throw new Error("Extraction returned an invalid quote or a quote outside this source batch. Retry extraction.");
+          throw new TrustedApplicationError("Extraction returned an invalid quote or a quote outside this source batch. Retry extraction.");
         }
       }
       const claimId = newId(claim.claim_type === "gap" ? "gap" : "tac");

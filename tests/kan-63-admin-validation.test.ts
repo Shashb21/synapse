@@ -194,10 +194,10 @@ describe("KAN-63: set_route validates fallbacks", () => {
     const before = await routeConfig("S9");
     const unknown = await control({ ...base, fallbacks: "anthropic-claude, nope-ai" });
     expect(unknown.status).toBe(400);
-    expect(unknown.body.error).toBe("Unknown fallback provider nope-ai");
+    expect(unknown.body.error).toBe("Choose an available fallback provider from the provider list.");
     const self = await control({ ...base, fallbacks: ["xai-grok"] });
     expect(self.status).toBe(400);
-    expect(String(self.body.error)).toMatch(/xai-grok is this stage's provider/);
+    expect(String(self.body.error)).toMatch(/The primary provider cannot also be its fallback/);
     expect((await control({ ...base, fallbacks: 42 })).status).toBe(400);
     expect(await routeConfig("S9")).toEqual(before);
   });
@@ -214,10 +214,11 @@ describe("KAN-63: set_route validates fallbacks", () => {
   });
 
   it("rejects repeats, and an empty field means no fallbacks (not the defaults)", async () => {
+    const before = await routeConfig("S9");
     const rejected = await control({ ...base, fallbacks: "openai, anthropic-claude, openai,  ,anthropic-claude" });
     expect(rejected.status).toBe(400);
-    expect(rejected.body.error).toContain("Duplicate fallback provider");
-
+    expect(rejected.body).toMatchObject({ safe_error: true, error: "Duplicate fallback provider. Remove the repeated entry." });
+    expect(await routeConfig("S9")).toEqual(before);
 
     expect((await control({ ...base, fallbacks: "" })).status).toBe(200);
     expect((await routeConfig("S9")).fallbacks).toEqual([]);
@@ -240,14 +241,14 @@ describe("KAN-63: routes only for stages that call a model", () => {
     for (const stage of ["S0", "S1", "S5"]) {
       const res = await control({ action: "set_route", stage, provider_id: "xai-grok", model: "grok-4" });
       expect(res.status, stage).toBe(400);
-      expect(String(res.body.error)).toMatch(new RegExp(`${stage} does not call a model`));
+      expect(String(res.body.error)).toMatch(/This task does not call a model/);
     }
   });
 
   it("connect_provider no longer exists: provider OAuth was removed (KAN-65)", async () => {
     const res = await control({ action: "connect_provider", provider_id: "nope-ai" });
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe("Unknown action connect_provider");
+    expect(res.body.error).toBe("This action is not available. Reload the page and choose an available action.");
   });
 
   it("the control panel's AI-off copy is for the owner, not the customer", async () => {

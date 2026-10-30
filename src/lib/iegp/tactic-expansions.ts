@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { withRelationshipChange } from "./relationship-change";
 /** Canonical child-scope lifecycle. Source owners validate proposals before composing acceptance. */
 import { createHash } from "node:crypto";
@@ -82,7 +83,7 @@ export function tacticVersion(tactic: Tactic): string {
 
 function validateActor(actor: Actor) {
   if (!actor?.name?.trim() || !(ACTOR_FUNCTIONS as readonly string[]).includes(actor.function)) {
-    throw new Error("A named actor with a known function is required.");
+    throw new TrustedApplicationError("A named actor with a known function is required.");
   }
 }
 
@@ -99,29 +100,29 @@ export type AcceptExpansionArgs = {
 async function acceptTacticExpansionChange(args: AcceptExpansionArgs, transaction?: ExpansionTransaction): Promise<TacticExpansion> {
   const rationale = requireRationale(args.rationale);
   validateActor(args.actor);
-  if (!args.proposal_id?.trim()) throw new Error("An expansion proposal origin is required.");
+  if (!args.proposal_id?.trim()) throw new TrustedApplicationError("An expansion proposal origin is required.");
   const scope = expansionScopeSchema.parse(args.scope);
   const run = async (tx: ExpansionTransaction) => {
     // All operations use this transaction, including state/status reads (max=1 safe).
     const [parent] = await tx.select().from(t.tactics).where(eq(t.tactics.id, args.tactic_id)).for("update");
-    if (!parent) throw new Error("Tactic not found in this workspace.");
+    if (!parent) throw new TrustedApplicationError("Tactic not found in this workspace.", "not_found", 404);
     // Parent then gap is the acceptance lock order; serialise computation for this gap.
     await tx.select().from(t.gaps).where(eq(t.gaps.id, args.gap_id)).for("update");
     const state = await readState(tx);
     const tactic = state.tactics.find((p) => p.id === args.tactic_id)!;
     const gap = state.gaps.find((g) => g.id === args.gap_id);
-    if (!gap || gap.retired || gap.status === "excluded") throw new Error("Live gap not found in this workspace.");
-    if (tactic.review_status !== "accepted" || tactic.status === "cancelled") throw new Error("Expansion requires an accepted, active tactic.");
-    if (tacticVersion(tactic) !== args.expected_tactic_version) throw new Error("Tactic changed; refresh the stale proposal before accepting.");
+    if (!gap || gap.retired || gap.status === "excluded") throw new TrustedApplicationError("Live gap not found in this workspace.", "not_found", 404);
+    if (tactic.review_status !== "accepted" || tactic.status === "cancelled") throw new TrustedApplicationError("Expansion requires an accepted, active tactic.");
+    if (tacticVersion(tactic) !== args.expected_tactic_version) throw new TrustedApplicationError("Tactic changed; refresh the stale proposal before accepting.");
     const existing = state.expansions.find((e) => e.proposal_id === args.proposal_id);
     if (existing) {
       if (existing.tactic_id !== args.tactic_id || !existing.gap_ids.includes(args.gap_id) || JSON.stringify(canonical(existing.scope)) !== JSON.stringify(canonical(scope))) {
-        throw new Error("Proposal already accepted with different scope or parent.");
+        throw new TrustedApplicationError("Proposal already accepted with different scope or parent.");
       }
       return existing;
     }
-    if (tactic.status === "completed" && scope.prospective_enrolment) throw new Error("Completed studies cannot add prospective enrolment.");
-    if (/post[- ]?hoc/i.test(scope.analysis) && !scope.post_hoc) throw new Error("Post-hoc analysis must be identified as post_hoc.");
+    if (tactic.status === "completed" && scope.prospective_enrolment) throw new TrustedApplicationError("Completed studies cannot add prospective enrolment.");
+    if (/post[- ]?hoc/i.test(scope.analysis) && !scope.post_hoc) throw new TrustedApplicationError("Post-hoc analysis must be identified as post_hoc.");
     const at = nowIso(), version = newId("EXV");
     const child: TacticExpansion = {
       id: newId("EXP"), tactic_id: args.tactic_id, gap_ids: [args.gap_id], scope,
@@ -150,13 +151,13 @@ export async function setExpansionStatus(args: {
 }): Promise<TacticExpansion> {
   const rationale = requireRationale(args.rationale);
   validateActor(args.actor);
-  if (!(TACTIC_STATUSES as readonly string[]).includes(args.status)) throw new Error("Unknown expansion status.");
+  if (!(TACTIC_STATUSES as readonly string[]).includes(args.status)) throw new TrustedApplicationError("Unknown expansion status.");
   await ensureCurrentSchemaTables();
   return db().transaction(async (tx) => {
     const [row] = await tx.select().from(t.tacticExpansions).where(eq(t.tacticExpansions.id, args.expansion_id)).for("update");
-    if (!row) throw new Error("Expansion not found in this workspace.");
+    if (!row) throw new TrustedApplicationError("Expansion not found in this workspace.", "not_found", 404);
     const child = row as TacticExpansion;
-    if (child.version !== args.expected_version) throw new Error("Expansion changed; refresh the stale version.");
+    if (child.version !== args.expected_version) throw new TrustedApplicationError("Expansion changed; refresh the stale version.");
     if (child.status === args.status) return child;
     for (const gapId of [...child.gap_ids].sort()) await tx.select().from(t.gaps).where(eq(t.gaps.id, gapId)).for("update");
     const at = nowIso(), version = newId("EXV");

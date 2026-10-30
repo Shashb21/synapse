@@ -60,7 +60,7 @@ test("expanded control help fits both themes and zoom without hiding a routing e
   await expect(help).toBeVisible();
   await page.route("**/api/control", async route => {
     if (route.request().postDataJSON()?.action === "set_default_provider") {
-      await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "Route save failed. Retry the provider choice." }) });
+      await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ safe_error: true, error: "Route save failed. Retry the provider choice." }) });
     } else await route.continue();
   });
   await page.getByRole("button", { name: "Anthropic · Claude", exact: true }).click();

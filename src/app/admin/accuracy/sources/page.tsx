@@ -68,8 +68,8 @@ export default async function AccuracySourcesPage({
         }),
       );
     }
-  } catch (error) {
-    loadError = error instanceof Error ? error.message : "Could not load sources";
+  } catch {
+    loadError = "Could not load sources. Reload this page to try again. If this continues, contact your Synapse administrator.";
   }
 
   const unknownWorkspace = Boolean(workspaceId) && !active && !loadError;

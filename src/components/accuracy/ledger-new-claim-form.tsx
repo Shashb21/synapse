@@ -34,6 +34,7 @@ export function LedgerNewClaimForm({
   const [values, setValues] = useState<ClaimFieldValues>(EMPTY_CLAIM_FIELDS);
   const [rationale, setRationale] = useState("");
   const [pending, setPending] = useState(false);
+  const [checkRequired, setCheckRequired] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -45,6 +46,7 @@ export function LedgerNewClaimForm({
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (pending || checkRequired) return;
     setError(null);
     setMessage(null);
     if (!values.statement.trim()) {
@@ -67,10 +69,18 @@ export function LedgerNewClaimForm({
     });
     setPending(false);
     if (!result.ok) {
-      setError(result.error);
+      setCheckRequired(result.outcome === "unknown");
+      setError(result.outcome === "unknown"
+        ? [result.error, "We couldn’t confirm creation of this claim. Check current claims before creating it again. Your draft is still here until you reload."].filter(Boolean).join(" ")
+        : result.error);
       return;
     }
-    const created = result.json.claim as { id?: string } | undefined;
+    const created = result.json.claim as { id?: unknown } | undefined;
+    if (typeof created?.id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(created.id)) {
+      setCheckRequired(true);
+      setError("We couldn’t confirm creation of this claim. Check current claims before creating it again. Your draft is still here until you reload.");
+      return;
+    }
     setMessage(`Created draft ${kind} ${created?.id ?? ""}`.trim());
     setValues(EMPTY_CLAIM_FIELDS);
     setRationale("");
@@ -94,7 +104,7 @@ export function LedgerNewClaimForm({
               </Button>
             </>
           ) : (
-            <Button size="sm" variant="default" onClick={() => setOpen(false)}>
+            <Button size="sm" variant="default" onClick={() => setOpen(false)} disabled={pending || checkRequired}>
               Close
             </Button>
           )}
@@ -142,12 +152,13 @@ export function LedgerNewClaimForm({
             />
           </label>
           {error ? (
-            <p className="text-[11px] text-destructive" role="alert">
+            <p className="text-sm text-destructive" role="alert">
               {error}
             </p>
           ) : null}
+          {checkRequired ? <Button type="button" size="sm" variant="outline" onClick={() => window.location.reload()}>Check current claims</Button> : null}
           <div>
-            <Button type="submit" size="sm" disabled={pending}>
+            <Button type="submit" size="sm" disabled={pending || checkRequired}>
               {pending ? "Creating…" : `Create draft ${kind}`}
             </Button>
           </div>

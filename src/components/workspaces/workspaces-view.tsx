@@ -1,5 +1,7 @@
 "use client";
 
+import { requestErrorMessage, RequestOutcomeError } from "@/lib/post-json";
+
 import Link from "next/link";
 import { useState } from "react";
 import { FolderKanban, Inbox, Loader2, Plus, Settings } from "lucide-react";
@@ -28,6 +30,7 @@ export function CreateWorkspaceForm({ autoFocus, onCancel }: { autoFocus?: boole
   const [name, setName] = useState("");
   const [start, setStart] = useState<Start>("blank");
   const [pending, setPending] = useState(false);
+  const [checkRequired, setCheckRequired] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   return (
@@ -36,14 +39,19 @@ export function CreateWorkspaceForm({ autoFocus, onCancel }: { autoFocus?: boole
       aria-label="Create a workspace"
       onSubmit={async (event) => {
         event.preventDefault();
+        if (pending || checkRequired) return;
         setPending(true);
         setError(null);
         try {
           const json = await sendJson<{ redirect: string }>("/api/workspaces", { name, start });
+          if (typeof json.redirect !== "string" || !json.redirect.startsWith("/") || json.redirect.startsWith("//")) {
+            throw new RequestOutcomeError("We couldn’t confirm the new workspace. Check the workspace list before creating it again.", "unknown", 200);
+          }
           window.location.assign(json.redirect);
         } catch (err) {
           setPending(false);
-          setError(err instanceof Error ? err.message : "Could not create the workspace.");
+          setCheckRequired(!(err instanceof RequestOutcomeError) || err.outcome === "unknown");
+          setError(requestErrorMessage(err, "Could not create the workspace. Check the current state before trying again. If this continues, contact your Synapse administrator."));
         }
       }}
     >
@@ -84,18 +92,19 @@ export function CreateWorkspaceForm({ autoFocus, onCancel }: { autoFocus?: boole
         ))}
       </fieldset>
       <div className="flex flex-wrap gap-2">
-        <Button type="submit" disabled={pending || name.trim().length < 2}>
+        <Button type="submit" disabled={pending || checkRequired || name.trim().length < 2}>
           {pending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" aria-hidden />}
           Create workspace
         </Button>
         {onCancel ? (
-          <Button type="button" variant="ghost" onClick={onCancel} disabled={pending}>
+          <Button type="button" variant="ghost" onClick={onCancel} disabled={pending || checkRequired}>
             Cancel
           </Button>
         ) : null}
       </div>
+      {checkRequired ? <Button type="button" variant="outline" onClick={() => window.location.reload()}>Check workspace list</Button> : null}
       {error ? (
-        <p role="alert" className="text-[12px] text-destructive">
+        <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
       ) : null}
@@ -126,7 +135,7 @@ export function WorkspacesView({
       window.location.assign(json.redirect);
     } catch (err) {
       setPending(null);
-      setError(err instanceof Error ? err.message : "Could not open the workspace.");
+      setError(requestErrorMessage(err, "Could not open the workspace. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     }
   }
 
@@ -208,7 +217,7 @@ export function WorkspacesView({
           ))}
         </ul>
         {error ? (
-          <p role="alert" className="text-[12px] text-destructive">
+          <p role="alert" className="text-sm text-destructive">
             {error}
           </p>
         ) : null}

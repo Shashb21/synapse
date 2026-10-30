@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { gapResolutionVersion } from "@/lib/iegp/relationship-version";
 import { getRun } from "@/modules/kernel/observability";
 import { scopedWorkspaceId } from "@/modules/workspaces/context";
@@ -185,7 +186,7 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
   outputSchema,
   freeze: freezeFacts,
   async run(input, ctx) {
-    if (ctx.replay?.evaluation && input.apply) throw new Error("A split apply command cannot be replayed.");
+    if (ctx.replay?.evaluation && input.apply) throw new TrustedApplicationError("A split apply command cannot be replayed.");
     if (input.apply) return applySplit(input.gap_id, input.apply, ctx);
 
     requireLlm(ctx, "The partial split proposal");
@@ -468,16 +469,16 @@ export async function decidePartialSplit(args: {
     const output = outputSchema.safeParse(run?.output);
     const input = inputSchema.safeParse(run?.input);
     if (!run || run.workspace_id !== workspace_id || run.stage !== "S6" || run.status !== "ok" || run.module_id !== partialSplitModule.manifest.id || run.module_version !== partialSplitModule.manifest.version || !output.success || output.data.mode !== "llm" || output.data.applied || !output.data.proposal || output.data.proposal.parent_gap_id !== args.gap_id || !input.success || input.data.gap_id !== args.gap_id || input.data.apply) {
-      throw new Error("The originating S6 proposal is unavailable or does not belong to this gap and workspace. Request a new proposal.");
+      throw new TrustedApplicationError("The originating S6 proposal is unavailable or does not belong to this gap and workspace. Request a new proposal.");
     }
     original = output.data.proposal;
   }
-  if (args.decision === "reject" && !original) throw new Error("Rejecting an AI split requires its original proposal run.");
+  if (args.decision === "reject" && !original) throw new TrustedApplicationError("Rejecting an AI split requires its original proposal run.");
   const state = await loadState();
   const gap = state.gaps.find(row => row.id === args.gap_id);
   if (!gap) throw new Error(`Unknown gap ${args.gap_id}`);
   const apply = args.apply;
-  if (args.decision === "accept" && !apply) throw new Error("A split decision requires the reviewed fields.");
+  if (args.decision === "accept" && !apply) throw new TrustedApplicationError("A split decision requires the reviewed fields.");
   const final = apply ? {
     addressed_name: apply.addressed_name.trim(),
     addressed_statement: apply.addressed_statement?.trim() || apply.addressed_name.trim(),
@@ -496,7 +497,7 @@ export async function decidePartialSplit(args: {
   } : null;
   const edited = original && JSON.stringify(proposedFields) !== JSON.stringify(final);
   const suppliedRationale = (args.rationale ?? apply?.rationale ?? "").trim();
-  if (original && (edited || args.decision === "reject") && suppliedRationale.length < 3) throw new Error("Give a short reason for editing or rejecting the proposed split.");
+  if (original && (edited || args.decision === "reject") && suppliedRationale.length < 3) throw new TrustedApplicationError("Give a short reason for editing or rejecting the proposed split.");
   const rationale = requireRationale(suppliedRationale);
   if (args.decision === "accept" && apply) {
     await splitPartialGap({
@@ -554,6 +555,6 @@ registerModule(partialSplitModule);
 
 /** Freeze the source facts this stage consumes, before any proposal or human decision. */
 async function freezeFacts(input: z.infer<typeof inputSchema>) {
-  if (input.apply) throw new Error("A split apply command cannot be replayed.");
+  if (input.apply) throw new TrustedApplicationError("A split apply command cannot be replayed.");
   return { state: await loadState() };
 }

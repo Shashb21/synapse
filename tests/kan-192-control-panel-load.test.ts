@@ -83,13 +83,13 @@ describe("KAN-192 server reads", () => {
   it("distinguishes missing credentials from unexpected resolution failures", async () => {
     reads.resolve.mockRejectedValue(new NoRouteError("unsafe provider detail"));
     const result = await html();
-    expect(result).toContain("No configured provider is available");
+    expect(result).toContain("No provider is ready. Add a provider credential and select a compatible model here.");
     expect(result).not.toContain("unsafe provider detail");
   });
   it("shows a known fallback without copying resolver diagnostic text", async () => {
     reads.resolve.mockResolvedValue({ provider_label: "OpenAI", model: "gpt-4.1", degraded: true, reason: "raw select query private_table" });
     const result = await html();
-    expect(result).toContain("Using a fallback because the preferred provider is unavailable");
+    expect(result).toContain("The preferred provider is unavailable. Check its credentials and model here before restoring it.");
     expect(result).not.toContain("private_table");
   });
   it("keeps a stage preview available when a different stage fails resolution", async () => {
@@ -104,7 +104,7 @@ describe("KAN-192 server reads", () => {
   it("shows intentional master-off without attempting resolution", async () => {
     reads.master.mockResolvedValue({ enabled: false, updated_by: null, updated_at: null, rationale: null });
     const result = await html();
-    expect(result).toContain("AI is off platform-wide. Turn it on above.");
+    expect(result).toContain("AI is off for this task. Enable it here when you are ready to use AI.");
     expect(reads.resolve).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,7 @@
 "use client";
 
+import { requestErrorMessage } from "@/lib/post-json";
+
 import { useState, type RefObject } from "react";
 import { Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -94,7 +96,7 @@ export function ExportImageButton({
       download.remove();
       setTimeout(() => URL.revokeObjectURL(download.href), 2000);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Export failed.");
+      setError(requestErrorMessage(cause, "Export failed. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     } finally {
       setPending(false);
     }
@@ -112,7 +114,7 @@ export function ExportImageButton({
         {pending ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <Download className="size-3.5" aria-hidden />}
         Export PNG
       </Button>
-      {error ? <p className="text-[11px] text-destructive">{error}</p> : null}
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
       {disabledReason ? <p className="text-[11px] text-muted-foreground">{disabledReason}</p> : null}
     </div>
   );

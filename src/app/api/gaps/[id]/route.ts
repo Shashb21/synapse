@@ -18,7 +18,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     const context = await requireCustomerContext();
     const { id } = await params;
     const record = await gapRecord(id);
-    if (!record) return NextResponse.json({ error: `No gap ${id} in this workspace.`, code: "not_found" }, { status: 404 });
+    if (!record) return NextResponse.json({ safe_error: true, error: "This gap is no longer available in this workspace. Reload the page to see current records.", code: "not_found" }, { status: 404 });
     return NextResponse.json({ ...record, permissions: { coverage: can(context.role, "validate") } }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return apiErrorResponse(error);

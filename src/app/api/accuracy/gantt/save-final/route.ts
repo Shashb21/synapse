@@ -47,7 +47,7 @@ export async function POST(request: Request) {
   } catch (error) {
     const known = labRequestErrorResponse(error);
     if (known) return known;
-    const message = labErrorMessage(error, "Save final failed");
-    return NextResponse.json({ error: message }, { status: 400 });
+    const message = labErrorMessage(error, "We couldn’t confirm the final timeline save. Check the current timeline before saving it again.");
+    return NextResponse.json({ safe_error: true, error: message }, { status: 400 });
   }
 }

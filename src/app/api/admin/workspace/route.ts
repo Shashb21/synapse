@@ -1,3 +1,4 @@
+import { customerErrorMessage } from "@/modules/kernel/stage-errors";
 import { NextResponse } from "next/server";
 import { ApiGuardError, readJsonBody } from "@/modules/auth/api-guard";
 import { ownerGate, ownerOnlyJson } from "@/modules/auth/owner";
@@ -18,10 +19,10 @@ const NO_STORE = { "cache-control": "no-store" };
 
 function failure(error: unknown): NextResponse {
   if (error instanceof NotOwnerError) return ownerOnlyJson();
-  if (error instanceof UnknownWorkspaceError) return NextResponse.json({ error: error.message }, { status: 404 });
-  if (error instanceof ApiGuardError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
-  const message = error instanceof Error ? error.message : "Workspace request failed.";
-  return NextResponse.json({ error: message }, { status: 400 });
+  if (error instanceof UnknownWorkspaceError) return NextResponse.json({ safe_error: true, error: error.message }, { status: 404 });
+  if (error instanceof ApiGuardError) return NextResponse.json({ safe_error: true, error: error.message, code: error.code }, { status: error.status });
+  const message = customerErrorMessage(error);
+  return NextResponse.json({ safe_error: true, error: message }, { status: 400 });
 }
 
 /** Every customer workspace and the console's current one. Owner only (KAN-62). */
@@ -56,7 +57,7 @@ export async function POST(request: Request) {
   try {
     const body = await readJsonBody(request, { allowEmpty: true });
     const workspaceId = typeof body.workspace_id === "string" ? body.workspace_id.trim() : "";
-    if (!workspaceId) return NextResponse.json({ error: "Choose a workspace." }, { status: 400 });
+    if (!workspaceId) return NextResponse.json({ safe_error: true, error: "Choose a workspace." }, { status: 400 });
     const workspace = await selectAdminWorkspace(workspaceId);
     return NextResponse.json({
       ok: true,

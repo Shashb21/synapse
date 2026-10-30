@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 /**
  * Human edits on ledger claims: manual create, field-level edit with a
  * required rationale, audit trail (`metadata.edit_history`) and human locks
@@ -275,7 +276,7 @@ export function applyClaimPatch(
 
   if (patch.statement !== undefined) {
     const next = patch.statement.trim();
-    if (!next) throw new Error("Statement cannot be empty.");
+    if (!next) throw new TrustedApplicationError("Statement cannot be empty.");
     if (record("statement", next)) statement = next;
   }
   if (patch.external_id !== undefined) {
@@ -373,7 +374,7 @@ export function applyClaimPatch(
   if (patch.depends_on !== undefined) {
     const next = [...new Set(patch.depends_on.map((id) => id.trim()).filter(Boolean))].sort();
     for (const id of next) {
-      if (id === ctx.claim_id) throw new Error("A tactic cannot depend on itself.");
+      if (id === ctx.claim_id) throw new TrustedApplicationError("A tactic cannot depend on itself.");
       if (!ctx.tactic_ids.has(id)) throw new Error(`depends_on: unknown tactic ${id}`);
     }
     if (record("depends_on", next)) meta.depends_on = next;
@@ -382,7 +383,7 @@ export function applyClaimPatch(
   const start = typeof meta.start === "string" ? meta.start.slice(0, 10) : null;
   const end = typeof meta.end === "string" ? meta.end.slice(0, 10) : null;
   if (start && end && end < start) {
-    throw new Error("End date must be on or after the start date.");
+    throw new TrustedApplicationError("End date must be on or after the start date.");
   }
 
   return { statement, metadata: meta, changed, before, after };
@@ -473,7 +474,7 @@ export async function updateClaim(args: {
   const rationale = requireValidationRationale(args.rationale);
   await ensureAccuracySchema();
   const existing = await getClaim(args.workspace_id, args.claim_id);
-  if (!existing) throw new Error(`Unknown claim: ${args.claim_id}`);
+  if (!existing) throw new TrustedApplicationError("Claim not found. Reload the list and choose an available claim.", "not_found", 404);
   if (existing.claim_type !== "gap" && existing.claim_type !== "tactic") {
     throw new Error(`Unsupported claim type: ${existing.claim_type}`);
   }
@@ -494,7 +495,7 @@ export async function updateClaim(args: {
     },
   );
   if (applied.changed.length === 0) {
-    throw new Error("No changes to save.");
+    throw new TrustedApplicationError("No changes to save.");
   }
   const metadata = withHumanEdit(applied.metadata, {
     action: "edit",
@@ -543,7 +544,7 @@ export async function createManualClaim(args: {
 }): Promise<AccuracyClaimRow> {
   const rationale = requireValidationRationale(args.rationale);
   const statement = args.statement.trim();
-  if (!statement) throw new Error("Statement is required.");
+  if (!statement) throw new TrustedApplicationError("Statement is required.");
   if (args.claim_type !== "gap" && args.claim_type !== "tactic") {
     throw new Error(`Unsupported claim type: ${String(args.claim_type)}`);
   }

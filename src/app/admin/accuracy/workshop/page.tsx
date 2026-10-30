@@ -37,8 +37,8 @@ export default async function AccuracyWorkshopPage({
         snapshot = await latestWorkshopSnapshot(workspaceId);
       }
     }
-  } catch (error) {
-    loadError = error instanceof Error ? error.message : "Could not load workshop";
+  } catch {
+    loadError = "Could not load workshop. Reload this page to try again. If this continues, contact your Synapse administrator.";
   }
 
   if (workspace && snapshot) {

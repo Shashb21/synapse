@@ -152,7 +152,7 @@ function NewGroupDialog({ gaps, themes }: { gaps: BreakoutGapRow[]; themes: Them
             ) : null}
           </div>
           {error ? (
-            <p role="alert" className="text-[12px] text-destructive">
+            <p role="alert" className="text-sm text-destructive">
               {error}
             </p>
           ) : null}
@@ -248,7 +248,7 @@ function GroupByThemeDialog({ themes }: { themes: ThemePreview[] }) {
             )}
           </div>
           {error ? (
-            <p role="alert" className="text-[12px] text-destructive">
+            <p role="alert" className="text-sm text-destructive">
               {error}
             </p>
           ) : null}

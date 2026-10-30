@@ -22,10 +22,12 @@ export function SourceUploadForm({ workspaceId }: { workspaceId: string }) {
   const [pending, startTransition] = useTransition();
   const [docRole, setDocRole] = useState<string>("medical");
   const [error, setError] = useState<string | null>(null);
+  const [unconfirmed, setUnconfirmed] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
 
   function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pending || unconfirmed) return;
     setError(null);
     setSummary(null);
     const form = event.currentTarget;
@@ -52,12 +54,13 @@ export function SourceUploadForm({ workspaceId }: { workspaceId: string }) {
         parse_error?: string | null;
       };
       if (!res.ok || !json.ok) {
-        setError(json.error ?? "Upload failed");
+        setUnconfirmed(res.outcome !== "rejected");
+        setError(json.error ?? "We couldn’t upload this source. Check the source list before uploading it again.");
         return;
       }
       if (json.parse_error) {
         setSummary(
-          `Registered ${json.filename} (${json.parser}) but parse failed: ${json.parse_error}`,
+          "Source registered, but reading its contents did not finish. Review this source’s text blocks and use Add block to enter missing text by hand.",
         );
       } else {
         setSummary(
@@ -103,11 +106,12 @@ export function SourceUploadForm({ workspaceId }: { workspaceId: string }) {
           required
         />
       </label>
-      {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
-      {summary ? <p className="text-[12px] text-muted-foreground">{summary}</p> : null}
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+      {summary ? <p role="status" className="text-[12px] text-muted-foreground">{summary}</p> : null}
+      {unconfirmed ? <button type="button" className="text-sm underline" onClick={() => window.location.reload()}>Check source list</button> : null}
       <button
         type="submit"
-        disabled={pending}
+        disabled={pending || unconfirmed}
         className="w-fit border border-foreground bg-foreground px-3 py-1.5 text-[12px] text-background disabled:opacity-50"
       >
         {pending ? "Uploading…" : "Upload & parse"}

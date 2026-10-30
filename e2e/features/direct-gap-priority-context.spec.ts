@@ -44,7 +44,7 @@ test("audits direct gap edits, retains failed input and previous judgement, and 
   await details.getByRole("button", { name: "Save details" }).click();
   await expect(details.getByRole("alert")).toContainText("meaningful reason");
   await details.getByLabel("Reason for details change (required)").fill("Record the committee follow-up");
-  await page.route("**/api/plan", route => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "Save failed; retry details" }) }), { times: 1 });
+  await page.route("**/api/plan", route => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ safe_error: true, request_outcome: "rejected", error: "Save failed; retry details" }) }), { times: 1 });
   await details.getByRole("button", { name: "Save details" }).click();
   await expect(details.getByRole("alert")).toContainText("Save failed");
   await expect(details.getByRole("textbox", { name: "Notes", exact: true })).toHaveValue("Follow up with the committee");
@@ -69,7 +69,7 @@ test("audits direct gap edits, retains failed input and previous judgement, and 
   await page.getByRole("button", { name: /^Edit GAP-/ }).click();
   await dialog.getByRole("textbox", { name: "Evidence needed (required)", exact: true }).fill("Missing long-term comparative survival evidence");
   await dialog.getByLabel("Rationale (required)").fill("The committee needs longer follow-up evidence");
-  await page.route("**/api/iegp", route => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "Save failed; retry evidence edit" }) }), { times: 1 });
+  await page.route("**/api/iegp", route => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ safe_error: true, request_outcome: "rejected", error: "Save failed; retry evidence edit" }) }), { times: 1 });
   await dialog.getByRole("button", { name: "Save edit", exact: true }).click();
   await expect(dialog.getByRole("alert")).toContainText("Save failed");
   await expect(dialog.getByRole("textbox", { name: "Evidence needed (required)", exact: true })).toHaveValue("Missing long-term comparative survival evidence");

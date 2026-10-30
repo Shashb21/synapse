@@ -28,7 +28,7 @@ export default async function IdeationPage() {
     listPlacements(),
     listIdeationProposals(),
     sessionContext(),
-    aiSectionEnabled("ideation").catch(() => false),
+    aiSectionEnabled("ideation"),
     listIdeationGapOutcomes(),
   ]);
 

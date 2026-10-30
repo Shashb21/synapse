@@ -1,3 +1,5 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
+import { customerErrorMessage } from "@/modules/kernel/stage-errors";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { apiErrorResponse, readJsonBody } from "@/modules/auth/api-guard";
@@ -41,7 +43,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, redirect: afterSignIn(next) });
     }
     const provider_id = String(body.provider_id ?? "");
-    if (!provider_id) throw new Error("Choose how to sign in.");
+    if (!provider_id) throw new TrustedApplicationError("Choose how to sign in.");
     const origin = new URL(request.url).origin;
     const { authorize_url } = await beginLogin({ provider_id, redirect_uri: `${origin}/api/auth/callback` });
     const jar = await cookies();
@@ -52,6 +54,6 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ ok: true, authorize_url });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Sign-in failed." }, { status: 400 });
+    return NextResponse.json({ safe_error: true, error: customerErrorMessage(error) }, { status: 400 });
   }
 }

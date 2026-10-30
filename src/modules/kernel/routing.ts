@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { sql } from "drizzle-orm";
 import { selectCredentialRoute, stageHasRoute } from "./credential-route";
 export { stageHasRoute } from "./credential-route";
@@ -65,10 +66,10 @@ export function parseRouteParam(value: unknown, field: keyof typeof ROUTE_LIMITS
   const { min, max } = ROUTE_LIMITS[field];
   if (field === "max_tokens") {
     if (!Number.isInteger(number) || number < min || number > max) {
-      throw new Error(`Max tokens must be a whole number from ${min} to ${max.toLocaleString("en-US")}.`);
+      throw new TrustedApplicationError("Max tokens must be a whole number from 1 to 200,000.");
     }
   } else if (!Number.isFinite(number) || number < min || number > max) {
-    throw new Error(`Temperature must be a number from ${min} to ${max}.`);
+    throw new TrustedApplicationError("Temperature must be a number from 0 to 2.");
   }
   return number;
 }
@@ -83,12 +84,12 @@ export function parseFallbacks(value: unknown, provider_id: string): string[] | 
   let ids: string[];
   if (typeof value === "string") ids = value.split(",");
   else if (Array.isArray(value) && value.every((id) => typeof id === "string")) ids = value;
-  else throw new Error("Fallbacks must be a comma-separated list of provider ids.");
+  else throw new TrustedApplicationError("Fallbacks must be a comma-separated list of provider ids.");
   const out: string[] = [];
   for (const id of ids.map((candidate) => candidate.trim()).filter(Boolean)) {
-    if (!findProvider(id)) throw new Error(`Unknown fallback provider ${id}`);
-    if (id === provider_id) throw new Error(`${id} is this stage's provider, so it cannot also be its fallback.`);
-    if (out.includes(id)) throw new Error(`Duplicate fallback provider ${id}. Remove the repeated entry.`);
+    if (!findProvider(id)) throw new TrustedApplicationError("Choose an available fallback provider from the provider list.");
+    if (id === provider_id) throw new TrustedApplicationError("The primary provider cannot also be its fallback. Choose a different provider.");
+    if (out.includes(id)) throw new TrustedApplicationError("Duplicate fallback provider. Remove the repeated entry.");
     out.push(id);
   }
   return out;
@@ -187,7 +188,7 @@ type RouteInput = {
 /** One stage's route. Mechanical and human stages have none, so they are refused. */
 export async function setRouteConfig(args: RouteInput): Promise<RouteConfig> {
   if (!stageHasRoute(args.stage)) {
-    throw new Error(`${args.stage} does not call a model, so it has no route to set.`);
+    throw new TrustedApplicationError("This task does not call a model, so it has no AI route to set. Choose a task that uses AI.");
   }
   return writeRouteConfig(args);
 }
@@ -195,12 +196,12 @@ export async function setRouteConfig(args: RouteInput): Promise<RouteConfig> {
 async function writeRouteConfig(args: RouteInput): Promise<RouteConfig> {
   await ensurePlatformSchema();
   if (args.provider_id === LEGACY_OFFLINE_PROVIDER) {
-    throw new Error("Deterministic / no-LLM routing was removed. Pick a cloud provider.");
+    throw new TrustedApplicationError("Choose an available cloud provider from the provider list.");
   }
   const provider = findProvider(args.provider_id);
-  if (!provider) throw new Error(`Unknown provider ${args.provider_id}`);
+  if (!provider) throw new TrustedApplicationError("Choose an available provider from the provider list.");
   if (args.model && !providerServes(provider, args.model)) {
-    throw new Error(`${provider.label} does not serve ${args.model}`);
+    throw new TrustedApplicationError("Choose a model listed for the selected provider.");
   }
   if (args.temperature !== undefined) parseRouteParam(args.temperature, "temperature");
   if (args.max_tokens !== undefined) parseRouteParam(args.max_tokens, "max_tokens");
@@ -288,7 +289,7 @@ export async function setDefaultProvider(args: {
   model?: string;
 }): Promise<RouteConfig[]> {
   const provider = findProvider(args.provider_id);
-  if (!provider) throw new Error(`Unknown provider ${args.provider_id}`);
+  if (!provider) throw new TrustedApplicationError("Choose an available provider from the provider list.");
   const chain = [DEFAULT_ROUTE_PROVIDER, ...DEFAULT_ROUTE_FALLBACKS];
   const fallbacks = chain.filter((id) => id !== args.provider_id);
   const out: RouteConfig[] = [];

@@ -20,7 +20,7 @@ export default async function WorkspacesPage({
   const params = await searchParams;
   const mine = await myWorkspaces();
   if (!mine) redirect("/login?next=/workspaces");
-  const selected = await selectedWorkspaceId().catch(() => null);
+  const selected = await selectedWorkspaceId();
 
   return (
     <WorkspacesFrame person={{ name: mine.session.actor.name, email: mine.session.email }}>

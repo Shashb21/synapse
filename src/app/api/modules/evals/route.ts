@@ -27,7 +27,7 @@ export async function POST(request: Request) {
   }
   const stage = String(body.stage ?? "") as StageId;
   if (!STAGE_IDS.includes(stage)) {
-    return NextResponse.json({ error: `Unknown stage ${body.stage}` }, { status: 400 });
+    return NextResponse.json({ safe_error: true, error: "Choose an available AI task and try again." }, { status: 400 });
   }
   const identity = await requestIdentity(body);
   try {
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
     if (aiOnly && !(await aiEnabled())) return aiOffResponse();
     if (!implementation.evals) {
       return NextResponse.json(
-        { error: `${implementation.manifest.id} does not ship an eval harness yet.` },
+        { safe_error: true, error: `${implementation.manifest.id} does not ship an eval harness yet.` },
         { status: 400 },
       );
     }
@@ -52,7 +52,7 @@ export async function POST(request: Request) {
     });
     if (cases === 0) {
       return NextResponse.json(
-        { error: "No gold cases are available yet. Parse a source first." },
+        { safe_error: true, error: "No gold cases are available yet. Parse a source first." },
         { status: 400 },
       );
     }

@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -61,7 +62,7 @@ function gapRecordFromClaim(gap: AccuracyClaimRow) {
 
 function requireEligibleGap(gap: AccuracyClaimRow) {
   if (!gap.validated) {
-    return { error: "Gap must be validated before ideation.", status: 400 as const };
+    return { safe_error: true, error: "Gap must be validated before ideation.", status: 400 as const };
   }
   const eligible = gapsEligibleForIdeation([gapRecordFromClaim(gap)]);
   if (eligible.length === 0) {
@@ -90,7 +91,7 @@ async function persistProposal(args: {
   const start = normalizeClaimDate("start", args.start);
   const end = normalizeClaimDate("end", args.end);
   if (start && end && end < start) {
-    throw new Error("End date must be on or after the start date.");
+    throw new TrustedApplicationError("End date must be on or after the start date.");
   }
   const base = {
     origin: "ideated",
@@ -147,17 +148,17 @@ export async function POST(req: Request) {
     if (isManual) {
       if (!body.gap_id) {
         return NextResponse.json(
-          { ok: false, error: "gap_id is required for a manual proposed tactic." },
+          { ok: false, safe_error: true, error: "gap_id is required for a manual proposed tactic." },
           { status: 400 },
         );
       }
       const gap = gaps.find((g) => g.id === body.gap_id);
       if (!gap) {
-        return NextResponse.json({ ok: false, error: "Gap not found" }, { status: 404 });
+        return NextResponse.json({ ok: false, safe_error: true, error: "Gap not found" }, { status: 404 });
       }
       const blocked = requireEligibleGap(gap);
       if (blocked) {
-        return NextResponse.json({ ok: false, error: blocked.error }, { status: blocked.status });
+        return NextResponse.json({ ok: false, safe_error: true, error: blocked.error }, { status: blocked.status });
       }
       const tactic = await persistProposal({
         workspace_id: body.workspace_id,
@@ -191,11 +192,11 @@ export async function POST(req: Request) {
     if (body.gap_id) {
       const gap = gaps.find((g) => g.id === body.gap_id);
       if (!gap) {
-        return NextResponse.json({ ok: false, error: "Gap not found" }, { status: 404 });
+        return NextResponse.json({ ok: false, safe_error: true, error: "Gap not found" }, { status: 404 });
       }
       const blocked = requireEligibleGap(gap);
       if (blocked) {
-        return NextResponse.json({ ok: false, error: blocked.error }, { status: blocked.status });
+        return NextResponse.json({ ok: false, safe_error: true, error: blocked.error }, { status: blocked.status });
       }
       targetGaps = [gap];
     }
@@ -266,7 +267,7 @@ export async function POST(req: Request) {
     if (aiOff) return aiOff;
     const known = labRequestErrorResponse(error);
     if (known) return known;
-    const message = labErrorMessage(error, "Ideate failed");
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    const message = labErrorMessage(error, "We couldn’t confirm the proposed tactics. Check the plan’s ideas before proposing them again.");
+    return NextResponse.json({ ok: false, safe_error: true, error: message }, { status: 400 });
   }
 }

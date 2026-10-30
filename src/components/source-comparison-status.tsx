@@ -16,7 +16,7 @@ export function SourceComparisonStatus({ comparison, sourceId, mayRetry = false 
       : "Comparison pending. Refresh to see progress, or retry if the check was interrupted.";
   return <section aria-label="Automatic source comparison" className="my-3 space-y-2 text-sm">
     <p role="status">{message}</p>
-    {comparison?.error ? <p className="text-muted-foreground">{comparison.error}</p> : null}
+
     {mayRetry && comparison && (comparison.status !== "completed" || !comparison.basis_current) ? <LockForm
       label="Retry comparison" action="retry_source_comparison" extra={{ source_id: sourceId }} confirmLabel="Run comparison"
       description="Compare retained claims against current plan records. Supporting links and possible discrepancies are saved for human review." /> : null}

@@ -212,7 +212,7 @@ export function AxisChooser({
       });
       if (!result.ok) {
         setPending(false);
-        setError(result.error ?? "Prioritization failed");
+        setError(`Axes saved, but gap suggestions could not finish. Review the matrix and continue with manual placement. ${result.error ?? "Check current placements before running suggestions again."}`);
         refresh();
         return;
       }
@@ -252,7 +252,7 @@ export function AxisChooser({
         </p>
       ) : null}
       {error ? (
-        <p role="alert" className="text-[12px] text-destructive">
+        <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
       ) : null}
@@ -581,7 +581,7 @@ export function PrioritizeMatrix({
         setting: scope,
         onlyMissing: true,
       });
-      if (!result.ok) showError(result.error ?? "Prioritization failed");
+      if (!result.ok) showError(`Axes saved, but gap suggestions could not finish. Review the matrix and continue with manual placement. ${result.error ?? "Check current placements before running suggestions again."}`);
     }
     refresh(() => setBusy(null));
   }
@@ -676,7 +676,7 @@ export function PrioritizeMatrix({
         })}
       </div>
       {message?.error ? (
-        <p role="alert" className="text-[12px] text-destructive">
+        <p role="alert" className="text-sm text-destructive">
           {message.text}
         </p>
       ) : null}

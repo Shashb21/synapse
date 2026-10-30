@@ -24,7 +24,7 @@ export async function inAdminWorkspace(
   } catch (error) {
     if (error instanceof NotOwnerError) return ownerOnlyJson();
     if (error instanceof UnknownWorkspaceError) {
-      return NextResponse.json({ error: error.message, code: "no_workspace" }, { status: 404 });
+      return NextResponse.json({ safe_error: true, error: error.message, code: "no_workspace" }, { status: 404 });
     }
     throw error;
   }

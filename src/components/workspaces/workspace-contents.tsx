@@ -1,5 +1,7 @@
 "use client";
 
+import { requestErrorMessage, RequestOutcomeError } from "@/lib/post-json";
+
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Database, Eraser, Loader2 } from "lucide-react";
@@ -55,10 +57,11 @@ export function WorkspaceContents({
   const [target, setTarget] = useState<{ id: string; isCurrent: boolean } | null>(null);
   const [pending, setPending] = useState<Replace | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [unconfirmed, setUnconfirmed] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   async function run(action: Replace) {
-    if (!target) return;
+    if (!target || pending || unconfirmed) return;
     setPending(action);
     setError(null);
     try {
@@ -70,7 +73,8 @@ export function WorkspaceContents({
       setTarget(null);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "That did not work.");
+      setUnconfirmed(!(err instanceof RequestOutcomeError) || err.outcome === "unknown");
+      setError(requestErrorMessage(err, "That did not work. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     } finally {
       setPending(null);
     }
@@ -106,7 +110,7 @@ export function WorkspaceContents({
               type="button"
               size="sm"
               variant={action === "reset" ? "outline" : "default"}
-              disabled={pending !== null}
+              disabled={pending !== null || unconfirmed}
               onClick={() => { setTarget({ id: workspaceId, isCurrent }); setError(null); setOpen(action); }}
             >
               {action === "reset" ? <Eraser className="size-3.5" aria-hidden /> : <Database className="size-3.5" aria-hidden />}
@@ -118,17 +122,18 @@ export function WorkspaceContents({
                 <DialogDescription>{COPY[action].body}</DialogDescription>
               </DialogHeader>
               {error ? (
-                <p role="alert" className="text-[12px] text-destructive">
+                <p role="alert" className="text-sm text-destructive">
                   {error}
                 </p>
               ) : null}
               <DialogFooter>
-                <DialogClose render={<Button type="button" size="sm" variant="outline" disabled={pending !== null} />}>Cancel</DialogClose>
+                {unconfirmed ? <Button type="button" size="sm" variant="outline" onClick={() => window.location.reload()}>Check workspace contents</Button> : null}
+                <DialogClose render={<Button type="button" size="sm" variant="outline" disabled={pending !== null || unconfirmed} />}>Cancel</DialogClose>
                 <Button
                   type="button"
                   size="sm"
                   variant="destructive"
-                  disabled={pending !== null}
+                  disabled={pending !== null || unconfirmed}
                   onClick={() => void run(action)}
                 >
                   {pending === action ? <Loader2 className="size-3.5 animate-spin" /> : null}
@@ -145,7 +150,7 @@ export function WorkspaceContents({
         </p>
       ) : null}
       {error && open === null ? (
-        <p role="alert" className="text-[12px] text-destructive">
+        <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
       ) : null}

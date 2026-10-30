@@ -25,7 +25,7 @@ export async function GET(req: Request) {
   if (denied) return denied;
   const workspace_id = new URL(req.url).searchParams.get("workspace_id")?.trim();
   if (!workspace_id) {
-    return NextResponse.json({ error: "workspace_id required" }, { status: 400 });
+    return NextResponse.json({ safe_error: true, error: "workspace_id required" }, { status: 400 });
   }
   const pairs = await listCoveragePairs(workspace_id);
   return NextResponse.json({
@@ -75,7 +75,7 @@ export async function POST(req: Request) {
   } catch (error) {
     const known = labRequestErrorResponse(error);
     if (known) return known;
-    const message = labErrorMessage(error, "Coverage decide failed");
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    const message = labErrorMessage(error, "We couldn’t confirm the coverage decision. Check current coverage before saving it again.");
+    return NextResponse.json({ ok: false, safe_error: true, error: message }, { status: 400 });
   }
 }

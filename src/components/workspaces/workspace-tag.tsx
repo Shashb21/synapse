@@ -1,5 +1,7 @@
 "use client";
 
+import { requestErrorMessage } from "@/lib/post-json";
+
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Check, ChevronsUpDown, FolderKanban, Loader2, LogOut, Plus, Settings, ShieldCheck, UserRound } from "lucide-react";
@@ -35,7 +37,7 @@ export function WorkspaceTag({ tag, dense }: { tag: WorkspaceTagModel; dense?: b
       window.location.assign("/");
     } catch (err) {
       setPending(null);
-      setError(err instanceof Error ? err.message : "Could not switch workspace.");
+      setError(requestErrorMessage(err, "Could not switch workspace. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     }
   }
 
@@ -142,7 +144,7 @@ export function WorkspaceTag({ tag, dense }: { tag: WorkspaceTagModel; dense?: b
         </DropdownMenuContent>
       </DropdownMenu>
       {error ? (
-        <p role="alert" className="text-[11px] text-destructive">
+        <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
       ) : null}

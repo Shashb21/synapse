@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { postJson } from "@/lib/post-json";
+import { postJson, requestErrorMessage, RequestOutcomeError } from "@/lib/post-json";
 
 export type PickerWorkspace = {
   id: string;
@@ -35,7 +35,10 @@ export function AdminWorkspacePicker({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [checkRequired, setCheckRequired] = useState(false);
+
   async function setDemoMode(workspace: PickerWorkspace, enabled: boolean) {
+    if (busy !== null || checkRequired) return;
     if (
       enabled &&
       !window.confirm(
@@ -47,11 +50,12 @@ export function AdminWorkspacePicker({
     setError(null);
     try {
       const res = await postJson("/api/admin/workspace/demo-mode", { workspace_id: workspace.id, enabled });
-      const json = res.json as { error?: string };
-      if (!res.ok) throw new Error(json.error ?? `Could not change demo mode (HTTP ${res.status}).`);
+      const json = res.json as { ok?: boolean; error?: string };
+      if (!res.ok || json.ok !== true) throw new RequestOutcomeError(json.error ?? "We couldn’t confirm this action. Check the current state before repeating it.", res.outcome === "rejected" ? "rejected" : "unknown", res.status);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not change demo mode.");
+      setCheckRequired(!(err instanceof RequestOutcomeError) || err.outcome === "unknown");
+      setError(requestErrorMessage(err, "Could not change demo mode. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     } finally {
       setBusy(null);
     }
@@ -63,11 +67,11 @@ export function AdminWorkspacePicker({
     try {
       const res = await postJson("/api/admin/workspace", { workspace_id: id, next });
       const json = res.json as { error?: string; redirect?: string };
-      if (!res.ok) throw new Error(json.error ?? `Could not open that workspace (HTTP ${res.status}).`);
+      if (!res.ok) throw new RequestOutcomeError(json.error ?? "We couldn’t confirm this action. Check the current state before repeating it.", res.outcome, res.status);
       router.push(json.redirect ?? "/admin");
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not open that workspace.");
+      setError(requestErrorMessage(err, "Could not open that workspace. Check the current state before trying again. If this continues, contact your Synapse administrator."));
       setBusy(null);
     }
   }
@@ -79,10 +83,11 @@ export function AdminWorkspacePicker({
   return (
     <div className="grid gap-3">
       {error ? (
-        <p role="alert" data-testid="admin-workspace-error" className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive rounded-lg">
+        <p role="alert" data-testid="admin-workspace-error" className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive rounded-lg">
           {error}
         </p>
       ) : null}
+      {checkRequired ? <Button type="button" size="sm" variant="outline" onClick={() => window.location.reload()}>Check workspace state</Button> : null}
       <div className="overflow-x-auto border border-border bg-card rounded-lg">
         <table className="w-full text-[13px]" data-testid="admin-workspace-list">
           <thead className="text-[11px] text-muted-foreground">
@@ -118,7 +123,7 @@ export function AdminWorkspacePicker({
                         data-testid={`demo-mode-${workspace.id}`}
                         aria-label={`Client demo mode for ${workspace.name}`}
                         checked={workspace.demo_mode === true}
-                        disabled={busy !== null}
+                        disabled={busy !== null || checkRequired}
                         onChange={(event) => void setDemoMode(workspace, event.target.checked)}
                       />
                       {busy === `demo:${workspace.id}` ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : null}
@@ -132,7 +137,7 @@ export function AdminWorkspacePicker({
                         Working here
                       </span>
                     ) : (
-                      <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void choose(workspace.id)}>
+                      <Button size="sm" variant="outline" disabled={busy !== null || checkRequired} onClick={() => void choose(workspace.id)}>
                         {busy === workspace.id ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : null}
                         Work in this one
                       </Button>

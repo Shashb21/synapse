@@ -1,5 +1,7 @@
 "use client";
 
+import { requestErrorMessage, postJson } from "@/lib/post-json";
+
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -81,22 +83,18 @@ export function LedgerClaimCard({
   async function act(action: "validate" | "reject") {
     setError(null);
     if (rationale.trim().length < 3) {
-      setError("A short rationale is required (hillclimb).");
+      setError("A short rationale is required. Explain why you are making this decision.");
       return;
     }
     setPending(action);
     try {
-      const res = await fetch("/api/accuracy/claims/validate", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const res = await postJson("/api/accuracy/claims/validate", {
           workspace_id: workspaceId,
           claim_ids: [claim.id],
           action,
           rationale,
-        }),
-      });
-      const body = (await res.json()) as { error?: string };
+        }, { method: "POST" });
+      const body = res.json as { error?: string };
       if (!res.ok) {
         setError(body.error ?? "Validation failed");
         return;
@@ -104,7 +102,7 @@ export function LedgerClaimCard({
       setRationale("");
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Validation failed");
+      setError(requestErrorMessage(err, "Validation failed. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     } finally {
       setPending(null);
     }
@@ -456,7 +454,7 @@ export function LedgerClaimCard({
         </div>
       )}
       {error ? (
-        <p className="mt-2 text-[11px] text-destructive" role="alert">
+        <p className="mt-2 text-sm text-destructive" role="alert">
           {error}
         </p>
       ) : null}

@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 /** Builds and edits workspace timelines, preserving human decisions and attributable history. */
 import { tacticEditVersion } from "@/lib/iegp/tactic-edit-version";
 import { expansionScopeSchema } from "@/lib/iegp/tactic-expansions";
@@ -37,7 +38,7 @@ import {
   type TimelineModel,
 } from "./build";
 import { plural } from "@/lib/plural";
-import { finalSaveRefusal, planIssues } from "./plan-checks";
+import { planIssues } from "./plan-checks";
 import { fingerprintCode, planFingerprint } from "./plan-fingerprint";
 import { currentSchemaName, withWorkspaceTransaction } from "@/lib/iegp/db";
 import { loadAxes } from "@/modules/stages/s8-prioritization/axes";
@@ -48,7 +49,6 @@ import {
   findGapOrphans,
   foreignReferences,
   packageFingerprint,
-  packageRefusal,
   type FinalPackage,
   type PackageBlocker,
 } from "./final-package";
@@ -542,7 +542,7 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
       // replacing metadata a person changed while the model was running.
       await withTimelineMutation(async () => {
         if (timelineRevision(await storedActivities()) !== timelineRevision(overrides)) {
-          throw new Error("The timeline changed while this rebuild was running. Rebuild again to include the latest edits.");
+          throw new TrustedApplicationError("The timeline changed while this rebuild was running. Rebuild again to include the latest edits.");
         }
         for (const activity of model.activities) {
           // A user's per-dependency reasons live only on the row; keep them.
@@ -724,8 +724,8 @@ function assertWindow(start: string, end: string, readout?: string | null) {
       throw new Error(`The ${label} date is not a valid date (use YYYY-MM-DD).`);
     }
   }
-  if (end < start) throw new Error("An activity cannot end before it starts.");
-  if (readout && readout < start) throw new Error("The readout cannot be before the activity starts.");
+  if (end < start) throw new TrustedApplicationError("An activity cannot end before it starts.");
+  if (readout && readout < start) throw new TrustedApplicationError("The readout cannot be before the activity starts.");
 }
 
 /**
@@ -859,13 +859,13 @@ export async function setTimelineDependencies(args: {
     const byId = new Map(model.activities.map((activity) => [activity.id, activity]));
     const upstream = [...new Set(args.depends_on.map((id) => id.trim()).filter(Boolean))];
     for (const id of upstream) {
-      if (id === args.id) throw new Error("An activity cannot depend on itself.");
+      if (id === args.id) throw new TrustedApplicationError("An activity cannot depend on itself.");
       if (!byId.has(id)) throw new Error(`Unknown activity ${id}: an activity can only wait on a dated activity.`);
     }
     const graph = new Map(model.activities.map((activity) => [activity.id, activity.depends_on]));
     graph.delete(args.id);
     if (wouldCycle(graph, args.id, upstream)) {
-      throw new Error("That dependency would create a cycle: an upstream activity already waits on this one.");
+      throw new TrustedApplicationError("That dependency would create a cycle: an upstream activity already waits on this one.");
     }
     const reasons: Record<string, string> = {};
     for (const id of upstream) {
@@ -929,14 +929,14 @@ export async function addTimelineActivity(args: {
     const [state, placements, overrides] = await Promise.all([loadState(), listPlacements(), storedActivities()]);
     const selectedExpansion = args.activity_id ? state.expansions.find(child => activityId(child.tactic_id, child.id) === args.activity_id) : undefined;
     const selectedTactic = args.activity_id ? state.tactics.find(row => activityId(row.id) === args.activity_id) : undefined;
-    if (args.activity_id && !selectedExpansion && !selectedTactic) throw new Error("Unknown timeline activity.");
+    if (args.activity_id && !selectedExpansion && !selectedTactic) throw new TrustedApplicationError("Unknown timeline activity.");
     const tacticId = selectedExpansion?.tactic_id ?? selectedTactic?.id ?? args.tactic_id;
-    if (args.tactic_id && args.tactic_id !== tacticId) throw new Error("Activity does not belong to this tactic.");
+    if (args.tactic_id && args.tactic_id !== tacticId) throw new TrustedApplicationError("Activity does not belong to this tactic.");
     const tactic = state.tactics.find((row) => row.id === tacticId);
     if (!tactic) throw new Error(`Unknown tactic ${args.tactic_id}.`);
     const expansion = selectedExpansion ?? (args.expansion_id ? state.expansions.find(child => child.id === args.expansion_id && child.tactic_id === tactic.id) : undefined);
-    if (args.expansion_id && expansion?.id !== args.expansion_id) throw new Error("Activity does not match this expansion.");
-    if (args.expansion_id && !expansion) throw new Error("Expansion not found under this tactic.");
+    if (args.expansion_id && expansion?.id !== args.expansion_id) throw new TrustedApplicationError("Activity does not match this expansion.");
+    if (args.expansion_id && !expansion) throw new TrustedApplicationError("Expansion not found under this tactic.", "not_found", 404);
     if ((expansion?.status ?? tactic.status) === "cancelled" || (!expansion && tactic.review_status === "rejected")) {
       throw new Error(`${tactic.name} is cancelled or rejected, so it cannot go on the timeline.`);
     }
@@ -948,7 +948,7 @@ export async function addTimelineActivity(args: {
     }
     const start = args.start_date ?? (restoring && existing.start_date ? existing.start_date : undefined);
     const end = args.end_date ?? (restoring && existing.end_date ? existing.end_date : undefined);
-    if (!start || !end) throw new Error("A start and an end date are required.");
+    if (!start || !end) throw new TrustedApplicationError("A start and an end date are required.");
     const readout =
       args.readout_date !== undefined ? args.readout_date : restoring ? (existing.readout_date ?? null) : null;
     assertWindow(start, end, readout);
@@ -1032,10 +1032,10 @@ export async function createTimelineActivity(args: {
 }) {
   return withTimelineMutation(async () => {
     const rationale = requireRationale(args.rationale);
-    if (!args.name.trim()) throw new Error("A name is required.");
-    if (!args.evidence_question.trim()) throw new Error("An evidence question is required.");
+    if (!args.name.trim()) throw new TrustedApplicationError("A name is required.");
+    if (!args.evidence_question.trim()) throw new TrustedApplicationError("An evidence question is required.");
     if (Boolean(args.start_date) !== Boolean(args.end_date)) {
-      throw new Error("Give both a start and an end date, or neither to leave it unscheduled.");
+      throw new TrustedApplicationError("Give both a start and an end date, or neither to leave it unscheduled.");
     }
     if (args.start_date && args.end_date) assertWindow(args.start_date, args.end_date, args.readout_date);
     const state = await loadState();
@@ -1242,19 +1242,27 @@ export async function savePlan(args: {
     await db().execute(sql`select pg_advisory_xact_lock(hashtext(${`iegp_plans:${schema}`}))`);
     const [model, state, proposals] = await Promise.all([timelineModel(), loadState(), listIdeationProposals()]);
     if (args.status === "final" && model.activities.length === 0) {
-      throw new Error("There is nothing to save as final yet: date at least one activity on the timeline first.");
+      throw new TrustedApplicationError("There is nothing to save as final yet: date at least one activity on the timeline first.");
     }
     if (args.status === "final" && model.pending.length > 0) {
-      throw new Error(
-        `${model.pending.length === 1 ? "1 activity has" : `${model.pending.length} activities have`} no schedule yet (${model.pending
-          .map((row) => row.tactic_name)
-          .join(", ")}). Date each one with Set dates on the timeline (choose Show deferred gaps if it sits under a deferred gap), or remove it, then save the plan as final.`,
-      );
+      throw new TrustedApplicationError("Some activities have no schedule yet. Date each one with Set dates on the timeline (choose Show deferred gaps if needed), or remove it, then save the plan as final. You can still save a draft.", "timeline_unscheduled");
     }
     // Conflicts, loops, missing references, invalid dates, unreviewed estimates and
     // proposed dependencies are explained and must be resolved first (KAN-85).
     const issues = planIssues(model).filter((issue) => issue.kind !== "pending");
-    if (args.status === "final" && issues.length > 0) throw new Error(finalSaveRefusal(issues));
+    if (args.status === "final" && issues.length > 0) {
+      const recovery = {
+        pending: "Date unscheduled activities or remove them.",
+        invalid_date: "Correct invalid activity dates on the timeline.",
+        estimate: "Accept or edit the unreviewed date estimates.",
+        stale_estimate: "Check the outdated date estimates, then accept or edit them.",
+        proposed_dependency: "Accept or reject the proposed dependencies.",
+        conflict: "Move conflicting activities or change their dependencies.",
+        cycle: "Remove circular dependencies between activities.",
+        dangling: "Remove or replace dependencies on missing activities.",
+      };
+      throw new TrustedApplicationError(`The plan cannot be saved as final yet. ${[...new Set(issues.map((issue) => recovery[issue.kind]))].join(" ")} You can still save a draft.`, "timeline_blocked");
+    }
     const fingerprint = planFingerprint(model.activities);
     const fingerprint_code = fingerprintCode(fingerprint);
     let finalPackage: FinalPackage | undefined;
@@ -1267,7 +1275,17 @@ export async function savePlan(args: {
         ...finalPackageBlockers({ state, placements, orphans: await findGapOrphans(state) }),
         ...foreignReferences(state, model),
       ];
-      if (blockers.length > 0) throw new Error(packageRefusal(blockers));
+      if (blockers.length > 0) {
+        const recovery = {
+          candidate: "Resolve candidate gaps on Evidence Inventory.",
+          partial: "Split or rewrite Partially Addressed gaps as Open or Addressed.",
+          unconfirmed: "Confirm the remaining gaps on Evidence Inventory.",
+          no_band: "Validate priority bands for Open gaps on the Prioritization Matrix.",
+          orphans: "Ask your administrator to check references to retired or missing gaps.",
+          foreign_reference: "Remove or replace references to items outside this workspace.",
+        };
+        throw new TrustedApplicationError(`The complete plan cannot be saved as final yet. ${[...new Set(blockers.map((blocker) => recovery[blocker.issue]))].join(" ")} Unscheduled, deferred, parked and excluded gaps do not block it: the final plan lists them as open items. You can still save a draft.`, "plan_package_blocked");
+      }
       finalPackage = await buildFinalPackage({
         state,
         model,
@@ -1374,7 +1392,7 @@ export async function reviewTimelineDependency(args: {
       graph.delete(args.id);
       dependsOn = [...new Set([...before, args.upstream_id])];
       if (wouldCycle(graph, args.id, dependsOn)) {
-        throw new Error("Accepting that dependency would create a cycle: the other activity already waits on this one.");
+        throw new TrustedApplicationError("Accepting that dependency would create a cycle: the other activity already waits on this one.");
       }
       meta.depends_locked = true;
       meta.dependency_reasons = { ...((meta.dependency_reasons as Record<string, string> | undefined) ?? {}), [args.upstream_id]: proposal.reason };
@@ -1450,7 +1468,7 @@ export async function acceptTimelineEstimates(args: {
       });
       accepted.push(row.id);
     }
-    if (wanted && accepted.length === 0) throw new Error("None of those activities carries a model estimate to accept.");
+    if (wanted && accepted.length === 0) throw new TrustedApplicationError("None of those activities carries a model estimate to accept.");
     return { accepted };
   });
 }

@@ -8,23 +8,14 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type { Customer, SeatAssignment } from "@/modules/auth/customers";
 import { formatUtc } from "@/lib/format-time";
-import { NETWORK_ERROR } from "@/lib/post-json";
+import { postJson, RequestOutcomeError, requestErrorMessage } from "@/lib/post-json";
 
 type Detail = { customer: Customer; seats: SeatAssignment[] };
 
 async function call<T>(url: string, method: string, body?: Record<string, unknown>): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method,
-      headers: body ? { "content-type": "application/json" } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-    });
-  } catch {
-    throw new Error(NETWORK_ERROR);
-  }
-  const json = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(json.error ?? `Request failed (HTTP ${res.status}).`);
+  const res = await postJson<T>(url, body, { method });
+  const json = res.json as T & { error?: string };
+  if (!res.ok) throw new RequestOutcomeError(json.error ?? "We couldn’t confirm this customer change. Reload the customer list before repeating it.", res.outcome, res.status);
   return json;
 }
 
@@ -39,7 +30,7 @@ function seatsLabel(customer: Customer): string {
 function ErrorNote({ error, testId }: { error: string | null; testId: string }) {
   if (!error) return null;
   return (
-    <p role="alert" data-testid={testId} className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
+    <p role="alert" data-testid={testId} className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
       {error}
     </p>
   );
@@ -53,6 +44,7 @@ function CreateCustomerForm({ onCreated }: { onCreated: (customer: Customer) => 
   const [domains, setDomains] = useState("");
   const [seats, setSeats] = useState("10");
   const [busy, setBusy] = useState(false);
+  const [checkRequired, setCheckRequired] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   return (
@@ -61,6 +53,7 @@ function CreateCustomerForm({ onCreated }: { onCreated: (customer: Customer) => 
       className="grid gap-2 border border-border bg-card p-4 rounded-lg"
       onSubmit={async (event) => {
         event.preventDefault();
+        if (busy || checkRequired) return;
         setBusy(true);
         setError(null);
         try {
@@ -74,7 +67,8 @@ function CreateCustomerForm({ onCreated }: { onCreated: (customer: Customer) => 
           setSeats("10");
           onCreated(customer);
         } catch (err) {
-          setError(err instanceof Error ? err.message : "Could not create the customer.");
+          setCheckRequired(!(err instanceof RequestOutcomeError) || err.outcome === "unknown");
+          setError(requestErrorMessage(err, "Could not create the customer. Check the current state before trying again. If this continues, contact your Synapse administrator."));
         } finally {
           setBusy(false);
         }
@@ -93,7 +87,7 @@ function CreateCustomerForm({ onCreated }: { onCreated: (customer: Customer) => 
           Seats
           <Input type="number" min={0} step={1} value={seats} required onChange={(e) => setSeats(e.target.value)} />
         </label>
-        <Button type="submit" disabled={busy || name.trim().length < 2 || seats === ""}>
+        <Button type="submit" disabled={checkRequired || busy || name.trim().length < 2 || seats === ""}>
           {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" aria-hidden />}
           Create customer
         </Button>
@@ -101,6 +95,7 @@ function CreateCustomerForm({ onCreated }: { onCreated: (customer: Customer) => 
       <p className="text-[11px] text-muted-foreground">
         With domains set, only emails on them can hold a seat. Leave empty to allow any domain.
       </p>
+      {checkRequired ? <Button type="button" variant="outline" onClick={() => window.location.reload()}>Check customer list</Button> : null}
       <ErrorNote error={error} testId="create-customer-error" />
     </form>
   );
@@ -125,12 +120,14 @@ function CustomerPanel({
   const [active, setActive] = useState(customer.active);
   const [emails, setEmails] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [checkRequired, setCheckRequired] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [seatError, setSeatError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const remaining = Math.max(0, customer.seats - customer.seats_used);
 
   async function save() {
+    if (busy !== null || checkRequired) return;
     setBusy("save");
     setEditError(null);
     setNotice(null);
@@ -144,13 +141,15 @@ function CustomerPanel({
       onChange(next);
       setNotice("Saved.");
     } catch (err) {
-      setEditError(err instanceof Error ? err.message : "Could not save.");
+      setCheckRequired(!(err instanceof RequestOutcomeError) || err.outcome === "unknown");
+      setEditError(requestErrorMessage(err, "Could not save. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     } finally {
       setBusy(null);
     }
   }
 
   async function assign() {
+    if (busy !== null || checkRequired) return;
     setBusy("assign");
     setSeatError(null);
     setNotice(null);
@@ -166,13 +165,15 @@ function CustomerPanel({
       if (result.already.length > 0) parts.push(`${result.already.length} already had one.`);
       setNotice(parts.join(" "));
     } catch (err) {
-      setSeatError(err instanceof Error ? err.message : "Could not assign seats.");
+      setCheckRequired(!(err instanceof RequestOutcomeError) || err.outcome === "unknown");
+      setSeatError(requestErrorMessage(err, "Could not assign seats. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     } finally {
       setBusy(null);
     }
   }
 
   async function unassign(email: string) {
+    if (busy !== null || checkRequired) return;
     setBusy(`unassign:${email}`);
     setSeatError(null);
     setNotice(null);
@@ -180,7 +181,8 @@ function CustomerPanel({
       onChange(await call<Detail>(`/api/admin/customers/${customer.id}/seats`, "DELETE", { email }));
       setNotice(`Unassigned ${email}. They are signed out.`);
     } catch (err) {
-      setSeatError(err instanceof Error ? err.message : "Could not unassign the seat.");
+      setCheckRequired(!(err instanceof RequestOutcomeError) || err.outcome === "unknown");
+      setSeatError(requestErrorMessage(err, "Could not unassign the seat. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     } finally {
       setBusy(null);
     }
@@ -208,6 +210,7 @@ function CustomerPanel({
         </Button>
       </div>
 
+      {checkRequired ? <Button variant="outline" onClick={() => window.location.reload()}>Check customer details</Button> : null}
       <form
         aria-label="Edit customer"
         className="grid gap-2"
@@ -233,7 +236,7 @@ function CustomerPanel({
             <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
             Active
           </label>
-          <Button type="submit" variant="outline" disabled={busy !== null || name.trim().length < 2 || seatCount === ""}>
+          <Button type="submit" variant="outline" disabled={checkRequired || busy !== null || name.trim().length < 2 || seatCount === ""}>
             {busy === "save" ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" aria-hidden />}
             Save
           </Button>
@@ -262,7 +265,7 @@ function CustomerPanel({
           />
         </label>
         <div className="flex flex-wrap items-center gap-2">
-          <Button type="submit" disabled={busy !== null || !emails.trim()}>
+          <Button type="submit" disabled={checkRequired || busy !== null || !emails.trim()}>
             {busy === "assign" ? <Loader2 className="size-4 animate-spin" /> : <UserPlus className="size-4" aria-hidden />}
             Assign seats
           </Button>
@@ -307,7 +310,7 @@ function CustomerPanel({
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={busy !== null}
+                    disabled={checkRequired || busy !== null}
                     aria-label={`Unassign ${seat.email}`}
                     onClick={() => void unassign(seat.email)}
                   >
@@ -333,6 +336,7 @@ export function AdminCustomers({ initialCustomers, maxBulk }: { initialCustomers
   const [customers, setCustomers] = useState(initialCustomers);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loading, setLoading] = useState<string | null>(null);
+  const [checkRequired, setCheckRequired] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -351,13 +355,14 @@ export function AdminCustomers({ initialCustomers, maxBulk }: { initialCustomers
       upsert(next.customer);
       setDetail(next);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not open the customer.");
+      setError(requestErrorMessage(err, "Could not open the customer. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     } finally {
       setLoading(null);
     }
   }
 
   async function remove(customer: Customer) {
+    if (loading !== null || checkRequired) return;
     setLoading(`delete:${customer.id}`);
     setError(null);
     setNotice(null);
@@ -370,7 +375,8 @@ export function AdminCustomers({ initialCustomers, maxBulk }: { initialCustomers
         `Deleted ${customer.name}.${result.seats_removed ? ` ${result.seats_removed} seat holder${result.seats_removed === 1 ? " is" : "s are"} signed out.` : ""}`,
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not delete the customer.");
+      setCheckRequired(!(err instanceof RequestOutcomeError) || err.outcome === "unknown");
+      setError(requestErrorMessage(err, "Could not delete the customer. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     } finally {
       setLoading(null);
     }
@@ -384,6 +390,7 @@ export function AdminCustomers({ initialCustomers, maxBulk }: { initialCustomers
           setDetail({ customer, seats: [] });
         }}
       />
+      {checkRequired ? <Button type="button" variant="outline" onClick={() => window.location.reload()}>Check customer list</Button> : null}
       <ErrorNote error={error} testId="customers-error" />
       {notice ? (
         <p role="status" data-testid="customers-notice" className="text-[12px] text-foreground">
@@ -429,7 +436,7 @@ export function AdminCustomers({ initialCustomers, maxBulk }: { initialCustomers
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={loading !== null}
+                      disabled={checkRequired || loading !== null}
                       aria-label={`Manage ${customer.name}`}
                       onClick={() => void open(customer.id)}
                     >
@@ -447,11 +454,11 @@ export function AdminCustomers({ initialCustomers, maxBulk }: { initialCustomers
                           Delete {customer.name} and its {customer.seats_used} assigned seat{customer.seats_used === 1 ? "" : "s"}? Seat
                           holders are signed out at once.
                         </span>
-                        <Button size="sm" variant="destructive" disabled={loading !== null} onClick={() => void remove(customer)}>
+                        <Button size="sm" variant="destructive" disabled={checkRequired || loading !== null} onClick={() => void remove(customer)}>
                           {loading === `delete:${customer.id}` ? <Loader2 className="size-3.5 animate-spin" /> : null}
                           Yes, delete
                         </Button>
-                        <Button size="sm" variant="ghost" disabled={loading !== null} onClick={() => setConfirmDelete(null)}>
+                        <Button size="sm" variant="ghost" disabled={checkRequired || loading !== null} onClick={() => setConfirmDelete(null)}>
                           Cancel
                         </Button>
                       </span>
@@ -459,7 +466,7 @@ export function AdminCustomers({ initialCustomers, maxBulk }: { initialCustomers
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={loading !== null}
+                        disabled={checkRequired || loading !== null}
                         aria-label={`Delete ${customer.name}`}
                         onClick={() => setConfirmDelete(customer.id)}
                       >

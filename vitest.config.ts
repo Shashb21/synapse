@@ -16,7 +16,7 @@ export default defineConfig({
       "./vitest.kan100.config.ts",
     ],
     environment: "node",
-    include: ["tests/**/*.test.ts"],
+    include: ["tests/**/*.test.{ts,tsx}"],
     setupFiles: ["./tests/support/ai-on.ts"],
     fileParallelism: false,
     /** CI ingest/store tests exceed the default 5s under shared Postgres load. */

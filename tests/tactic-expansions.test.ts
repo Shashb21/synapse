@@ -20,6 +20,7 @@ import { computeGapStatus, unlocked, countingCoverages, relationshipFit } from "
 import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
 import { coverageReviewVersion, getRequirementBasisReview } from "@/lib/iegp/requirement-basis";
 import type { ExpansionScope } from "@/lib/iegp/types";
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh() {} }) }));
 
@@ -60,7 +61,13 @@ describe("canonical expansion acceptance", () => {
     await db().execute(sql.raw(`CREATE FUNCTION reject_split_scope() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.expansion_id IS NOT NULL AND NEW.gap_id <> '${args.gap_id}' THEN RAISE EXCEPTION 'injected scoped split failure'; END IF; RETURN NEW; END $$`));
     await db().execute(sql`CREATE TRIGGER reject_split_scope BEFORE INSERT ON coverages FOR EACH ROW EXECUTE FUNCTION reject_split_scope()`);
     try {
-      await expect(splitPartialGap({expected_resolution: gapResolutionVersion(await loadState(), args.gap_id), parent_gap_id: args.gap_id, addressed_name: "Covered scope", open_name: "Uncovered scope", tactic_ids: [child.id], note: "Reviewed the evidence scope and remaining need", actor_name: actor.name, actor_function: actor.function})).rejects.toMatchObject({cause: {message: "injected scoped split failure"}});
+      const action = splitPartialGap({expected_resolution: gapResolutionVersion(await loadState(), args.gap_id), parent_gap_id: args.gap_id, addressed_name: "Covered scope", open_name: "Uncovered scope", tactic_ids: [child.id], note: "Reviewed the evidence scope and remaining need", actor_name: actor.name, actor_function: actor.function});
+      await expect(action).rejects.toBeInstanceOf(TrustedApplicationError);
+      await expect(action).rejects.toMatchObject({
+        code: "invalid_request", status: 400,
+        message: "Could not save the relationship and its history. Keep your input and reason, and check the relationship before trying again.",
+      });
+      await expect(action).rejects.not.toHaveProperty("cause");
       expect(await loadState()).toEqual(before);
     } finally {
       await db().execute(sql`DROP TRIGGER reject_split_scope ON coverages`);
@@ -423,7 +430,13 @@ describe("canonical expansion acceptance", () => {
     await db().execute(sql`CREATE TRIGGER test_expansion_fail BEFORE INSERT ON coverages FOR EACH ROW EXECUTE FUNCTION fail_expansion_coverage()`);
     const before = await loadState();
     try {
-      await expect(acceptTacticExpansion(args)).rejects.toMatchObject({ cause: { message: "injected coverage failure" } });
+      const action = acceptTacticExpansion(args);
+      await expect(action).rejects.toBeInstanceOf(TrustedApplicationError);
+      await expect(action).rejects.toMatchObject({
+        code: "invalid_request", status: 400,
+        message: "Could not save the relationship and its history. Keep your input and reason, and check the relationship before trying again.",
+      });
+      await expect(action).rejects.not.toHaveProperty("cause");
       const after = await loadState();
       expect(after.expansions).toEqual([]);
       expect(after.coverages).toEqual(before.coverages);

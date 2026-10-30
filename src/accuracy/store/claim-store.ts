@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 /** Stores ledger claims, validation decisions, and durable source evidence. */
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { accuracyDb, ensureAccuracySchema } from "./db";
@@ -96,7 +97,7 @@ const RATIONALE_MIN = 3;
 export function requireValidationRationale(rationale: string | null | undefined): string {
   const trimmed = (rationale ?? "").trim();
   if (trimmed.length < RATIONALE_MIN) {
-    throw new Error("A short rationale is required for every validation decision.");
+    throw new TrustedApplicationError("A short rationale is required for every validation decision.");
   }
   return trimmed;
 }
@@ -222,7 +223,7 @@ export async function applyClaimValidation(args: {
 }): Promise<{ updated: number; claims: AccuracyClaimRow[] }> {
   const rationale = requireValidationRationale(args.rationale);
   if (args.claim_ids.length === 0) {
-    throw new Error("At least one claim_id is required.");
+    throw new TrustedApplicationError("At least one claim_id is required.");
   }
 
   await ensureAccuracySchema();

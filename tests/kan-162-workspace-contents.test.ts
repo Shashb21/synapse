@@ -17,7 +17,7 @@ beforeEach(() => { container = document.createElement("div"); document.body.appe
 afterEach(() => { act(() => root.unmount()); document.body.innerHTML = ""; vi.unstubAllGlobals(); });
 it.each([true, false])("sends the confirmed workspace for current=%s", async (isCurrent) => {
   // Arrange: render the real dialog and record outgoing HTTP requests.
-  const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true }));
+  const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(Response.json({ ok: true })));
   vi.stubGlobal("fetch", fetchMock);
   act(() => root.render(createElement(WorkspaceContents, { ...props, isCurrent })));
   await click("Load demo data");
@@ -31,7 +31,7 @@ it.each([true, false])("sends the confirmed workspace for current=%s", async (is
   expect(document.body.textContent).toContain("Demo data loaded.");
 });
 it("a failed select keeps the confirmation open and prevents replacement", async () => {
-  const fetchMock = vi.fn().mockResolvedValue(Response.json({ error: "Selection failed" }, { status: 403 }));
+  const fetchMock = vi.fn().mockResolvedValue(Response.json({ safe_error: true, request_outcome: "rejected", error: "Selection failed" }, { status: 403 }));
   vi.stubGlobal("fetch", fetchMock);
   act(() => root.render(createElement(WorkspaceContents, { ...props, isCurrent: false })));
   await click("Load demo data");
@@ -41,7 +41,7 @@ it("a failed select keeps the confirmation open and prevents replacement", async
   expect(document.querySelector('[role="dialog"]')).not.toBeNull();
 });
 it.each([true, false])("a prop change and mismatch preserve the original target through retry (current=%s)", async (isCurrent) => {
-  const fetchMock = vi.fn().mockImplementation((url: string) => Promise.resolve(url === "/api/workspaces/select" ? Response.json({ ok: true }) : Response.json({ error: "The selected workspace changed. Reopen the intended workspace and try again. No contents were changed.", code: "workspace_mismatch" }, { status: 409 })));
+  const fetchMock = vi.fn().mockImplementation((url: string) => Promise.resolve(url === "/api/workspaces/select" ? Response.json({ ok: true }) : Response.json({ safe_error: true, request_outcome: "rejected", error: "The selected workspace changed. Reopen the intended workspace and try again. No contents were changed.", code: "workspace_mismatch" }, { status: 409 })));
   vi.stubGlobal("fetch", fetchMock);
   act(() => root.render(createElement(WorkspaceContents, { ...props, isCurrent })));
   await click("Reset to blank");

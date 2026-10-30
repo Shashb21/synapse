@@ -18,7 +18,7 @@ import { recordEvalRun } from "./evals";
 import type { Actor, EvalScore, ModuleContext, ResolvedRoute, StageId } from "./contracts";
 import { assertCan, type Capability, type Role } from "@/modules/auth/roles";
 import { isTestStub } from "./llm";
-import { tagStageError } from "./stage-errors";
+import { tagStageError, TrustedApplicationError } from "./stage-errors";
 import type { RunStep } from "./contracts";
 
 export const DEFAULT_WORKSPACE = "default";
@@ -178,7 +178,11 @@ export async function runStage<O = unknown>(args: {
       .map((issue) => `${issue.path.join(".") || "(root)"} ${issue.message}`)
       .join("; ")}`;
     await closeRun({ recorder, status: "error", error: message });
-    throw new Error(message);
+    // Schema diagnostics stay in the run record. Public guidance never reflects input.
+    const needsRationale = args.stage === "S5" && parsedInput.error.issues.some(issue => issue.path[0] === "rationale");
+    throw new TrustedApplicationError(needsRationale
+      ? "Enter a rationale with at least 3 characters, then try again."
+      : "Check the required fields and their values, then try again.");
   }
   recorder.note("input:accepted", implementation.traceInput ? implementation.traceInput(parsedInput.data) : parsedInput.data);
 

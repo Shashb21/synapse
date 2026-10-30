@@ -1,3 +1,4 @@
+import { customerErrorMessage } from "@/modules/kernel/stage-errors";
 import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -43,10 +44,7 @@ export async function POST(req: Request) {
       });
       return NextResponse.json({ ok: true, changed: result.changed });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Priority update failed";
-      if (/^Unknown claim/.test(message)) {
-        return NextResponse.json({ ok: false, error: "Claim not found" }, { status: 404 });
-      }
+      const message = customerErrorMessage(error);
       if (message === "No changes to save.") {
         return NextResponse.json({ ok: true, changed: [] });
       }
@@ -55,7 +53,7 @@ export async function POST(req: Request) {
   } catch (error) {
     const known = labRequestErrorResponse(error);
     if (known) return known;
-    const message = labErrorMessage(error, "Priority update failed");
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    const message = labErrorMessage(error, "We couldn’t confirm the priority update. Check the claim’s current priority before saving it again.");
+    return NextResponse.json({ ok: false, safe_error: true, error: message }, { status: 400 });
   }
 }

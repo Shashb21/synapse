@@ -18,7 +18,7 @@ export default async function NeedsPage() {
     loadState(),
     sessionContext(),
     listRejectedGapCandidates(),
-    aiSectionEnabled("gap_extraction").catch(() => false),
+    aiSectionEnabled("gap_extraction"),
   ]);
   const identity: ActionIdentity = {
     signed_in: session.signed_in,

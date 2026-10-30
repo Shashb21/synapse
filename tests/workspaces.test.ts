@@ -73,7 +73,7 @@ describe("workspaces", () => {
 
     await expect(inviteMember({ workspace_id: ws.id, email: "not-an-email", by: owner })).rejects.toThrow(/valid email/);
     await expect(inviteMember({ workspace_id: ws.id, email: "x@example.com", by: "stranger@example.com" })).rejects.toThrow(
-      /not a member/,
+      /Your workspace access has changed. Choose another workspace or ask its owner for access/,
     );
     await expect(removeMember({ workspace_id: ws.id, principal: owner, by: guest })).rejects.toThrow(/Only the workspace owner/);
     await removeMember({ workspace_id: ws.id, principal: guest, by: owner });

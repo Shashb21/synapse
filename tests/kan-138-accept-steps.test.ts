@@ -108,7 +108,7 @@ describe("accepting a step", () => {
       vi.fn(async (url: string) =>
         url === "/api/demo/pending"
           ? Response.json({ ...base, ideation: { proposed: ["IDEA-1"] } })
-          : Response.json({ error: "Proposal IDEA-1 was already decided." }, { status: 409 }),
+          : Response.json({ safe_error: true, request_outcome: "rejected", error: "Proposal IDEA-1 was already decided." }, { status: 409 }),
       ),
     );
     await expect(acceptDemoStep("ideation")).rejects.toThrow("Proposal IDEA-1 was already decided.");

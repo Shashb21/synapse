@@ -1,5 +1,7 @@
 "use client";
 
+import { requestErrorMessage, RequestOutcomeError } from "@/lib/post-json";
+
 import { useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { CheckCheck, Download, Loader2, RotateCcw } from "lucide-react";
@@ -27,6 +29,7 @@ export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["curr
   const [target, setTarget] = useState<typeof workspace | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [checkRequired, setCheckRequired] = useState(false);
   const owner = (target ?? workspace).role === "owner";
   const pathname = usePathname() ?? "";
   const place = useSearchParams()?.get("place") ?? null;
@@ -43,21 +46,24 @@ export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["curr
       await acceptDemoStep(step, setAccepting);
       window.location.reload();
     } catch (err) {
-      setAcceptError(err instanceof Error ? err.message : "Could not accept this step.");
+      setAcceptError(requestErrorMessage(err, "Could not accept this step. Check the current state before trying again. If this continues, contact your Synapse administrator."));
       setAccepting(null);
     }
   }
 
   async function reset() {
-    if (!target) return;
+    if (!target || pending || checkRequired) return;
     setPending(true);
     setError(null);
     try {
-      await sendJson("/api/iegp", { action: "load_demo", expected_workspace_id: target.id });
+      const result = await sendJson<{ ok?: boolean }>("/api/iegp", { action: "load_demo", expected_workspace_id: target.id });
+      if (result.ok !== true) throw new RequestOutcomeError("We couldn’t confirm the reset. Check workspace contents before resetting again.", "unknown", 200);
       // A full load from the home page, so nothing from before the reset stays on screen.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- A document navigation discards stale workspace state after contents replacement.
       window.location.assign("/");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "The demo could not be reset.");
+      setCheckRequired(!(err instanceof RequestOutcomeError) || err.outcome === "unknown");
+      setError(requestErrorMessage(err, "The demo could not be reset. Check the current state before trying again. If this continues, contact your Synapse administrator."));
       setPending(false);
     }
   }
@@ -105,13 +111,13 @@ export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["curr
         <Dialog
           open={open}
           onOpenChange={(next) => {
-            if (pending) return;
+            if (pending || checkRequired) return;
             setOpen(next);
             setTarget(next ? { ...workspace } : null);
             if (!next) setError(null);
           }}
         >
-          <Button type="button" size="xs" variant="outline" onClick={() => { setTarget({ ...workspace }); setOpen(true); }}>
+          <Button type="button" size="xs" variant="outline" disabled={pending || checkRequired} onClick={() => { setTarget({ ...workspace }); setOpen(true); }}>
             <RotateCcw className="size-3" aria-hidden />
             Reset demo
           </Button>
@@ -125,13 +131,14 @@ export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["curr
               </DialogDescription>
             </DialogHeader>
             {error ? (
-              <p role="alert" className="text-[12px] text-destructive">
+              <p role="alert" className="text-sm text-destructive">
                 {error}
               </p>
             ) : null}
             <DialogFooter>
-              <DialogClose render={<Button type="button" size="sm" variant="outline" disabled={pending} />}>Cancel</DialogClose>
-              <Button type="button" size="sm" onClick={() => void reset()} disabled={pending}>
+              {checkRequired ? <Button type="button" size="sm" variant="outline" onClick={() => window.location.reload()}>Check workspace contents</Button> : null}
+              <DialogClose render={<Button type="button" size="sm" variant="outline" disabled={pending || checkRequired} />}>Cancel</DialogClose>
+              <Button type="button" size="sm" onClick={() => void reset()} disabled={pending || checkRequired}>
                 {pending ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : null}
                 {pending ? "Resetting…" : "Reset demo"}
               </Button>

@@ -1,9 +1,12 @@
 import { priorityDecision } from "./support/priority-decision";
 import { makeFinalReady } from "./support/final-ready";
 import { beforeAll, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import "@/modules";
 import { runStage } from "@/modules/kernel/run";
-import { wipePlatform } from "@/modules/kernel/db";
+import { db, wipePlatform } from "@/modules/kernel/db";
+import { HISTORICAL_FAILURE_MESSAGE } from "@/modules/kernel/failure-presentation";
+import { moduleRuns } from "@/modules/kernel/schema";
 import { getRun, listRuns } from "@/modules/kernel/observability";
 import { listEdits } from "@/modules/kernel/edit-records";
 import { hillclimbDigest, listSignals } from "@/modules/kernel/hillclimb";
@@ -259,9 +262,10 @@ describe("modular pipeline, S0 to S10", () => {
     expect(moved.start_date).toBe("2027-01-01");
 
     // The other activities' dates are model estimates nobody reviewed: final waits for that (KAN-85).
-    await expect(savePlan({ status: "final", note: "Signed off in the Q1 review", actor: ACTOR })).rejects.toThrow(
-      /model-estimated .* nobody has reviewed/,
-    );
+    await expect(savePlan({ status: "final", note: "Signed off in the Q1 review", actor: ACTOR })).rejects.toMatchObject({
+      code: "timeline_blocked",
+      message: expect.stringContaining("Accept or edit the unreviewed date estimates."),
+    });
     const { accepted } = await acceptTimelineEstimates({ rationale: "Estimates reviewed in the Q1 planning call", actor: ACTOR });
     expect(accepted.length).toBeGreaterThan(0);
     // A complete final needs every gap resolved, confirmed and banded (KAN-86).
@@ -281,14 +285,18 @@ describe("modular pipeline, S0 to S10", () => {
     const state = await loadState();
     // Provider comparison attempts own separate traces from stage contract failures.
     for (const record of runs.filter((candidate) => candidate.status === "error")) {
+      expect(record.error).toBe(HISTORICAL_FAILURE_MESSAGE);
+      expect(JSON.stringify(record)).not.toMatch(/no API key|rejected its input/i);
+      // Public history uses safe guidance; storage retains the internal diagnosis.
+      const [stored] = await db().select({ error: moduleRuns.error }).from(moduleRuns).where(eq(moduleRuns.id, record.id));
       if (record.module_id === "incoming-source-comparison") {
         const comparison = state.source_comparisons?.find((row) => row.version === record.id);
         expect(record).toMatchObject({ stage: "S1", finished_at: expect.any(String), route: null });
-        expect(record.error ?? "").toMatch(/no API key/i);
-        expect(comparison).toMatchObject({ status: "failed", error: record.error });
+        expect(stored?.error ?? "").toMatch(/no API key/i);
+        expect(comparison).toMatchObject({ status: "failed", error: stored?.error });
         expect(record.input).toMatchObject({ source_id: comparison?.source_id, basis_version: comparison?.basis_version });
       } else {
-        expect(record.error ?? "").toMatch(/rejected its input/i);
+        expect(stored?.error ?? "").toMatch(/rejected its input/i);
       }
     }
     for (const stage of ["S0", "S1", "S2", "S3", "S4", "S7", "S8", "S9", "S10"] as const) {
@@ -341,9 +349,14 @@ describe("modular pipeline, S0 to S10", () => {
   it("rejects input that breaks a module's contract and records the failed run", async () => {
     await expect(
       runStage({ stage: "S4", input: { max_per_gap: 99 }, ...LEAD }),
-    ).rejects.toThrow(/rejected its input/i);
+    ).rejects.toThrow("Check the required fields and their values, then try again.");
     const failed = (await listRuns({ stage: "S4", limit: 5 })).find((record) => record.status === "error");
-    expect(failed?.error ?? "").toMatch(/rejected its input/i);
+    expect(failed?.error).toBe(HISTORICAL_FAILURE_MESSAGE);
+    const detail = await getRun(failed!.id);
+    expect(detail?.error).toBe(HISTORICAL_FAILURE_MESSAGE);
+    expect(JSON.stringify(detail)).not.toMatch(/rejected its input/i);
+    const [stored] = await db().select({ error: moduleRuns.error }).from(moduleRuns).where(eq(moduleRuns.id, failed!.id));
+    expect(stored?.error ?? "").toMatch(/rejected its input/i);
   }, 60_000);
 
   it("enforces role capabilities at the stage boundary", async () => {
@@ -372,7 +385,7 @@ describe("modular pipeline, S0 to S10", () => {
     expect((await routeConfig("S2")).model).toBe("grok-4");
     await expect(
       setRouteConfig({ stage: "S2", provider_id: "xai-grok", model: "not-a-model", actor_name: ACTOR.name }),
-    ).rejects.toThrow(/does not serve/i);
+    ).rejects.toMatchObject({ code: "invalid_request", message: "Choose a model listed for the selected provider." });
   }, 60_000);
 
   it("activates a named module per stage, which is how a stage is upgraded", async () => {

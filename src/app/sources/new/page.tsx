@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export default async function NewTypedSourcePage() {
   const context = await sessionContext();
   // With AI off there are no sources at all: gaps and tactics are added by hand.
-  if (!(await aiSectionEnabled("ingestion").catch(() => false))) {
+  if (!(await aiSectionEnabled("ingestion"))) {
     return (
       <AppShell active="sources">
         <PageIntro kicker="Sources" title="Sources are not used">

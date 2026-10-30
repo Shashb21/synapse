@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { createHash } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { ensureCurrentSchemaTables } from "@/lib/iegp/db";
@@ -18,6 +19,7 @@ import { gaps } from "@/lib/iegp/schema";
 import { lockObjectiveContext, loadState } from "@/lib/iegp/store";
 import type { EvidenceGap, IegpState } from "@/lib/iegp/types";
 import {
+  DEFAULT_AXES,
   loadAxes,
   quadrantBand,
   quadrantScore,
@@ -283,7 +285,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
     const xAxis = axisById(input.x_axis) ?? axisById(axesConfig.x_axis) ?? axesConfig.axes[0]!;
     const yAxis =
       axisById(input.y_axis) ?? axisById(axesConfig.y_axis) ?? axesConfig.axes.find((axis) => axis !== xAxis)!;
-    if (xAxis.id === yAxis.id) throw new Error("Pick two different axes for the matrix.");
+    if (xAxis.id === yAxis.id) throw new TrustedApplicationError("Pick two different axes for the matrix.");
     const pairOnly = Boolean(input.x_axis && input.y_axis);
     // A pair a person picked (in this run or saved), or only the catalog's
     // fallback? With no chosen pair the model still scores every axis, but its
@@ -468,9 +470,9 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
           const latest = await loadState();
           const gap = await requireOpenGap(placement.gap_id);
           const original = gapById.get(placement.gap_id)!;
-          if (gap.statement !== original.statement || gap.objective_id !== original.objective_id || gap.priority_context_version !== original.priority_context_version) throw new Error("Priority context changed. Regenerate suggestions against the current context.");
+          if (gap.statement !== original.statement || gap.objective_id !== original.objective_id || gap.priority_context_version !== original.priority_context_version) throw new TrustedApplicationError("Priority context changed. Regenerate suggestions against the current context.");
           const references = inspectJudgementReferences(latest, [placement.gap_id], placement.references);
-          if (placement.references.length && !references.length) throw new Error("Supporting references changed. Regenerate the suggestion.");
+          if (placement.references.length && !references.length) throw new TrustedApplicationError("Supporting references changed. Regenerate the suggestion.");
           const current = await currentPlacement(placement.gap_id);
           const currentScores = (current?.axis_scores as Record<string, number> | undefined) ?? {};
           const locked = Boolean(current?.validated || current?.needs_review);
@@ -803,7 +805,7 @@ type ManualDecision = {
 
 function requireDecisionReason(reason: string | undefined): string {
   const value = (reason ?? "").trim();
-  if (value.length < 3) throw new Error("A meaningful reason is required for every priority decision.");
+  if (value.length < 3) throw new TrustedApplicationError("A meaningful reason is required for every priority decision.");
   return value;
 }
 
@@ -821,17 +823,17 @@ async function saveManualDecision(args: ManualDecision, decide: (current: Placem
     const state = await loadState();
     const [current] = await tx.select().from(placementsTable).where(eq(placementsTable.gap_id, args.gap_id)).for("update");
     if (args.expected_version === undefined || args.expected_version !== (current ? placementVersion(current) : null)) {
-      throw new Error("Priority changed or its version is missing. Your values and reason have not been saved. Close this dialog, refresh the page and review the latest priority, then retry with your reason.");
+      throw new TrustedApplicationError("Priority changed or its version is missing. Your values and reason have not been saved. Close this dialog, refresh the page and review the latest priority, then retry with your reason.");
     }
     if (!current && (args.expected_context_version ?? null) !== (gap.priority_context_version ?? null)) {
-      throw new Error("Priority context changed. Your values and reason have not been saved. Close this dialog, refresh the page and review the current context before making the first priority decision.");
+      throw new TrustedApplicationError("Priority context changed. Your values and reason have not been saved. Close this dialog, refresh the page and review the current context before making the first priority decision.");
     }
     const decision = decide(current);
     let references: JudgementReference[] = [];
     if (args.accept_suggestion) {
-      if (!confirm || !current || current.human_band || current.needs_review || humanAxesOf(current).length || decision.band !== current.suggested_band || !current.suggested_rationale.trim()) throw new Error("This priority requires an explicit manual judgement with a reason.");
+      if (!confirm || !current || current.human_band || current.needs_review || humanAxesOf(current).length || decision.band !== current.suggested_band || !current.suggested_rationale.trim()) throw new TrustedApplicationError("This priority requires an explicit manual judgement with a reason.");
       references = inspectJudgementReferences(state, [args.gap_id], current.suggested_references).map(({ entity_type, entity_id, reason }) => ({ entity_type, entity_id, reason }));
-      if (!references.length) throw new Error("Supporting references not recorded for this suggestion. Regenerate it or make an explicit manual judgement with a reason.");
+      if (!references.length) throw new TrustedApplicationError("Supporting references not recorded for this suggestion. Regenerate it or make an explicit manual judgement with a reason.");
     }
     const rationale = args.accept_suggestion ? current!.suggested_rationale : args.rationale === undefined ? current?.rationale ?? null : args.rationale.trim() || null;
     // Saving the same scores/band/rationale is not a decision. Explicit confirmation always is.
@@ -919,21 +921,21 @@ export async function setPlacement(args: ManualDecision & {
     const axis = axes.axes.find((candidate) => candidate.id === id);
     if (!axis) throw new Error(`Unknown matrix axis ${id}.`);
     if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 100) {
-      throw new Error(`${axis.label} score must be a number from 0 to 100.`);
+      throw new TrustedApplicationError(`${DEFAULT_AXES.axes.find((candidate) => candidate.id === id)?.label ?? "Selected axis"} score must be a number from 0 to 100.`);
     }
     typed[id] = Math.round(value);
   }
   const xAxis = args.x_axis ? axes.axes.find((axis) => axis.id === args.x_axis) : undefined;
   const yAxis = args.y_axis ? axes.axes.find((axis) => axis.id === args.y_axis) : undefined;
-  if ((args.x_axis && !xAxis) || (args.y_axis && !yAxis)) throw new Error("Unknown matrix axis.");
-  if (xAxis && yAxis && xAxis.id === yAxis.id) throw new Error("Pick two different axes for the matrix.");
-  if (Object.keys(typed).length === 0 && !args.band) throw new Error("Give an axis score or a band to place the gap.");
+  if ((args.x_axis && !xAxis) || (args.y_axis && !yAxis)) throw new TrustedApplicationError("Unknown matrix axis.");
+  if (xAxis && yAxis && xAxis.id === yAxis.id) throw new TrustedApplicationError("Pick two different axes for the matrix.");
+  if (Object.keys(typed).length === 0 && !args.band) throw new TrustedApplicationError("Give an axis score or a band to place the gap.");
   return saveManualDecision(args, (current) => {
     const axis_scores = { ...((current?.axis_scores as Record<string, number>) ?? {}), ...typed };
     const quadrant = xAxis && yAxis && typeof axis_scores[xAxis.id] === "number" && typeof axis_scores[yAxis.id] === "number"
       ? quadrantBand({ xAxis, yAxis, scores: axis_scores }) : null;
     const band = args.band ?? quadrant ?? ((current?.band ?? current?.suggested_band) as Band | null);
-    if (!band) throw new Error("Give a band, or score both plotted axes so the quadrant sets it.");
+    if (!band) throw new TrustedApplicationError("Give a band, or score both plotted axes so the quadrant sets it.");
     return { band, axis_scores, human_axes: [...new Set([...humanAxesOf(current), ...Object.keys(typed)])],
       validated: Boolean(args.validate) || Boolean(current?.validated && current.band === band) };
   }, Boolean(args.validate));
@@ -947,10 +949,10 @@ export async function movePlacement(args: ManualDecision & {
   const axes = await loadAxes();
   const xAxis = axes.axes.find((axis) => axis.id === args.x_axis);
   const yAxis = axes.axes.find((axis) => axis.id === args.y_axis);
-  if (!xAxis || !yAxis) throw new Error("Unknown matrix axis.");
-  if (xAxis.id === yAxis.id) throw new Error("Pick two different axes for the matrix.");
+  if (!xAxis || !yAxis) throw new TrustedApplicationError("Unknown matrix axis.");
+  if (xAxis.id === yAxis.id) throw new TrustedApplicationError("Pick two different axes for the matrix.");
   if (![args.x, args.y].every((value) => Number.isFinite(value) && value >= 0 && value <= 100)) {
-    throw new Error("A matrix position needs two numbers from 0 to 100.");
+    throw new TrustedApplicationError("A matrix position needs two numbers from 0 to 100.");
   }
   return setPlacement({ ...args, axis_scores: {
     [xAxis.id]: scoreFromFavourability(xAxis, args.x), [yAxis.id]: scoreFromFavourability(yAxis, args.y),

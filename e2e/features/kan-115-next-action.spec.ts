@@ -65,7 +65,8 @@ test.describe("KAN-115 next action", () => {
     });
     await dialog.getByRole("button", { name: "Save override" }).click();
     const saveError = dialog.getByRole("alert");
-    await expect(saveError).toHaveText("Status save failed");
+    await expect(saveError).toContainText("Check the current state before trying again");
+    await expect(saveError).not.toContainText("Status save failed");
     await expect(dialog.getByRole("combobox")).toHaveAttribute("aria-describedby", await saveError.getAttribute("id") as string);
     await expect(reason).toHaveValue("Keep this assessment for review");
     await expect(dialog.getByRole("combobox")).toHaveValue("validated_addressed");

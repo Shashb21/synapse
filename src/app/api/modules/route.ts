@@ -35,7 +35,7 @@ export async function POST(request: Request) {
     const identity = await requireCustomerContext({ body });
     const stage = String(body.stage ?? "") as StageId;
     if (!STAGE_IDS.includes(stage)) {
-      return NextResponse.json({ error: `Unknown stage ${body.stage}` }, { status: 400 });
+      return NextResponse.json({ safe_error: true, error: "Choose an available AI task and try again." }, { status: 400 });
     }
     const result = await runStage({
       stage,
@@ -45,6 +45,6 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
-    return stageErrorResponse(error, "Stage run failed");
+    return stageErrorResponse(error, "We couldn’t finish this AI task. Check the current workspace results before running it again. If this continues, contact your Synapse administrator.");
   }
 }

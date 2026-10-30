@@ -1,37 +1,14 @@
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { SetupWizard } from "@/components/setup/setup-wizard";
-import { buildBlankWorkspace } from "@/lib/iegp/blank";
 import { setupContextFromState } from "@/lib/iegp/planning-context";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
 import { loadState } from "@/lib/iegp/store";
-import { sessionContext, type SessionContext } from "@/modules/auth/session";
+import { sessionContext } from "@/modules/auth/session";
 import { aiSectionEnabled } from "@/modules/kernel/ai-switch";
 import { currentWorkspace } from "@/modules/workspaces/session";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-
-async function loadSetupState() {
-  try {
-    return await loadState();
-  } catch {
-    return buildBlankWorkspace();
-  }
-}
-
-async function loadSetupIdentity(): Promise<SessionContext> {
-  try {
-    return await sessionContext();
-  } catch {
-    return {
-      session: null,
-      actor: { name: "Unsigned (demo)", function: "medical_affairs" },
-      role: "medical_affairs",
-      demo: true,
-      signed_in: false,
-    };
-  }
-}
 
 /**
  * The IEGP setup wizard for the current workspace. `?new=1` (sent right after
@@ -40,10 +17,10 @@ async function loadSetupIdentity(): Promise<SessionContext> {
 export default async function SetupPage({ searchParams }: { searchParams: Promise<{ new?: string }> }) {
   const params = await searchParams;
   const [state, identity, ai, workspace] = await Promise.all([
-    loadSetupState(),
-    loadSetupIdentity(),
-    aiSectionEnabled("ingestion").catch(() => false),
-    currentWorkspace().catch(() => null),
+    loadState(),
+    sessionContext(),
+    aiSectionEnabled("ingestion"),
+    currentWorkspace(),
   ]);
   const isNew = params.new === "1" && !state.asset.setup_complete;
   const initial = setupContextFromState(state, { fresh: isNew });

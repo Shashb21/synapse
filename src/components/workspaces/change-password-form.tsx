@@ -1,5 +1,7 @@
 "use client";
 
+import { requestErrorMessage } from "@/lib/post-json";
+
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -28,7 +30,7 @@ export function ChangePasswordForm({ minLength }: { minLength: number }) {
       setConfirm("");
       setDone(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not change your password.");
+      setError(requestErrorMessage(err, "Could not change your password. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     } finally {
       setPending(false);
     }
@@ -44,7 +46,7 @@ export function ChangePasswordForm({ minLength }: { minLength: number }) {
       }}
     >
       {error ? (
-        <p role="alert" className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
+        <p role="alert" className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </p>
       ) : null}

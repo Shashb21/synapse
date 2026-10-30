@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -112,11 +113,12 @@ export async function seedWorkspaceFromGold(args: {
           workspace_id,
         });
         parse_blocks = parsed.output.block_count;
-      } catch (error) {
-        parse_error = error instanceof Error ? error.message : String(error);
+      } catch {
+        parse_error = "Reading the reference source did not finish. Open the seeded workspace and review its source text blocks before adding missing content by hand.";
       }
     }
   } catch (error) {
+    parse_error = "Reading the reference source did not finish. Open the seeded workspace and review its source text blocks before adding missing content by hand.";
     if (!source_file_id) {
       const source = await insertSourceFile({
         workspace_id,
@@ -214,7 +216,7 @@ export async function seedWorkspaceFromGold(args: {
   }
 
   const ws = await getWorkspace(workspace_id);
-  if (!ws) throw new Error("Seed failed: workspace missing after create");
+  if (!ws) throw new TrustedApplicationError("Seed failed: workspace missing after create");
 
   return {
     org_id,

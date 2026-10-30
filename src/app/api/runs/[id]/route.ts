@@ -16,7 +16,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (denied) return denied;
   const { id } = await params;
   const run = await getRun(id);
-  if (!run) return NextResponse.json({ error: `Unknown run ${id}` }, { status: 404 });
+  if (!run) return NextResponse.json({ safe_error: true, error: "This run is no longer available. Return to the run list and choose another." }, { status: 404 });
   const url = new URL(request.url);
   // Every model call of the run, whole (owner only), with the run's token and cost totals (KAN-91).
   const llm_calls = await listLlmCalls(run.id);

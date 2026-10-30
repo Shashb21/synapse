@@ -35,9 +35,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, redirect: staff ? afterOwnerSignIn(next) : afterSignIn(next) });
   } catch (error) {
     if (error instanceof PasswordLoginError) {
-      return NextResponse.json({ error: error.message, code: error.code }, { status: STATUS[error.code] });
+      return NextResponse.json({ safe_error: true, error: error.message, code: error.code }, { status: STATUS[error.code] });
     }
     console.error("password sign-in failed", error instanceof Error ? error.message : error);
-    return NextResponse.json({ error: "Sign-in failed. Try again." }, { status: 500 });
+    return NextResponse.json({ safe_error: true, error: "Sign-in failed. Try again." }, { status: 500 });
   }
 }

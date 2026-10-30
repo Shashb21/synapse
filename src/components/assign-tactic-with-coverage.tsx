@@ -129,7 +129,7 @@ export function AssignTacticWithCoverage({ gapId, availableTactics, mappedTactic
                 <textarea name="rationale" required minLength={3} placeholder={assessing ? "Why this tactic covers the gap this much" : "Why this tactic should be linked for later assessment"} className="min-h-16 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm" />
               </label>
             </fieldset>
-            {error ? <p ref={errorRef} tabIndex={-1} role="alert" className="text-[12px] text-destructive">{error}</p> : null}
+            {error ? <p ref={errorRef} tabIndex={-1} role="alert" className="text-sm text-destructive">{error}</p> : null}
             {pending || refreshing ? <p role="status">{refreshing ? "Updating…" : "Saving…"}</p> : null}
           </div>
           <DialogFooter>

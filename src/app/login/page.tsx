@@ -18,7 +18,7 @@ export default async function LoginPage({
 }) {
   const params = await searchParams;
   const next = safeNext(params.next, "");
-  const session = await currentSession().catch(() => null);
+  const session = await currentSession();
   if (session) redirect((await ownerAccess()).owner ? afterOwnerSignIn(next) : afterSignIn(next));
   const options = loginOptions();
 

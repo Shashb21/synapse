@@ -21,7 +21,7 @@ afterEach(() => { act(() => root.unmount()); host.remove(); document.body.innerH
 function actions(mayPrioritize = true) { act(() => root.render(createElement(GapPriorityActions, { gap, xAxis: axes[0], yAxis: axes[1], identity, mayPrioritize }))); }
 async function click(text: string) { const button = [...document.querySelectorAll("button")].find(button => button.textContent === text)!; expect(button).toBeTruthy(); await act(async () => button.click()); }
 async function submit(confirm: boolean, ok = true) {
-  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(ok ? { ok: true, placement: { validated: confirm } } : { error: "Save refused" }), { status: ok ? 200 : 409 })));
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(ok ? { ok: true, placement: { validated: confirm } } : { safe_error: true, request_outcome: "rejected", error: "Save refused" }), { status: ok ? 200 : 409 })));
   await click("Edit scores");
   const form = document.querySelector("form")!;
   (form.querySelector('[name="reason"]') as HTMLTextAreaElement).value = "Reviewed evidence";
@@ -125,7 +125,7 @@ it("explains review and confirmation in the axis chooser without AI", () => {
   expect((host.querySelector("button") as HTMLButtonElement).disabled).toBe(true);
 });
 it("keeps failed matrix moves in review without a success message", async () => {
-  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Move refused" }), { status: 409 })));
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ safe_error: true, request_outcome: "rejected", error: "Move refused" }), { status: 409 })));
   act(() => root.render(createElement(PrioritizeMatrix, { scope: "all", gaps: [gap], axes, xAxis: axes[0], yAxis: axes[1], identity, mayPrioritize: true })));
   const point = host.querySelector('button[data-gap-id="g1"]')!;
   await act(async () => point.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })));

@@ -139,14 +139,14 @@ test.describe("Place by hand", () => {
     await page.route("**/api/plan", async (route) => {
       if (route.request().method() === "POST" && refused === 0) {
         refused += 1;
-        await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "Try again." }) });
+        await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ safe_error: true, request_outcome: "rejected", error: "The placement was refused. Review the scores and try again." }) });
         return;
       }
       await route.fallback();
     });
     await dialog.locator('input[name="x_score"]').fill("30");
     await save.click();
-    await expect(dialog.getByText("Try again.")).toBeVisible();
+    await expect(dialog.getByText("The placement was refused. Review the scores and try again.", { exact: true })).toBeVisible();
     await expect(dialog.locator('input[name="x_score"]')).toHaveValue("30");
     await expect(rationale).toHaveValue("Placed by hand in the e2e");
 
@@ -155,7 +155,7 @@ test.describe("Place by hand", () => {
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
     await open();
-    await expect(dialog.getByText("Try again.")).toHaveCount(0);
+    await expect(dialog.getByText("The placement was refused. Review the scores and try again.", { exact: true })).toHaveCount(0);
 
     // The corrected save succeeds and the gap leaves Not placed yet without a reload.
     await dialog.locator('input[name="y_score"]').fill("70");

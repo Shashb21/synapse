@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import "@/modules";
@@ -30,7 +31,7 @@ describe("postJson never throws (dialogs never stick on Saving…)", () => {
   it("turns a dropped connection into a failed result with a message", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
     const res = await postJson("/api/iegp", { action: "x" });
-    expect(res).toEqual({ ok: false, status: 0, json: { error: NETWORK_ERROR } });
+    expect(res).toEqual({ ok: false, outcome: "unknown", status: 0, json: { error: NETWORK_ERROR } });
   });
 
   it("keeps the status of a reply that is not JSON", async () => {
@@ -38,7 +39,8 @@ describe("postJson never throws (dialogs never stick on Saving…)", () => {
     const res = await postJson("/api/iegp", {});
     expect(res.ok).toBe(false);
     expect(res.status).toBe(502);
-    expect(res.json).toEqual({});
+    expect(res.json).toEqual({ error: NETWORK_ERROR });
+    expect(res.outcome).toBe("unknown");
   });
 
   it("sends JSON, or a FormData body as is", async () => {
@@ -76,7 +78,7 @@ describe("API errors keep a meaningful status", () => {
   });
 
   it("maps parse, schema and not-found errors instead of flattening them", async () => {
-    const syntax = await apiErrorResponse(new SyntaxError("Unexpected token"));
+    const syntax = await apiErrorResponse(await readJsonBody(malformed("/api/test")).catch((error: unknown) => error));
     expect(syntax.status).toBe(400);
     expect((await syntax.json()).code).toBe("invalid_json");
 
@@ -86,12 +88,15 @@ describe("API errors keep a meaningful status", () => {
     expect(await invalid.json()).toMatchObject({ code: "invalid_request", error: expect.stringMatching(/^stage: /) });
 
     for (const message of ["Gap not found", "Breakout group not found", "Activity ACT-1 not found."]) {
-      const res = await apiErrorResponse(new Error(message));
+      const res = await apiErrorResponse(new TrustedApplicationError(message, "not_found", 404));
       expect(res.status, message).toBe(404);
       expect((await res.json()).code).toBe("not_found");
     }
     // A sentence that merely mentions "not found" stays a 400.
+    const diagnostics = vi.spyOn(console, "error").mockImplementation(() => undefined);
     expect((await apiErrorResponse(new Error("The quote was not found in the source, so check the block and try again"))).status).toBe(400);
+    expect(diagnostics).toHaveBeenCalledWith("API action failed", { category: "unexpected", stage: null });
+    diagnostics.mockRestore();
   });
 });
 

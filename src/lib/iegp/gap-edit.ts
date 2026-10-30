@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { z } from "zod";
 import type { EvidenceGap } from "./types";
 
@@ -22,6 +23,6 @@ export function requireGapEditSnapshot(gap: EvidenceGap, expected: unknown): voi
   const parsed = gapEditSnapshotSchema.safeParse(expected);
   const current = gapEditSnapshot(gap);
   if (!parsed.success || (Object.keys(current) as (keyof GapEditSnapshot)[]).some(key => parsed.data[key] !== current[key])) {
-    throw new Error("Gap or linked objective context changed, or its snapshot is missing. Your values and reason have not been saved. Reload the latest gap and retry.");
+    throw new TrustedApplicationError("Gap or linked objective context changed, or its snapshot is missing. Your values and reason have not been saved. Reload the latest gap and retry.");
   }
 }

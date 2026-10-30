@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 
 export default async function AdminUsersPage() {
   await requireOwnerPage();
-  const [users, session] = await Promise.all([listAdminUsers(), currentSession().catch(() => null)]);
+  const [users, session] = await Promise.all([listAdminUsers(), currentSession()]);
   const selfId = session?.provider_id === PASSWORD_PROVIDER ? session.subject : null;
   return (
     <AdminMain>

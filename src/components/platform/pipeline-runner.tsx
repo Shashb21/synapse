@@ -11,7 +11,7 @@ import { SOURCE_TYPES, SOURCE_TYPE_LABELS, type SourceType } from "@/lib/iegp/en
 import type { ActionIdentity } from "@/components/platform/action-dialog";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import { CUSTOMER_STAGE_TARGET, type StageTarget } from "@/components/platform/run-stage-button";
-import { postJson } from "@/lib/post-json";
+import { postJson, requestErrorMessage, RequestOutcomeError } from "@/lib/post-json";
 
 type StageStep = { stage: string; label: string; input?: Record<string, unknown> };
 
@@ -26,7 +26,7 @@ async function runOne(step: StageStep, identity: ActionIdentity, target: StageTa
       ...(target.workspace_id ? { workspace_id: target.workspace_id } : {}),
     });
   const json = res.json as { error?: string; summary?: string; mode?: string };
-  if (!res.ok) throw new Error(json.error ?? `${step.stage} failed (HTTP ${res.status})`);
+  if (!res.ok) throw new RequestOutcomeError(json.error ?? `We couldn’t complete ${step.label}. Check current progress before trying again.`, res.outcome, res.status);
   return json;
 }
 
@@ -49,8 +49,10 @@ function Chain({
   const router = useRouter();
   const [state, setState] = useState<Record<string, StepState>>({});
   const [running, setRunning] = useState(false);
+  const [stopped, setStopped] = useState(false);
 
   async function run() {
+    if (running || stopped) return;
     setRunning(true);
     setState({});
     for (const step of steps) {
@@ -62,11 +64,12 @@ function Chain({
           [step.stage]: { status: "ok", detail: result.summary },
         }));
       } catch (error) {
+        setStopped(true);
         setState((prev) => ({
           ...prev,
           [step.stage]: {
             status: "error",
-            detail: error instanceof Error ? error.message : "failed",
+            detail: requestErrorMessage(error, "failed. Check the current state before trying again. If this continues, contact your Synapse administrator."),
           },
         }));
         break;
@@ -78,16 +81,17 @@ function Chain({
 
   return (
     <div className="grid gap-2">
-      <Button size="sm" disabled={running} onClick={() => void run()}>
+      <Button size="sm" disabled={running || stopped} onClick={() => void run()}>
         {running ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
         {label}
       </Button>
+      {stopped ? <Button size="sm" variant="outline" onClick={() => window.location.reload()}>Check current progress</Button> : null}
       {steps.some((step) => state[step.stage]) ? (
         <ol className="grid gap-1">
           {steps.map((step) => {
             const status = state[step.stage]?.status ?? "idle";
             return (
-              <li key={step.stage} className="flex items-start gap-2 text-[11px]">
+              <li key={step.stage} role={status === "error" ? "alert" : "status"} className="flex items-start gap-2 text-sm">
                 {status === "running" ? (
                   <Loader2 className="mt-0.5 size-3 animate-spin text-muted-foreground" aria-hidden />
                 ) : status === "ok" ? (
@@ -136,10 +140,14 @@ function UploadForm({ demoOptions, identity, target = CUSTOMER_STAGE_TARGET }: U
   const [sourceType, setSourceType] = useState<SourceType>("stakeholder_interview");
   const [text, setText] = useState("");
   const [pending, setPending] = useState(false);
+  const [checkRequired, setCheckRequired] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function upload(parseToo: boolean) {
+    if (pending || checkRequired) return;
+    if (!text.trim() && picked.length === 0) { setError("Pick a demo file or paste some text first."); return; }
+    let uploaded = false;
     setPending(true);
     setError(null);
     setMessage(null);
@@ -157,14 +165,15 @@ function UploadForm({ demoOptions, identity, target = CUSTOMER_STAGE_TARGET }: U
           ]
         : [];
       if (files.length === 0 && picked.length === 0) {
-        throw new Error("Pick a demo file or paste some text first.");
+        throw new RequestOutcomeError("Pick a demo file or paste some text first.", "rejected", 400);
       }
       const upload = await runOne(
         { stage: "S0", label: "Upload", input: { files, demo_ids: picked } },
         identity,
         target,
       );
-      let detail = upload.summary ?? "uploaded";
+      uploaded = true;
+      let detail = upload.summary ?? "Source uploaded";
       if (parseToo) {
         const parsed = await runOne({ stage: "S1", label: "Parse", input: {} }, identity, target);
         detail = `${detail}; ${parsed.summary ?? "parsed"}`;
@@ -175,7 +184,8 @@ function UploadForm({ demoOptions, identity, target = CUSTOMER_STAGE_TARGET }: U
       setTitle("");
       router.refresh();
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : "Upload failed");
+      setCheckRequired(true);
+      setError((uploaded ? "Source uploaded, but parsing could not be confirmed. Check the source list and continue parsing there; do not upload the same source again. " : "") + requestErrorMessage(failure, "Upload failed. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     } finally {
       setPending(false);
     }
@@ -228,16 +238,17 @@ function UploadForm({ demoOptions, identity, target = CUSTOMER_STAGE_TARGET }: U
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" disabled={pending} onClick={() => void upload(true)}>
+        <Button size="sm" disabled={pending || checkRequired} onClick={() => void upload(true)}>
           {pending ? <Loader2 className="size-3.5 animate-spin" /> : null}
           Upload and parse
         </Button>
-        <Button size="sm" variant="outline" disabled={pending} onClick={() => void upload(false)}>
+        <Button size="sm" variant="outline" disabled={pending || checkRequired} onClick={() => void upload(false)}>
           Upload only
         </Button>
       </div>
-      {message ? <p className="text-[11px] text-muted-foreground">{message}</p> : null}
-      {error ? <p className="text-[11px] text-destructive">{error}</p> : null}
+      {checkRequired ? <Button type="button" size="sm" variant="outline" onClick={() => window.location.reload()}>Check source list</Button> : null}
+      {message ? <p role="status" className="text-[11px] text-muted-foreground">{message}</p> : null}
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
     </div>
   );
 }

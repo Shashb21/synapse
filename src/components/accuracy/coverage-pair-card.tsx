@@ -40,7 +40,7 @@ export function CoveragePairCard({
         });
       const body = res.json as { ok?: boolean; error?: string };
       if (!res.ok || !body.ok) {
-        setError(body.error ?? "Save failed");
+        setError(body.error ?? "We couldn’t confirm this coverage decision. Reload coverage before saving it again.");
         return;
       }
       setOverall(next);
@@ -74,7 +74,7 @@ export function CoveragePairCard({
           placeholder="Why this coverage overall?"
         />
       </label>
-      {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
       <div className="flex flex-wrap gap-2">
         {(["covers", "partial", "none", "unknown"] as const).map((value) => (
           <button

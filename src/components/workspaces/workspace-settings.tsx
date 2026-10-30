@@ -1,5 +1,7 @@
 "use client";
 
+import { requestErrorMessage, RequestOutcomeError } from "@/lib/post-json";
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, UserMinus, UserPlus } from "lucide-react";
@@ -34,17 +36,20 @@ export function WorkspaceSettings({
   const [members, setMembers] = useState(initialMembers);
   const [email, setEmail] = useState("");
   const [pending, setPending] = useState<string | null>(null);
+  const [checkRequired, setCheckRequired] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   async function run(key: string, fn: () => Promise<void>) {
+    if (pending !== null || checkRequired) return;
     setPending(key);
     setError(null);
     setNotice(null);
     try {
       await fn();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "That did not work.");
+      setCheckRequired(!(err instanceof RequestOutcomeError) || err.outcome === "unknown");
+      setError(requestErrorMessage(err, "We couldn’t confirm this workspace change. Check workspace settings before repeating it."));
     } finally {
       setPending(null);
     }
@@ -76,7 +81,7 @@ export function WorkspaceSettings({
               Workspace name
               <Input value={name} maxLength={80} onChange={(event) => setName(event.target.value)} />
             </label>
-            <Button type="submit" disabled={pending !== null || name.trim() === savedName || name.trim().length < 2}>
+            <Button type="submit" disabled={checkRequired || pending !== null || name.trim() === savedName || name.trim().length < 2}>
               {pending === "rename" ? <Loader2 className="size-4 animate-spin" /> : null}
               Rename
             </Button>
@@ -115,7 +120,7 @@ export function WorkspaceSettings({
                   size="sm"
                   variant="ghost"
                   aria-label={`Remove ${member.principal}`}
-                  disabled={pending !== null}
+                  disabled={checkRequired || pending !== null}
                   onClick={() =>
                     void run(`remove:${member.principal}`, async () => {
                       const json = await sendJson<{ members: WorkspaceMember[] }>(
@@ -163,7 +168,7 @@ export function WorkspaceSettings({
               onChange={(event) => setEmail(event.target.value)}
             />
           </label>
-          <Button type="submit" disabled={pending !== null || !email.trim()}>
+          <Button type="submit" disabled={checkRequired || pending !== null || !email.trim()}>
             {pending === "invite" ? <Loader2 className="size-4 animate-spin" /> : <UserPlus className="size-4" aria-hidden />}
             Invite
           </Button>
@@ -178,8 +183,9 @@ export function WorkspaceSettings({
           {notice}
         </p>
       ) : null}
+      {checkRequired ? <Button variant="outline" onClick={() => window.location.reload()}>Check workspace settings</Button> : null}
       {error ? (
-        <p role="alert" className="text-[12px] text-destructive">
+        <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
       ) : null}

@@ -288,7 +288,9 @@ describe("accuracy source upload API", () => {
 
     expect(res.status).toBe(200);
     expect(body.ok).toBe(true);
-    expect(body.parse_error).toBe("Malformed DOCX archive");
+    expect(body.parse_error).toContain("The source is registered, but reading its contents did not finish");
+    expect(body.parse_error).toContain("use Add block to enter missing text by hand");
+    expect(body.parse_error).not.toContain("Malformed DOCX archive");
     expect(mockParseLocal.mock.calls[0][0].buffer).toEqual(bytes);
     const [run] = await accuracyDb().select().from(t.accuracyModuleRuns)
       .where(eq(t.accuracyModuleRuns.workspace_id, workspace_id));

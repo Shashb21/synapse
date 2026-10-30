@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { NextResponse } from "next/server";
 import { currentSession, type Session } from "@/modules/auth/session";
 import { readJsonBody } from "@/modules/auth/api-guard";
@@ -53,10 +54,9 @@ export async function readBody(request: Request): Promise<Record<string, unknown
 /** Turns a thrown error into JSON: auth problems keep their status, owner-only rules are 403. */
 export function errorResponse(error: unknown): NextResponse {
   if (error instanceof HttpError) {
-    return NextResponse.json(error.code ? { error: error.message, code: error.code } : { error: error.message }, { status: error.status });
+    return NextResponse.json(error.code ? { safe_error: true, error: error.message, code: error.code } : { safe_error: true, error: error.message }, { status: error.status });
   }
-  if (error instanceof WorkspaceLimitError) return NextResponse.json({ error: error.message, code: "workspace_limit" }, { status: 429 });
-  const message = error instanceof Error ? error.message : "Workspace request failed.";
-  const status = /^(Only the workspace owner|You are not a member)/.test(message) ? 403 : 400;
-  return NextResponse.json({ error: message }, { status });
+  if (error instanceof WorkspaceLimitError) return NextResponse.json({ safe_error: true, error: error.message, code: "workspace_limit" }, { status: 429 });
+  if (error instanceof TrustedApplicationError) return NextResponse.json({ safe_error: true, error: error.message, code: error.code }, { status: error.status });
+  return NextResponse.json({ safe_error: true, error: "We couldn't complete the workspace change. Check the current workspace before trying again. If this continues, contact your Synapse administrator." }, { status: 400 });
 }

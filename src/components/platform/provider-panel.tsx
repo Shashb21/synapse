@@ -81,7 +81,7 @@ export function ProviderPanel({
     const json = res.json as { error?: string };
     setBusy(null);
     if (!res.ok) {
-      setError(json.error ?? "Action failed");
+      setError(json.error ?? "We couldn’t complete this change. Check the current state before trying again.");
       return;
     }
     if (done) setNotice({ text: done, providerId: String(body.provider_id), snapshot: persisted, confirmed: false });
@@ -161,7 +161,7 @@ export function ProviderPanel({
           {notice.text} {bulkReadiness(notice.providerId)}
         </p>
       ) : null}
-      {error ? <p role="alert" className="text-[12px] text-destructive">{error}</p> : null}
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {connections.map((connection) => {

@@ -25,6 +25,8 @@ import "@/modules";
 import { POST } from "@/app/api/iegp/route";
 import { advanceIngest } from "@/app/api/iegp/ingest-pipeline";
 import { getRun } from "@/modules/kernel/observability";
+import { HISTORICAL_FAILURE_MESSAGE } from "@/modules/kernel/failure-presentation";
+import { moduleRuns } from "@/modules/kernel/schema";
 import { runStage } from "@/modules/kernel/run";
 import { findProvider } from "@/modules/llm/provider";
 import { listParsedDocuments } from "@/modules/stages/s1-parse/module";
@@ -77,8 +79,13 @@ describe("KAN-146 incoming document comparison", () => {
   const run = await getRun(checkpoint.version);
   expect(run).toMatchObject({ module_id: "incoming-source-comparison", status: failure ? "error" : "ok", route: { provider_id: "xai-grok" }, finished_at: expect.any(String) });
   expect(run!.steps.some(step => step.name.startsWith("llm:"))).toBe(true);
-  if (failure) expect(run!.error).toContain("Traceable provider failure");
-  else expect(run!.output).toMatchObject({ outcomes: [expect.objectContaining({ coverage_id: coverage })] });
+  if (failure) {
+   expect(run!.error).toBe(HISTORICAL_FAILURE_MESSAGE);
+   expect(JSON.stringify(run)).not.toContain("Traceable provider failure");
+   // Public reads suppress exception text; server storage keeps the original diagnosis.
+   const [stored] = await db().select({ error: moduleRuns.error }).from(moduleRuns).where(eq(moduleRuns.id, checkpoint.version));
+   expect(stored?.error).toContain("Traceable provider failure");
+  } else expect(run!.output).toMatchObject({ outcomes: [expect.objectContaining({ coverage_id: coverage })] });
  });
 
  it("compares a direct parse against current plan records and preserves the human verdict", async () => {

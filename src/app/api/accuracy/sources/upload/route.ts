@@ -1,3 +1,4 @@
+import { customerErrorMessage, ownerErrorMessage } from "@/modules/kernel/stage-errors";
 import { ownerGate } from "@/modules/auth/owner";
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
@@ -36,33 +37,33 @@ export async function POST(req: Request) {
     const file = form.get("file");
 
     if (!workspace_id) {
-      return NextResponse.json({ ok: false, error: "workspace_id required" }, { status: 400 });
+      return NextResponse.json({ ok: false, safe_error: true, error: "workspace_id required" }, { status: 400 });
     }
     if (!(file instanceof File)) {
-      return NextResponse.json({ ok: false, error: "file required" }, { status: 400 });
+      return NextResponse.json({ ok: false, safe_error: true, error: "file required" }, { status: 400 });
     }
     if (file.size === 0) {
-      return NextResponse.json({ ok: false, error: "empty file" }, { status: 400 });
+      return NextResponse.json({ ok: false, safe_error: true, error: "empty file" }, { status: 400 });
     }
     if (file.size > 40 * 1024 * 1024) {
-      return NextResponse.json({ ok: false, error: "file too large (40MB max)" }, { status: 400 });
+      return NextResponse.json({ ok: false, safe_error: true, error: "file too large (40MB max)" }, { status: 400 });
     }
 
     // With AI off there is no parser; gaps and tactics are entered by hand.
     if (!(await aiEnabled())) {
-      return NextResponse.json({ ok: false, error: AI_OFF_ADMIN_MESSAGE, code: "ai_off" }, { status: 409 });
+      return NextResponse.json({ ok: false, safe_error: true, error: AI_OFF_ADMIN_MESSAGE, code: "ai_off" }, { status: 409 });
     }
 
     const workspace = await getWorkspace(workspace_id);
     if (!workspace) {
-      return NextResponse.json({ ok: false, error: "Unknown workspace" }, { status: 404 });
+      return NextResponse.json({ ok: false, safe_error: true, error: "Unknown workspace" }, { status: 404 });
     }
     const org_id = (await getWorkspaceOrgId(workspace_id)) ?? workspace.org_id;
 
     const filename = file.name || "upload.bin";
     const formatError = accuracyUploadFormatError(filename);
     if (formatError) {
-      return NextResponse.json({ ok: false, error: formatError }, { status: 400 });
+      return NextResponse.json({ ok: false, safe_error: true, error: formatError }, { status: 400 });
     }
     const mime = file.type || mimeForFilename(filename);
     const policy = resolveParsePolicy({ filename, mime });
@@ -102,7 +103,7 @@ export async function POST(req: Request) {
       parser = result.output.parser;
       block_count = result.output.block_count;
     } catch (error) {
-      parse_error = error instanceof Error ? error.message : "Parse failed";
+      parse_error = `The source is registered, but reading its contents did not finish. Review this source's text blocks and use Add block to enter missing text by hand. ${ownerErrorMessage(error)}`;
     }
 
     return NextResponse.json({
@@ -117,7 +118,7 @@ export async function POST(req: Request) {
       parse_error,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Upload failed";
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    const message = customerErrorMessage(error);
+    return NextResponse.json({ ok: false, safe_error: true, error: message }, { status: 400 });
   }
 }

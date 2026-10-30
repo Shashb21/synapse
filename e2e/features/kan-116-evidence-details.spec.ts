@@ -28,7 +28,7 @@ test.describe("KAN-116 supporting evidence", () => {
     await link.press("Enter");
     await expect(page).toHaveURL(new RegExp(`/gaps/${gap.gap_id}$`));
     await page.route("**/api/plan", async route => {
-      if (route.request().postDataJSON()?.action === "set_gap_settings") await route.fulfill({ status: 500, json: { error: "Settings save failed" } });
+      if (route.request().postDataJSON()?.action === "set_gap_settings") await route.fulfill({ status: 500, json: { safe_error: true, request_outcome: "rejected", error: "Settings save failed" } });
       else await route.continue();
     });
     const setting = page.getByRole("combobox", { name: "Add a treatment setting" });

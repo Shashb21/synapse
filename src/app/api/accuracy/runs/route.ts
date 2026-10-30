@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const workspace_id = searchParams.get("workspace_id")?.trim() ?? "";
   if (!workspace_id) {
-    return NextResponse.json({ error: "workspace_id is required" }, { status: 400 });
+    return NextResponse.json({ safe_error: true, error: "workspace_id is required" }, { status: 400 });
   }
   const limit = Math.min(100, Math.max(1, Number(searchParams.get("limit") ?? 40)));
   const [runs, rollup] = await Promise.all([

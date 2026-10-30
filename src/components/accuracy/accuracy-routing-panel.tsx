@@ -98,7 +98,7 @@ function AccuracyRouteCard({
     const json = res.json as { error?: string };
     setPending(false);
     if (!res.ok) {
-      setError(json.error ?? "Could not save this route");
+      setError(json.error ?? "We couldn’t confirm the AI preferences. Refresh configuration to check saved settings before saving again.");
       return;
     }
     setSaved(true);
@@ -201,7 +201,7 @@ function AccuracyRouteCard({
           {saved ? "Saved." : `Last set by ${route.updated_by} · ${route.updated_at}`}
         </span>
       </div>
-      {error ? <p className="text-[11px] text-destructive">{error}</p> : null}
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
     </article>
   );
 }

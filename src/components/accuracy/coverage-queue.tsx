@@ -74,7 +74,7 @@ export function CoverageQueue({
         suggestion?: AssistSuggestion;
       };
       if (!res.ok || !body.ok || !body.suggestion) {
-        setAssistError(body.error ?? "Assist failed");
+        setAssistError(body.error ?? "We couldn’t suggest a coverage decision. Try again later or enter a decision manually.");
         return;
       }
       setSuggestion(body.suggestion);
@@ -139,7 +139,7 @@ export function CoverageQueue({
         </p>
       ) : null}
 
-      {assistError ? <p className="text-[12px] text-destructive">{assistError}</p> : null}
+      {assistError ? <p role="alert" className="text-sm text-destructive">{assistError}</p> : null}
       {suggestion && current ? (
         <p className="border border-border/60 bg-muted/20 px-2 py-1.5 text-[11px] text-muted-foreground">
           Assist ({assistMode ?? "—"}) · {suggestion.schema_overall} → {suggestion.overall} · conf{" "}

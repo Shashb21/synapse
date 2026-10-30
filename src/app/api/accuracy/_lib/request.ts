@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { Actor } from "@/accuracy/kernel/contracts";
@@ -51,7 +52,7 @@ export function validationMessage(error: z.ZodError): string {
 /** A user-facing message for any error a route catches. */
 export function labErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof z.ZodError) return validationMessage(error);
-  if (error instanceof Error && error.message) return error.message;
+  if (error instanceof LabRequestError || error instanceof TrustedApplicationError) return error.message;
   return fallback;
 }
 
@@ -72,17 +73,17 @@ export async function labActor(): Promise<Actor> {
  * errors, unknown workspace, duplicate slug), or null for the route to handle.
  */
 export function labRequestErrorResponse(error: unknown): NextResponse | null {
-  if (error instanceof LabRequestError) {
+  if (error instanceof LabRequestError || error instanceof TrustedApplicationError) {
     return NextResponse.json(
-      { ok: false, error: error.message, ...(error.code ? { code: error.code } : {}) },
+      { ok: false, safe_error: true, error: error.message, ...(error.code ? { code: error.code } : {}) },
       { status: error.status },
     );
   }
   if (error instanceof DuplicateWorkspaceSlugError) {
-    return NextResponse.json({ ok: false, error: error.message, code: "duplicate_slug" }, { status: 409 });
+    return NextResponse.json({ ok: false, safe_error: true, error: error.message, code: "duplicate_slug" }, { status: 409 });
   }
   if (error instanceof z.ZodError) {
-    return NextResponse.json({ ok: false, error: validationMessage(error) }, { status: 400 });
+    return NextResponse.json({ ok: false, safe_error: true, error: validationMessage(error) }, { status: 400 });
   }
   return null;
 }

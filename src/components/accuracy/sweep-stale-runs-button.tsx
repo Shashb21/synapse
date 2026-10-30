@@ -15,7 +15,7 @@ export function SweepStaleRunsButton({ workspaceId }: { workspaceId: string }) {
       const res = await postJson("/api/accuracy/hygiene", { action: "sweep_stale_runs", workspace_id: workspaceId });
       const body = res.json as { ok?: boolean; abandoned_ids?: string[]; error?: string };
       if (!res.ok || !body.ok) {
-        setMessage(body.error ?? "Sweep failed");
+        setMessage(body.error ?? "We couldn’t confirm the run cleanup. Reload the run list before repeating it.");
         return;
       }
       setMessage(`${body.abandoned_ids?.length ?? 0} stale run(s) marked abandoned`);

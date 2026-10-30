@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { NextResponse } from "next/server";
 import "@/modules";
 import { STAGE_IDS, type StageId } from "@/modules/kernel/contracts";
@@ -118,7 +119,7 @@ export async function POST(request: Request) {
     const identity = await requestIdentity(body);
     switch (action) {
       case "set_ai_enabled": {
-        if (typeof body.enabled !== "boolean") throw new Error("enabled must be true or false");
+        if (typeof body.enabled !== "boolean") throw new TrustedApplicationError("enabled must be true or false");
         const was = await aiSwitch();
         const ai = await setAiEnabled({
           enabled: body.enabled,
@@ -130,8 +131,8 @@ export async function POST(request: Request) {
       }
       // One AI section on or off for every customer (KAN-53).
       case "set_ai_section": {
-        if (!isAiSectionId(body.section)) throw new Error("Unknown AI section.");
-        if (typeof body.enabled !== "boolean") throw new Error("enabled must be true or false");
+        if (!isAiSectionId(body.section)) throw new TrustedApplicationError("Unknown AI section.");
+        if (typeof body.enabled !== "boolean") throw new TrustedApplicationError("enabled must be true or false");
         const was = (await storedAiSections()).sections;
         const sections = await setAiSection({ section: body.section, enabled: body.enabled, actor_name: identity.actor.name });
         await audit("set_ai_section", "ai_section", body.section, { enabled: was[body.section] }, { enabled: sections[body.section] });
@@ -139,7 +140,7 @@ export async function POST(request: Request) {
       }
       // Every section at once (a fresh platform, or the e2e suite).
       case "set_ai_sections": {
-        if (typeof body.enabled !== "boolean") throw new Error("enabled must be true or false");
+        if (typeof body.enabled !== "boolean") throw new TrustedApplicationError("enabled must be true or false");
         const was = (await storedAiSections()).sections;
         let sections = was;
         for (const section of AI_SECTION_IDS) {
@@ -150,7 +151,7 @@ export async function POST(request: Request) {
       }
       case "set_route": {
         const stage = String(body.stage ?? "") as StageId;
-        if (!STAGE_IDS.includes(stage)) throw new Error(`Unknown stage ${body.stage}`);
+        if (!STAGE_IDS.includes(stage)) throw new TrustedApplicationError("Choose an available task and load its AI routing settings again.");
         const provider_id = String(body.provider_id ?? "");
         const was = await routeConfig(stage);
         // Blank numbers keep the current value; blank fallbacks mean none (KAN-63).
@@ -239,9 +240,9 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true });
       }
       default:
-        return NextResponse.json({ error: `Unknown action ${action}` }, { status: 400 });
+        return NextResponse.json({ safe_error: true, error: "This action is not available. Reload the page and choose an available action." }, { status: 400 });
     }
   } catch (error) {
-    return apiErrorResponse(error, "Control-panel action failed");
+    return apiErrorResponse(error, "We couldn't update the control panel. Reload its settings to check the current selection before trying again.");
   }
 }

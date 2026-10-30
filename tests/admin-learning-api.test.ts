@@ -7,6 +7,7 @@ import { GET, POST } from "@/app/api/admin/learning/route";
 import { sql } from "drizzle-orm";
 import { sharedDb } from "@/modules/kernel/db";
 import { listDecisionExamples } from "@/modules/kernel/decision-examples";
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { NextResponse } from "next/server";
 const ownedReportWorkspaces: string[] = [];
 afterEach(async () => {
@@ -63,7 +64,7 @@ it('authorises evaluate/approve/rollback and validates pointer and workspace bou
  vi.spyOn(owner,'ownerAccess').mockResolvedValue({owner:true,actor} as Awaited<ReturnType<typeof owner.ownerAccess>>);
  vi.spyOn(admin,'withAdminWorkspace').mockImplementation(async fn=>fn({id:'selected',name:'Selected',schema_name:'public',demo:false,source:'picked'}));
  const evaluate=vi.spyOn(evaluations,'evaluatePromptRevision').mockResolvedValue({id:'pre_test',eligible:false} as evaluations.RevisionEvaluation);
- const approve=vi.spyOn(revisions,'activatePromptRevision').mockRejectedValue(new Error('Active prompt changed since evaluation.'));
+ const approve=vi.spyOn(revisions,'activatePromptRevision').mockRejectedValue(new TrustedApplicationError('Active prompt changed since evaluation. Evaluate again.'));
  const rollback=vi.spyOn(revisions,'rollbackPromptRevision').mockResolvedValue(null);
  expect((await POST(request({action:'evaluate',revision_id:'prv_test'}))).status).toBe(200);
  expect(evaluate).toHaveBeenCalledWith({revision_id:'prv_test',workspace_id:'selected',actor});

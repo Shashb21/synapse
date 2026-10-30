@@ -82,13 +82,15 @@ describe("KAN-86: the final plan is the complete, frozen IEGP", () => {
     await datedDemo();
   }, 60_000);
 
-  it("refuses a final while gaps are unresolved, names each one, and still saves a draft", async () => {
+  it("refuses a final with safe gap correction guidance and still saves a draft", async () => {
     const state = await loadState();
     const partial = state.gaps.filter(isLiveGap).find((gap) => displayedGapStatus(gap) === "validated_partial")!;
     const refusal = await savePlan({ status: "final", note: "Sign off", actor: ACTOR }).catch((error: Error) => error.message);
     expect(refusal).toMatch(/complete plan cannot be saved as final yet/);
-    expect(refusal).toContain(`${partial.name} (${partial.id}) is Partially Addressed`);
-    expect(refusal).toMatch(/is still a candidate/);
+    expect(refusal).toContain("Split or rewrite Partially Addressed gaps");
+    expect(refusal).not.toContain(partial.name);
+    expect(refusal).not.toContain(partial.id);
+    expect(refusal).toContain("Resolve candidate gaps on Evidence Inventory");
     expect(refusal).toMatch(/Unscheduled, deferred, parked and excluded gaps do not block it/);
     const draft = await savePlan({ status: "draft", note: "Work in progress", actor: ACTOR });
     expect(draft.snapshot.package).toBeUndefined();

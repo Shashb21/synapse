@@ -1,3 +1,4 @@
+import { customerErrorMessage } from "@/modules/kernel/stage-errors";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { ACTOR_FUNCTIONS, SOURCE_TYPES } from "@/lib/iegp/enums";
@@ -26,7 +27,7 @@ export const dynamic = "force-dynamic";
 /** GET /api/sources/blocks?source_id= — blocks in order with human/model provenance. */
 export async function GET(req: Request) {
   const source_id = new URL(req.url).searchParams.get("source_id")?.trim() ?? "";
-  if (!source_id) return NextResponse.json({ error: "source_id required" }, { status: 400 });
+  if (!source_id) return NextResponse.json({ safe_error: true, error: "source_id required" }, { status: 400 });
   try {
     await requireCustomerContext();
   } catch (error) {
@@ -42,7 +43,7 @@ export async function GET(req: Request) {
     );
     return NextResponse.json({ ok: true, source_id, blocks, dropped, stakeholder, edits });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Not found" }, { status: 404 });
+    return NextResponse.json({ safe_error: true, error: customerErrorMessage(error) }, { status: 404 });
   }
 }
 
@@ -125,7 +126,7 @@ export async function POST(req: Request) {
   const parsed = postSchema.safeParse(raw);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") },
+      { safe_error: true, error: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") },
       { status: 400 },
     );
   }
@@ -191,8 +192,8 @@ export async function POST(req: Request) {
     }
   } catch (error) {
     if (error instanceof SourceQuoteConflictError) {
-      return NextResponse.json({ error: error.message, orphaned_needs: error.orphans.map((o) => o.id) }, { status: 409 });
+      return NextResponse.json({ safe_error: true, error: error.message, orphaned_needs: error.orphans.map((o) => o.id) }, { status: 409 });
     }
-    return apiErrorResponse(error, "Block edit failed");
+    return apiErrorResponse(error, "We couldn’t confirm the source change. Check current sources and their text blocks before saving it again.");
   }
 }
