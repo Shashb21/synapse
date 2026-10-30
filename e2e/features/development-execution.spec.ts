@@ -56,7 +56,7 @@ test("history shows frozen routes, unreviewed outputs and stale prerequisites", 
   await page.getByRole("button", { name: "Run all sections" }).focus();
   await page.keyboard.press("Enter");
   const execution = page.getByRole("region", { name: "Execution", exact: true });
-  await expect(execution.getByText("Generation: succeeded · Evaluation: not_requested · 4/4 sections finished")).toBeVisible();
+  await expect(execution.getByText("Generation: succeeded · 4/4 sections finished")).toBeVisible();
   await expect(execution.getByText("Partial splitting: not_applicable")).toBeVisible();
   await expect(execution.getByText(/Generated output: unreviewed/).first()).toBeVisible();
   await expect(execution.getByText(/proposer: requested/).first()).toBeVisible();

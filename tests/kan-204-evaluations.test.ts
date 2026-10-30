@@ -10,6 +10,8 @@ import { developmentOutputIdentity, executeDevelopmentSection } from '@/modules/
 import { canonicalParsedJson, sha256 } from '@/modules/development/documents';
 import { balancedProfile, effectiveCriteria } from '@/modules/development/profile-schema';
 import { POST, GET } from '@/app/api/admin/development/[id]/evaluations/route';
+import { GET as detail } from '@/app/api/admin/development/[id]/evaluations/[evaluationId]/route';
+import { GET as executionDetail } from '@/app/api/admin/development/[id]/executions/[executionId]/route';
 import { POST as save, GET as profiles } from '@/app/api/admin/development/[id]/profiles/route';
 import { progressEvaluation } from '@/modules/development/evaluation-worker';
 import { getEvaluation } from '@/modules/development/evaluation-store';
@@ -255,4 +257,79 @@ it.each([2000, 2001])('bounds expanded mapping identities at admission for %s it
     expect(await evaluatorStore.listEvaluations(f.e.id)).toEqual([]);
   }
   expect(send).not.toHaveBeenCalled();
+});
+
+it('redacts owner evaluation and profile responses without changing retained evidence', async () => {
+  const f = await fixture();
+  const result = structuredClone(f.result);
+  result.reason = 'test-key-never-send';
+  Object.assign(result.output as object, { 'sk-abcdefghijklmnopqrstuvwx': 'test-key-never-send' });
+  result.output_id = developmentOutputIdentity(result);
+  await sharedDb().execute(sql`update development_execution_sections set result=${JSON.stringify(result)}::jsonb where id=${f.input.attempt_id}`);
+  f.input.output_id = result.output_id;
+  const response = await create(f);
+  const body = await response.json();
+  expect(JSON.stringify(body)).not.toContain('test-key-never-send');
+  const saved = await getEvaluation(f.e.id, body.evaluation.id);
+  expect(saved.manifest.output.reason).toBe('test-key-never-send');
+  expect(saved.manifest.output.output_id).toBe(result.output_id);
+  expect(saved.manifest.output.output).toHaveProperty('sk-abcdefghijklmnopqrstuvwx');
+  const providerReply = reply('gap_extraction'); providerReply.criteria[0].reason = 'test-key-never-send sk-abcdefghijklmnopqrstuvwx';
+  vi.spyOn(xaiGrok, 'complete').mockResolvedValue(JSON.stringify(providerReply));
+  await progressEvaluation(saved.id); await progressEvaluation(saved.id);
+  expect((await getEvaluation(f.e.id, saved.id)).receipt?.text).toContain('test-key-never-send');
+  expect(JSON.stringify(await (await GET(req({}), ctx(f.e.id))).json())).not.toContain('test-key-never-send');
+  expect(JSON.stringify(await (await detail(req({}), { params: Promise.resolve({ id: f.e.id, evaluationId: saved.id }) })).json())).not.toContain('test-key-never-send');
+  expect(JSON.stringify(await (await detail(req({}), { params: Promise.resolve({ id: f.e.id, evaluationId: saved.id }) })).json())).not.toContain('sk-abcdefghijklmnopqrstuvwx');
+  const profile = await save(req({ name: 'test-key-never-send', defaults: balancedProfile.defaults, sections: balancedProfile.sections }), ctx(f.e.id));
+  expect(JSON.stringify(await profile.json())).not.toContain('test-key-never-send');
+  expect(JSON.stringify(await (await profiles(req({}), ctx(f.e.id))).json())).not.toContain('test-key-never-send');
+});
+it('shows real evaluation state under its exact attempt in execution history', async () => {
+  const f = await fixture();
+  const evaluation = (await (await create(f)).json()).evaluation;
+  const read = async () => (await (await executionDetail(req({}), { params: Promise.resolve({ id: f.e.id, executionId: f.execution.id }) })).json()).history[f.input.attempt_id].evaluations;
+  expect(await read()).toEqual(expect.arrayContaining([expect.objectContaining({ id: evaluation.id, status: 'queued', output_id: f.input.output_id, profile_id: 'balanced', freshness: 'unavailable' })]));
+  vi.spyOn(xaiGrok, 'complete').mockImplementation(async () => {
+    expect(await read()).toEqual(expect.arrayContaining([expect.objectContaining({ id: evaluation.id, status: 'sending' })]));
+    return JSON.stringify(reply('gap_extraction'));
+  });
+  await progressEvaluation(evaluation.id);
+  expect(await read()).toEqual(expect.arrayContaining([expect.objectContaining({ id: evaluation.id, status: 'received' })]));
+  await progressEvaluation(evaluation.id);
+  expect(await read()).toEqual(expect.arrayContaining([expect.objectContaining({ id: evaluation.id, status: 'succeeded' })]));
+});
+it('compares only the selected output, profile version, section settings and reference provenance', async () => {
+  const { compareEvaluation } = await import('@/modules/development/evaluation-freshness');
+  const f = await fixture(), document = await reference(f);
+  const evaluation = (await (await create(f, { reference_ids: [document.id] })).json()).evaluation;
+  const selection = { attempt_id: f.input.attempt_id, output_id: f.input.output_id, profile: evaluation.manifest.profile, config: evaluation.manifest.config, references: [document] };
+  expect(compareEvaluation(evaluation, null).freshness).toBe('unavailable');
+  expect(compareEvaluation(evaluation, selection).freshness).toBe('current');
+  expect(compareEvaluation(evaluation, { ...selection, output_id: 'different' }).reasons).toContain('output_changed');
+  expect(compareEvaluation(evaluation, { ...selection, profile: { ...selection.profile, version: 2 } }).reasons).toContain('profile_changed');
+  const changed = structuredClone(selection.config); changed.sections.gap_extraction.route.temperature = 0.9;
+  expect(compareEvaluation(evaluation, { ...selection, config: changed }).reasons).toContain('evaluator_changed');
+  const unrelated = structuredClone(selection.config); unrelated.sections.tactic_extraction.route.temperature = 0.9;
+  expect(compareEvaluation(evaluation, { ...selection, config: unrelated }).freshness).toBe('current');
+  expect(compareEvaluation(evaluation, { ...selection, references: [{ ...document, review_status: 'provisional' }] }).reasons).toContain('references_changed');
+  expect(compareEvaluation(evaluation, { ...selection, references: [{ ...document, parsed_sha256: 'changed' }] }).reasons).toContain('references_changed');
+  expect(compareEvaluation(evaluation, { ...selection, references: [{ ...document, id: 'other-reference' }] }).reasons).toContain('references_changed');
+  expect(compareEvaluation(evaluation, { ...selection, references: [] }).reasons).toContain('references_changed');
+});
+
+it('keeps redacted reference snapshots current against unchanged raw provenance', async () => {
+  const { compareEvaluation } = await import('@/modules/development/evaluation-freshness');
+  const f = await fixture(), document = await reference(f);
+  vi.stubEnv('XAI_API_KEY', 'GOLD_REFERENCE_SECRET');
+  const created = (await (await create(f, { reference_ids: [document.id] })).json()).evaluation;
+  const listed = (await (await GET(new Request('http://localhost'), ctx(f.e.id))).json()).evaluations[0];
+  const fetched = (await (await detail(new Request('http://localhost'), { params: Promise.resolve({ id: f.e.id, evaluationId: created.id }) })).json()).evaluation;
+  const selection = { attempt_id: f.input.attempt_id, output_id: f.input.output_id, profile: created.manifest.profile, config: created.manifest.config, references: [document] };
+  for (const evaluation of [created, listed, fetched]) {
+    expect(JSON.stringify(evaluation.manifest.references)).not.toContain('GOLD_REFERENCE_SECRET');
+    expect(compareEvaluation(evaluation, selection).freshness).toBe('current');
+    expect(compareEvaluation(evaluation, { ...selection, references: [{ ...document, parsed_sha256: 'changed' }] }).reasons).toContain('references_changed');
+    expect(compareEvaluation(evaluation, { ...selection, references: [{ ...document, review_status: 'provisional' }] }).reasons).toContain('references_changed');
+  }
 });

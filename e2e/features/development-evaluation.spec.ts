@@ -5,7 +5,7 @@ import { evaluationConfigSchema } from "../../src/modules/development/evaluation
 import type { Experiment } from "../../src/modules/development/schema";
 
 /** Create real isolated source/reference snapshots, while scripting generation and evaluator I/O. */
-async function arrange(page: Page, options: { malformed?: boolean; missingDelivery?: boolean; profileLoadFailure?: boolean; pollFailure?: boolean; twoExecutions?: boolean; holdEvaluationNumber?: number; recoveryHistoryFailure?: boolean; firstQueueFailure?: { status: number; code: string } } = {}) {
+async function arrange(page: Page, options: { malformed?: boolean; missingDelivery?: boolean; profileLoadFailure?: boolean; pollFailure?: boolean; twoExecutions?: boolean; holdEvaluationNumber?: number; recoveryHistoryFailure?: boolean; firstQueueFailure?: { status: number; code: string }; holdQueuedHistory?: boolean; holdSucceededHistory?: boolean; paginated?: boolean } = {}) {
   const name = `Evaluation ${Date.now()}`;
   const created = await page.request.post("/api/admin/development", { data: { name, source_workspace_id: null } });
   expect(created.ok(), `Create experiment: ${created.status()} ${await created.text()}`).toBe(true);
@@ -36,10 +36,27 @@ async function arrange(page: Page, options: { malformed?: boolean; missingDelive
   const generation = { revision: draft.revision, config: { mode: "standard", evaluator: config.sections.gap_extraction.route }, routes: {}, sources: [source] };
   const execution = { id: "saved-run", experiment_id: draft.id, created_at: "2026-10-30", updated_at: "2026-10-30", generation_status: "succeeded", evaluation_status: "not_requested", error: null, manifest: generation, sections: [{ id: "saved-attempt", section: "gap_extraction", status: "rejected", result: output, error: null, prerequisites: {} }], calls: [] };
   const evaluations: Record<string, unknown>[] = [];
-  await page.route(`**/api/admin/development/${draft.id}/executions`, async (route) => {
+  let releaseQueuedHistory!: () => void;
+  let queuedHistoryHeld!: () => void;
+  const queuedHistoryRelease = new Promise<void>((resolve) => { releaseQueuedHistory = resolve; });
+  const queuedHistoryStarted = new Promise<void>((resolve) => { queuedHistoryHeld = resolve; });
+  let held = false;
+  let releaseSucceededHistory!: () => void;
+  let succeededHistoryHeld!: () => void;
+  const succeededHistoryRelease = new Promise<void>((resolve) => { releaseSucceededHistory = resolve; });
+  const succeededHistoryStarted = new Promise<void>((resolve) => { succeededHistoryHeld = resolve; });
+  await page.route(`**/api/admin/development/${draft.id}/executions**`, async (route) => {
     if (route.request().method() === "POST") generationPosts++;
     if (options.profileLoadFailure) await executionResponse;
-    await route.fulfill({ json: { executions: options.twoExecutions ? [execution, { ...execution, id: "other-run", sections: [{ ...execution.sections[0], id: "other-attempt", result: { ...output, output_id: "b".repeat(64) } }] }] : [execution], delivery: { available: true, reason: null } } });
+    const snapshot = structuredClone(evaluations);
+    const olderPage = new URL(route.request().url()).searchParams.has("cursor");
+    if (options.holdSucceededHistory && !held && !olderPage && snapshot.some(item => item.status === "succeeded")) {
+      held = true; succeededHistoryHeld(); await succeededHistoryRelease;
+    }
+    if (options.holdQueuedHistory && !held && snapshot.some(item => item.status === "queued")) {
+      held = true; queuedHistoryHeld(); await queuedHistoryRelease;
+    }
+    await route.fulfill({ json: { executions: olderPage ? [{ ...execution, id: "older-run", sections: [{ ...execution.sections[0], id: "older-attempt" }] }] : options.twoExecutions ? [execution, { ...execution, id: "other-run", sections: [{ ...execution.sections[0], id: "other-attempt", result: { ...output, output_id: "b".repeat(64) } }] }] : [execution], next_cursor: options.paginated && !olderPage ? "older-cursor" : null, delivery: { available: true, reason: null }, history: olderPage ? { "older-attempt": { freshness: { current: true, reasons: [] }, evaluations: [] } } : { "saved-attempt": { freshness: { current: true, reasons: [] }, evaluations: snapshot.filter(item => (item.manifest as { attempt_id: string }).attempt_id === "saved-attempt").map(item => ({ id: item.id, status: item.status, freshness: "unavailable", reasons: [], profile_id: "balanced", output_id: output.output_id, evaluator_identity: "settings", reference_identity: "references", reference_ids: [] })) } } } });
   });
   await page.route(`**/api/admin/development/${draft.id}/profiles`, async (route) => {
     if (route.request().method() === "GET" && profileLoadFailure) { await route.fulfill({ status: 503, json: { error: "Profile service unavailable. Reload evaluation data." } }); return; }
@@ -82,7 +99,7 @@ async function arrange(page: Page, options: { malformed?: boolean; missingDelive
   await page.goto("/admin/development");
   await page.getByRole("button", { name: `Open ${name}` }).click();
   if (!options.profileLoadFailure) await expect(page.getByRole("region", { name: "Evaluation", exact: true }).getByRole("button", { name: "Save As custom profile" })).toBeEnabled();
-  return { name, draft, reference, saves, posts, releaseExecutions, releaseEvaluation, releasedResponse: () => releasedResponse, recoverProfiles: () => { profileLoadFailure = false; }, recoverHistory: (mode: "all" | "empty" | "older" = "all") => { recoveryHistoryFailure = false; historyMode = mode; }, generationPosts: () => generationPosts, polls: () => polls };
+  return { name, draft, reference, saves, posts, releaseExecutions, releaseEvaluation, releasedResponse: () => releasedResponse, recoverProfiles: () => { profileLoadFailure = false; }, recoverHistory: (mode: "all" | "empty" | "older" = "all") => { recoveryHistoryFailure = false; historyMode = mode; }, releaseQueuedHistory, queuedHistoryStarted, releaseSucceededHistory, succeededHistoryStarted, generationPosts: () => generationPosts, polls: () => polls };
 }
 
 test("copies and versions profiles, evaluates a retained rejected output and reopens immutable history", async ({ page }) => {
@@ -387,3 +404,58 @@ for (const failure of [{ status: 503, code: "development_unavailable" }, { statu
     expect(fixture.generationPosts()).toBe(0);
   });
 }
+
+test("refreshes execution history when an evaluation is queued and settled", async ({ page }) => {
+  const fixture = await arrange(page);
+  const panel = page.getByRole("region", { name: "Evaluation", exact: true });
+  const execution = page.getByRole("region", { name: "Execution", exact: true });
+  await panel.getByRole("button", { name: "Evaluate saved output", exact: true }).click();
+  await expect(execution.getByText(/Evaluation: queued · unavailable/)).toBeVisible();
+  await expect(execution.getByText(/Evaluation: succeeded · unavailable/)).toBeVisible({ timeout: 10000 });
+  await expect(execution.getByText(/Evaluation: succeeded · unavailable/)).toContainText("evaluation-1");
+  await expect(panel.getByText(/Comparison with the selected saved output.*current/)).toBeVisible();
+  expect(fixture.posts).toHaveLength(1);
+});
+
+
+test("ignores a delayed queued execution history after the evaluation succeeds", async ({ page }) => {
+  const fixture = await arrange(page, { holdQueuedHistory: true });
+  const panel = page.getByRole("region", { name: "Evaluation", exact: true });
+  const execution = page.getByRole("region", { name: "Execution", exact: true });
+  await panel.getByRole("button", { name: "Evaluate saved output", exact: true }).click();
+  await fixture.queuedHistoryStarted;
+  await expect(execution.getByText(/Evaluation: succeeded · unavailable/)).toBeVisible({ timeout: 10000 });
+  const oldResponse = page.waitForResponse(response => response.url().includes(`/development/${fixture.draft.id}/executions?`) && response.request().method() === "GET");
+  fixture.releaseQueuedHistory();
+  await oldResponse;
+  await expect(execution.getByText(/Evaluation: succeeded · unavailable/)).toBeVisible();
+  await expect(execution.getByText(/Evaluation: queued · unavailable/)).toHaveCount(0);
+  await expect(execution.getByText(/Evaluation: succeeded · unavailable/)).toBeVisible();
+  await expect(panel.getByLabel("Selected evaluation").locator('option[value="evaluation-1"]')).toContainText("succeeded");
+  expect(fixture.posts).toHaveLength(1);
+  expect(fixture.generationPosts()).toBe(0);
+});
+
+
+test("keeps both pages fresh when loading older history during a succeeded refresh", async ({ page }) => {
+  const fixture = await arrange(page, { paginated: true, holdSucceededHistory: true });
+  const panel = page.getByRole("region", { name: "Evaluation", exact: true });
+  const execution = page.getByRole("region", { name: "Execution", exact: true });
+  await panel.getByRole("button", { name: "Evaluate saved output", exact: true }).click();
+  await fixture.succeededHistoryStarted;
+  await expect(execution.getByText("Evaluation: unavailable", { exact: true })).toBeVisible();
+  await execution.getByRole("button", { name: "Load older executions" }).click();
+  await expect(execution.getByLabel("Selected execution").locator('option[value="older-run"]')).toHaveCount(1);
+  const oldResponse = page.waitForResponse(response => response.url().includes(`/development/${fixture.draft.id}/executions?`) && !response.url().includes("cursor=") && response.request().method() === "GET");
+  fixture.releaseSucceededHistory();
+  await oldResponse;
+  await expect(execution.getByText("Generation freshness: current")).toBeVisible();
+  await expect(execution.getByText(/Evaluation: succeeded · unavailable/)).toBeVisible();
+  await expect(panel.getByLabel("Selected evaluation").locator('option[value="evaluation-1"]')).toContainText("succeeded");
+  await expect(execution.getByRole("button", { name: "Load older executions" })).toHaveCount(0);
+  await execution.getByLabel("Selected execution").selectOption("older-run");
+  await expect(execution.getByText("Generation freshness: current")).toBeVisible();
+  await expect(execution.getByText("Evaluation: unscored / not requested")).toBeVisible();
+  expect(fixture.posts).toHaveLength(1);
+  expect(fixture.generationPosts()).toBe(0);
+});

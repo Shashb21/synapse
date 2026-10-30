@@ -55,6 +55,13 @@ export async function listEvaluations(experimentId: string): Promise<Evaluation[
   await ensureEvaluationTables(); const rows = await sharedDb().execute(sql`select id from development_evaluations where experiment_id=${experimentId} order by created_at desc limit 100`);
   return Promise.all(rows.map(row => getEvaluation(experimentId, row.id as string)));
 }
+/** Read durable evaluations for the exact attempts displayed, including older records. */
+export async function listAttemptEvaluations(experimentId: string, attemptIds: string[]): Promise<Evaluation[]> {
+  if (!attemptIds.length) return [];
+  await ensureEvaluationTables();
+  const rows = await sharedDb().execute(sql`select id from development_evaluations where experiment_id=${experimentId} and manifest->>'attempt_id' in ${sql`(${sql.join(attemptIds.map(id => sql`${id}`), sql`, `)})`} order by created_at desc, id desc`);
+  return Promise.all(rows.map(row => getEvaluation(experimentId, row.id as string)));
+}
 /** Atomically own one job, preserving a sending marker across expired-lease recovery. */
 export async function claimEvaluation(id?: string): Promise<{ evaluation: Evaluation; token: string } | null> {
   await ensureEvaluationTables(); const token = randomUUID();

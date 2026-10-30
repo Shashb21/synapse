@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RouteFields, routeSelectClass } from "./development-route-fields";
 import { profileInputSchema, type Criterion, type EvaluationProfile } from "@/modules/development/profile-schema";
+import { compareEvaluation } from "@/modules/development/evaluation-freshness";
 import { evaluationConfigSchema, startEvaluationSchema, type EvaluationConfig } from "@/modules/development/evaluation-schema";
 import type { DevelopmentDocument, DevelopmentSection, Experiment } from "@/modules/development/schema";
 import type { Execution } from "@/modules/development/execution-store";
@@ -136,7 +137,7 @@ function EvaluationDetail({ evaluation }: { evaluation: Evaluation }) {
 }
 
 /** Configure evaluations without regenerating or rewriting historical outputs and scores. */
-export function DevelopmentEvaluation({ draft, execution, providers, disabled }: { draft: Experiment; execution?: Execution; providers: ProviderKeyView[]; disabled: boolean }) {
+export function DevelopmentEvaluation({ draft, execution, providers, disabled, onHistoryChange }: { draft: Experiment; execution?: Execution; providers: ProviderKeyView[]; disabled: boolean; onHistoryChange: () => void }) {
   const root = `/api/admin/development/${draft.id}`;
   const lifetime = useRef<AbortController | null>(null);
   const [profiles, setProfiles] = useState<EvaluationProfile[]>([]);
@@ -162,6 +163,13 @@ export function DevelopmentEvaluation({ draft, execution, providers, disabled }:
   const attempt = outputs.find((item) => item.id === attemptId) ?? outputs[0];
   const current = history.find((item) => item.id === selected);
   const locked = disabled || pending || loading;
+  const historyVersion = history.map((item) => `${item.id}:${item.status}`).join('|');
+  useEffect(() => { if (historyVersion) onHistoryChange();
+    // Refresh only when durable job identity or status changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historyVersion]);
+  const selectedReferences = references.map((id) => draft.documents.find((item) => item.id === id && item.role === "reference"));
+  const comparison = current ? compareEvaluation(current, attempt?.result && profile && !dirty && selectedReferences.every(Boolean) ? { attempt_id: attempt.id, output_id: attempt.result.output_id, profile, config, references: selectedReferences as DevelopmentDocument[] } : null) : null;
 
   // The editor belongs to the experiment; only output-bound actions reset on execution changes.
   const executionId = execution?.id ?? "";
@@ -369,6 +377,6 @@ export function DevelopmentEvaluation({ draft, execution, providers, disabled }:
         </>}
       </fieldset>
     </>}
-    <div className="min-w-0 space-y-3 border-t border-border pt-3"><h3 className="font-semibold">Immutable evaluation history</h3><p className="text-muted-foreground">Up to 100 recent attempts. Each record retains its own output, profile version, evaluator settings and reference review state.</p>{!history.length && !loading && <p>No evaluations yet. Choose a saved output above.</p>}{!!history.length && <><label className="block space-y-1">Selected evaluation<select className={routeSelectClass} value={selected} disabled={pending} onChange={(event) => setSelected(event.target.value)}>{history.map((item) => <option key={item.id} value={item.id}>{item.created_at} · {labels[item.manifest.section]} · {item.status} · {item.id}</option>)}</select></label>{current && <EvaluationDetail evaluation={current} />}</>}</div>
+    <div className="min-w-0 space-y-3 border-t border-border pt-3"><h3 className="font-semibold">Immutable evaluation history</h3><p className="text-muted-foreground">Up to 100 recent attempts. Each record retains its own output, profile version, evaluator settings and reference review state.</p>{!history.length && !loading && <p>No evaluations yet. Choose a saved output above.</p>}{!!history.length && <><label className="block space-y-1">Selected evaluation<select className={routeSelectClass} value={selected} disabled={pending} onChange={(event) => setSelected(event.target.value)}>{history.map((item) => <option key={item.id} value={item.id}>{item.created_at} · {labels[item.manifest.section]} · {item.status} · {item.id}</option>)}</select></label>{current && <><p>Comparison with the selected saved output, profile, section settings and checked references: {comparison?.freshness}{comparison?.reasons.length ? ` · ${comparison.reasons.join(", ")}` : ""}</p><EvaluationDetail evaluation={current} /></>}</>}</div>
   </section>;
 }

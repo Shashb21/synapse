@@ -154,8 +154,8 @@ for (const change of ['controls', 'source'] as const) {
       changed = true;
       failing = true;
       if (change === 'controls') {
-        await execution.getByText('Evaluator route (for later evaluation)').click();
-        await execution.getByLabel('Temperature', { exact: true }).last().fill('0.7');
+        await execution.getByText('Legacy evaluator route (legacy history comparisons only)').click();
+        await execution.getByText('Legacy evaluator route (legacy history comparisons only)').locator('..').getByLabel('Temperature', { exact: true }).fill('0.7');
       } else {
         await page.getByLabel('Private source file').setInputFiles({ name: 'source.txt', mimeType: 'text/plain', buffer: Buffer.from('Changed evidence') });
         await page.getByRole('button', { name: 'Upload source', exact: true }).click();
@@ -203,11 +203,11 @@ test('a delayed refresh from previous controls cannot replace current comparison
   await page.getByRole('button', { name: 'Create experiment' }).click();
   const execution = page.getByRole('region', { name: 'Execution', exact: true });
   await expect(execution.getByText('Evaluation: succeeded · current', { exact: false })).toBeVisible();
-  await execution.getByText('Evaluator route (for later evaluation)').click();
+  await execution.getByText('Legacy evaluator route (legacy history comparisons only)').click();
   holdNext = true;
   await execution.getByRole('button', { name: 'Reload history' }).click();
   await expect.poll(() => Boolean(release)).toBe(true);
-  await execution.getByLabel('Temperature', { exact: true }).last().fill('0.7');
+  await execution.getByText('Legacy evaluator route (legacy history comparisons only)').locator('..').getByLabel('Temperature', { exact: true }).fill('0.7');
   await expect(execution.getByText(/Evaluation: succeeded · outdated/)).toContainText('evaluator_changed');
   release!();
   await expect.poll(() => settled).toBe(true);

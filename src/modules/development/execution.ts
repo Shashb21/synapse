@@ -4,6 +4,7 @@ import { assertAiEnabled, AiDisabledError } from '@/modules/kernel/ai-switch';
 import { sectionOfStage } from '@/modules/kernel/ai-sections';
 import { NoRouteError } from '@/modules/llm/provider';
 import { canonicalParsedJson, sha256 } from './documents';
+import { listAttemptEvaluations } from './evaluation-store';
 import { executionConfigSchema, SECTION_DEPENDENCIES, SECTION_STAGES } from './execution-schema';
 import { sectionSchema, DevelopmentError, type DevelopmentSection, type DevelopmentDocument } from './schema';
 import { getExperiment, requireRevision } from './store';
@@ -92,11 +93,13 @@ export function historyConfig(request: Request): ExecutionManifest['config'] | u
   if (raw.length > 16000) throw new DevelopmentError(400, 'invalid_config', 'The history configuration is too large.');
   return executionConfigSchema.parse(JSON.parse(raw));
 }
-export type AttemptHistoryMetadata = { freshness: SectionFreshness; evaluations: (EvaluationAssociation & { freshness: 'current' | 'outdated'; reasons: ('attempt_changed' | 'evaluator_changed' | 'references_changed')[] })[] };
+export type AttemptHistoryEvaluation = Omit<EvaluationAssociation, 'status'> & { status: EvaluationAssociation['status'] | import('./evaluation-store').EvaluationStatus; freshness: 'current' | 'outdated' | 'unavailable'; reasons: ('attempt_changed' | 'evaluator_changed' | 'references_changed')[]; profile_version?: number };
+export type AttemptHistoryMetadata = { freshness: SectionFreshness; evaluations: readonly AttemptHistoryEvaluation[] };
 /** Compute owner history metadata using the current draft and optionally supplied controls. */
 export async function historyMetadata(experimentId: string, executions: Execution[], config?: ExecutionManifest['config']): Promise<Record<string, AttemptHistoryMetadata>> {
   const experiment = await getExperiment(experimentId);
   const history = await sectionHistory(experimentId);
+  const durableEvaluations = await listAttemptEvaluations(experimentId, executions.flatMap(execution => execution.sections.map(section => section.id)));
   const entries = await Promise.all(executions.flatMap(execution => execution.sections.map(async section => {
     const historical = history.find(item => item.id === section.id)!;
     const current: ExecutionManifest = { ...execution.manifest, sources: experiment.documents.filter(document => document.role === 'source'), config: config ?? execution.manifest.config, code_identity: executionCodeIdentity(), modules: Object.fromEntries(SECTIONS.map(name => [name, developmentModuleIdentity(name)])) as ExecutionManifest['modules'], prompts: Object.fromEntries(SECTIONS.map(name => [name, { id: 'development-baseline-v1', instruction: '' }])) as ExecutionManifest['prompts'] };
@@ -112,7 +115,8 @@ export async function historyMetadata(experimentId: string, executions: Executio
       if (item.reference_identity !== expected.reference_identity) reasons.push('references_changed');
       return { ...item, freshness: evaluationFreshness(saved, expected), reasons };
     });
-    return [section.id, { freshness: sectionFreshness(historical, history, current), evaluations }] as const;
+    const durable = durableEvaluations.filter(item => item.manifest.attempt_id === section.id).map(item => ({ id: item.id, experiment_id: item.experiment_id, attempt_id: item.manifest.attempt_id, output_id: item.manifest.output_id, profile_id: item.manifest.profile.id, profile_version: item.manifest.profile.version, evaluator_identity: hash(item.manifest.config.sections[item.manifest.section]), reference_identity: hash(item.manifest.references), reference_ids: item.manifest.references.map(reference => reference.id), status: item.status, created_at: item.created_at, freshness: 'unavailable' as const, reasons: [] }));
+    return [section.id, { freshness: sectionFreshness(historical, history, current), evaluations: [...durable, ...evaluations] }] as const;
   })));
   return Object.fromEntries(entries);
 }
