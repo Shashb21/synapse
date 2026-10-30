@@ -3,7 +3,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { RouteFields } from "./development-route-fields";
+import { DevelopmentEvaluation } from "./development-evaluation";
 import type { Experiment, DevelopmentSection } from "@/modules/development/schema";
 import type { ExecutionConfig, ExecutionRoute } from "@/modules/development/execution-schema";
 import type { AttemptHistoryMetadata } from "@/modules/development/execution";
@@ -18,26 +19,14 @@ const roleLabels: Record<Role, string> = { proposer: "Proposer", critic: "Critic
 const selectClass = "w-full rounded-lg border border-input bg-background px-2 py-2 text-sm focus-visible:outline-2 focus-visible:outline-ring";
 const active = (execution: Execution) => execution.generation_status === "queued" || execution.generation_status === "running";
 
-/** Edit one complete requested route using the owner-readable provider catalog. */
-function RouteFields({ value, onChange, providers }: { value: ExecutionRoute; onChange: (route: ExecutionRoute) => void; providers: ProviderKeyView[] }) {
-  const provider = providers.find((item) => item.provider_id === value.provider_id);
-  return <div className="grid gap-3 sm:grid-cols-2">
-    <label className="block space-y-1">Provider<select className={selectClass} value={value.provider_id} onChange={(event) => { const next = providers.find((item) => item.provider_id === event.target.value); if (next) onChange({ ...value, provider_id: next.provider_id, model: next.default_model, fallbacks: value.fallbacks.filter((id) => id !== next.provider_id) }); }}>{providers.map((item) => <option key={item.provider_id} value={item.provider_id}>{item.label} ({item.status === "configured" ? "key present" : "no key"})</option>)}</select></label>
-    <label className="block space-y-1">Model<select className={selectClass} value={value.model} onChange={(event) => onChange({ ...value, model: event.target.value })}>{provider?.models.map((model) => <option key={model}>{model}</option>)}</select></label>
-    <label className="block space-y-1">Temperature<Input type="number" min="0" max="2" step="0.1" value={value.temperature} onChange={(event) => onChange({ ...value, temperature: Number(event.target.value) })} /></label>
-    <label className="block space-y-1">Maximum output tokens<Input type="number" min="256" max="64000" step="1" value={value.max_tokens} onChange={(event) => onChange({ ...value, max_tokens: Number(event.target.value) })} /></label>
-    <fieldset className="sm:col-span-2"><legend>Allowed fallbacks (in listed order)</legend><div className="flex flex-wrap gap-3 mt-1">{providers.filter((item) => item.provider_id !== value.provider_id).map((item) => <label key={item.provider_id} className="flex gap-1 items-center"><input type="checkbox" checked={value.fallbacks.includes(item.provider_id)} onChange={(event) => onChange({ ...value, fallbacks: event.target.checked ? [...value.fallbacks, item.provider_id] : value.fallbacks.filter((id) => id !== item.provider_id) })} />{item.label}</label>)}</div><p className="text-muted-foreground">Order: {value.fallbacks.join(", ") || "none"}</p></fieldset>
-  </div>;
-}
-
 /** Display frozen configuration, progress and unreviewed section output. */
 function ExecutionDetail({ execution, metadata }: { execution: Execution; metadata: Record<string, AttemptHistoryMetadata> }) {
   const terminal = execution.sections.filter((item) => !["queued", "running"].includes(item.status)).length;
   return <div className="space-y-3 break-words" aria-live="polite">
-    <p>Generation: {execution.generation_status} · Evaluation: {execution.evaluation_status} · {terminal}/{execution.sections.length} sections finished</p>
-    <p>The evaluation status above describes the generation request; any later evaluations appear under their associated attempts.</p>
+    <p>Generation: {execution.generation_status} · {terminal}/{execution.sections.length} sections finished</p>
+    <p>Evaluations appear under their associated attempts.</p>
     <p>Mode: {execution.manifest.config.mode === "standard" ? "Standard" : "Single pass"} · Revision {execution.manifest.revision}</p>
-    <p>Evaluator for later: {execution.manifest.config.evaluator.provider_id} / {execution.manifest.config.evaluator.model} (not requested)</p>
+
     <p>Execution ID: {execution.id} · Created: {execution.created_at} · Updated: {execution.updated_at}</p>
     <details><summary className="cursor-pointer">Provenance and retry policy</summary><div className="space-y-2 pt-2">
       <p>Code version: {execution.manifest.code_identity ?? "unknown"}</p>
@@ -52,7 +41,7 @@ function ExecutionDetail({ execution, metadata }: { execution: Execution; metada
       <p>Attempt: {item.id} · Output: {item.result?.output_id ?? "none"} · Started: {item.started_at ?? "unknown"} · Finished: {item.finished_at ?? "unknown"}</p>
       <p>Prerequisite attempts: {Object.entries(item.prerequisites ?? {}).map(([name, id]) => `${labels[name as DevelopmentSection] ?? name}: ${id}`).join(", ") || "none"}</p>
       {metadata[item.id] ? <p>Generation freshness: {metadata[item.id].freshness.current ? "current" : "outdated"}{metadata[item.id].freshness.reasons.length ? ` · ${metadata[item.id].freshness.reasons.join(", ")}` : ""}</p> : <p>Generation freshness: unavailable</p>}
-      {metadata[item.id]?.evaluations.length ? metadata[item.id].evaluations.map((evaluation) => <p key={evaluation.id}>Evaluation: {evaluation.status} · {evaluation.freshness}{evaluation.reasons.length ? ` · ${evaluation.reasons.join(", ")}` : ""} · Profile: {evaluation.profile_id} · Output: {evaluation.output_id} · Evaluator: {evaluation.evaluator_identity} · References: {evaluation.reference_ids.join(", ") || "none"} ({evaluation.reference_identity})</p>) : <p>Evaluation: {metadata[item.id] ? "unscored / not requested" : "unavailable"}</p>}
+      {metadata[item.id]?.evaluations.length ? metadata[item.id].evaluations.map((evaluation) => <p key={evaluation.id}>Evaluation: {evaluation.status} · {evaluation.freshness}{evaluation.reasons.length ? ` · ${evaluation.reasons.join(", ")}` : ""} · Profile: {evaluation.profile_id}{evaluation.profile_version ? `@${evaluation.profile_version}` : ""} · Evaluation ID: {evaluation.id} · Output: {evaluation.output_id} · Evaluator: {evaluation.evaluator_identity} · References: {evaluation.reference_ids.join(", ") || "none"} ({evaluation.reference_identity})</p>) : <p>Evaluation: {metadata[item.id] ? "unscored / not requested" : "unavailable"}</p>}
       {item.result && <><p>Generated output: unreviewed{item.result.reason ? ` · ${item.result.reason}` : ""}</p><details><summary className="cursor-pointer">View generated output</summary><div className="space-y-2 pt-2"><p>Unreviewed candidates</p>{item.result.candidates.length ? <pre className="overflow-x-auto whitespace-pre-wrap break-words text-xs">{JSON.stringify(item.result.candidates, null, 2)}</pre> : <p>No unreviewed candidates.</p>}<p>Original stage output</p><pre className="overflow-x-auto whitespace-pre-wrap break-words text-xs">{JSON.stringify(item.result.output, null, 2)}</pre></div></details></>}
       {Object.entries(execution.manifest.routes[item.section] ?? {}).map(([role, route]) => route && <p key={role} className="text-muted-foreground">{role}: requested {route.requested.provider_id} / {route.requested.model}, temperature {route.requested.temperature}, max tokens {route.requested.max_tokens}, fallbacks {route.requested.fallbacks.join(", ") || "none"}; actual {route.actual.provider_id} / {route.actual.model}, temperature {route.actual_temperature ?? "not sent"}{route.actual.reason ? ` · ${route.actual.reason}` : ""}</p>)}
       {execution.calls.filter((call) => call.section_id === item.id).map((call) => <details key={call.id}><summary className="cursor-pointer">Call {call.ordinal}: {call.status}</summary><div className="space-y-1 pt-2 break-words"><p>Role: {call.request?.role ?? "unknown"} · Purpose: {call.request?.purpose ?? "unknown"} · Trace: {call.identity ?? call.id} · LLM call ID: {call.receipt?.llm_call_id ?? "unknown"}</p><p>Sent: {call.sending_at ?? "unknown"} · Settled: {call.settled_at ?? "unknown"}</p><p>Cost: {call.receipt?.cost_usd ?? call.failure_accounting?.cost_usd ?? "unknown"} · Price source: {call.receipt?.price_source ?? call.failure_accounting?.price_source ?? "unknown"}</p><p>Usage: {JSON.stringify(call.receipt?.usage ?? call.failure_accounting?.usage ?? "unknown")}</p><p>Frozen call route: {call.route ? JSON.stringify(call.route) : "unknown"}</p>{call.error && <p>{call.error}</p>}<pre className="overflow-x-auto whitespace-pre-wrap break-words text-xs">{call.receipt?.text ?? "No response recorded."}</pre></div></details>)}
@@ -65,8 +54,12 @@ export function DevelopmentExecution({ draft, disabled }: { draft: Experiment; d
   const [providers, setProviders] = useState<ProviderKeyView[]>([]);
   const [config, setConfig] = useState<ExecutionConfig | null>(null);
   const [history, setHistory] = useState<Execution[]>([]);
+  const historyRef = useRef(history);
+  historyRef.current = history;
   const [historyMetadata, setHistoryMetadata] = useState<{ inputs: string; attempts: Record<string, AttemptHistoryMetadata> }>({ inputs: "", attempts: {} });
   const freshnessController = useRef<{ inputs: string; controller: AbortController } | null>(null);
+  const historyRefreshSequence = useRef(0);
+  const historyPageSequence = useRef(0);
   const [cursor, setCursor] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [delivery, setDelivery] = useState<{ available: boolean; reason: string | null } | null>(null);
@@ -139,40 +132,60 @@ export function DevelopmentExecution({ draft, disabled }: { draft: Experiment; d
   /** Recheck the first and retained pages using one invalidation/request policy. */
   async function refreshHistory(pageCursor?: string, signal = freshnessController.current?.inputs === comparisonInputs ? freshnessController.current.controller.signal : undefined) {
     if (!signal || signal.aborted) return [];
-    if (!pageCursor) setHistoryMetadata({ inputs: comparisonInputs, attempts: {} });
-    const params = new URLSearchParams();
-    if (config) params.set("config", JSON.stringify(config));
-    if (pageCursor) params.set("cursor", pageCursor);
-    const response = await fetch(`${root}?${params}`, { signal, cache: "no-store" });
-    if (!response.ok) throw new Error("Unable to reload execution history.");
-    const body = await response.json();
-    if (signal.aborted) return [];
-    const executions = body.executions as Execution[];
-    setHistory((items) => pageCursor ? [...items, ...executions.filter((entry) => !items.some((item) => item.id === entry.id))] : [...executions, ...items.filter((item) => !executions.some((entry) => entry.id === item.id))]);
-    mergeMetadata(body.history ?? {}, signal);
-    setCursor(body.next_cursor ?? null);
-    setSelected((current) => current ?? executions[0]?.id ?? null);
-    setDelivery(body.delivery);
-    if (!pageCursor) {
-      // A list page cannot establish freshness for executions retained from older pages.
-      const retained = history.filter((item) => !executions.some((entry) => entry.id === item.id));
-      const detailParams = new URLSearchParams();
-      if (config) detailParams.set("config", JSON.stringify(config));
-      await Promise.all(retained.map(async (item) => {
-        const detail = await fetch(`${root}/${item.id}?${detailParams}`, { signal, cache: "no-store" });
-        if (!detail.ok) throw new Error("Unable to refresh older history freshness.");
-        const data = await detail.json();
-        mergeMetadata(data.history ?? {}, signal);
-      }));
+    // A page only covers older records, so it cannot supersede a full refresh.
+    const sequence = pageCursor ? ++historyPageSequence.current : ++historyRefreshSequence.current;
+    const pageSequenceAtStart = historyPageSequence.current;
+    const displayedHistory = historyRef.current;
+    const isCurrent = () => !signal.aborted && (pageCursor ? historyPageSequence.current : historyRefreshSequence.current) === sequence;
+    if (!pageCursor) setHistoryMetadata((current) => {
+      if (!isCurrent()) return current;
+      if (current.inputs !== comparisonInputs) return { inputs: comparisonInputs, attempts: {} };
+      const attempts = { ...current.attempts };
+      for (const item of displayedHistory) for (const attempt of item.sections) delete attempts[attempt.id];
+      return { inputs: comparisonInputs, attempts };
+    });
+    try {
+      const params = new URLSearchParams();
+      if (config) params.set("config", JSON.stringify(config));
+      if (pageCursor) params.set("cursor", pageCursor);
+      const response = await fetch(`${root}?${params}`, { signal, cache: "no-store" });
+      if (!response.ok) throw new Error("Unable to reload execution history.");
+      const body = await response.json();
+      if (!isCurrent()) return [];
+      const executions = body.executions as Execution[];
+      const attempts = { ...(body.history ?? {}) } as Record<string, AttemptHistoryMetadata>;
+      if (!pageCursor) {
+        // A list page cannot establish freshness for executions retained from older pages.
+        const retained = displayedHistory.filter((item) => !executions.some((entry) => entry.id === item.id));
+        const detailParams = new URLSearchParams();
+        if (config) detailParams.set("config", JSON.stringify(config));
+        const details = await Promise.all(retained.map(async (item) => {
+          const detail = await fetch(`${root}/${item.id}?${detailParams}`, { signal, cache: "no-store" });
+          if (!detail.ok) throw new Error("Unable to refresh older history freshness.");
+          return detail.json();
+        }));
+        for (const detail of details) Object.assign(attempts, detail.history ?? {});
+      }
+      if (!isCurrent()) return [];
+      setHistory((items) => !isCurrent() ? items : pageCursor ? [...items, ...executions.filter((entry) => !items.some((item) => item.id === entry.id))] : [...executions, ...items.filter((item) => !executions.some((entry) => entry.id === item.id))]);
+      setHistoryMetadata((current) => !isCurrent() ? current : ({ inputs: comparisonInputs, attempts: { ...(current.inputs === comparisonInputs ? current.attempts : {}), ...attempts } }));
+      setCursor((current) => isCurrent() && (pageCursor || historyPageSequence.current === pageSequenceAtStart) ? body.next_cursor ?? null : current);
+      setSelected((current) => isCurrent() ? current ?? executions[0]?.id ?? null : current);
+      setDelivery((current) => isCurrent() ? body.delivery : current);
+      setError((current) => isCurrent() ? "" : current);
+      return executions;
+    } catch (failure) {
+      setError((current) => isCurrent() ? (failure instanceof Error ? failure.message : "Unable to reload execution history.") : current);
+      return [];
     }
-    if (!signal.aborted) setError("");
-    return executions;
   }
   useEffect(() => {
     if (!config || loading) return;
     const controller = new AbortController();
     freshnessController.current = { inputs: comparisonInputs, controller };
+    const scheduledSequence = historyRefreshSequence.current;
     const timer = window.setTimeout(() => {
+      if (historyRefreshSequence.current !== scheduledSequence) return;
       void refreshHistory(undefined, controller.signal).catch((failure) => {
         if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : "Unable to refresh history freshness.");
       });
@@ -206,7 +219,7 @@ export function DevelopmentExecution({ draft, disabled }: { draft: Experiment; d
   const locked = disabled || pending || loading || !config || !delivery?.available || history.some(active) || !draft.documents.some((item) => item.role === "source");
   return <section aria-label="Execution" className="space-y-4 border-t border-border pt-5">
     <h2 className="font-semibold">Execution</h2>
-    <p className="text-muted-foreground">Generation uses source snapshots only. Outputs are unreviewed; evaluation is separate and is not run here. A fresh run may incur provider charges, including after an uncertain failure.</p>
+    <p className="text-muted-foreground">Generation uses source snapshots only. Outputs are unreviewed; evaluation uses saved outputs in the separate controls below. A fresh run may incur provider charges, including after an uncertain failure.</p>
     {loading && <p>Loading execution settings and history…</p>}
     {error && <p role="alert" className="text-destructive">{error}</p>}
     {delivery && !delivery.available && <p>Execution delivery unavailable: {delivery.reason ?? "Check server configuration."}</p>}
@@ -214,12 +227,14 @@ export function DevelopmentExecution({ draft, disabled }: { draft: Experiment; d
     {config && <><label className="block space-y-1">Execution mode<select aria-label="Execution mode" className={selectClass} value={config.mode} onChange={(event) => { const mode = event.target.value as ExecutionConfig["mode"]; setConfig({ ...config, mode, stages: mode === "single_pass" ? Object.fromEntries(sections.map((section) => [section, { ...config.stages[section], overrides: config.stages[section].overrides.proposer ? { proposer: config.stages[section].overrides.proposer } : {} }])) as ExecutionConfig["stages"] : config.stages }); }}><option value="standard">Standard</option><option value="single_pass">Single pass (experimental)</option></select></label>
       <p className="text-muted-foreground">Single pass omits critique, revision and internal acceptance; switching to it removes those role overrides. Structural repair may still make additional calls.</p>
       {sections.map((section) => <details key={section} className="border-t border-border pt-3"><summary className="cursor-pointer font-medium">{labels[section]} route and roles</summary><div className="space-y-3 pt-3"><RouteFields providers={providers} value={config.stages[section].route} onChange={(route) => setConfig({ ...config, stages: { ...config.stages, [section]: { ...config.stages[section], route } } })} />{roles.map((role) => <div key={role}><label className="flex gap-2 items-center"><input type="checkbox" aria-label={`${roleLabels[role]} override`} disabled={config.mode === "single_pass" && role !== "proposer"} checked={!!config.stages[section].overrides[role]} onChange={(event) => { const overrides = { ...config.stages[section].overrides }; if (event.target.checked) overrides[role] = structuredClone(config.stages[section].route); else delete overrides[role]; setConfig({ ...config, stages: { ...config.stages, [section]: { ...config.stages[section], overrides } } }); }} />{roleLabels[role]} override</label>{config.stages[section].overrides[role] && <div className="mt-3"><RouteFields providers={providers} value={config.stages[section].overrides[role]!} onChange={(route) => setConfig({ ...config, stages: { ...config.stages, [section]: { ...config.stages[section], overrides: { ...config.stages[section].overrides, [role]: route } } } })} /></div>}</div>)}</div></details>)}
-      <details className="border-t border-border pt-3"><summary className="cursor-pointer font-medium">Evaluator route (for later evaluation)</summary><div className="pt-3"><RouteFields providers={providers} value={config.evaluator} onChange={(evaluator) => setConfig({ ...config, evaluator })} /></div></details>
+
+      <details className="border-t border-border pt-3"><summary className="cursor-pointer font-medium">Legacy evaluator route (legacy history comparisons only)</summary><div className="pt-3"><p>These settings apply only to older evaluation associations. Use the per-section evaluator settings below for new evaluations.</p><RouteFields providers={providers} value={config.evaluator} onChange={(evaluator) => setConfig({ ...config, evaluator })} /></div></details>
       <p className="text-muted-foreground">Matching requires current successful gap and tactic extraction. Partial splitting requires those results and matching built from them. Changed settings or sources can make prerequisites stale; the server checks them before every run.</p>
       <div className="flex flex-wrap gap-2"><Button disabled={!!locked} onClick={() => void run("all")}>Run all sections</Button>{sections.map((section) => <Button key={section} variant="outline" disabled={!!locked} onClick={() => void run(section)}>{latest(section) ? "Rerun" : "Run"} {labels[section]}</Button>)}</div></>}
     <div className="border-t border-border pt-3 space-y-3"><div className="flex flex-wrap gap-2 items-center"><h3 className="font-semibold">Execution history</h3><Button variant="outline" disabled={pending || loading} onClick={() => { setPending(true); void refreshHistory().catch((failure) => setError(failure.message)).finally(() => setPending(false)); }}>Reload history</Button></div>
       {!history.length && !loading && <p>No executions yet.</p>}
       {!!history.length && <><label className="block space-y-1">Selected execution<select className={selectClass} value={selected ?? ""} onChange={(event) => setSelected(event.target.value)}>{history.map((item) => <option key={item.id} value={item.id}>{item.created_at} · {item.generation_status} · {item.id}</option>)}</select></label>{current && <ExecutionDetail execution={current} metadata={metadata} />}{cursor && <Button variant="outline" disabled={pending} onClick={() => { setPending(true); void refreshHistory(cursor).catch((failure) => setError(failure.message)).finally(() => setPending(false)); }}>Load older executions</Button>}</>}
     </div>
+    <DevelopmentEvaluation key={draft.id} draft={draft} execution={current} providers={providers} disabled={disabled || loading || pending} onHistoryChange={() => { void refreshHistory().catch((failure) => setError(failure.message)); }} />
   </section>;
 }

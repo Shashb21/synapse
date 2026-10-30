@@ -1,4 +1,5 @@
 /** Bounded durable progression: replay real stages, dispatch one claimed raw request, checkpoint and return. */
+import { progressEvaluation } from './evaluation-worker';
 import { findProvider, providerServes } from '@/modules/llm/provider';
 import { providerApiKey } from '@/modules/llm/api-keys';
 import { redactSecrets } from '@/modules/llm/provider-error';
@@ -81,11 +82,11 @@ async function dispatch(execution: Execution, token: string, section: SectionAtt
   // Deliberately outside the provider catch: a receipt-write failure leaves sending indeterminate.
   await settleCall(execution.id, token, call.id, receipt);
 }
-export type WorkerProgress = { processed: boolean; execution_id?: string; generation_status?: Execution['generation_status'] };
+export type WorkerProgress = { processed: boolean; execution_id?: string; generation_status?: Execution['generation_status']; evaluation_id?: string; evaluation_status?: import('./evaluation-store').EvaluationStatus };
 /** Advance one execution with at most one actual provider send; repeated scheduler delivery is safe. */
 export async function progressExecution(id?: string): Promise<WorkerProgress> {
   const claimed = await claimExecution(id);
-  if (!claimed) return { processed: false };
+  if (!claimed) return id ? { processed: false } : progressEvaluation();
   let execution = claimed.execution;
   const token = claimed.token;
   if (execution.calls.some(call => call.status === 'sending')) {
