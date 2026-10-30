@@ -4,21 +4,21 @@ import { findProvider, providerServes } from '@/modules/llm/provider';
 import { providerApiKey } from '@/modules/llm/api-keys';
 import { redactSecrets } from '@/modules/llm/provider-error';
 import { completionFor } from '@/modules/kernel/routing';
-import { tracedCompletion } from '@/modules/kernel/llm-calls';
+import { tracedCompletion, redactPromptSecrets } from '@/modules/kernel/llm-calls';
 import type { JsonCompletion, RunHandle } from '@/modules/kernel/contracts';
 import { canonicalParsedJson, sha256 } from './documents';
 import { executionCodeIdentity, requireSectionAi } from './execution';
 import { SECTION_DEPENDENCIES } from './execution-schema';
 import { executeDevelopmentSection, type DevelopmentSectionResult } from './stage-execution';
 import { DevelopmentError, type DevelopmentSection } from './schema';
-import { beginCall, checkpointCall, claimExecution, getExecution, publishSection, releaseExecution, requireClaim, settleCall, type CallReceipt, type Execution, type ExecutionCall, type SectionAttempt } from './execution-store';
+import { beginCall, checkpointCall, claimExecution, getExecution, publishSection, releaseExecution, requireClaim, settleCall, startSection, type CallReceipt, type Execution, type ExecutionCall, type SectionAttempt } from './execution-store';
 class NextCall extends Error { constructor(readonly call: ExecutionCall) { super('Durable next call checkpointed.'); } }
 /** A private trace recorder keeps adapter IDs stable and never opens customer runs. */
 function recorder(id: string): RunHandle { return { id, step: async (_name, fn) => fn(), note: () => {}, steps: () => [] }; }
 /** Persist actionable codes privately while stripping configured credentials from provider errors. */
 function safeError(error: unknown): string {
   const message = error instanceof Error ? error.message : 'Execution could not continue.';
-  return redactSecrets(message, ['xai-grok', 'anthropic-claude', 'openai', 'google-gemini', 'openrouter'].map(id => providerApiKey(id)).filter((key): key is string => Boolean(key))).slice(0, 1200);
+  return redactPromptSecrets(redactSecrets(message, ['xai-grok', 'anthropic-claude', 'openai', 'google-gemini', 'openrouter'].map(id => providerApiKey(id)).filter((key): key is string => Boolean(key)))).slice(0, 1200);
 }
 function prerequisitesFor(execution: Execution, section: DevelopmentSection): { results: Partial<Record<DevelopmentSection, DevelopmentSectionResult>>; ids: SectionAttempt['prerequisites']; valid: boolean } {
   const results: Partial<Record<DevelopmentSection, DevelopmentSectionResult>> = {}, ids: SectionAttempt['prerequisites'] = {};
@@ -52,6 +52,10 @@ async function compute(execution: Execution, token: string, section: SectionAtte
   if (ordinal !== execution.calls.filter(call => call.section_id === section.id).length) throw new DevelopmentError(409, 'replay_mismatch', 'The resumed computation consumed a different number of saved replies.');
   return result;
 }
+/** Refuse credential-bearing replies rather than altering replay input or persisting a secret. */
+export function assertSafeReceiptText(text: string, secrets: string[]): void {
+  if (redactPromptSecrets(redactSecrets(text, secrets)) !== text) throw new DevelopmentError(422, 'unsafe_response', 'Provider response contained a credential and was discarded.');
+}
 /** Perform one network call only after the database has committed its sending marker. */
 async function dispatch(execution: Execution, token: string, section: SectionAttempt, call: ExecutionCall): Promise<void> {
   const route = call.route.actual;
@@ -68,6 +72,8 @@ async function dispatch(execution: Execution, token: string, section: SectionAtt
       beforeSend: async () => { await requireClaim(execution.id, token); await requireSectionAi(section.section); },
       onFailure: accounting => { failure = accounting; },
     });
+    failure = { usage: receipt.usage, cost_usd: receipt.cost_usd, price_source: receipt.price_source };
+    assertSafeReceiptText(receipt.text, ['xai-grok', 'anthropic-claude', 'openai', 'google-gemini', 'openrouter'].map(providerApiKey).filter((key): key is string => Boolean(key)));
   } catch (error) {
     // Even an explicit provider failure is terminal. The call can never return to queued.
     await settleCall(execution.id, token, call.id, null, safeError(error), failure);
@@ -92,6 +98,7 @@ export async function progressExecution(id?: string): Promise<WorkerProgress> {
     for (const initial of execution.sections) {
       const section = execution.sections.find(attempt => attempt.id === initial.id)!;
       if (!['queued', 'running'].includes(section.status)) continue;
+      await startSection(execution.id, token, section.id);
       const dependency = prerequisitesFor(execution, section.section);
       if (!dependency.valid) {
         await publishSection(execution.id, token, section.id, 'blocked', null, 'A required current prerequisite failed or was rejected.', dependency.ids);

@@ -5,7 +5,7 @@ test("owner configures and starts a frozen execution", async ({ page }) => {
   // Arrange: the draft uses the isolated server; execution responses are scripted.
   const name = `Execution ${Date.now()}`;
   let posted: Record<string, unknown> | undefined;
-  await page.route("**/api/admin/development/*/executions", async (route) => {
+  await page.route("**/api/admin/development/*/executions*", async (route) => {
     if (route.request().method() === "POST") {
       posted = route.request().postDataJSON();
       await route.fulfill({ status: 409, json: { error: "Prerequisites changed. Reload history." } });
@@ -36,7 +36,7 @@ test("history shows frozen routes, unreviewed outputs and stale prerequisites", 
   let saved: Record<string, unknown> | null = null;
   let posts = 0;
   const rerunPayloads: Record<string, unknown>[] = [];
-  await page.route("**/api/admin/development/*/executions", async (route) => {
+  await page.route("**/api/admin/development/*/executions*", async (route) => {
     if (route.request().method() === "POST") {
       posts++;
       const body = route.request().postDataJSON();
@@ -83,20 +83,22 @@ test("polls only the selected active execution and shows terminal errors", async
   const base = { experiment_id: "fixture", created_at: "2026-10-30", updated_at: "2026-10-30", evaluation_status: "not_requested", error: null, manifest: { revision: 1, config: { mode: "standard", evaluator: route }, routes: {} }, calls: [] };
   const running = { ...base, id: "active", generation_status: "running", sections: [{ id: "a", section: "gap_extraction", status: "running", result: null, error: null, prerequisites: {} }] };
   const finished = { ...running, generation_status: "needs_attention", error: "Inspect the uncertain request before retrying.", sections: [{ ...running.sections[0], status: "blocked", error: "Prerequisite failed." }] };
-  await page.route("**/api/admin/development/*/executions", async (request) => { lists++; await request.fulfill({ json: { executions: [running], delivery: { available: true, reason: null } } }); });
-  await page.route("**/api/admin/development/*/executions/active", async (request) => { details++; await request.fulfill({ json: { execution: finished } }); });
+  await page.route("**/api/admin/development/*/executions*", async (request) => { lists++; await request.fulfill({ json: { executions: [running], delivery: { available: true, reason: null } } }); });
+  await page.route("**/api/admin/development/*/executions/active*", async (request) => { details++; await request.fulfill({ json: { execution: finished } }); });
   await page.goto("/admin/development");
   await page.getByLabel("New experiment name").fill(name);
   await page.getByRole("button", { name: "Create experiment" }).click();
   const execution = page.getByRole("region", { name: "Execution", exact: true });
   // Act and assert: polling reads detail, then stops after the terminal state.
   await expect(execution.getByRole("button", { name: "Run all sections" })).toBeDisabled();
-  const initialLists = lists;
   await expect(execution.getByText(/Generation: needs_attention/)).toBeVisible({ timeout: 10000 });
   await expect(execution.getByText("Gap extraction: blocked")).toBeVisible();
   await expect(execution.getByText("Inspect the uncertain request before retrying.")).toBeVisible();
   expect(details).toBe(1);
-  expect(lists).toBe(initialLists);
+  const settledLists = lists;
+  await page.waitForTimeout(3500);
+  expect(lists).toBe(settledLists);
+  expect(details).toBe(1);
 });
 
 test("conflict discovers and polls an execution started elsewhere", async ({ page }, testInfo) => {
@@ -113,11 +115,11 @@ test("conflict discovers and polls an execution started elsewhere", async ({ pag
   const route = { provider_id: "xai-grok", model: "grok-4", temperature: 0.2, max_tokens: 16000, fallbacks: [] };
   const running = { id: "external", experiment_id: "fixture", created_at: "2026-10-30", updated_at: "2026-10-30", generation_status: "running", evaluation_status: "not_requested", error: null, manifest: { revision: 1, config: { mode: "standard", evaluator: route }, routes: {} }, sections: [{ id: "attempt", section: "gap_extraction", status: "running", result: null, error: null, prerequisites: {} }], calls: [] };
   const finished = { ...running, generation_status: "failed", error: "Provider unavailable.", sections: [{ ...running.sections[0], status: "failed", error: "Provider unavailable." }] };
-  await page.route("**/api/admin/development/*/executions", async (request) => {
+  await page.route("**/api/admin/development/*/executions*", async (request) => {
     if (request.request().method() === "POST") { posted = true; await request.fulfill({ status: 409, json: { error: "An execution is already active." } }); }
     else { listReads++; await request.fulfill({ json: { executions: posted ? [running] : [], delivery: { available: true, reason: null } } }); }
   });
-  await page.route("**/api/admin/development/*/executions/external", async (request) => { detailReads++; await request.fulfill({ json: { execution: finished } }); });
+  await page.route("**/api/admin/development/*/executions/external*", async (request) => { detailReads++; await request.fulfill({ json: { execution: finished } }); });
   try {
     await page.goto("/admin/development");
     await page.getByLabel("New experiment name").fill(name);
@@ -152,7 +154,7 @@ test("shows unreviewed extraction candidates in single pass history", async ({ p
   ];
   const single = { ...base, id: "single", manifest: { revision: 1, config: { mode: "single_pass", evaluator: route }, routes: {} }, sections };
   const standard = { ...base, id: "standard", manifest: { revision: 1, config: { mode: "standard", evaluator: route }, routes: {} }, sections: [{ ...sections[0], result: { ...sections[0].result, output: { accepted: [{ statement: "Standard accepted stage output" }] }, candidates: [{ statement: "Standard unreviewed candidate" }] } }] };
-  await page.route("**/api/admin/development/*/executions", async (request) => { await request.fulfill({ json: { executions: [single, standard], delivery: { available: true, reason: null } } }); });
+  await page.route("**/api/admin/development/*/executions*", async (request) => { await request.fulfill({ json: { executions: [single, standard], delivery: { available: true, reason: null } } }); });
   await page.goto("/admin/development");
   await page.getByLabel("New experiment name").fill(name);
   await page.getByRole("button", { name: "Create experiment" }).click();
