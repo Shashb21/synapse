@@ -159,29 +159,31 @@ test("shows unreviewed extraction candidates in single pass history", async ({ p
   await page.getByLabel("New experiment name").fill(name);
   await page.getByRole("button", { name: "Create experiment" }).click();
   const execution = page.getByRole("region", { name: "Execution", exact: true });
-  // Act and assert: the raw output remains separate and candidates contain the proposal text.
+  // Act and assert: definition fields expose proposals separately from retained raw output.
   await execution.getByText("View generated output").nth(0).click();
   await execution.getByText("View generated output").nth(1).click();
-  await expect(execution.getByText("Comparative effectiveness remains unknown.")).toBeVisible();
-  await expect(execution.getByText("Comparative outcomes remain uncertain.")).toBeVisible();
-  await expect(execution.getByText("What are patient outcomes?")).toBeVisible();
-  await expect(execution.getByText("An outcomes study is ongoing.")).toBeVisible();
-  await expect(execution.getByText(/"accepted": \[\]/).first()).toBeVisible();
+  await expect(execution.getByRole("definition").filter({ hasText: /^Comparative effectiveness remains unknown\.$/ })).toBeVisible();
+  await expect(execution.getByRole("definition").filter({ hasText: /^Comparative outcomes remain uncertain\.$/ })).toBeVisible();
+  await expect(execution.getByRole("definition").filter({ hasText: /^What are patient outcomes\?$/ })).toBeVisible();
+  await expect(execution.getByRole("definition").filter({ hasText: /^An outcomes study is ongoing\.$/ })).toBeVisible();
+  await expect(execution.getByText(/"accepted":\s*\[\]/).first()).toBeVisible();
   await execution.getByText("View generated output").nth(2).click();
-  await expect(execution.getByText("No unreviewed candidates.")).toBeVisible();
+  const emptySplittingOutput = execution.locator("pre").filter({ hasText: '"stage_results":[]' });
+  await expect(emptySplittingOutput).toBeVisible();
+  await expect(emptySplittingOutput).toContainText('"candidates":[]');
   await execution.getByLabel("Selected execution").selectOption("standard");
   const standardOutput = execution.locator("details").filter({ hasText: "View generated output" });
   if (await standardOutput.getAttribute("open") === null) {
     await standardOutput.getByText("View generated output").click();
   }
-  await expect(execution.getByText("Standard unreviewed candidate")).toBeVisible();
-  await expect(execution.getByText(/Standard accepted stage output/)).toBeVisible();
+  await expect(execution.getByRole("definition").filter({ hasText: /^Standard unreviewed candidate$/ })).toBeVisible();
+  await expect(execution.getByRole("definition").filter({ hasText: /^Standard accepted stage output$/ })).toBeVisible();
   await page.reload();
   await page.getByRole("button", { name: `Open ${name}` }).click();
   await execution.getByText("View generated output").nth(0).click();
   await execution.getByText("View generated output").nth(1).click();
-  await expect(execution.getByText("Comparative effectiveness remains unknown.")).toBeVisible();
-  await expect(execution.getByText("What are patient outcomes?")).toBeVisible();
-  await expect(execution.getByText("Comparative outcomes remain uncertain.")).toBeVisible();
-  await expect(execution.getByText("An outcomes study is ongoing.")).toBeVisible();
+  await expect(execution.getByRole("definition").filter({ hasText: /^Comparative effectiveness remains unknown\.$/ })).toBeVisible();
+  await expect(execution.getByRole("definition").filter({ hasText: /^What are patient outcomes\?$/ })).toBeVisible();
+  await expect(execution.getByRole("definition").filter({ hasText: /^Comparative outcomes remain uncertain\.$/ })).toBeVisible();
+  await expect(execution.getByRole("definition").filter({ hasText: /^An outcomes study is ongoing\.$/ })).toBeVisible();
 });
