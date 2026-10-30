@@ -3,7 +3,8 @@
 
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { RouteFields } from "./development-route-fields";
+import { DevelopmentEvaluation } from "./development-evaluation";
 import type { Experiment, DevelopmentSection } from "@/modules/development/schema";
 import type { ExecutionConfig, ExecutionRoute } from "@/modules/development/execution-schema";
 import type { Execution, SectionAttempt } from "@/modules/development/execution-store";
@@ -16,18 +17,6 @@ const roles: Role[] = ["proposer", "critic", "reviser", "internal_judge"];
 const roleLabels: Record<Role, string> = { proposer: "Proposer", critic: "Critic", reviser: "Reviser", internal_judge: "Internal judge" };
 const selectClass = "w-full rounded-lg border border-input bg-background px-2 py-2 text-sm focus-visible:outline-2 focus-visible:outline-ring";
 const active = (execution: Execution) => execution.generation_status === "queued" || execution.generation_status === "running";
-
-/** Edit one complete requested route using the owner-readable provider catalog. */
-function RouteFields({ value, onChange, providers }: { value: ExecutionRoute; onChange: (route: ExecutionRoute) => void; providers: ProviderKeyView[] }) {
-  const provider = providers.find((item) => item.provider_id === value.provider_id);
-  return <div className="grid gap-3 sm:grid-cols-2">
-    <label className="block space-y-1">Provider<select className={selectClass} value={value.provider_id} onChange={(event) => { const next = providers.find((item) => item.provider_id === event.target.value); if (next) onChange({ ...value, provider_id: next.provider_id, model: next.default_model, fallbacks: value.fallbacks.filter((id) => id !== next.provider_id) }); }}>{providers.map((item) => <option key={item.provider_id} value={item.provider_id}>{item.label} ({item.status === "configured" ? "key present" : "no key"})</option>)}</select></label>
-    <label className="block space-y-1">Model<select className={selectClass} value={value.model} onChange={(event) => onChange({ ...value, model: event.target.value })}>{provider?.models.map((model) => <option key={model}>{model}</option>)}</select></label>
-    <label className="block space-y-1">Temperature<Input type="number" min="0" max="2" step="0.1" value={value.temperature} onChange={(event) => onChange({ ...value, temperature: Number(event.target.value) })} /></label>
-    <label className="block space-y-1">Maximum output tokens<Input type="number" min="256" max="64000" step="1" value={value.max_tokens} onChange={(event) => onChange({ ...value, max_tokens: Number(event.target.value) })} /></label>
-    <fieldset className="sm:col-span-2"><legend>Allowed fallbacks (in listed order)</legend><div className="flex flex-wrap gap-3 mt-1">{providers.filter((item) => item.provider_id !== value.provider_id).map((item) => <label key={item.provider_id} className="flex gap-1 items-center"><input type="checkbox" checked={value.fallbacks.includes(item.provider_id)} onChange={(event) => onChange({ ...value, fallbacks: event.target.checked ? [...value.fallbacks, item.provider_id] : value.fallbacks.filter((id) => id !== item.provider_id) })} />{item.label}</label>)}</div><p className="text-muted-foreground">Order: {value.fallbacks.join(", ") || "none"}</p></fieldset>
-  </div>;
-}
 
 /** Display frozen configuration, progress and unreviewed section output. */
 function ExecutionDetail({ execution }: { execution: Execution }) {
@@ -129,7 +118,7 @@ export function DevelopmentExecution({ draft, disabled }: { draft: Experiment; d
   const locked = disabled || pending || loading || !config || !delivery?.available || history.some(active) || !draft.documents.some((item) => item.role === "source");
   return <section aria-label="Execution" className="space-y-4 border-t border-border pt-5">
     <h2 className="font-semibold">Execution</h2>
-    <p className="text-muted-foreground">Generation uses source snapshots only. Outputs are unreviewed; evaluation is separate and is not run here. A fresh run may incur provider charges, including after an uncertain failure.</p>
+    <p className="text-muted-foreground">Generation uses source snapshots only. Outputs are unreviewed; evaluation uses saved outputs in the separate controls below. A fresh run may incur provider charges, including after an uncertain failure.</p>
     {loading && <p>Loading execution settings and history…</p>}
     {error && <p role="alert" className="text-destructive">{error}</p>}
     {delivery && !delivery.available && <p>Execution delivery unavailable: {delivery.reason ?? "Check server configuration."}</p>}
@@ -144,5 +133,6 @@ export function DevelopmentExecution({ draft, disabled }: { draft: Experiment; d
       {!history.length && !loading && <p>No executions yet.</p>}
       {!!history.length && <><label className="block space-y-1">Selected execution<select className={selectClass} value={selected ?? ""} onChange={(event) => setSelected(event.target.value)}>{history.map((item) => <option key={item.id} value={item.id}>{item.created_at} · {item.generation_status} · {item.id}</option>)}</select></label>{current && <ExecutionDetail execution={current} />}</>}
     </div>
+    <DevelopmentEvaluation key={draft.id} draft={draft} execution={current} providers={providers} disabled={disabled || loading || pending} />
   </section>;
 }
