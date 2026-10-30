@@ -416,7 +416,7 @@ export function SetupSummary({
   issues: Partial<Record<SetupSection, string[]>>;
 }) {
   const block = (section: SetupSection, title: string, rows: ReactNode) => (
-    <div key={section} className="grid content-start gap-1 rounded-md border border-border bg-card p-4" data-testid={`setup-summary-${section}`}>
+    <div key={section} className="grid min-w-0 content-start gap-1 rounded-md border border-border bg-card p-4" data-testid={`setup-summary-${section}`}>
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-[12px] font-semibold text-foreground">{title}</h3>
         <button type="button" className="text-[11px] text-[var(--chart-1)] hover:underline" onClick={() => onEdit(section)}>
@@ -434,7 +434,7 @@ export function SetupSummary({
     </div>
   );
   return (
-    <div className="grid gap-3 md:grid-cols-2">
+    <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr))]">
       {block(
         "asset",
         "Asset",

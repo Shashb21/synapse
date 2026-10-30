@@ -53,6 +53,16 @@ export type PrioritizeGap = {
 
 type Point = { x: number; y: number };
 
+/** Optional quadrant guidance shared by the first axis choice and the active matrix. */
+function MatrixPlacementHelp() {
+  return (
+    <details className="mt-2 min-w-0 text-sm text-muted-foreground">
+      <summary className="w-fit max-w-full cursor-pointer break-words rounded-sm text-sm font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">How matrix placement works</summary>
+      <p className="mt-2 max-w-2xl break-words leading-5">Changing axes changes the plotted view. Top-right is Prioritize (High), top-left Plan (Medium), bottom-right Monitor (Low) and bottom-left Defer. The quadrant only suggests a priority: you validate it with a rationale.</p>
+    </details>
+  );
+}
+
 /** Favourable-scale point (100 = priority end) → CSS offsets: the priority corner is top-right, as in the design. */
 function toOffsets(point: Point) {
   return { left: point.x, top: 100 - point.y };
@@ -223,12 +233,12 @@ export function AxisChooser({
         <h2 id="axis-chooser" className="text-[15px] font-medium text-foreground">
           1. Choose axes for {scopeLabel}
         </h2>
-        <p className="mt-1 max-w-2xl text-[12px] leading-5 text-muted-foreground">
+        <p className="mt-1 max-w-2xl text-sm leading-5 text-muted-foreground">
           {ai
             ? "Pick the two axes for the matrix. The model places each Open gap as a first draft; you then drag gaps to change their priority and validate each one."
-            : "Pick the two axes for the matrix. You place each Open gap yourself: type its scores or band, or drop it on the matrix, then validate it."}{" "}
-          Changing axes changes the plotted view. Saved priorities apply across all settings. Review placement, then validate priority with your reason. Top-right is Prioritize (High), top-left Plan (Medium), bottom-right Monitor (Low) and bottom-left Defer. The quadrant only suggests a priority: you validate it with a rationale.
+            : "Pick the two axes for the matrix. You place each Open gap yourself: type its scores or band, or drop it on the matrix, then validate it."} Saved priorities apply across all settings. Review placement, then validate priority with your reason.
         </p>
+        <MatrixPlacementHelp />
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <AxisSelect label="Vertical axis (Y)" value={yAxis} onChange={setYAxis} axes={axes} exclude={xAxis} />
@@ -581,6 +591,7 @@ export function PrioritizeMatrix({
       <div>
         <h2 className="text-[15px] font-medium text-foreground">1. Choose axes</h2>
         <p className="mt-1 text-[12px] leading-5 text-muted-foreground">Changing axes changes the plotted view for this setting and saves immediately. Priority applies across all settings.</p>
+        <MatrixPlacementHelp />
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground" data-testid="matrix-axes">
