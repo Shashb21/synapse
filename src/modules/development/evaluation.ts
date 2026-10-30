@@ -1,4 +1,5 @@
 /** Bind evaluator-only references and immutable outputs without replaying generation. */
+import { configureEvaluationCosts } from './cost-store';
 import { NoRouteError } from '@/modules/llm/provider';
 import { deliveryConfiguration, executionCodeIdentity, requireSectionAi } from './execution';
 import { getExecution } from './execution-store';
@@ -13,7 +14,7 @@ import { reserveEvaluation, type EvaluationManifest } from './evaluation-store';
 import { evaluationOutputItems } from './evaluation-scoring';
 import { freezeRoute } from './routes';
 /** Validate exact ownership and hashes, then freeze all settings and untrusted evaluator evidence. */
-export async function startEvaluation(experimentId: string, raw: StartEvaluationInput) {
+export async function startEvaluation(experimentId: string, raw: StartEvaluationInput, actor = 'system:legacy-start') {
   const input = startEvaluationSchema.parse(raw);
   const experiment = await getExperiment(experimentId), execution = await getExecution(experimentId, input.execution_id);
   const attempt = execution.sections.find(attempt => attempt.id === input.attempt_id && attempt.section === input.section);
@@ -61,5 +62,6 @@ export async function startEvaluation(experimentId: string, raw: StartEvaluation
       user: canonicalParsedJson({ section: input.section, criteria: useRubric ? manifest.criteria : [], sources: manifest.sources, output_items: outputItems, output: manifest.output, reference_items: useReference ? manifest.reference_items : [], reference_review: references.map(reference => ({ id: reference.id, status: reference.review_status })) }),
     };
   }
+  await configureEvaluationCosts(experimentId, execution.id, input.cost_controls, actor);
   return reserveEvaluation(experimentId, manifest);
 }

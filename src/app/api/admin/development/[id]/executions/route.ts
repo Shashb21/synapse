@@ -15,9 +15,9 @@ export async function GET(request: Request, context: DraftContext) {
 }
 /** Accept a frozen execution after all availability, revision and prerequisite checks. */
 export async function POST(request: Request, context: DraftContext) {
-  return guarded(async () => {
+  return guarded(async actor => {
     const id = (await context.params).id;
-    const execution = await startExecution(id, await body(request, startExecutionSchema));
+    const execution = await startExecution(id, await body(request, startExecutionSchema), actor);
     return json({ execution: await getOwnerExecution(id, execution.id) }, 202);
   });
 }

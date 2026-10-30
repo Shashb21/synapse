@@ -1,5 +1,6 @@
 /** Validate owner execution requests and freeze source-only generation lineage before publication. */
 import { z } from 'zod';
+import { costControlsSchema } from './cost-schema';
 import { assertAiEnabled, AiDisabledError } from '@/modules/kernel/ai-switch';
 import { sectionOfStage } from '@/modules/kernel/ai-sections';
 import { NoRouteError } from '@/modules/llm/provider';
@@ -14,6 +15,7 @@ import { reserveExecution, sectionHistory, listEvaluationAssociations, evaluatio
 export const SECTIONS = sectionSchema.options;
 export const startExecutionSchema = z.object({
   revision: z.number().int().positive(),
+  cost_controls: costControlsSchema.optional(),
   target: z.union([z.literal('all'), sectionSchema]),
   config: executionConfigSchema.default(() => executionConfigSchema.parse({})),
   prerequisites: z.partialRecord(sectionSchema, z.object({ attempt_id: z.string().min(1).max(200), output_id: z.string().regex(/^[a-f0-9]{64}$/) }).strict()).default({}),
@@ -121,7 +123,7 @@ export async function historyMetadata(experimentId: string, executions: Executio
   return Object.fromEntries(entries);
 }
 /** Publish an immutable fresh attempt only after configuration, availability and current-lineage checks. */
-export async function startExecution(experimentId: string, raw: StartExecutionInput) {
+export async function startExecution(experimentId: string, raw: StartExecutionInput, actor = 'system:legacy-start') {
   const input = startExecutionSchema.parse(raw);
   if (!deliveryConfiguration().available) throw new DevelopmentError(503, 'delivery_unavailable', deliveryConfiguration().reason!);
   const experiment = await getExperiment(experimentId);
@@ -140,5 +142,5 @@ export async function startExecution(experimentId: string, raw: StartExecutionIn
     prompts: Object.fromEntries(SECTIONS.map(section => [section, { id: 'development-baseline-v1', instruction: '' }])) as ExecutionManifest['prompts'],
     prerequisites: {}, retry_policy: { http_max_attempts: 1, uncertain_resend: false, user_rerun: 'fresh_attempt_may_charge' },
   };
-  return reserveExecution(experimentId, input.revision, sections, history => { bindPrerequisites(manifest, input, history); return manifest; });
+  return reserveExecution(experimentId, input.revision, sections, history => { bindPrerequisites(manifest, input, history); return manifest; }, input.cost_controls, actor);
 }

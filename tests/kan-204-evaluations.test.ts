@@ -31,7 +31,7 @@ async function fixture(section: DevelopmentSection = 'gap_extraction', empty = f
   const parsed = { blocks: [{ id: 'b1', text: quote, heading: 'Evidence', location: '1' }] };
   const source = { id: `${e.id}-source`, experiment_id: e.id, role: 'source', compatibility: 'compatible', filename: 'source.txt', sha256: sha256(quote), parsed_sha256: sha256(canonicalParsedJson(parsed)), parsed_at: '2026-10-30T00:00:00Z', parser: { name: 'test', version: '1', model: null, prompt: null }, parsed } as DevelopmentDocument;
   await updateExperiment(e.id, 1, { document: source, content_base64: Buffer.from(quote).toString('base64') });
-  const execution = await startExecution(e.id, { revision: 2, target: 'all', config: { mode: 'single_pass' } as never, prerequisites: {} });
+  const execution = await startExecution(e.id, { revision: 2, target: 'all', config: { mode: 'single_pass' } as never, prerequisites: {}, cost_controls: { allowance_usd: 100, unknown_acknowledged: true } });
   const results: Partial<Record<DevelopmentSection, Awaited<ReturnType<typeof executeDevelopmentSection>>>> = {};
   for (const attempt of execution.sections) {
     const result = await executeDevelopmentSection({ section: attempt.section, sources: [source], prerequisites: attempt.section === 'matching_coverage' ? { gap_extraction: results.gap_extraction, tactic_extraction: results.tactic_extraction } : attempt.section === 'partial_splitting' ? { matching_coverage: results.matching_coverage } : {}, mode: 'single_pass', recorder: { id: attempt.id, step: async (_name, fn) => fn(), note: () => {}, steps: () => [] }, complete: async request => {
@@ -52,7 +52,7 @@ async function fixture(section: DevelopmentSection = 'gap_extraction', empty = f
 function reply(section: DevelopmentSection, additions = {}) {
   return { criteria: effectiveCriteria(balancedProfile, section).map(c => ({ criterion_id: c.id, score: 3, reason: 'Supported by the frozen source.' })), matches: [], unmatched_output_ids: [], unmatched_reference_ids: [], ...additions };
 }
-const create = async (f: Awaited<ReturnType<typeof fixture>>, additions = {}) => POST(req({ ...f.input, ...additions }), ctx(f.e.id));
+const create = async (f: Awaited<ReturnType<typeof fixture>>, additions = {}) => POST(req({ ...f.input, cost_controls: { allowance_usd: 100, unknown_acknowledged: true }, ...additions }), ctx(f.e.id));
 beforeEach(async () => {
   vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Paid or unscripted network forbidden.'));
   vi.spyOn(llm, 'isTestStub').mockReturnValue(false);
@@ -77,7 +77,8 @@ it.each(['gap_extraction', 'tactic_extraction', 'matching_coverage', 'partial_sp
   expect(saved.status).toBe('succeeded'); expect(saved.result?.rubric?.score).toBe(3);
   expect(saved.result?.rubric?.label).toBe('provisional_ai_assessment');
   expect(saved.result?.checks.passed).toBe(true); expect(saved.receipt?.llm_call_id).toBeTruthy();
-  expect((await getExecution(f.e.id, f.execution.id))).toEqual(f.execution);
+  expect((await getExecution(f.e.id, f.execution.id)).manifest).toEqual(f.execution.manifest);
+  expect((await getExecution(f.e.id, f.execution.id)).sections).toEqual(f.execution.sections);
   expect(saved.manifest.output.output_id).toBe(f.input.output_id); expect(saved.manifest.profile.id).toBe('balanced');
   await expect(sharedDb().execute(sql`update development_evaluations set manifest='{}'::jsonb where id=${evaluation.id}`)).rejects.toThrow();
   await expect(sharedDb().execute(sql`update development_evaluations set result='{}'::jsonb where id=${evaluation.id}`)).rejects.toThrow();
@@ -157,7 +158,8 @@ it.each(['gap_extraction', 'tactic_extraction', 'matching_coverage', 'partial_sp
   expect(saved.result?.reference.label).toBe('provisional_semantic_reference'); expect(saved.manifest.references[0].review_status).toBe(document.review_status);
   expect(saved.manifest.references[0].sha256).toBe(document.sha256); expect(saved.manifest.references[0].parsed_sha256).toBe(document.parsed_sha256);
   expect(saved.manifest.generation.sources.every((s: DevelopmentDocument) => s.role === 'source')).toBe(true);
-  expect((await getExecution(f.e.id, f.execution.id))).toEqual(f.execution);
+  expect((await getExecution(f.e.id, f.execution.id)).manifest).toEqual(f.execution.manifest);
+  expect((await getExecution(f.e.id, f.execution.id)).sections).toEqual(f.execution.sections);
 });
 it.each(['unknown', 'duplicate', 'omitted'] as const)('refuses %s semantic identities without rewriting generation', async kind => {
   const f = await fixture(), document = await reference(f);
@@ -166,7 +168,8 @@ it.each(['unknown', 'duplicate', 'omitted'] as const)('refuses %s semantic ident
   const matches = kind === 'unknown' ? [{ ...match, reference_id: 'unknown' }] : kind === 'duplicate' ? [match, match] : [];
   vi.spyOn(xaiGrok, 'complete').mockResolvedValue(JSON.stringify(reply('gap_extraction', { criteria: [], matches })));
   await progressEvaluation(evaluation.id); await progressEvaluation(evaluation.id);
-  expect((await getEvaluation(f.e.id, evaluation.id)).status).toBe('failed'); expect((await getExecution(f.e.id, f.execution.id))).toEqual(f.execution);
+  expect((await getEvaluation(f.e.id, evaluation.id)).status).toBe('failed'); expect((await getExecution(f.e.id, f.execution.id)).manifest).toEqual(f.execution.manifest);
+  expect((await getExecution(f.e.id, f.execution.id)).sections).toEqual(f.execution.sections);
 });
 it('keeps incompatible references unscored and freezes the complete custom profile before later edits', async () => {
   const f = await fixture(), document = await reference(f, false);
