@@ -1,7 +1,13 @@
 /** Session context stays visible; development tools remain an explicit keyboard choice. */
 import { expect, test } from "@playwright/test";
+import { signInForSuite, STORAGE_STATE } from "../support/session";
 
-test("session context precedes availability and offers genuine sign-out", async ({ page }, testInfo) => {
+// Sign-out revokes a server-side token, so this file must never inherit the suite's token.
+test.use({ storageState: { cookies: [], origins: [] } });
+
+test("session context precedes availability and offers genuine sign-out", async ({ page, playwright, baseURL }, testInfo) => {
+  // Keep the same identity/owner context, with a fresh token owned by this journey.
+  await signInForSuite(page.request);
   await page.goto("/admin/control");
   const session = page.getByRole("region", { name: "Session", exact: true });
   await expect(session).toContainText("Feature E2E · Medical Affairs");
@@ -17,10 +23,17 @@ test("session context precedes availability and offers genuine sign-out", async 
   await expect(page).toHaveURL(/\/login$/);
   await page.goto("/admin/control");
   await expect(page.getByRole("region", { name: "Session", exact: true })).toContainText("Unsigned");
+  // Other specs reload this saved token; sign-out must leave it valid on the server.
+  const sharedSession = await playwright.request.newContext({ baseURL, storageState: STORAGE_STATE });
+  try {
+    const response = await sharedSession.get("/api/workspaces");
+    expect(response.status(), "sign-out must preserve the shared suite session").toBe(200);
+  } finally {
+    await sharedSession.dispose();
+  }
 });
 
 test.describe("unsigned development tools", () => {
-  test.use({ storageState: { cookies: [], origins: [] } });
   test("native disclosure works by Tab, Enter and Space; narrow form submits a persistent demo session", async ({ page }, testInfo) => {
     await page.goto("/admin/control");
     const session = page.getByRole("region", { name: "Session", exact: true });
