@@ -1,5 +1,6 @@
 /** Durable independent evaluator jobs with immutable manifests, receipts and terminal results. */
 import { randomUUID } from 'node:crypto';
+import { getCostAccount, type CostAccountSummary } from './cost-store';
 import { sql } from 'drizzle-orm';
 import { sharedDb } from '@/lib/iegp/db';
 import { DevelopmentError, type DevelopmentDocument, type DevelopmentSection } from './schema';
@@ -26,7 +27,7 @@ export type EvaluationResult = {
   rubric: { label: 'provisional_ai_assessment'; score: number; criteria: { criterion_id: string; score: number; reason: string; threshold_met: boolean | null }[]; factual_checks_passed: boolean } | null;
   reference: { label: 'provisional_semantic_reference'; status: 'scored' | 'unscored'; reasons: string[]; precision: RatioMeasure; recall: RatioMeasure; matches: { output_id: string; reference_id: string; reason: string }[]; unmatched_output_ids: string[]; unmatched_reference_ids: string[] };
 };
-export type Evaluation = { id: string; experiment_id: string; manifest: EvaluationManifest; status: EvaluationStatus; result: EvaluationResult | null; receipt: CallReceipt | null; failure_accounting: ExecutionCall['failure_accounting']; error: string | null; created_at: string; updated_at: string; sending_at: string | null; settled_at: string | null };
+export type Evaluation = { id: string; experiment_id: string; manifest: EvaluationManifest; status: EvaluationStatus; result: EvaluationResult | null; receipt: CallReceipt | null; failure_accounting: ExecutionCall['failure_accounting']; error: string | null; created_at: string; updated_at: string; sending_at: string | null; settled_at: string | null; cost?: CostAccountSummary | null };
 let ready: Promise<void> | undefined;
 /** Install additive evaluation storage, serializing DDL across worker and API processes. */
 export async function ensureEvaluationTables(): Promise<void> {
@@ -48,7 +49,7 @@ export async function reserveEvaluation(experimentId: string, manifest: Evaluati
 export async function getEvaluation(experimentId: string, id: string): Promise<Evaluation> {
   await ensureEvaluationTables(); const rows = await sharedDb().execute(sql`select * from development_evaluations where id=${id} and experiment_id=${experimentId}`);
   if (!rows[0]) throw new DevelopmentError(404, 'evaluation_not_found', 'That evaluation does not belong to this experiment.');
-  const { claim_token: token, claim_until: until, ...record } = rows[0]; void token; void until; return record as unknown as Evaluation;
+  const { claim_token: token, claim_until: until, ...record } = rows[0]; void token; void until; return { ...record, cost: await getCostAccount(experimentId, (record.manifest as EvaluationManifest).execution_id) } as unknown as Evaluation;
 }
 /** Return bounded recent history; database history remains append-only. */
 export async function listEvaluations(experimentId: string): Promise<Evaluation[]> {
@@ -65,7 +66,7 @@ export async function listAttemptEvaluations(experimentId: string, attemptIds: s
 /** Atomically own one job, preserving a sending marker across expired-lease recovery. */
 export async function claimEvaluation(id?: string): Promise<{ evaluation: Evaluation; token: string } | null> {
   await ensureEvaluationTables(); const token = randomUUID();
-  const rows = await sharedDb().execute(sql`update development_evaluations set claim_token=${token},claim_until=now()+interval '300 seconds',status=case when status='queued' then 'running' else status end where id=(select id from development_evaluations where status in ('queued','running','sending','received') and (${id ?? null}::text is null or id=${id ?? null}) and (claim_until is null or claim_until<now()) order by created_at for update skip locked limit 1) returning id,experiment_id`);
+  const rows = await sharedDb().execute(sql`update development_evaluations set claim_token=${token},claim_until=now()+interval '300 seconds',status=case when status='queued' then 'running' else status end where id=(select id from development_evaluations where status in ('queued','running','sending','received') and (status in ('sending','received') or manifest->>'request' is null or exists(select 1 from development_cost_accounts a where a.execution_id=development_evaluations.manifest->>'execution_id' and not a.paused)) and (${id ?? null}::text is null or id=${id ?? null}) and (claim_until is null or claim_until<now()) order by created_at for update skip locked limit 1) returning id,experiment_id`);
   return rows[0] ? { token, evaluation: await getEvaluation(rows[0].experiment_id as string, rows[0].id as string) } : null;
 }
 /** Fail closed when a worker no longer owns the lease immediately before dispatch. */

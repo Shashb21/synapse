@@ -4,6 +4,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { CostPreview, CostStartFields } from "./development-costs";
+import type { CostControls } from "@/modules/development/cost-schema";
 import { RouteFields, routeSelectClass } from "./development-route-fields";
 import { profileInputSchema, type Criterion, type EvaluationProfile } from "@/modules/development/profile-schema";
 import { compareEvaluation } from "@/modules/development/evaluation-freshness";
@@ -140,6 +142,7 @@ function EvaluationDetail({ evaluation }: { evaluation: Evaluation }) {
 export function DevelopmentEvaluation({ draft, execution, providers, disabled, onHistoryChange }: { draft: Experiment; execution?: Execution; providers: ProviderKeyView[]; disabled: boolean; onHistoryChange: () => void }) {
   const root = `/api/admin/development/${draft.id}`;
   const lifetime = useRef<AbortController | null>(null);
+  const [costControls, setCostControls] = useState<CostControls>({ allowance_usd: 0, unknown_acknowledged: false });
   const [profiles, setProfiles] = useState<EvaluationProfile[]>([]);
   const [profileKey, setProfileKey] = useState("");
   const [editor, setEditor] = useState<ProfileDraft | null>(null);
@@ -163,9 +166,10 @@ export function DevelopmentEvaluation({ draft, execution, providers, disabled, o
   const attempt = outputs.find((item) => item.id === attemptId) ?? outputs[0];
   const current = history.find((item) => item.id === selected);
   const locked = disabled || pending || loading;
-  const historyVersion = history.map((item) => `${item.id}:${item.status}`).join('|');
-  useEffect(() => { if (historyVersion) onHistoryChange();
-    // Refresh only when durable job identity or status changes.
+  const historyVersion = JSON.stringify(history.map((item) => ({ id: item.id, status: item.status, cost: item.cost })));
+  useEffect(() => { if (historyVersion !== "[]") onHistoryChange();
+    // Shared spending can change while a paused evaluator remains queued.
+    // Refresh execution history by identity rather than applying an evaluator account to the open run.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [historyVersion]);
   const selectedReferences = references.map((id) => draft.documents.find((item) => item.id === id && item.role === "reference"));
@@ -176,6 +180,7 @@ export function DevelopmentEvaluation({ draft, execution, providers, disabled, o
   const [previousExecutionId, setPreviousExecutionId] = useState(executionId);
   if (previousExecutionId !== executionId) {
     setPreviousExecutionId(executionId);
+    setCostControls({ allowance_usd: 0, unknown_acknowledged: false });
     setAttemptId(""); setReferences([]); setPending(false); setError(""); setMessage("");
   }
   useEffect(() => {
@@ -294,7 +299,7 @@ export function DevelopmentEvaluation({ draft, execution, providers, disabled, o
   async function evaluate() {
     const signal = lifetime.current?.signal;
     if (!execution || !attempt?.result || !profile || !signal || signal.aborted || locked || dirty || !delivery?.available || activeForOutput || requestForOutput) return;
-    const input = startEvaluationSchema.safeParse({ execution_id: execution.id, attempt_id: attempt.id, output_id: attempt.result.output_id, section: attempt.section, profile_id: profile.id, profile_version: profile.version, reference_ids: references, config });
+    const input = startEvaluationSchema.safeParse({ execution_id: execution.id, attempt_id: attempt.id, output_id: attempt.result.output_id, section: attempt.section, profile_id: profile.id, profile_version: profile.version, reference_ids: references, config, cost_controls: costControls });
     if (!input.success) { setError(input.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")); return; }
     const submission: QueueRequest = { executionId: execution.id, attemptId: attempt.id, outputId: attempt.result.output_id, previousIds: history.map((item) => item.id), interrupted: false };
     setQueueRequests((items) => [...items, submission]);
@@ -373,6 +378,8 @@ export function DevelopmentEvaluation({ draft, execution, providers, disabled, o
           {dirty && <p>Save or discard profile draft changes before evaluating.</p>}
           {activeForOutput && <p>An evaluation of this output is still active. Inspect its progress before requesting another.</p>}
           {requestForOutput?.interrupted && <p role="status">The queue request for this output has an uncertain outcome. It remains locked until saved history contains its evaluation. Reload evaluation data to check again; an empty history response does not confirm cancellation.</p>}
+          <CostStartFields value={costControls} onChange={setCostControls} evaluation />
+          <CostPreview root={root} evaluationOnly />
           <Button disabled={dirty || !delivery?.available || activeForOutput || !!requestForOutput} onClick={() => void evaluate()}>{hasEvaluation ? "Re-evaluate saved output" : "Evaluate saved output"}</Button>
         </>}
       </fieldset>

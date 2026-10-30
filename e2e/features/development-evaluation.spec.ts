@@ -5,7 +5,7 @@ import { evaluationConfigSchema } from "../../src/modules/development/evaluation
 import type { Experiment } from "../../src/modules/development/schema";
 
 /** Create real isolated source/reference snapshots, while scripting generation and evaluator I/O. */
-async function arrange(page: Page, options: { malformed?: boolean; missingDelivery?: boolean; profileLoadFailure?: boolean; pollFailure?: boolean; twoExecutions?: boolean; holdEvaluationNumber?: number; recoveryHistoryFailure?: boolean; firstQueueFailure?: { status: number; code: string }; holdQueuedHistory?: boolean; holdSucceededHistory?: boolean; paginated?: boolean } = {}) {
+async function arrange(page: Page, options: { queuedSpendingPause?: boolean; malformed?: boolean; missingDelivery?: boolean; profileLoadFailure?: boolean; pollFailure?: boolean; twoExecutions?: boolean; holdEvaluationNumber?: number; recoveryHistoryFailure?: boolean; firstQueueFailure?: { status: number; code: string }; holdQueuedHistory?: boolean; holdSucceededHistory?: boolean; paginated?: boolean } = {}) {
   const name = `Evaluation ${Date.now()}`;
   const created = await page.request.post("/api/admin/development", { data: { name, source_workspace_id: null } });
   expect(created.ok(), `Create experiment: ${created.status()} ${await created.text()}`).toBe(true);
@@ -34,7 +34,8 @@ async function arrange(page: Page, options: { malformed?: boolean; missingDelive
   const config = evaluationConfigSchema.parse({});
   const output = { output_id: "a".repeat(64), output: { accepted: [], rejected: [{ reason: "Internal acceptance failed" }] }, candidates: [{ statement: "Comparative evidence is missing." }], reason: null };
   const generation = { revision: draft.revision, config: { mode: "standard", evaluator: config.sections.gap_extraction.route }, routes: {}, sources: [source] };
-  const execution = { id: "saved-run", experiment_id: draft.id, created_at: "2026-10-30", updated_at: "2026-10-30", generation_status: "succeeded", evaluation_status: "not_requested", error: null, manifest: generation, sections: [{ id: "saved-attempt", section: "gap_extraction", status: "rejected", result: output, error: null, prerequisites: {} }], calls: [] };
+  const cost = options.queuedSpendingPause ? { execution_id: "saved-run", currency: "USD", allowance_usd: 2, unknown_acknowledged: false, override_enabled: false, paused: false, pause_reason: "", estimate: { total_usd: null, uncertainty: [] }, reserved_usd: 0, generation_usage_usd: 0.12, evaluation_usage_usd: 0, unknown_usage_calls: 0, unknown_active_reservations: 0, reported_total: null, events: [], reservations: [] } : undefined;
+  const execution = { cost, id: "saved-run", experiment_id: draft.id, created_at: "2026-10-30", updated_at: "2026-10-30", generation_status: "succeeded", evaluation_status: "not_requested", error: null, manifest: generation, sections: [{ id: "saved-attempt", section: "gap_extraction", status: "rejected", result: output, error: null, prerequisites: {} }], calls: [] };
   const evaluations: Record<string, unknown>[] = [];
   let releaseQueuedHistory!: () => void;
   let queuedHistoryHeld!: () => void;
@@ -56,7 +57,7 @@ async function arrange(page: Page, options: { malformed?: boolean; missingDelive
     if (options.holdQueuedHistory && !held && snapshot.some(item => item.status === "queued")) {
       held = true; queuedHistoryHeld(); await queuedHistoryRelease;
     }
-    await route.fulfill({ json: { executions: olderPage ? [{ ...execution, id: "older-run", sections: [{ ...execution.sections[0], id: "older-attempt" }] }] : options.twoExecutions ? [execution, { ...execution, id: "other-run", sections: [{ ...execution.sections[0], id: "other-attempt", result: { ...output, output_id: "b".repeat(64) } }] }] : [execution], next_cursor: options.paginated && !olderPage ? "older-cursor" : null, delivery: { available: true, reason: null }, history: olderPage ? { "older-attempt": { freshness: { current: true, reasons: [] }, evaluations: [] } } : { "saved-attempt": { freshness: { current: true, reasons: [] }, evaluations: snapshot.filter(item => (item.manifest as { attempt_id: string }).attempt_id === "saved-attempt").map(item => ({ id: item.id, status: item.status, freshness: "unavailable", reasons: [], profile_id: "balanced", output_id: output.output_id, evaluator_identity: "settings", reference_identity: "references", reference_ids: [] })) } } } });
+    await route.fulfill({ json: { executions: olderPage ? [{ ...execution, id: "older-run", sections: [{ ...execution.sections[0], id: "older-attempt" }] }] : options.twoExecutions ? [execution, { ...execution, id: "other-run", cost: cost ? { ...cost, execution_id: "other-run", paused: false, pause_reason: "", evaluation_usage_usd: 0 } : undefined, sections: [{ ...execution.sections[0], id: "other-attempt", result: { ...output, output_id: "b".repeat(64) } }] }] : [execution], next_cursor: options.paginated && !olderPage ? "older-cursor" : null, delivery: { available: true, reason: null }, history: olderPage ? { "older-attempt": { freshness: { current: true, reasons: [] }, evaluations: [] } } : { "saved-attempt": { freshness: { current: true, reasons: [] }, evaluations: snapshot.filter(item => (item.manifest as { attempt_id: string }).attempt_id === "saved-attempt").map(item => ({ id: item.id, status: item.status, freshness: "unavailable", reasons: [], profile_id: "balanced", output_id: output.output_id, evaluator_identity: "settings", reference_identity: "references", reference_ids: [] })) } } } });
   });
   await page.route(`**/api/admin/development/${draft.id}/profiles`, async (route) => {
     if (route.request().method() === "GET" && profileLoadFailure) { await route.fulfill({ status: 503, json: { error: "Profile service unavailable. Reload evaluation data." } }); return; }
@@ -92,6 +93,13 @@ async function arrange(page: Page, options: { malformed?: boolean; missingDelive
     if (options.pollFailure && polls === 1) { await route.fulfill({ status: 503, json: { error: "Temporary progress outage. Reload evaluation data." } }); return; }
     const id = route.request().url().split("/").pop();
     const evaluation = evaluations.find((item) => item.id === id)!;
+    if (options.queuedSpendingPause && cost) {
+      cost.paused = true; cost.pause_reason = "Evaluator allowance exhausted.";
+      cost.evaluation_usage_usd = Number((polls * 0.03).toFixed(2));
+      Object.assign(evaluation, { cost: structuredClone(cost) });
+      await route.fulfill({ json: { evaluation } });
+      return;
+    }
     const manifest = evaluation.manifest as { references: unknown[]; profile: EvaluationProfile };
     Object.assign(evaluation, options.malformed ? { status: "failed", error: "Evaluator reply has an out-of-range score.", receipt: { llm_call_id: "trace-1", text: "malformed", usage: null, cost_usd: 0 } } : { status: "succeeded", result: { checks: { passed: false, items: [{ id: "quotation", passed: false, detail: "Quotation requires inspection." }] }, rubric: { score: 3, criteria: manifest.profile.defaults.map((criterion) => ({ criterion_id: criterion.id, score: 3, reason: "Source-supported assessment.", threshold_met: null })) }, reference: { status: manifest.references.length ? "scored" : "unscored", reasons: manifest.references.length ? [] : ["No reference documents selected."], precision: { numerator: 1, denominator: 1, value: manifest.references.length ? 1 : null }, recall: { numerator: 1, denominator: 1, value: manifest.references.length ? 1 : null }, matches: manifest.references.length ? [{ output_id: "candidate:0", reference_id: `${reference.id}:answer-1`, reason: "Same question." }] : [], unmatched_output_ids: [], unmatched_reference_ids: [] } } });
     await route.fulfill({ json: { evaluation } });
@@ -142,6 +150,8 @@ test("copies and versions profiles, evaluates a retained rejected output and reo
   await tactics.getByLabel("Method").selectOption("checks_only");
   await gaps.getByRole("combobox", { name: "Provider", exact: true }).selectOption("openai");
   await panel.getByLabel(new RegExp(`Use evaluation-reference.json`)).check();
+  await panel.getByLabel("Additional evaluation allowance (USD)").fill("4");
+  await panel.getByLabel(/I acknowledge unknown provider charges/).check();
   await panel.getByRole("button", { name: "Evaluate saved output", exact: true }).click();
   // Assert: durable progress yields separate results; exact snapshots and reference review state remain visible.
   await expect(panel.getByText("Evaluation status: succeeded", { exact: true })).toBeVisible({ timeout: 10000 });
@@ -153,9 +163,12 @@ test("copies and versions profiles, evaluates a retained rejected output and reo
   await expect(panel.getByText(/Reference snapshot: evaluation-reference.json/).filter({ visible: true })).toContainText(fixture.reference.review_status);
   expect(fixture.posts[0]).toMatchObject({ execution_id: "saved-run", attempt_id: "saved-attempt", output_id: "a".repeat(64), profile_id: "custom-profile", profile_version: 2, reference_ids: [fixture.reference.id], config: { sections: { gap_extraction: { method: "rubric_and_reference", route: { provider_id: "openai" } }, tactic_extraction: { method: "checks_only" } } } });
   await panel.getByLabel(new RegExp(`Use evaluation-reference.json`)).uncheck();
+  expect(fixture.posts[0].cost_controls).toEqual({ allowance_usd: 4, unknown_acknowledged: true });
+  await panel.getByLabel("Additional evaluation allowance (USD)").fill("1.5");
   await panel.getByRole("button", { name: "Re-evaluate saved output", exact: true }).click();
   await expect(panel.getByText("Provisional reference measures: unscored", { exact: true })).toBeVisible({ timeout: 10000 });
   await expect(panel.getByText("No reference documents selected.", { exact: true })).toBeVisible();
+  expect(fixture.posts[1].cost_controls).toEqual({ allowance_usd: 1.5, unknown_acknowledged: true });
   expect(fixture.generationPosts()).toBe(0);
   expect(fixture.polls()).toBe(2);
   await panel.getByLabel("Selected evaluation").selectOption("evaluation-1");
@@ -255,10 +268,14 @@ test("preserves unsaved profile and independent evaluator settings across execut
   await gaps.getByRole("combobox", { name: "Provider", exact: true }).selectOption("openai");
   await panel.getByRole("group", { name: "Tactic extraction evaluator", exact: true }).getByLabel("Method").selectOption("checks_only");
   await panel.getByLabel(new RegExp("Use evaluation-reference.json")).check();
+  await panel.getByLabel("Additional evaluation allowance (USD)").fill("7");
+  await panel.getByLabel(/I acknowledge unknown provider charges/).check();
   // Act: inspect another saved execution and return.
   await page.getByLabel("Selected execution").selectOption("other-run");
   await expect(panel.getByText(/Execution: other-run · Attempt: other-attempt/)).toBeVisible();
   await page.getByLabel("Selected execution").selectOption("saved-run");
+  await expect(panel.getByLabel("Additional evaluation allowance (USD)")).toHaveValue("0");
+  await expect(panel.getByLabel(/I acknowledge unknown provider charges/)).not.toBeChecked();
   // Assert: editor draft and each section's settings survive; output-specific references reset.
   await expect(panel.getByLabel("Profile name", { exact: true })).toHaveValue("Unsaved experiment rubric");
   await expect(panel.getByLabel("Criteria scope")).toHaveValue("tactic_extraction");
@@ -458,4 +475,31 @@ test("keeps both pages fresh when loading older history during a succeeded refre
   await expect(execution.getByText("Evaluation: unscored / not requested")).toBeVisible();
   expect(fixture.posts).toHaveLength(1);
   expect(fixture.generationPosts()).toBe(0);
+});
+
+// Arrange a completed generation, act through a queued evaluator poll, assert shared spending updates.
+test('queued evaluator spending pause refreshes the shared account without a status change', async ({ page }) => {
+  const fixture = await arrange(page, { queuedSpendingPause: true, twoExecutions: true });
+  const costs = page.getByRole('region', { name: 'Execution spending', exact: true });
+  await expect(costs.getByText('Spending authorized', { exact: true })).toBeVisible();
+  const panel = page.getByRole('region', { name: 'Evaluation', exact: true });
+  await panel.getByRole('button', { name: 'Evaluate saved output', exact: true }).click();
+  await expect(panel.getByText('Evaluation status: queued', { exact: true })).toBeVisible();
+  await expect(costs.getByText('Spending paused: Evaluator allowance exhausted.', { exact: true })).toBeVisible({ timeout: 10000 });
+  await expect(costs.getByText('Evaluation known usage: USD 0.03', { exact: true })).toBeVisible();
+  await expect(panel.getByText('Evaluation status: queued', { exact: true })).toBeVisible();
+  await expect(costs.getByRole('button', { name: 'Resume spending', exact: true })).toBeVisible();
+  await page.getByRole('region', { name: 'Execution', exact: true }).getByLabel('Selected execution').selectOption('other-run');
+  await expect(costs.getByText('Spending authorized', { exact: true })).toBeVisible();
+  const previousPolls = fixture.polls();
+  await page.waitForResponse(async response => {
+    if (!new URL(response.url()).pathname.endsWith(`/api/admin/development/${fixture.draft.id}/executions`) || response.request().method() !== 'GET') return false;
+    const body = await response.json();
+    return body.executions[0].cost.evaluation_usage_usd > previousPolls * 0.03;
+  }, { timeout: 10000 });
+  // Let React paint the account refresh while the other execution remains selected.
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await expect(page.getByRole('region', { name: 'Execution', exact: true }).getByLabel('Selected execution')).toHaveValue('other-run');
+  await expect(costs.getByText('Spending authorized', { exact: true })).toBeVisible();
+  await expect(costs.getByText('Evaluation known usage: USD 0', { exact: true })).toBeVisible();
 });

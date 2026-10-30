@@ -1,5 +1,8 @@
 /** Durable immutable execution manifests and atomic worker/call claims in the shared experiment schema. */
 import { randomUUID } from 'node:crypto';
+import { COST_DDL, type CostControls } from './cost-schema';
+import { getCostAccount, initializeCostAccount, type CostAccountSummary } from './cost-store';
+import { estimateDevelopmentCost } from './cost';
 import { redactSecrets } from '@/modules/llm/provider-error';
 import { redactPromptSecrets } from '@/modules/kernel/llm-calls';
 import { providerApiKey } from '@/modules/llm/api-keys';
@@ -32,7 +35,7 @@ export type ExecutionCall = { id: string; execution_id: string; section_id: stri
 export type EvaluationStatus = 'unscored' | 'queued' | 'running' | 'succeeded' | 'failed' | 'blocked' | 'outdated' | 'not_applicable';
 export type EvaluationIdentity = { attempt_id: string; output_id: string; profile_id: string; evaluator_identity: string; reference_identity: string; reference_ids: string[] };
 export type EvaluationAssociation = EvaluationIdentity & { id: string; experiment_id: string; status: EvaluationStatus; created_at: string };
-export type Execution = { id: string; experiment_id: string; manifest: ExecutionManifest; generation_status: GenerationStatus; evaluation_status: 'not_requested'; created_at: string; updated_at: string; error: string | null; sections: SectionAttempt[]; calls: ExecutionCall[] };
+export type Execution = { id: string; experiment_id: string; manifest: ExecutionManifest; generation_status: GenerationStatus; evaluation_status: 'not_requested'; created_at: string; updated_at: string; error: string | null; sections: SectionAttempt[]; calls: ExecutionCall[]; cost?: CostAccountSummary | null };
 const DDL = [
   `CREATE TABLE IF NOT EXISTS development_executions (id text PRIMARY KEY, experiment_id text NOT NULL REFERENCES development_experiments(id), manifest jsonb NOT NULL, generation_status text NOT NULL CHECK(generation_status IN ('queued','running','succeeded','failed','needs_attention')), evaluation_status text NOT NULL DEFAULT 'not_requested' CHECK(evaluation_status='not_requested'), created_at text NOT NULL, updated_at text NOT NULL, error text, claim_token text, claim_until timestamptz)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS development_execution_one_active ON development_executions(experiment_id) WHERE generation_status IN ('queued','running')`,
@@ -50,11 +53,11 @@ const DDL = [
 let ready: Promise<void> | undefined;
 /** Install additive experiment tables only; a failed initialization can be retried safely. */
 export async function ensureExecutionTables(): Promise<void> {
-  ready ??= (async () => { await ensureDevelopmentTables(); await sharedDb().transaction(async tx => { await tx.execute(sql`select pg_advisory_xact_lock(hashtext('development-execution-schema'))`); for (const ddl of DDL) await tx.execute(sql.raw(ddl)); }); })().catch(error => { ready = undefined; throw error; });
+  ready ??= (async () => { await ensureDevelopmentTables(); await sharedDb().transaction(async tx => { await tx.execute(sql`select pg_advisory_xact_lock(hashtext('development-execution-schema'))`); for (const ddl of [...DDL, ...COST_DDL]) await tx.execute(sql.raw(ddl)); }); })().catch(error => { ready = undefined; throw error; });
   await ready;
 }
 /** Serialize publication with draft writes and bind current successful prerequisite attempts. */
-export async function reserveExecution(experimentId: string, revision: number, sections: DevelopmentSection[], build: (history: (SectionAttempt & { manifest: ExecutionManifest })[]) => ExecutionManifest): Promise<Execution> {
+export async function reserveExecution(experimentId: string, revision: number, sections: DevelopmentSection[], build: (history: (SectionAttempt & { manifest: ExecutionManifest })[]) => ExecutionManifest, controls?: CostControls, actor = 'system:legacy-start'): Promise<Execution> {
   await ensureExecutionTables();
   const id = randomUUID();
   await sharedDb().transaction(async tx => {
@@ -67,6 +70,7 @@ export async function reserveExecution(experimentId: string, revision: number, s
     const manifest = build(history as unknown as (SectionAttempt & { manifest: ExecutionManifest })[]);
     const at = new Date().toISOString();
     await tx.execute(sql`insert into development_executions(id,experiment_id,manifest,generation_status,created_at,updated_at) values(${id},${experimentId},${JSON.stringify(manifest)}::jsonb,'queued',${at},${at})`);
+    await initializeCostAccount(tx, id, controls, actor, estimateDevelopmentCost({ target: manifest.target, mode: manifest.config.mode }));
     for (const [ordinal, section] of sections.entries()) await tx.execute(sql`insert into development_execution_sections(id,execution_id,experiment_id,section,ordinal,status,created_at) values(${randomUUID()},${id},${experimentId},${section},${ordinal},'queued',${at})`);
   });
   return getExecution(experimentId, id);
@@ -80,7 +84,7 @@ export async function getExecution(experimentId: string, id: string): Promise<Ex
   const calls = await sharedDb().execute(sql`select * from development_execution_calls where execution_id=${id} order by section_id,ordinal`);
   const { claim_token: ignoredToken, claim_until: ignoredUntil, ...record } = rows[0];
   void ignoredToken; void ignoredUntil;
-  return { ...record, sections, calls } as unknown as Execution;
+  return { ...record, sections, calls, cost: await getCostAccount(experimentId, id) } as unknown as Execution;
 }
 /** Return bounded recent immutable history, preserving all database attempts. */
 export async function listExecutions(experimentId: string): Promise<Execution[]> {
@@ -186,7 +190,7 @@ export const CLAIM_SECONDS = 300;
 export async function claimExecution(id?: string): Promise<{ execution: Execution; token: string } | null> {
   await ensureExecutionTables();
   const token = randomUUID();
-  const rows = await sharedDb().execute(sql`update development_executions set claim_token=${token},claim_until=now()+${CLAIM_SECONDS}*interval '1 second',generation_status='running',updated_at=${new Date().toISOString()} where id=(select id from development_executions where generation_status in ('queued','running') and (${id ?? null}::text is null or id=${id ?? null}) and (claim_until is null or claim_until<now()) order by created_at for update skip locked limit 1) returning id,experiment_id`);
+  const rows = await sharedDb().execute(sql`update development_executions set claim_token=${token},claim_until=now()+${CLAIM_SECONDS}*interval '1 second',generation_status='running',updated_at=${new Date().toISOString()} where id=(select id from development_executions where generation_status in ('queued','running') and (exists(select 1 from development_cost_accounts a where a.execution_id=development_executions.id and not a.paused) or exists(select 1 from development_execution_calls c where c.execution_id=development_executions.id and (c.status='sending' or (c.status in ('succeeded','failed') and exists(select 1 from development_cost_reservations r where r.call_id=c.id and r.status='active' and r.usage_cost is null))))) and (${id ?? null}::text is null or id=${id ?? null}) and (claim_until is null or claim_until<now()) order by created_at for update skip locked limit 1) returning id,experiment_id`);
   if (!rows[0]) return null;
   return { execution: await getExecution(rows[0].experiment_id as string, rows[0].id as string), token };
 }

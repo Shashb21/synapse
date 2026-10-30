@@ -1,4 +1,6 @@
 /** Bounded durable progression: replay real stages, dispatch one claimed raw request, checkpoint and return. */
+import { CostPause, CostSettlementPending, reserveCost, settleCost } from './cost-store';
+import { rawCallBound, developmentUsageCost } from './cost';
 import { progressEvaluation } from './evaluation-worker';
 import { findProvider, providerServes } from '@/modules/llm/provider';
 import { providerApiKey } from '@/modules/llm/api-keys';
@@ -56,6 +58,16 @@ async function compute(execution: Execution, token: string, section: SectionAtte
 export function assertSafeReceiptText(text: string, secrets: string[]): void {
   if (redactPromptSecrets(redactSecrets(text, secrets)) !== text) throw new DevelopmentError(422, 'unsafe_response', 'Provider response contained a credential and was discarded.');
 }
+/** Reconcile only saved evidence; a ledger outage must not terminally fail replayable work. */
+async function settleSavedCallCost(executionId: string, call: ExecutionCall): Promise<void> {
+  const route = call.route.actual;
+  const usage = call.receipt?.usage ?? call.failure_accounting?.usage ?? null;
+  try {
+    await settleCost(executionId, call.id, developmentUsageCost(route.provider_id, route.model, usage), call.status === 'succeeded');
+  } catch (error) {
+    throw new CostSettlementPending(error);
+  }
+}
 /** Perform one network call only after the database has committed its sending marker. */
 async function dispatch(execution: Execution, token: string, section: SectionAttempt, call: ExecutionCall): Promise<void> {
   const route = call.route.actual;
@@ -64,6 +76,7 @@ async function dispatch(execution: Execution, token: string, section: SectionAtt
   if (!provider || !providerServes(provider, route.model) || !api_key) throw new DevelopmentError(409, 'route_unavailable', 'The frozen provider/model credentials are no longer available. Start a fresh execution after correcting them.');
   await requireSectionAi(section.section);
   await requireClaim(execution.id, token);
+  await reserveCost(execution.id, call.id, 'generation', rawCallBound(route.provider_id, call.request.request));
   if (!await beginCall(execution.id, token, call.id)) throw new DevelopmentError(409, 'dispatch_conflict', 'This call was already claimed; it cannot be resent.');
   let receipt: CallReceipt;
   let failure: ExecutionCall['failure_accounting'] = null;
@@ -77,10 +90,12 @@ async function dispatch(execution: Execution, token: string, section: SectionAtt
   } catch (error) {
     // Even an explicit provider failure is terminal. The call can never return to queued.
     await settleCall(execution.id, token, call.id, null, safeError(error), failure);
+    await settleSavedCallCost(execution.id, { ...call, status: 'failed', receipt: null, failure_accounting: failure });
     throw error;
   }
   // Deliberately outside the provider catch: a receipt-write failure leaves sending indeterminate.
   await settleCall(execution.id, token, call.id, receipt);
+  await settleSavedCallCost(execution.id, { ...call, status: 'succeeded', receipt });
 }
 export type WorkerProgress = { processed: boolean; execution_id?: string; generation_status?: Execution['generation_status']; evaluation_id?: string; evaluation_status?: import('./evaluation-store').EvaluationStatus };
 /** Advance one execution with at most one actual provider send; repeated scheduler delivery is safe. */
@@ -95,6 +110,10 @@ export async function progressExecution(id?: string): Promise<WorkerProgress> {
   }
   try {
     if (execution.manifest.code_identity !== executionCodeIdentity()) throw new DevelopmentError(409, 'code_changed', 'The deployed code changed. Start a new execution; saved calls cannot resume under different code.');
+    // A crash can leave saved outcomes ahead of the ledger. Repeating settlement cannot charge twice.
+    for (const call of execution.calls) {
+      if (call.status === 'succeeded' || call.status === 'failed') await settleSavedCallCost(execution.id, call);
+    }
     for (const initial of execution.sections) {
       const section = execution.sections.find(attempt => attempt.id === initial.id)!;
       if (!['queued', 'running'].includes(section.status)) continue;
@@ -113,6 +132,10 @@ export async function progressExecution(id?: string): Promise<WorkerProgress> {
           if (error instanceof NextCall) {
             try { await dispatch(execution, token, section, error.call); }
             catch (dispatchError) {
+              if (dispatchError instanceof CostPause || dispatchError instanceof CostSettlementPending) {
+                await releaseExecution(execution.id, token, 'queued', dispatchError.message);
+                return { processed: true, execution_id: execution.id, generation_status: 'queued' };
+              }
               const current = await getExecution(execution.experiment_id, execution.id);
               if (current.calls.some(call => call.status === 'sending')) {
                 await releaseExecution(execution.id, token, 'needs_attention', safeError(dispatchError));
@@ -132,6 +155,10 @@ export async function progressExecution(id?: string): Promise<WorkerProgress> {
     await releaseExecution(execution.id, token, status);
     return { processed: true, execution_id: execution.id, generation_status: status };
   } catch (error) {
+    if (error instanceof CostSettlementPending) {
+      await releaseExecution(execution.id, token, 'queued', error.message);
+      return { processed: true, execution_id: execution.id, generation_status: 'queued' };
+    }
     await releaseExecution(execution.id, token, 'failed', safeError(error));
     return { processed: true, execution_id: execution.id, generation_status: 'failed' };
   }
