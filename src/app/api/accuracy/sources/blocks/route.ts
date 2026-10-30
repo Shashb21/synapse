@@ -42,19 +42,19 @@ export async function GET(req: Request) {
   const workspace_id = url.searchParams.get("workspace_id")?.trim() ?? "";
   const source_file_id = url.searchParams.get("source_file_id")?.trim() ?? "";
   if (!workspace_id) {
-    return NextResponse.json({ error: "workspace_id required" }, { status: 400 });
+    return NextResponse.json({ safe_error: true, error: "workspace_id required" }, { status: 400 });
   }
   if (!source_file_id) {
-    return NextResponse.json({ error: "source_file_id required" }, { status: 400 });
+    return NextResponse.json({ safe_error: true, error: "source_file_id required" }, { status: 400 });
   }
 
   const workspace = await getWorkspace(workspace_id);
   if (!workspace) {
-    return NextResponse.json({ error: "Unknown workspace" }, { status: 404 });
+    return NextResponse.json({ safe_error: true, error: "Unknown workspace" }, { status: 404 });
   }
   const source = await getSourceFile(workspace_id, source_file_id);
   if (!source) {
-    return NextResponse.json({ error: "Unknown source file" }, { status: 404 });
+    return NextResponse.json({ safe_error: true, error: "Unknown source file" }, { status: 404 });
   }
 
   const stored = await readParseBlocksWithMeta(workspace_id, source_file_id);
@@ -162,10 +162,10 @@ export async function POST(req: Request) {
   try {
     body = postSchema.parse(await readLabJson(req));
   } catch (error) {
-    return labRequestErrorResponse(error) ?? NextResponse.json({ ok: false, error: "Invalid body" }, { status: 400 });
+    return labRequestErrorResponse(error) ?? NextResponse.json({ ok: false, safe_error: true, error: "Invalid body" }, { status: 400 });
   }
   const org_id = await getWorkspaceOrgId(body.workspace_id);
-  if (!org_id) return NextResponse.json({ ok: false, error: "Unknown workspace" }, { status: 404 });
+  if (!org_id) return NextResponse.json({ ok: false, safe_error: true, error: "Unknown workspace" }, { status: 404 });
   const actor = await labActor();
   const base = { workspace_id: body.workspace_id, rationale: body.rationale, actor };
   try {
@@ -234,11 +234,11 @@ export async function POST(req: Request) {
   } catch (error) {
     if (error instanceof ProvenanceConflictError) {
       return NextResponse.json(
-        { ok: false, error: error.message, orphaned_claims: error.orphans.map((o) => o.id) },
+        { ok: false, safe_error: true, error: error.message, orphaned_claims: error.orphans.map((o) => o.id) },
         { status: 409 },
       );
     }
-    const message = labErrorMessage(error, "Block edit failed");
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    const message = labErrorMessage(error, "We couldn’t confirm the source change. Check current sources and their text blocks before saving it again.");
+    return NextResponse.json({ ok: false, safe_error: true, error: message }, { status: 400 });
   }
 }

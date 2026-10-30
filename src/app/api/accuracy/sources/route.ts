@@ -13,7 +13,7 @@ export async function GET(req: Request) {
   if (denied) return denied;
   const workspace_id = new URL(req.url).searchParams.get("workspace_id")?.trim();
   if (!workspace_id) {
-    return NextResponse.json({ error: "workspace_id required" }, { status: 400 });
+    return NextResponse.json({ safe_error: true, error: "workspace_id required" }, { status: 400 });
   }
   const sources = await listSourceFiles(workspace_id);
   const withBlocks = await Promise.all(

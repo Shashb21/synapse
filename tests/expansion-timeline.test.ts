@@ -152,7 +152,7 @@ it("persists independent dates and human dependency locks through rebuild, child
   expect(restored.activities.find(a => a.id === `ACT-${args.parent.id}`)).toEqual(before.activities.find(a => a.id === `ACT-${args.parent.id}`));
   expect((await loadState()).expansions).toEqual(scopeBefore);
   // B now waits on A but starts before A ends: a final save explains and refuses it (KAN-85).
-  await expect(savePlan({status: "final", note: "Reviewed separate child activities", actor})).rejects.toThrow(/Added scope B starts 2026-04-01, before Added scope A ends/);
+  await expect(savePlan({status: "final", note: "Reviewed separate child activities", actor})).rejects.toMatchObject({code: "timeline_blocked", message: expect.stringContaining("Move conflicting activities or change their dependencies.")});
   await updateTimelineActivity({id: "ACT-EXP-B", start_date: "2027-03-01", end_date: "2027-09-01", rationale: "After the child analysis", actor});
   // A complete final needs every gap resolved, confirmed and banded (KAN-86).
   await makeFinalReady(actor);

@@ -80,7 +80,7 @@ test("supported S8 candidate earns owner approval and rollback restores baseline
     await page.goto(`${url}/admin/learning`);
     await expect(page.getByRole("heading", { name: "Decision learning", level: 1 })).toBeVisible();
     await page.getByLabel("Stage", { exact: true }).selectOption("S8");
-    await page.getByRole("button", { name: "Create S8 candidate", exact: true }).click();
+    await page.getByRole("button", { name: "Create Gap prioritization candidate", exact: true }).click();
     await expect(page.getByTestId("learning-created")).toContainText("active prompt is unchanged");
     const proposed = await report();
     const revision = proposed.revisions[0];
@@ -191,7 +191,7 @@ test("owner sees counts and creates a candidate; customers are refused", async (
   const table = page.getByRole("table", { name: "S2 agreement counts and shares" });
   await expect(table).toContainText("1 (25.0%)"); await expect(table).toContainText("2 (50.0%)");
   await expect(page.getByRole("img", { name: /S2 agreement chart/ })).toBeVisible();
-  await page.getByRole("button", { name: "Create S2 candidate" }).click();
+  await page.getByRole("button", { name: "Create Gap extraction candidate" }).click();
   await expect(page.getByTestId("learning-created")).toContainText("active prompt is unchanged");
   await expect(page.getByRole("table", { name: "Prompt revision history" })).toContainText("candidate");
   const report = await (await context.request.get("/api/admin/learning")).json();
@@ -229,7 +229,7 @@ test("owner sees counts and creates a candidate; customers are refused", async (
   await page.getByLabel("Group by").selectOption("week");
   await expect(page.getByLabel("Group by")).toHaveValue("week");
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole("button", { name: "Create S2 candidate" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create Gap extraction candidate" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: test.info().outputPath("task3-learning-mobile.png"), fullPage: true });
 

@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 /** S9's sourced per-gap evidence brief and semantic context used at acceptance. */
 import { createHash } from "node:crypto";
 import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
@@ -35,7 +36,7 @@ function stable(value: unknown): unknown {
  */
 export function buildIdeationGapBrief(state: IegpState, gapId: string, placements: IdeationPriorityPlacement[]) {
   const gap = state.gaps.find(item => item.id === gapId);
-  if (!gap) throw new Error("Gap not found");
+  if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
   const review = getRequirementBasisReview(state, gapId);
   const objective = state.objectives.find(item => item.id === gap.objective_id);
   const placement = placements.find(item => item.gap_id === gapId);

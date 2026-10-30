@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import {
@@ -44,9 +45,7 @@ function routeNumber(
     parsed < range.min ||
     parsed > range.max
   ) {
-    throw new Error(
-      `${label} must be ${range.integer ? "a whole number" : "a number"} from ${range.min} to ${range.max}.`,
-    );
+    throw new TrustedApplicationError(range.integer ? "Max tokens must be a whole number from 1 to 200,000." : "Temperature must be a number from 0 to 2.");
   }
   return parsed;
 }
@@ -60,11 +59,11 @@ function routeFallbacks(value: unknown): string[] | undefined {
       : Array.isArray(value)
         ? value.map((id) => (typeof id === "string" ? id : ""))
         : null;
-  if (!ids) throw new Error("Fallbacks must be a comma-separated list of provider ids.");
+  if (!ids) throw new TrustedApplicationError("Fallbacks must be a comma-separated list of provider ids.");
   const cleaned = ids.map((id) => id.trim()).filter(Boolean);
   if (cleaned.length === 0) return undefined;
   const unknown = cleaned.filter((id) => !findProvider(id));
-  if (unknown.length > 0) throw new Error(`Unknown fallback provider: ${unknown.join(", ")}.`);
+  if (unknown.length > 0) throw new TrustedApplicationError("Choose an available fallback provider from the provider list.");
   return cleaned;
 }
 
@@ -105,7 +104,7 @@ export async function POST(request: Request) {
     const parsed = await readLabJson(request);
     body = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
   } catch (error) {
-    return labRequestErrorResponse(error) ?? NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return labRequestErrorResponse(error) ?? NextResponse.json({ safe_error: true, error: "Invalid JSON" }, { status: 400 });
   }
   const action = String(body.action ?? "");
 
@@ -116,11 +115,11 @@ export async function POST(request: Request) {
         assertCan(identity.role, "configure_routing");
         const call_kind = String(body.call_kind ?? "") as CallKind;
         if (!CALL_KINDS.includes(call_kind)) {
-          throw new Error(`Unknown call_kind ${body.call_kind}`);
+          throw new TrustedApplicationError("Choose an available AI task and load its routing settings again.");
         }
         const agent_role = String(body.agent_role ?? "proposer") as AgentRole | "none";
         if (agent_role !== "none" && !AGENT_ROLES.includes(agent_role as AgentRole)) {
-          throw new Error(`Unknown agent_role ${body.agent_role}`);
+          throw new TrustedApplicationError("Choose an available AI role and load its routing settings again.");
         }
         // Validated before anything is saved; a blank field keeps the route's current value.
         const temperature = routeNumber(body.temperature, "Temperature", { min: 0, max: 2 });
@@ -168,12 +167,12 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true, routes: configs.length });
       }
       default:
-        return NextResponse.json({ error: `Unknown action ${action}` }, { status: 400 });
+        return NextResponse.json({ safe_error: true, error: "This action is not available. Reload the page and choose an available action." }, { status: 400 });
     }
   } catch (error) {
     const known = labRequestErrorResponse(error);
     if (known) return known;
-    const message = labErrorMessage(error, "Accuracy routing action failed");
-    return NextResponse.json({ error: message }, { status: 400 });
+    const message = labErrorMessage(error, "We couldn't update the AI routing. Reload the routing settings to check the current selection before trying again.");
+    return NextResponse.json({ safe_error: true, error: message }, { status: 400 });
   }
 }

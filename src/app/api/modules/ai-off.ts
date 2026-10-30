@@ -4,7 +4,7 @@ import { apiErrorResponse } from "@/modules/auth/api-guard";
 
 /** A clear 409 for work refused because an admin switched AI off. */
 export function aiOffResponse(): NextResponse {
-  return NextResponse.json({ code: "ai_off", error: AI_OFF_MESSAGE }, { status: 409 });
+  return NextResponse.json({ safe_error: true, code: "ai_off", error: AI_OFF_MESSAGE }, { status: 409 });
 }
 
 /**

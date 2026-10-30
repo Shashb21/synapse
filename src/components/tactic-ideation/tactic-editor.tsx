@@ -32,7 +32,7 @@ async function post(body: Record<string, unknown>) {
   const res = await postJson("/api/iegp", body);
   if (res.ok) return null;
   const json = res.json as { error?: string };
-  return json.error ?? `Could not save (${res.status}).`;
+  return json.error ?? "We couldn’t confirm this action. Check the current state before repeating it.";
 }
 
 export function TacticEditor({
@@ -227,7 +227,7 @@ export function TacticEditor({
           />
         </label>
         {error ? (
-          <p role="alert" className="text-[12px] text-destructive">
+          <p role="alert" className="text-sm text-destructive">
             {error}
           </p>
         ) : null}

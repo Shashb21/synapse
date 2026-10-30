@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { withRelationshipChange } from "./relationship-change";
 import { relationshipSnapshot, relationshipVersion } from "./relationship-version";
 import { and, eq, sql } from "drizzle-orm";
@@ -60,9 +61,9 @@ export async function restoreExcludedGap(args: RestoreActor & { gap_id: string }
   const rationale = requireRationale(args.rationale);
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
-  if (!gap) throw new Error("Gap not found");
-  if (gap.retired) throw new Error("A retired gap cannot be restored; its successor is the live gap.");
-  if (gap.status !== "excluded") throw new Error("This gap is not excluded.");
+  if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
+  if (gap.retired) throw new TrustedApplicationError("A retired gap cannot be restored; its successor is the live gap.");
+  if (gap.status !== "excluded") throw new TrustedApplicationError("This gap is not excluded.");
   const reason = gap.exclusion_reason ?? "no reason";
   await db()
     .update(t.gaps)
@@ -104,8 +105,8 @@ export async function restoreRejectedNeed(args: RestoreActor & { need_id: string
     const assessmentGapIds = await lockAssessmentOwners({ need_ids: [args.need_id] });
     const state = await loadState();
     const need = state.needs.find((n) => n.id === args.need_id);
-    if (!need) throw new Error("Need not found");
-    if (need.status !== "rejected") throw new Error("This need is not rejected.");
+    if (!need) throw new TrustedApplicationError("Need not found", "not_found", 404);
+    if (need.status !== "rejected") throw new TrustedApplicationError("This need is not rejected.");
     await db()
       .update(t.needs)
       .set({ status: "candidate", lock: makeLock(args.actor_name, args.actor_function, rationale) })
@@ -134,8 +135,8 @@ export async function restoreRejectedTactic(args: RestoreActor & { tactic_id: st
   return withWorkspaceTransaction(async () => {
     await db().execute(sql`SELECT id FROM tactics WHERE id = ${args.tactic_id} FOR UPDATE`);
     const tactic = (await loadState()).tactics.find(row => row.id === args.tactic_id);
-    if (!tactic) throw new Error("Tactic not found");
-    if (tactic.review_status !== "rejected") throw new Error("This tactic is not rejected.");
+    if (!tactic) throw new TrustedApplicationError("Tactic not found", "not_found", 404);
+    if (tactic.review_status !== "rejected") throw new TrustedApplicationError("This tactic is not rejected.");
     await lockTacticReview({ ...args, review_status: "accepted", note: rationale });
     await appendAudit(args.actor_name, args.actor_function, "tactic", args.tactic_id, "restore", rationale);
   });
@@ -169,7 +170,7 @@ async function restoreRejectedMappingChange(args: RestoreActor & { gap_id: strin
   const row = state.mapping_suggestions.find(
     (m) => m.gap_id === args.gap_id && m.tactic_id === args.tactic_id && m.status === "rejected",
   );
-  if (!row || isMappingRowKey(args.tactic_id)) throw new Error("This mapping is not rejected.");
+  if (!row || isMappingRowKey(args.tactic_id)) throw new TrustedApplicationError("This mapping is not rejected.");
   await db()
     .delete(t.mappingSuggestions)
     .where(and(eq(t.mappingSuggestions.gap_id, args.gap_id), eq(t.mappingSuggestions.tactic_id, args.tactic_id)));

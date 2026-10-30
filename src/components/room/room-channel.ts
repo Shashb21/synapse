@@ -1,5 +1,7 @@
 "use client";
 
+import { postJson, RequestOutcomeError } from "@/lib/post-json";
+
 import type { RoomState } from "@/lib/room/store";
 
 /**
@@ -58,14 +60,7 @@ export function postRoom(body: Record<string, unknown>): Promise<{ state?: RoomS
 }
 
 async function sendRoom(body: Record<string, unknown>): Promise<{ state?: RoomState; error?: string }> {
-  const res = await fetch("/api/room", {
-    method: "POST",
-    // A save still reaches the server if the presenter reloads or closes the window.
-    keepalive: true,
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const json = (await res.json().catch(() => ({}))) as { state?: RoomState; error?: string };
-  if (!res.ok) throw new Error(json.error ?? "Room request failed.");
-  return json;
+  const res = await postJson<{ state?: RoomState }>("/api/room", body, { keepalive: true });
+  if (!res.ok || !res.json.state) throw new RequestOutcomeError(res.json.error ?? "We couldn’t confirm the room update. Reload the room to check the current slide and notes.", res.outcome === "confirmed" ? "unknown" : res.outcome, res.status);
+  return res.json;
 }

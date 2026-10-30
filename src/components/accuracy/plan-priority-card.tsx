@@ -5,7 +5,7 @@ import { useState, useTransition } from "react";
 import { resolveGapStatus, resolvePriorityBand } from "@/accuracy/domain/iegp-semantics";
 import { TACTIC_TYPES, TACTIC_TYPE_LABELS } from "@/lib/iegp/enums";
 import { useAiEnabled } from "@/components/platform/ai-status";
-import { postJson } from "@/lib/post-json";
+import { postJson, type PostResult } from "@/lib/post-json";
 
 type IdeateResponse = {
   ok?: boolean;
@@ -21,11 +21,13 @@ type IdeateResponse = {
 async function postIdeate(body: Record<string, unknown>): Promise<{
   ok: boolean;
   status: number;
+  outcome: PostResult<unknown>["outcome"];
   json: IdeateResponse;
 }> {
   const res = await postJson("/api/accuracy/ideate", body);
   const json = res.json as IdeateResponse;
-  return { ok: res.ok && Boolean(json.ok), status: res.status, json };
+  const ok = res.ok && json.ok === true;
+  return { ok, status: res.status, outcome: ok ? "confirmed" : res.outcome === "rejected" ? "rejected" : "unknown", json };
 }
 
 function outcomeMessage(json: IdeateResponse): string {
@@ -52,6 +54,7 @@ export function PlanIdeateAllButton({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [checkRequired, setCheckRequired] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const aiOn = useAiEnabled();
 
@@ -66,12 +69,14 @@ export function PlanIdeateAllButton({
   }
 
   function run() {
+    if (pending || checkRequired) return;
     setError(null);
     setMsg(null);
     startTransition(async () => {
-      const { ok, json } = await postIdeate({ workspace_id: workspaceId });
+      const { ok, json, outcome } = await postIdeate({ workspace_id: workspaceId });
       if (!ok) {
-        setError(json.error ?? "Ideate failed");
+        setCheckRequired(outcome === "unknown");
+        setError(json.error ?? "We couldn’t confirm the new ideas. Reload the plan to check its ideas before running this again.");
         return;
       }
       setMsg(outcomeMessage(json));
@@ -83,13 +88,14 @@ export function PlanIdeateAllButton({
     <div className="mb-3 grid gap-1">
       <button
         type="button"
-        disabled={pending}
+        disabled={pending || checkRequired}
         onClick={run}
         className="w-fit border border-foreground bg-foreground px-3 py-1.5 text-[11px] text-background disabled:opacity-50"
       >
         {pending ? "Ideating…" : `Run LLM ideate (${eligibleCount} high open gap${eligibleCount === 1 ? "" : "s"})`}
       </button>
-      {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+      {checkRequired ? <button type="button" onClick={() => window.location.reload()} className="text-sm underline">Check plan ideas</button> : null}
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
       {msg ? <p className="text-[12px] text-muted-foreground">{msg}</p> : null}
     </div>
   );
@@ -115,6 +121,7 @@ export function PlanPriorityCard({
   const aiOn = useAiEnabled();
   const [value, setValue] = useState(priority ?? "medium");
   const [error, setError] = useState<string | null>(null);
+  const [checkRequired, setCheckRequired] = useState(false);
   const [ideateTitle, setIdeateTitle] = useState("");
   const [ideateRationale, setIdeateRationale] = useState("");
   const [ideateMsg, setIdeateMsg] = useState<string | null>(null);
@@ -142,7 +149,7 @@ export function PlanPriorityCard({
         });
       const body = res.json as { ok?: boolean; error?: string };
       if (!res.ok || !body.ok) {
-        setError(body.error ?? "Update failed");
+        setError(body.error ?? "We couldn’t confirm the priority change. Reload the plan before saving it again.");
         return;
       }
       setValue(next);
@@ -152,16 +159,18 @@ export function PlanPriorityCard({
   }
 
   function runLlm() {
+    if (pending || checkRequired) return;
     setError(null);
     setIdeateMsg(null);
     startTransition(async () => {
-      const { ok, json } = await postIdeate({
+      const { ok, json, outcome } = await postIdeate({
         workspace_id: workspaceId,
         gap_id: claimId,
         hints: [ideateTitle.trim(), ideateRationale.trim()].filter(Boolean).join(" — ") || undefined,
       });
       if (!ok) {
-        setError(json.error ?? "Ideate failed");
+        setCheckRequired(outcome === "unknown");
+        setError(json.error ?? "We couldn’t confirm the new ideas. Reload the plan to check its ideas before running this again.");
         return;
       }
       setIdeateMsg(outcomeMessage(json));
@@ -173,10 +182,11 @@ export function PlanPriorityCard({
 
   function ideateManual(event: React.FormEvent) {
     event.preventDefault();
+    if (pending || checkRequired) return;
     setError(null);
     setIdeateMsg(null);
     startTransition(async () => {
-      const { ok, json } = await postIdeate({
+      const { ok, json, outcome } = await postIdeate({
         workspace_id: workspaceId,
         gap_id: claimId,
         title: ideateTitle.trim(),
@@ -186,7 +196,8 @@ export function PlanPriorityCard({
         ...(ideateType ? { type: ideateType } : {}),
       });
       if (!ok) {
-        setError(json.error ?? "Ideate failed");
+        setCheckRequired(outcome === "unknown");
+        setError(json.error ?? "We couldn’t confirm the new ideas. Reload the plan to check its ideas before running this again.");
         return;
       }
       setIdeateMsg(outcomeMessage(json));
@@ -220,7 +231,7 @@ export function PlanPriorityCard({
           <button
             key={bandOption}
             type="button"
-            disabled={pending}
+            disabled={pending || checkRequired}
             onClick={() => save(bandOption)}
             className={`border px-2 py-1 text-[11px] capitalize ${
               value === bandOption
@@ -243,7 +254,7 @@ export function PlanPriorityCard({
               </p>
               <button
                 type="button"
-                disabled={pending}
+                disabled={pending || checkRequired}
                 onClick={runLlm}
                 className="w-fit border border-foreground bg-foreground px-3 py-1.5 text-[11px] text-background disabled:opacity-50"
               >
@@ -309,7 +320,7 @@ export function PlanPriorityCard({
           </div>
           <button
             type="submit"
-            disabled={pending || ideateTitle.trim().length < 8 || ideateRationale.trim().length < 3}
+            disabled={pending || checkRequired || ideateTitle.trim().length < 8 || ideateRationale.trim().length < 3}
             className="w-fit border border-border px-3 py-1.5 text-[11px] text-foreground disabled:opacity-50 hover:bg-muted/40"
           >
             {pending ? "Working…" : "Save manual proposal"}
@@ -321,7 +332,8 @@ export function PlanPriorityCard({
         </p>
       )}
 
-      {error ? <p className="mt-2 text-[12px] text-destructive">{error}</p> : null}
+      {checkRequired ? <button type="button" onClick={() => window.location.reload()} className="text-sm underline">Check plan ideas</button> : null}
+      {error ? <p role="alert" className="mt-2 text-sm text-destructive">{error}</p> : null}
       {ideateMsg ? <p className="mt-2 text-[12px] text-muted-foreground">{ideateMsg}</p> : null}
     </article>
   );

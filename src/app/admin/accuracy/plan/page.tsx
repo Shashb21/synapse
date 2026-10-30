@@ -43,8 +43,8 @@ export default async function AccuracyPlanPage({
       ready = workshop.readiness;
       hasSnapshot = Boolean(await latestWorkshopSnapshot(workspaceId));
     }
-  } catch (error) {
-    loadError = error instanceof Error ? error.message : "Could not load plan";
+  } catch {
+    loadError = "Could not load plan. Reload this page to try again. If this continues, contact your Synapse administrator.";
   }
 
   const unknownWorkspace = Boolean(workspaceId) && !active && !loadError;

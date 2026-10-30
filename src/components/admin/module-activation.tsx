@@ -26,12 +26,12 @@ export function ModuleActivation({
       const res = await postJson("/api/control", { action: "activate_module", stage, module_id: moduleId });
       const json = res.json as { error?: string };
       if (!res.ok) {
-        setError(json.error ?? "Could not activate that module");
+        setError(json.error ?? "We couldn’t confirm the active implementation. Refresh configuration before changing it again.");
         return;
       }
       router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? `Could not activate that module: ${err.message}` : "Could not activate that module");
+    } catch {
+      setError("We couldn’t confirm the active implementation. Refresh configuration before changing it again.");
     } finally {
       setBusy(false);
     }
@@ -59,7 +59,7 @@ export function ModuleActivation({
         </select>
       </label>
       {error ? (
-        <p role="alert" className="text-[11px] text-destructive">
+        <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
       ) : null}

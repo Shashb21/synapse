@@ -88,8 +88,8 @@ export async function POST(request: Request) {
   } catch (error) {
     const known = labRequestErrorResponse(error);
     if (known) return known;
-    const message = labErrorMessage(error, "Merge action failed");
-    const status = /^Unknown claim/.test(message) ? 404 : 400;
-    return NextResponse.json({ ok: false, error: message }, { status });
+    const message = labErrorMessage(error, "We couldn’t confirm the claim merge. Check current claims before merging again.");
+    const status = 400;
+    return NextResponse.json({ ok: false, safe_error: true, error: message }, { status });
   }
 }

@@ -47,7 +47,7 @@ test("compact source suggestions, affected gap navigation, choices and save stat
     const gate = new Promise<void>(resolve => { release = resolve; });
     await page.route("**/api/iegp", async route => {
       await gate;
-      await route.fulfill({ status: 500, json: { error: "Suggestion save failed" } });
+      await route.fulfill({ status: 500, json: { safe_error: true, request_outcome: "rejected", error: "Suggestion save failed" } });
     });
     await dialog.locator('button[type="submit"]').click();
     await expect(dialog.getByRole("button", { name: "Saving…" })).toBeDisabled();

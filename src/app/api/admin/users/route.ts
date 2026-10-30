@@ -27,7 +27,7 @@ export async function POST(request: Request) {
   const access = await ownerAccess();
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
   if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return NextResponse.json({ error: "The request body must be a JSON object.", code: "invalid_json" }, { status: 400 });
+    return NextResponse.json({ safe_error: true, request_outcome: "rejected", error: "The request body must be a JSON object.", code: "invalid_json" }, { status: 400 });
   }
   const session = await currentSession().catch(() => null);
   try {
@@ -48,9 +48,9 @@ export async function POST(request: Request) {
         meta: { code: error.code },
       });
       const status = error.code === "not_found" ? 404 : error.code === "exists" ? 409 : 400;
-      return NextResponse.json({ error: error.message, code: error.code }, { status });
+      return NextResponse.json({ safe_error: true, request_outcome: "rejected", error: error.message, code: error.code }, { status });
     }
     console.error("admin users action failed", error instanceof Error ? error.message : error);
-    return NextResponse.json({ error: "That did not work. Try again." }, { status: 500 });
+    return NextResponse.json({ safe_error: true, error: "We couldn’t confirm the account change. Reload the user list and check the account before repeating this action. For an unconfirmed password reset, check sign-in before resetting again." }, { status: 500 });
   }
 }

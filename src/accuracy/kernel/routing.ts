@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { accuracyDb, ensureAccuracySchema } from "../store/db";
 import * as t from "../store/schema";
 import { nowIso } from "@/modules/kernel/ids";
@@ -110,7 +111,7 @@ export async function setAccuracyRouteConfig(args: {
 }): Promise<AccuracyRouteConfig> {
   await ensureAccuracySchema();
   const provider = findProvider(args.provider_id);
-  if (!provider) throw new Error(`Unknown provider ${args.provider_id}`);
+  if (!provider) throw new TrustedApplicationError("Choose an available provider from the provider list.");
   const values = {
     call_kind: args.call_kind,
     agent_role: args.agent_role,
@@ -266,7 +267,7 @@ export async function setAccuracyDefaultProvider(args: {
   model?: string;
 }) {
   const provider = findProvider(args.provider_id);
-  if (!provider) throw new Error(`Unknown provider ${args.provider_id}`);
+  if (!provider) throw new TrustedApplicationError("Choose an available provider from the provider list.");
   const out: AccuracyRouteConfig[] = [];
   for (const kind of CALL_KINDS) {
     const meta = CALL_KINDS_META[kind];

@@ -56,8 +56,8 @@ export default async function AccuracyTimelinePage({
         };
       });
     }
-  } catch (error) {
-    loadError = error instanceof Error ? error.message : "Could not load timeline";
+  } catch {
+    loadError = "Could not load timeline. Reload this page to try again. If this continues, contact your Synapse administrator.";
   }
 
   const unknownWorkspace = Boolean(workspaceId) && !activeWorkspace && !loadError;

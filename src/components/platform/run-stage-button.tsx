@@ -27,6 +27,8 @@ export type StageRunResponse = {
  * workspace its page showed (KAN-62).
  */
 export type StageTarget = { endpoint: string; workspace_id?: string };
+const TASK_NAMES: Record<string, string> = { S0: "Upload sources", S1: "Read sources", S2: "Extract gaps", S3: "Extract tactics", S4: "Map evidence", S5: "Validate evidence", S6: "Propose gap splits", S7: "Review coverage", S8: "Prioritize gaps", S9: "Generate ideas", S10: "Build timeline" };
+
 export const CUSTOMER_STAGE_TARGET: StageTarget = { endpoint: "/api/modules" };
 
 /** Runs one stage through the kernel and reports what came back, inline. */
@@ -98,11 +100,11 @@ function StageButton({
         ...(target.workspace_id ? { workspace_id: target.workspace_id } : {}),
       });
     const json = res.json as StageRunResponse;
-    if (!res.ok && !json.error) json.error = `Stage run failed (HTTP ${res.status}).`;
+    if (!res.ok && !json.error) json.error = "We couldn’t confirm this action. Check the current state before repeating it.";
     const show = () => {
       setPending(false);
       setResult(
-        res.ok ? json : { code: json.code, error: json.error ?? "Stage run failed", admin_href: json.admin_href },
+        res.ok ? json : { code: json.code, error: json.error ?? "We couldn’t complete this task. Check current results before running it again.", admin_href: json.admin_href },
       );
     };
     // A good run keeps the spinner until the page has its new data, then shows both at once.
@@ -119,10 +121,10 @@ function StageButton({
         ) : (
           <Play className="size-3.5" aria-hidden />
         )}
-        {label ?? `Run ${stage}`}
+        {label ?? TASK_NAMES[stage] ?? "Run task"}
       </Button>
       {result?.error ? (
-        <p className="text-[11px] text-destructive">
+        <p role="alert" className="text-sm text-destructive">
           {result.error}
           {result.admin_href ? (
             <>

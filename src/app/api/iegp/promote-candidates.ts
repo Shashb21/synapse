@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { and, desc, eq } from "drizzle-orm";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
@@ -73,7 +74,7 @@ export async function promoteGapCandidate(args: {
     .select()
     .from(gapCandidates)
     .where(and(eq(gapCandidates.id, args.candidate_id), eq(gapCandidates.verdict, "reject")));
-  if (!row) throw new Error("Rejected gap candidate not found.");
+  if (!row) throw new TrustedApplicationError("Rejected gap candidate not found.", "not_found", 404);
   if (row.committed_gap_id) throw new Error(`Already promoted as ${row.committed_gap_id}.`);
   const domain = (args.domain || row.domain) as EvidenceDomain;
   const gapId = await createGap({
@@ -124,7 +125,7 @@ export async function promoteTacticCandidate(args: {
     .select()
     .from(tacticCandidates)
     .where(and(eq(tacticCandidates.id, args.candidate_id), eq(tacticCandidates.verdict, "reject")));
-  if (!row) throw new Error("Rejected tactic candidate not found.");
+  if (!row) throw new TrustedApplicationError("Rejected tactic candidate not found.", "not_found", 404);
   const state = await loadState();
   const source = state.sources.find((s) => s.id === row.source_id);
   const type = (args.type || row.type) as TacticType;

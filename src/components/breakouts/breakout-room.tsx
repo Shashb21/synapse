@@ -201,7 +201,7 @@ export function AddGapsDialog({
             </ul>
           </div>
         )}
-        {error ? <p role="alert" className="text-[12px] text-destructive">{error}</p> : null}
+        {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
         <DialogFooter>
           <Button disabled={pending || selected.length === 0} onClick={() => void onSubmit()}>
             {pending ? "Adding…" : `Add ${selected.length || ""} gap${selected.length === 1 ? "" : "s"}`.replace("  ", " ")}
@@ -249,7 +249,7 @@ export function EditGroupDialog({ groupId, name, note }: { groupId: string; name
             What it covers
             <input value={nextNote} onChange={(event) => setNextNote(event.target.value)} className={FIELD} />
           </label>
-          {error ? <p role="alert" className="text-[12px] text-destructive">{error}</p> : null}
+          {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
         </div>
         <DialogFooter>
           <Button

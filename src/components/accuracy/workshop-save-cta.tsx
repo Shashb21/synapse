@@ -1,5 +1,7 @@
 "use client";
 
+import { requestErrorMessage, postJson, RequestOutcomeError } from "@/lib/post-json";
+
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -21,27 +23,28 @@ export function WorkshopSaveCta({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [checkRequired, setCheckRequired] = useState(false);
+
   async function save() {
+    if (pending || checkRequired) return;
     setError(null);
     setPending(true);
     try {
-      const res = await fetch("/api/accuracy/workshop", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const res = await postJson("/api/accuracy/workshop", {
           workspace_id: workspaceId,
           note: "Save state for workshop after validate/map",
-        }),
-      });
-      const body = (await res.json()) as { ok?: boolean; error?: string };
+        }, { method: "POST" });
+      const body = res.json as { ok?: boolean; error?: string };
       if (!res.ok || !body.ok) {
-        setError(body.error ?? "Could not save workshop state");
+        setCheckRequired(res.outcome !== "rejected");
+        setError(body.error ?? "We couldn’t confirm the workshop save. Check workshop state before saving again.");
         return;
       }
       router.push(workshopHref);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save workshop state");
+      setCheckRequired(!(err instanceof RequestOutcomeError) || err.outcome === "unknown");
+      setError(requestErrorMessage(err, "Could not save workshop state. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     } finally {
       setPending(false);
     }
@@ -68,11 +71,12 @@ export function WorkshopSaveCta({
       ) : (
         <p className="mt-2 text-[12px] text-[var(--known-foreground)]">Ready to save workshop state.</p>
       )}
-      {error ? <p className="mt-2 text-[12px] text-destructive">{error}</p> : null}
+      {error ? <p role="alert" className="mt-2 text-sm text-destructive">{error}</p> : null}
       <div className="mt-3 flex flex-wrap gap-2">
-        <Button size="sm" disabled={!ready || pending} onClick={() => void save()}>
+        <Button size="sm" disabled={!ready || pending || checkRequired} onClick={() => void save()}>
           {pending ? "Saving…" : "Save state for workshop"}
         </Button>
+        {checkRequired ? <Button type="button" size="sm" variant="outline" onClick={() => window.location.reload()}>Check workshop state</Button> : null}
         {hasSnapshot ? (
           <Button size="sm" variant="outline" onClick={() => router.push(workshopHref)}>
             Enter workshop

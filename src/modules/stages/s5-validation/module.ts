@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { inRelationshipChange, withRelationshipChange, lockRelationships, requireRelationshipSnapshot } from "@/lib/iegp/relationship-change";
 import { z } from "zod";
 import { gapEditSnapshotSchema } from "@/lib/iegp/gap-edit";
@@ -95,7 +96,7 @@ export const validationModule: SynapseModule<ValidationInput, ValidationOutput> 
 
     switch (input.action) {
       case "classify": {
-        if (!input.gap_id || !input.status) throw new Error("gap_id and status are required.");
+        if (!input.gap_id || !input.status) throw new TrustedApplicationError("gap_id and status are required.");
         await overrideGapStatus({
           gap_id: input.gap_id,
           status: input.status,
@@ -110,7 +111,7 @@ export const validationModule: SynapseModule<ValidationInput, ValidationOutput> 
         break;
       }
       case "validate": {
-        if (!input.gap_id) throw new Error("gap_id is required.");
+        if (!input.gap_id) throw new TrustedApplicationError("gap_id is required.");
         await validateGap({
           gap_id: input.gap_id,
           actor_name: ctx.actor.name,
@@ -124,7 +125,7 @@ export const validationModule: SynapseModule<ValidationInput, ValidationOutput> 
         break;
       }
       case "edit_gap": {
-        if (!input.gap_id) throw new Error("gap_id is required.");
+        if (!input.gap_id) throw new TrustedApplicationError("gap_id is required.");
         await modifyGap({
           gap_id: input.gap_id,
           expected_gap: input.expected_gap,
@@ -140,7 +141,7 @@ export const validationModule: SynapseModule<ValidationInput, ValidationOutput> 
         break;
       }
       case "edit_tactic": {
-        if (!input.tactic_id) throw new Error("tactic_id is required.");
+        if (!input.tactic_id) throw new TrustedApplicationError("tactic_id is required.");
         await modifyTactic({
           tactic_id: input.tactic_id,
           name: input.name ?? tactic?.name ?? "",
@@ -157,7 +158,7 @@ export const validationModule: SynapseModule<ValidationInput, ValidationOutput> 
         break;
       }
       case "map_tactic": {
-        if (!input.gap_id || !input.tactic_id) throw new Error("gap_id and tactic_id are required.");
+        if (!input.gap_id || !input.tactic_id) throw new TrustedApplicationError("gap_id and tactic_id are required.");
         await assignTacticToGap({
           gap_id: input.gap_id,
           tactic_id: input.tactic_id,
@@ -173,7 +174,7 @@ export const validationModule: SynapseModule<ValidationInput, ValidationOutput> 
       }
       case "accept_mapping":
       case "reject_mapping": {
-        if (!input.gap_id || !input.tactic_id) throw new Error("gap_id and tactic_id are required.");
+        if (!input.gap_id || !input.tactic_id) throw new TrustedApplicationError("gap_id and tactic_id are required.");
         const apply = input.action === "accept_mapping" ? acceptMapping : rejectMapping;
         await apply({
           gap_id: input.gap_id,

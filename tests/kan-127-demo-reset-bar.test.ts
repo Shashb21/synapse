@@ -56,7 +56,7 @@ describe("Reset demo bar", () => {
   });
 
   it("a refused reset stays open and says why", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ error: "Only the workspace owner can replace its contents." }, { status: 403 })));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ safe_error: true, request_outcome: "rejected", error: "Only the workspace owner can replace its contents." }, { status: 403 })));
     act(() => root.render(createElement(DemoResetBar, { workspace: workspace("owner") })));
     await act(async () => button("Reset demo")!.click());
     const confirm = [...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent?.trim() === "Reset demo") as HTMLButtonElement;
@@ -67,7 +67,7 @@ describe("Reset demo bar", () => {
 });
 
 it("keeps the confirmed workspace and its description when props change while open", async () => {
-  const fetchMock = vi.fn().mockResolvedValue(Response.json({ error: "The selected workspace changed. Reopen the intended workspace and try again. No contents were changed.", code: "workspace_mismatch" }, { status: 409 }));
+  const fetchMock = vi.fn().mockResolvedValue(Response.json({ safe_error: true, request_outcome: "rejected", error: "The selected workspace changed. Reopen the intended workspace and try again. No contents were changed.", code: "workspace_mismatch" }, { status: 409 }));
   vi.stubGlobal("fetch", fetchMock);
   act(() => root.render(createElement(DemoResetBar, { workspace: workspace("owner") })));
   await act(async () => button("Reset demo")!.click());

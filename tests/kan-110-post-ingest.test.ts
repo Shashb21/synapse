@@ -25,8 +25,8 @@ describe("KAN-110 browser ingestion", () => {
   });
 
   it("preserves server stage failures so the form can show the correct remedy", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply({ error: "Mapping unavailable", stage: "S4" }, 502)));
-    expect(await postIngest(payload, vi.fn())).toMatchObject({ ok: false, status: 502, json: { error: "Mapping unavailable", stage: "S4" } });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply({ safe_error: true, error: "Mapping unavailable", stage: "S4" }, 502)));
+    expect(await postIngest(payload, vi.fn())).toMatchObject({ ok: false, status: 502, json: { safe_error: true, error: "Mapping unavailable", stage: "S4" } });
   });
 
   it.each([

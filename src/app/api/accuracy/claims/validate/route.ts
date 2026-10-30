@@ -48,7 +48,7 @@ export async function POST(request: Request) {
   } catch (error) {
     const known = labRequestErrorResponse(error);
     if (known) return known;
-    const message = labErrorMessage(error, "Validation failed");
-    return NextResponse.json({ error: message }, { status: 400 });
+    const message = labErrorMessage(error, "We couldn’t confirm claim validation. Check the claim’s validation status before validating it again.");
+    return NextResponse.json({ safe_error: true, error: message }, { status: 400 });
   }
 }

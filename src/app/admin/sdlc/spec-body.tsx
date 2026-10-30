@@ -42,10 +42,10 @@ function MermaidBlock({ chart, index }: { chart: string; index: number }) {
       .then(({ svg }) => {
         if (!cancelled && ref.current) ref.current.innerHTML = svg;
       })
-      .catch((error: unknown) => {
+      .catch(() => {
         if (ref.current) {
           ref.current.textContent =
-            error instanceof Error ? error.message : "Diagram failed to render.";
+            "This diagram could not be displayed. Reload this page or read the specification text below.";
         }
       });
     return () => {

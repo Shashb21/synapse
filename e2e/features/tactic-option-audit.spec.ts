@@ -24,9 +24,9 @@ test("supported accept/reject decisions, recovery, lifecycle and manual dates pe
   await accept.getByRole("button", { name: "Accept proposal", exact: true }).click();
   await expect(accept.getByRole("alert")).toContainText("rationale");
   await accept.getByLabel("Rationale (required)").fill("The comparative cohort is a feasible first option");
-  await page.route("**/api/plan", route => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "Temporary option save failure. Try again." }) }), { times: 1 });
+  await page.route("**/api/plan", route => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ safe_error: true, request_outcome: "rejected", error: "The proposal could not be accepted. Review your rationale and try again." }) }), { times: 1 });
   await accept.getByRole("button", { name: "Accept proposal", exact: true }).click();
-  await expect(accept.getByRole("alert")).toContainText("Temporary option save failure");
+  await expect(accept.getByRole("alert")).toContainText("The proposal could not be accepted. Review your rationale and try again.");
   await expect(accept.getByLabel("Rationale (required)")).toHaveValue("The comparative cohort is a feasible first option");
   await accept.getByRole("button", { name: "Accept proposal", exact: true }).click();
   await expect(accept).toBeHidden();
@@ -68,9 +68,16 @@ test("supported accept/reject decisions, recovery, lifecycle and manual dates pe
 
 test("a stale option dialog retains its original selection and reason", async ({ page, request }) => {
   page.setDefaultTimeout(15_000);
-  const pending = (await planState(request)).proposals.find(row => row.gap_id === gapId && row.status === "proposed")!;
+  // The preceding acceptance changes that gap's context. Start with a current
+  // proposal so this case isolates a concurrent proposal edit, not context review.
+  const gap = await iegpAction(request, { action: "create_gap", name: "Concurrent option review", statement: "Comparative outcomes need a separate review", domain: "economics" });
+  const reviewGapId = String(gap.id);
+  await iegpAction(request, { action: "validate_gap", gap_id: reviewGapId });
+  await validateBandHigh(request, reviewGapId, "This comparison needs an independent option decision");
+  await runStage(request, "S9", { gap_ids: [reviewGapId], per_gap: 1 });
+  const pending = (await planState(request)).proposals.find(row => row.gap_id === reviewGapId && row.status === "proposed")!;
   await page.goto("/ideation");
-  const card = page.locator("article").filter({ has: page.getByRole("heading", { name: pending.name, exact: true }) }).first();
+  const card = page.locator("article").filter({ has: page.getByRole("heading", { name: pending.name, exact: true }) }).filter({ has: page.getByRole("button", { name: `Accept ${pending.name}`, exact: true }) }).first();
   await card.getByRole("button", { name: `Accept ${pending.name}`, exact: true }).click();
   const dialog = page.getByRole("dialog", { name: `Accept ${pending.name}`, exact: true });
   await dialog.getByLabel("Decision basis").selectOption("manual");

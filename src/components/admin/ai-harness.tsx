@@ -255,7 +255,7 @@ function HarnessCard({
           </div>
 
           {error ? (
-            <p role="alert" className="text-[12px] text-destructive">
+            <p role="alert" className="text-sm text-destructive">
               {error.message}{" "}
               {error.code === "no_model" ? (
                 <Link href="/admin/control" className="text-foreground">

@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 export default async function GapsPage() {
   const state = await loadState();
-  const ai = await aiSectionEnabled("ingestion").catch(() => false);
+  const ai = await aiSectionEnabled("ingestion");
   return (
     <AppShell active="gaps">
       <PageIntro kicker="Decision objects" title="Evidence Inventory">

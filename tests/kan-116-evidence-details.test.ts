@@ -97,7 +97,7 @@ it("opens the shared evidence record before tactics, with collapsed history and 
 });
 
 it("announces failed settings saves, retains entered values, and offers retry", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({ error: "Settings failed" }) }));
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({ safe_error: true, request_outcome: "rejected", error: "Settings failed" }) }));
   act(() => root.render(createElement(GapSettingsEditor, { gapId: "GAP-001", settings: ["1L"], options: [] })));
   const input = container.querySelector("input")!;
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;

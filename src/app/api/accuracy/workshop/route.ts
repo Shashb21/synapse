@@ -28,11 +28,11 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const workspace_id = searchParams.get("workspace_id")?.trim() ?? "";
   if (!workspace_id) {
-    return NextResponse.json({ error: "workspace_id is required" }, { status: 400 });
+    return NextResponse.json({ safe_error: true, error: "workspace_id is required" }, { status: 400 });
   }
   const workspace = await getWorkspace(workspace_id);
   if (!workspace) {
-    return NextResponse.json({ error: "Unknown workspace" }, { status: 404 });
+    return NextResponse.json({ safe_error: true, error: "Unknown workspace" }, { status: 404 });
   }
   const { readiness, inventory } = await workshopReadiness(workspace_id);
   const snapshot = await latestWorkshopSnapshot(workspace_id);
@@ -73,9 +73,9 @@ export async function POST(request: Request) {
   } catch (error) {
     const known = labRequestErrorResponse(error);
     if (known) return known;
-    const message = labErrorMessage(error, "Could not save workshop state");
+    const message = labErrorMessage(error, "We couldn’t confirm the workshop snapshot. Check the workshop state before saving it again.");
     const status = /not ready|Partial|validated|No live gaps/i.test(message) ? 409 : 400;
-    return NextResponse.json({ ok: false, error: message }, { status });
+    return NextResponse.json({ ok: false, safe_error: true, error: message }, { status });
   }
 }
 
@@ -96,7 +96,7 @@ export async function PATCH(request: Request) {
   } catch (error) {
     const known = labRequestErrorResponse(error);
     if (known) return known;
-    const message = labErrorMessage(error, "Could not update workshop scene");
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    const message = labErrorMessage(error, "We couldn’t confirm the workshop scene change. Check the current workshop scene before changing it again.");
+    return NextResponse.json({ ok: false, safe_error: true, error: message }, { status: 400 });
   }
 }

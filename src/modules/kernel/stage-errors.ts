@@ -1,13 +1,6 @@
+/** Public error wording and stage metadata; unknown exceptions never reach users. */
 import { ProviderError, type ProviderErrorKind } from "@/modules/llm/provider-error";
 import type { StageId } from "./contracts";
-
-/**
- * What a customer is told when an AI step fails (KAN-68). Stage errors carry
- * the owner's remedy (switch a route in /admin/control, raise Max tokens) and
- * provider errors name the account's problem; customers never see the owner
- * console, so they get plain wording that says whether anything was saved and
- * to ask their administrator. The owner keeps the technical message.
- */
 
 /** A model that never returned a complete answer for every row a stage asked about. */
 export class IncompleteAnswerError extends Error {
@@ -25,12 +18,12 @@ const ASK_ADMIN = "Try again; if it keeps failing, contact your Synapse administ
 
 const PROVIDER_CUSTOMER_MESSAGE: Record<ProviderErrorKind, string> = {
   billing:
-    "The AI provider isn't available right now (the platform's AI account needs attention). Your work is saved; try again later or contact your Synapse administrator.",
-  auth: "The AI provider isn't available right now (the platform's AI account needs attention). Your work is saved; try again later or contact your Synapse administrator.",
-  rate_limit: "The AI provider is busy right now. Your work is saved; wait a minute and try again.",
-  unavailable: "The AI provider isn't responding right now. Your work is saved; try again in a few minutes.",
-  bad_request: `The AI provider couldn't handle this request. Your work is saved. ${ASK_ADMIN}`,
-  other: `The AI provider couldn't handle this request. Your work is saved. ${ASK_ADMIN}`,
+    "The AI provider isn't available right now (the platform's AI account needs attention). Try again later or contact your Synapse administrator.",
+  auth: "The AI provider isn't available right now (the platform's AI account needs attention). Try again later or contact your Synapse administrator.",
+  rate_limit: "The AI provider is busy right now. Wait a minute and try again.",
+  unavailable: "The AI provider isn't responding right now. Try again in a few minutes.",
+  bad_request: `The AI provider couldn't handle this request. ${ASK_ADMIN}`,
+  other: `The AI provider couldn't handle this request. ${ASK_ADMIN}`,
 };
 
 /** How each AI step is named to a customer. */
@@ -45,14 +38,6 @@ const STEP_NAME: Partial<Record<StageId, string>> = {
   S10: "The timeline",
 };
 
-/**
- * Text that only makes sense in the owner console: routes, keys, token budgets,
- * raw HTTP, and a ProviderError's message folded into another error (S1 records
- * a failed file's reason, and ingest repeats it).
- */
-const ADMIN_ONLY =
-  /\/admin\/control|switch (?:its|the \S+) route|AI & routing|max_tokens|Max tokens|_API_KEY|API key|HTTP \d{3}|did not return valid JSON|"type"\s*:\s*"error"|credit balance|rejected the request/i;
-
 // Which stage an error came out of, without touching the error itself.
 const stageOfError = new WeakMap<object, StageId>();
 
@@ -65,31 +50,40 @@ export function stageOf(error: unknown): StageId | null {
   return error && typeof error === "object" ? (stageOfError.get(error) ?? null) : null;
 }
 
-/** True when the message is meant for the owner and must be reworded for a customer. */
-export function isAdminOnlyError(error: unknown): boolean {
-  if (error instanceof ProviderError || error instanceof IncompleteAnswerError) return true;
-  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
-  return ADMIN_ONLY.test(message);
+/** An application-owned message. Only construct with fixed copy and safe domain values. */
+export class TrustedApplicationError extends Error {
+  constructor(message: string, readonly code = "invalid_request", readonly status = 400) {
+    super(message);
+    this.name = "TrustedApplicationError";
+  }
 }
 
-/**
- * The customer's message for an error, or null when its own message is already
- * fine to show (validation errors, "Nothing to ingest." and the like).
- */
-const DAILY_QUOTA_CUSTOMER_MESSAGE =
-  "The AI has reached its limit for today. Your work is saved; try again tomorrow, or contact your Synapse administrator.";
+/** Unknown failures require translation for every audience, including owners. */
+export function isAdminOnlyError(error: unknown): boolean {
+  return !(error instanceof TrustedApplicationError);
+}
 
-export function customerErrorMessage(error: unknown): string | null {
+/** Safe wording shared by the API and historical failure summaries. */
+export function customerErrorMessage(error: unknown): string {
+  if (error instanceof TrustedApplicationError) return error.message;
   if (error instanceof ProviderError) {
-    // A daily cap won't lift in a minute (KAN-70).
-    if (error.info.daily_quota) return DAILY_QUOTA_CUSTOMER_MESSAGE;
+    if (error.info.daily_quota) return "The AI has reached its limit for today. Try again tomorrow, or contact your Synapse administrator.";
     return PROVIDER_CUSTOMER_MESSAGE[error.kind];
   }
-  if (!isAdminOnlyError(error)) return null;
   const stage = stageOf(error);
-  const step = (stage && STEP_NAME[stage]) ?? "The AI step";
+  const step = (stage && STEP_NAME[stage]) ?? "This action";
   if (error instanceof IncompleteAnswerError) {
-    return `${step} couldn't finish because the AI didn't return a complete answer. Nothing was saved. ${ASK_ADMIN}`;
+    return `${step} couldn't finish because the AI didn't return a complete answer. Check the current results before trying again. ${ASK_ADMIN}`;
   }
-  return `${step} couldn't finish because of a problem with the AI. Nothing was saved. ${ASK_ADMIN}`;
+  return `${step} couldn't finish. Check the current state before trying again. If this continues, contact your Synapse administrator.`;
+}
+
+/** Owner recovery uses known classifications, never provider messages or exception text. */
+export function ownerErrorMessage(error: unknown): string {
+  if (error instanceof ProviderError) {
+    if (error.info.daily_quota) return "The AI has reached its daily limit. Try again tomorrow, or choose another connected model in AI & routing.";
+    if (error.kind === "auth") return "The AI account connection needs attention. Check the provider connection in AI & routing, then try again.";
+    if (error.kind === "billing") return "The AI account needs credit or billing attention. Check billing with the provider, then try again.";
+  }
+  return customerErrorMessage(error);
 }

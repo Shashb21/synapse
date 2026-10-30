@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import {
   asTacticLifecycle,
   deriveWorkspaceGapStatuses,
@@ -270,7 +271,7 @@ export function assignGapToTag(
     return next;
   }
   if (!next.tags.some((tag) => tag.id === tag_id)) {
-    throw new Error("Unknown facilitator tag.");
+    throw new TrustedApplicationError("Unknown facilitator tag.");
   }
   next.assignments[gap_id] = tag_id;
   return next;

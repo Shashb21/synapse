@@ -7,7 +7,10 @@ import { activitiesToSvg } from "@/accuracy/modules/gantt-project/export-svg";
 
 const mocks = vi.hoisted(() => ({ refresh: vi.fn(), post: vi.fn(), download: vi.fn(), raster: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mocks.refresh }) }));
-vi.mock("@/lib/post-json", () => ({ postJson: mocks.post }));
+vi.mock("@/lib/post-json", async importOriginal => ({
+  ...await importOriginal<typeof import("@/lib/post-json")>(),
+  postJson: mocks.post,
+}));
 vi.mock("@/components/accuracy/svg-to-png", () => ({ triggerBlobDownload: mocks.download, svgMarkupToPngBlob: mocks.raster }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const frozen = { id: "ACT-T1", tactic_id: "T1", start: "2026-01-01", end: "2026-06-01", readout: null, depends_on: [], gap_ids: [] };
@@ -105,6 +108,7 @@ describe("saved and live Gantt views", () => {
     expect(host.textContent).toContain("hash-1");
     mocks.post.mockResolvedValue({ ok: true, json: { snapshot_hash: "hash-2" } });
     await click("Save as final");
+    expect(host.textContent).toContain("Save final failed. Check the current state before trying again. If this continues, contact your Synapse administrator.");
     expect(host.textContent).not.toContain("hash-2");
     expect(host.textContent).toContain("Frozen study");
   });

@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -63,7 +64,7 @@ export async function POST(req: Request) {
     const sources = await listSourceFiles(body.workspace_id);
     const source = sources.find((row) => row.id === body.source_file_id);
     if (!source) {
-      return NextResponse.json({ ok: false, error: "Unknown source_file_id" }, { status: 404 });
+      return NextResponse.json({ ok: false, safe_error: true, error: "Unknown source_file_id" }, { status: 404 });
     }
 
     page = await prepareExtractPage({
@@ -74,7 +75,7 @@ export async function POST(req: Request) {
       continuation: body.continuation,
     });
     if (page.total === 0) {
-      return NextResponse.json({ ok: false, error: "No parse blocks for this source — upload/re-parse before extracting." }, { status: 400 });
+      return NextResponse.json({ ok: false, safe_error: true, error: "No parse blocks for this source — upload/re-parse before extracting." }, { status: 400 });
     }
     const block_ids = page.blocks.map((block) => block.id);
 
@@ -110,7 +111,7 @@ export async function POST(req: Request) {
         workspace_id: body.workspace_id,
       });
       if (result.output.workspace_id !== body.workspace_id || result.output.source_file_id !== body.source_file_id) {
-        throw new Error("Extraction returned a different workspace or source.");
+        throw new TrustedApplicationError("Extraction returned a different workspace or source.");
       }
       gaps_inserted += await saveExtractBatch({ page, kind: "need", run_id: result.run_id,
         claims: result.output.gaps.map((gap) => ({
@@ -144,7 +145,7 @@ export async function POST(req: Request) {
         workspace_id: body.workspace_id,
       });
       if (result.output.workspace_id !== body.workspace_id || result.output.source_file_id !== body.source_file_id) {
-        throw new Error("Extraction returned a different workspace or source.");
+        throw new TrustedApplicationError("Extraction returned a different workspace or source.");
       }
       tactics_inserted += await saveExtractBatch({ page, kind: "inventory", run_id: result.run_id,
         claims: result.output.tactics.map((tactic) => ({
@@ -219,11 +220,11 @@ export async function POST(req: Request) {
       }
     }
     if (error instanceof ExtractContinuationError) {
-      return NextResponse.json({ ok: false, error: error.message, code: "stale_continuation", status: "failed", restart_required: true }, { status: 409 });
+      return NextResponse.json({ ok: false, safe_error: true, error: error.message, code: "stale_continuation", status: "failed", restart_required: true }, { status: 409 });
     }
     const known = labRequestErrorResponse(error);
     if (known) return known;
-    const message = labErrorMessage(error, "Extract failed");
+    const message = labErrorMessage(error, "We couldn’t finish extracting claims. Check the source and current claims before extracting again.");
     return NextResponse.json({
       ...(page ? { ...await extractPageProgress(page), continuation: retryExtractContinuation(page) } : {}),
       ok: false, status: "failed", complete: false, error: message,

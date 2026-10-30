@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
@@ -172,15 +173,15 @@ export function parseAxesConfig(value: unknown): AxesConfig {
 }
 
 export function validateAxes(config: AxesConfig): AxesConfig {
-  if (config.axes.length < 2) throw new Error("At least two axes are required.");
+  if (config.axes.length < 2) throw new TrustedApplicationError("At least two axes are required.");
   const ids = new Set(config.axes.map((axis) => axis.id));
-  if (ids.size !== config.axes.length) throw new Error("Axis ids must be unique.");
+  if (ids.size !== config.axes.length) throw new TrustedApplicationError("Axis ids must be unique.");
   if (!ids.has(config.x_axis) || !ids.has(config.y_axis)) {
-    throw new Error("The matrix axes must reference configured axes.");
+    throw new TrustedApplicationError("The matrix axes must reference configured axes.");
   }
-  if (config.x_axis === config.y_axis) throw new Error("Pick two different axes for the matrix.");
+  if (config.x_axis === config.y_axis) throw new TrustedApplicationError("Pick two different axes for the matrix.");
   if (config.bands.high <= config.bands.medium) {
-    throw new Error("The High threshold must sit above the Medium threshold.");
+    throw new TrustedApplicationError("The High threshold must sit above the Medium threshold.");
   }
   return config;
 }
@@ -251,9 +252,9 @@ export async function saveScopeAxes(args: {
   const catalog = await loadAxes();
   const ids = new Set(catalog.axes.map((axis) => axis.id));
   if (!ids.has(args.x_axis) || !ids.has(args.y_axis)) {
-    throw new Error("Pick both axes from the list.");
+    throw new TrustedApplicationError("Pick both axes from the list.");
   }
-  if (args.x_axis === args.y_axis) throw new Error("Pick two different axes for the matrix.");
+  if (args.x_axis === args.y_axis) throw new TrustedApplicationError("Pick two different axes for the matrix.");
   const values = {
     id: scopeRowId(args.scope),
     config: { x_axis: args.x_axis, y_axis: args.y_axis },

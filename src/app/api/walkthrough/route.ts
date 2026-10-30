@@ -15,7 +15,7 @@ export async function GET(request: Request) {
     const { principal } = await requireCustomerContext({ body: { actor_name } });
     return NextResponse.json({ progress: await getWalkthrough(principal) });
   } catch (error) {
-    return apiErrorResponse(error, "Failed");
+    return apiErrorResponse(error, "We couldn’t update the walkthrough. Reload this page to check your progress before trying again.");
   }
 }
 
@@ -35,10 +35,10 @@ export async function POST(request: Request) {
     };
     const target = Object.hasOwn(next, action) ? next[action] : undefined;
     if (!target || !WALKTHROUGH_STATUSES.includes(target.status)) {
-      return NextResponse.json({ error: `Unknown action ${action}` }, { status: 400 });
+      return NextResponse.json({ safe_error: true, error: "This action is not available. Reload the page and choose an available action." }, { status: 400 });
     }
     return NextResponse.json({ progress: await saveWalkthrough(principal, target) });
   } catch (error) {
-    return apiErrorResponse(error, "Failed");
+    return apiErrorResponse(error, "We couldn’t update the walkthrough. Reload this page to check your progress before trying again.");
   }
 }

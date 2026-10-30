@@ -24,7 +24,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const workspace_id = searchParams.get("workspace_id")?.trim() ?? "";
   if (!workspace_id) {
-    return NextResponse.json({ error: "workspace_id is required" }, { status: 400 });
+    return NextResponse.json({ safe_error: true, error: "workspace_id is required" }, { status: 400 });
   }
   const claim_type = searchParams.get("claim_type")?.trim() as AccuracyClaimType | undefined;
   const claims = await listClaims(workspace_id, {
@@ -65,7 +65,7 @@ export async function POST(request: Request) {
     if (body.rationale !== undefined) {
       if (body.validated) {
         return NextResponse.json(
-          { error: "Validate a manual claim through the validation gate, not on create." },
+          { safe_error: true, error: "Validate a manual claim through the validation gate, not on create." },
           { status: 400 },
         );
       }
@@ -94,8 +94,8 @@ export async function POST(request: Request) {
   } catch (error) {
     const known = labRequestErrorResponse(error);
     if (known) return known;
-    const message = labErrorMessage(error, "Could not insert claim");
-    return NextResponse.json({ error: message }, { status: 400 });
+    const message = labErrorMessage(error, "We couldn’t confirm creation of this claim. Check current claims before creating it again.");
+    return NextResponse.json({ safe_error: true, error: message }, { status: 400 });
   }
 }
 
@@ -144,8 +144,8 @@ export async function PATCH(request: Request) {
   } catch (error) {
     const known = labRequestErrorResponse(error);
     if (known) return known;
-    const message = labErrorMessage(error, "Could not update claim");
-    const status = /^Unknown claim/.test(message) ? 404 : 400;
-    return NextResponse.json({ ok: false, error: message }, { status });
+    const message = labErrorMessage(error, "We couldn’t confirm the claim update. Check the current claim before saving it again.");
+    const status = 400;
+    return NextResponse.json({ ok: false, safe_error: true, error: message }, { status });
   }
 }

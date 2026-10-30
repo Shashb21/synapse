@@ -21,6 +21,9 @@ import { createSession, type Session } from "@/modules/auth/session";
 import { WORKSPACE_COOKIE, workspaceCookieValue } from "@/modules/workspaces/context";
 import { createWorkspace, getWorkspace, inviteMember, withWorkspace, type Workspace } from "@/modules/workspaces/store";
 import { listAuditEvents } from "@/modules/kernel/audit";
+import * as audit from "@/modules/kernel/audit";
+import { setWorkspaceDemo } from "@/modules/workspaces/store";
+import { postJson } from "@/lib/post-json";
 const unique = crypto.randomUUID();
 const owner = `kan162-${unique}@example.com`;
 let a: Workspace;
@@ -57,7 +60,7 @@ describe.each(["reset", "load_demo"])("%s fixed workspace", (action) => {
     expect(schema).not.toHaveBeenCalled();
     schema.mockRestore();
     expect(response.status).toBe(409);
-    expect(await response.json()).toEqual({ code: "workspace_mismatch", error: "The selected workspace changed. Reopen the intended workspace and try again. No contents were changed." });
+    expect(await response.json()).toEqual({ safe_error: true, request_outcome: "rejected", code: "workspace_mismatch", error: "The selected workspace changed. Reopen the intended workspace and try again. No contents were changed." });
     expect(await Promise.all([snapshot(a), snapshot(b)])).toEqual(before);
   });
   it.each([undefined, null, 123, "", [], {}])("rejects malformed target %j before writes", async (target) => {
@@ -98,5 +101,29 @@ describe.each(["reset", "load_demo"])("%s fixed workspace", (action) => {
     expect(response.status).toBe(403);
     expect(await response.json()).toMatchObject({ code: "forbidden" });
     expect(await withWorkspace(a.id, loadState)).toEqual(before);
+  });
+});
+
+
+describe.each(["reset", "load_demo"])("%s atomic replacement", (action) => {
+  it("rolls back contents and demo metadata when the required audit fails", async () => {
+    // Arrange: start with the opposite flag so the committed shared write is visible.
+    await selected(a);
+    await setWorkspaceDemo(a.id, action === "reset");
+    const before = await withWorkspace(a.id, loadState);
+    const failure = vi.spyOn(audit, "recordAuditVia").mockRejectedValueOnce(new Error("private audit failure"));
+    try {
+      // Act: fail the required audit after contents and metadata have been written.
+      const response = await withWorkspace(a.id, () => iegpPost(request({ action, expected_workspace_id: a.id, scope: "setup" })));
+      expect(response.status).toBe(400);
+      expect((await getWorkspace(a.id))?.demo).toBe(action === "reset");
+      expect(await withWorkspace(a.id, loadState)).toEqual(before);
+      vi.stubGlobal("fetch", vi.fn(async () => response));
+      // Assert: a rejected outcome is truthful only after every write rolls back.
+      expect(await postJson("/api/iegp", {})).toMatchObject({ ok: false, outcome: "rejected" });
+    } finally {
+      failure.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 });

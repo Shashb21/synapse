@@ -13,8 +13,8 @@ export const runtime = "nodejs";
 export default async function AdminOverviewPage() {
   const access = await requireOwnerPage();
   const [{ name: workspaceName, health }, ai] = await Promise.all([
-    withAdminWorkspace(async (workspace) => ({ name: workspace.name, health: await stageHealth().catch(() => []) })),
-    aiSwitch().catch(() => null),
+    withAdminWorkspace(async (workspace) => ({ name: workspace.name, health: await stageHealth() })),
+    aiSwitch(),
   ]);
   const runs = health.reduce((sum, row) => sum + row.runs, 0);
   const errors = health.reduce((sum, row) => sum + row.errors, 0);

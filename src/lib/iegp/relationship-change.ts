@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { DrizzleQueryError, eq, sql } from "drizzle-orm";
 import * as tables from "./schema";
@@ -54,7 +55,7 @@ export async function withRelationshipChange<T>(args: ChangeActor, change: () =>
       const tactic = before.tactics.find(row => row.id === args.tactic_id);
       if (!matchesSuppliedJudgementRecords(before, gapIds, args.supplied_records) ||
           !tactic || args.expected_tactic_version !== tacticEditVersion(tactic)) {
-        throw new Error("Model judgement context changed. Regenerate it or make a manual judgement with a reason.");
+        throw new TrustedApplicationError("Model judgement context changed. Regenerate it or make a manual judgement with a reason.");
       }
     }
     const result = await active.run(args, change);
@@ -74,7 +75,7 @@ export async function withRelationshipChange<T>(args: ChangeActor, change: () =>
       if (previous === next) continue;
       const reason = requireRationale(args.rationale || args.note);
       if (args.model && !inspectJudgementReferences(before, [gapId], args.references).length) {
-        throw new Error("Supporting references are missing, inaccessible or unrelated to this judgement. Make a manual judgement with a reason instead.");
+        throw new TrustedApplicationError("Supporting references are missing, inaccessible or unrelated to this judgement. Make a manual judgement with a reason instead.");
       }
       const edit = await recordEdit({ stage: "S5", entity_type: "gap_tactic", entity_id: id,
         field: args.model ? "model_relationship" : "relationship", action: "edit",
@@ -86,7 +87,7 @@ export async function withRelationshipChange<T>(args: ChangeActor, change: () =>
     }
     return result;
   }).catch(error => {
-    if (error instanceof DrizzleQueryError) throw new Error("Could not save the relationship and its history. Your input and reason have not been saved. Try again.", { cause: error.cause ?? error });
+    if (error instanceof DrizzleQueryError) throw new TrustedApplicationError("Could not save the relationship and its history. Keep your input and reason, and check the relationship before trying again.");
     throw error;
   });
 }
@@ -107,7 +108,7 @@ export function requireRelationshipSnapshot(state: IegpState, body: Record<strin
     ? { coverages: state.coverages.filter(row => row.gap_id === gapId), decisions: state.mapping_suggestions.filter(row => row.gap_id === gapId) }
     : relationshipSnapshot(state, gapId, tacticId);
   if (relationshipVersion(expected) !== relationshipVersion(current)) {
-    throw new Error("Relationship changed or its opening snapshot is missing. Your input and reason have not been saved. Reload the latest record and retry.");
+    throw new TrustedApplicationError("Relationship changed or its opening snapshot is missing. Your input and reason have not been saved. Reload the latest record and retry.");
   }
 }
 
@@ -124,6 +125,6 @@ export function inRelationshipChange(): boolean {
 /** Invoked by the resolving owner after its locks and before any mutation. */
 export function requireGapResolutionSnapshot(state: IegpState, gapId: string, expected?: string) {
   if (!expected || expected !== gapResolutionVersion(state, gapId)) {
-    throw new Error("Gap relationships or evidence scope changed, or the opening snapshot is missing. Your fields and reason have not been saved. Reload the latest record or regenerate the proposal and retry.");
+    throw new TrustedApplicationError("Gap relationships or evidence scope changed, or the opening snapshot is missing. Your fields and reason have not been saved. Reload the latest record or regenerate the proposal and retry.");
   }
 }

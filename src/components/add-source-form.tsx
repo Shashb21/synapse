@@ -209,7 +209,7 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
         )}
         {error ? (
           <div className="grid gap-2">
-            <p role="alert" className="text-[12px] text-destructive">
+            <p role="alert" className="text-sm text-destructive">
               {error}
             </p>
             {mappingFailed ? (

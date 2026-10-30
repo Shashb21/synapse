@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 
 export function FieldError({ message }: { message?: string }) {
   return message ? (
-    <span role="alert" className="text-[11px] text-destructive">
+    <span role="alert" className="text-sm text-destructive">
       {message}
     </span>
   ) : null;

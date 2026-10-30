@@ -132,7 +132,7 @@ export function CoverageManualPairForm({
             className="text-[12px]"
           />
           {error ? (
-            <p className="text-[11px] text-destructive" role="alert">
+            <p className="text-sm text-destructive" role="alert">
               {error}
             </p>
           ) : null}

@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 /** Manage accuracy workspaces and atomically delete their extraction data. */
 import { asc, desc, eq, isNull } from "drizzle-orm";
 import { accuracyDb, ensureAccuracySchema } from "./db";
@@ -73,7 +74,7 @@ export async function updateWorkspacePlanLabel(
   plan_label: PlanLabel | string | null,
 ) {
   const workspace = await getWorkspace(workspace_id);
-  if (!workspace) throw new Error(`Unknown workspace: ${workspace_id}`);
+  if (!workspace) throw new TrustedApplicationError("This workspace is no longer available. Return to the workspace list and choose an available workspace.", "not_found", 404);
   const planning_context = planningContextWithPlanLabel(workspace.planning_context, plan_label);
   await accuracyDb()
     .update(t.accuracyWorkspaces)
@@ -126,7 +127,7 @@ export async function getWorkspaceBySlug(slug: string): Promise<AccuracyWorkspac
 
 export async function archiveWorkspace(workspace_id: string) {
   const workspace = await getWorkspace(workspace_id);
-  if (!workspace) throw new Error(`Unknown workspace: ${workspace_id}`);
+  if (!workspace) throw new TrustedApplicationError("This workspace is no longer available. Return to the workspace list and choose an available workspace.", "not_found", 404);
   if (workspace.archived_at) return workspace;
   const archived_at = nowIso();
   await accuracyDb()
@@ -138,7 +139,7 @@ export async function archiveWorkspace(workspace_id: string) {
 
 export async function unarchiveWorkspace(workspace_id: string) {
   const workspace = await getWorkspace(workspace_id);
-  if (!workspace) throw new Error(`Unknown workspace: ${workspace_id}`);
+  if (!workspace) throw new TrustedApplicationError("This workspace is no longer available. Return to the workspace list and choose an available workspace.", "not_found", 404);
   await accuracyDb()
     .update(t.accuracyWorkspaces)
     .set({ archived_at: null })
@@ -158,7 +159,7 @@ export async function deleteWorkspace(workspace_id: string): Promise<{
   deleted: WorkspaceDeleteCounts;
 }> {
   const workspace = await getWorkspace(workspace_id);
-  if (!workspace) throw new Error(`Unknown workspace: ${workspace_id}`);
+  if (!workspace) throw new TrustedApplicationError("This workspace is no longer available. Return to the workspace list and choose an available workspace.", "not_found", 404);
   await ensureAccuracySchema([WORKSHOP_SNAPSHOT_DDL]);
   await ensureBatchSchema();
   return accuracyDb().transaction(async (db) => {

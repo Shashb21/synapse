@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 /** Compare retained incoming claims using the routed model and canonical source review operations. */
 import { createHash } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
@@ -36,7 +37,7 @@ function hash(value: unknown): string { return createHash("sha256").update(JSON.
 /** Exactly the same-plan current records and retained provenance used for matching. */
 async function facts(state: IegpState, sourceId: string) {
   const source = state.sources.find(s => s.id === sourceId);
-  if (!source) throw new Error("Comparison source not found in this plan.");
+  if (!source) throw new TrustedApplicationError("Comparison source not found in this plan.", "not_found", 404);
   const sorted = <T extends { id: string }>(rows: T[]) => [...rows].sort((a, b) => a.id.localeCompare(b.id));
   const gaps = sorted(state.gaps.filter(isLiveGap));
   const tactics = sorted(state.tactics.filter(t => t.review_status === "accepted"));
@@ -151,7 +152,7 @@ async function lockedCurrent(sourceId: string, version: string, expectedBasis: s
   const currentFacts = await facts(state, sourceId);
   // New references committed while acquiring owners must not introduce an unlocked evidence source.
   if (hash(currentFacts.provenance_source_ids) !== hash(selected.provenance_source_ids) || hash(currentFacts) !== expectedBasis) {
-    throw new Error("The source or plan changed during comparison. Retry against the current records.");
+    throw new TrustedApplicationError("The source or plan changed during comparison. Retry against the current records.");
   }
   return { row: saved.record, state };
 }
@@ -167,7 +168,7 @@ export async function compareSource(sourceId: string, actor: Actor): Promise<voi
     attempt = await withWorkspaceTransaction(async () => {
       await db().execute(sql`select id from sources where id = ${sourceId} for update`);
       const state = await loadState();
-      if (!state.sources.some(s => s.id === sourceId)) throw new Error("Comparison source not found in this plan.");
+      if (!state.sources.some(s => s.id === sourceId)) throw new TrustedApplicationError("Comparison source not found in this plan.", "not_found", 404);
       const old = state.source_comparisons?.find(row => row.source_id === sourceId);
       const basis_version = await basis(state, sourceId);
       const enabled = await aiSectionEnabled("ingestion");

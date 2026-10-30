@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 
 /**
  * KAN-68: a failed AI step tells a customer what happened in plain words (never
- * /admin/control or a provider's raw reply) while the owner keeps the detail; a
+ * /admin/control or a provider's raw reply) while the owner gets safe recovery; a
  * provider's HTTP failure is a typed, classified error that is not retried; and
  * customers can re-run mapping (S4) through /api/modules.
  */
@@ -32,7 +32,7 @@ import { createWorkspace, inviteMember, withWorkspace, type Workspace } from "@/
 import { anthropicClaude, openAi } from "@/modules/llm/provider";
 import { ProviderError, classifyProviderError, parseProviderErrorBody } from "@/modules/llm/provider-error";
 import { completeAll } from "@/modules/kernel/llm";
-import { IncompleteAnswerError, customerErrorMessage, tagStageError } from "@/modules/kernel/stage-errors";
+import { IncompleteAnswerError, TrustedApplicationError, customerErrorMessage, tagStageError } from "@/modules/kernel/stage-errors";
 import { completionFor, resolveRoute, setRouteConfig } from "@/modules/kernel/routing";
 import { RunRecorder } from "@/modules/kernel/observability";
 import { ensurePlatformSchema, sharedDb } from "@/modules/kernel/db";
@@ -191,7 +191,7 @@ describe("KAN-68 billing errors are not retried", () => {
   });
 });
 
-describe("KAN-68 customers get customer wording; the owner keeps the detail", () => {
+describe("KAN-68 customers and owners get safe recovery", () => {
   const S4_REMEDY = "run S4 again or switch the S4 route in /admin/control.";
   const incomplete = () => {
     const error = new IncompleteAnswerError(
@@ -214,21 +214,21 @@ describe("KAN-68 customers get customer wording; the owner keeps the detail", ()
   it("an incomplete S4 answer reads as a mapping failure to a customer", () => {
     const body = stageFailureBody(incomplete(), false);
     expect(body.error).toBe(
-      "Mapping couldn't finish because the AI didn't return a complete answer. Nothing was saved. Try again; if it keeps failing, contact your Synapse administrator.",
+      "Mapping couldn't finish because the AI didn't return a complete answer. Check the current results before trying again. Try again; if it keeps failing, contact your Synapse administrator.",
     );
     expect(body.stage).toBe("S4");
     expectCustomerSafe(body.error);
   });
 
   it("the owner sees the technical remedy", () => {
-    expect(stageFailureBody(incomplete(), true).error).toContain(S4_REMEDY);
-    expect(stageFailureBody(billing(), true).error).toContain("console.anthropic.com");
+    expect(stageFailureBody(incomplete(), true).error).toContain("complete answer");
+    expect(stageFailureBody(billing(), true).error).toContain("Check billing with the provider");
   });
 
   it("a billing failure tells a customer the AI account needs attention", () => {
     const body = stageFailureBody(billing(), false);
     expect(body.error).toBe(
-      "The AI provider isn't available right now (the platform's AI account needs attention). Your work is saved; try again later or contact your Synapse administrator.",
+      "The AI provider isn't available right now (the platform's AI account needs attention). Try again later or contact your Synapse administrator.",
     );
     expect(body).toMatchObject({ code: "provider_error", provider_error: "billing" });
     expectCustomerSafe(body.error);
@@ -248,10 +248,11 @@ describe("KAN-68 customers get customer wording; the owner keeps the detail", ()
       expectCustomerSafe(text!);
     }
     // A plain validation error is already fine to show and is left alone.
-    expect(customerErrorMessage(new Error("A title is required."))).toBeNull();
+    expect(customerErrorMessage(new TrustedApplicationError("A title is required."))).toBe("A title is required.");
   });
 
   it("a customer route's response never carries /admin/control or provider JSON", async () => {
+    const diagnostics = vi.spyOn(console, "error").mockImplementation(() => undefined);
     jar.values.set(TEST_AS_CUSTOMER_COOKIE, "customer");
     for (const error of [incomplete(), billing(), new Error(`api.anthropic.com HTTP 400: ${CREDIT_BODY}`)]) {
       for (const response of [await apiErrorResponse(error), await stageErrorResponse(error, "Stage run failed")]) {
@@ -260,19 +261,25 @@ describe("KAN-68 customers get customer wording; the owner keeps the detail", ()
         expect(response.status).toBe(error instanceof ProviderError ? 502 : 400);
       }
     }
+    expect(diagnostics).toHaveBeenCalledWith("API action failed", { category: "billing", stage: null });
+    expect(JSON.stringify(diagnostics.mock.calls)).not.toContain(CREDIT_BODY);
+    diagnostics.mockRestore();
   });
 
-  it("the owner (test-stub session) gets the detail from the same route helpers", async () => {
+  it("the owner (test-stub session) gets safe recovery from the same route helpers", async () => {
+    const diagnostics = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const json = (await (await apiErrorResponse(incomplete())).json()) as { error: string; stage?: string };
-    expect(json.error).toContain("/admin/control");
+    expect(json.error).toContain("complete answer");
     expect(json.stage).toBe("S4");
+    expect(diagnostics).toHaveBeenCalledWith("API action failed", { category: "unexpected", stage: "S4" });
+    diagnostics.mockRestore();
   });
 
   it("other errors keep their 400 and message", async () => {
     jar.values.set(TEST_AS_CUSTOMER_COOKIE, "customer");
-    const response = await apiErrorResponse(new Error("Bad input"));
+    const response = await apiErrorResponse(new TrustedApplicationError("Bad input"));
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: "Bad input" });
+    expect(await response.json()).toEqual({ safe_error: true, error: "Bad input", code: "invalid_request" });
   });
 });
 

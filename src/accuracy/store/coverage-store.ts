@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 /** Stores coverage decisions and reassigns their claim references during merges. */
 import type { AccuracyTransaction } from "./provenance-store";
 import { and, eq } from "drizzle-orm";
@@ -97,7 +98,7 @@ export async function requireCoveragePairClaims(args: {
     throw new Error(`Unknown tactic: ${args.tactic_id}`);
   }
   if (!isActiveLedgerClaim(gap) || !isActiveLedgerClaim(tactic)) {
-    throw new Error("Coverage can only be decided between active (not merged / rejected) claims.");
+    throw new TrustedApplicationError("Coverage can only be decided between active (not merged / rejected) claims.");
   }
   return { gap, tactic };
 }

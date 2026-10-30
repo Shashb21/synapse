@@ -1,3 +1,5 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
+import { customerErrorMessage } from "@/modules/kernel/stage-errors";
 /** Recoverable ingestion: each request commits at most one stage and its checkpoint. */
 import { compareParsedSources } from "@/lib/ingest/compare-source";
 import "@/modules";
@@ -57,7 +59,7 @@ async function requireLlmStages(sections: AiSections): Promise<void> {
     try {
       await resolveRoute(stage);
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
+      const reason = customerErrorMessage(error);
       throw new NoRouteError(
         `Ingest runs gap extraction (S2), tactic extraction (S3) and mapping (S4) on an LLM, and ${stage} has no connected model: ${reason}`,
       );
@@ -95,10 +97,10 @@ export async function advanceIngest(args: IngestArgs): Promise<IngestProgress> {
   const files = args.files ?? [];
   const demo_ids = args.demo_ids ?? [];
   uploadModule.inputSchema.parse({ files, demo_ids });
-  if (!args.job_id && files.length === 0 && demo_ids.length === 0) throw new Error("Nothing to ingest.");
+  if (!args.job_id && files.length === 0 && demo_ids.length === 0) throw new TrustedApplicationError("Choose a file or paste source text to import.");
   for (const file of files) {
-    if (!file.title?.trim()) throw new Error("A title is required.");
-    if (!file.content_base64 && !file.text?.trim()) throw new Error("Paste or drop the source text to ingest.");
+    if (!file.title?.trim()) throw new TrustedApplicationError("A title is required.");
+    if (!file.content_base64 && !file.text?.trim()) throw new TrustedApplicationError("Paste or drop the source text to ingest.");
   }
   // S0 identifies files by their bytes, so renaming the same upload must also
   // find its existing checkpoint rather than extracting its evidence twice.
@@ -155,7 +157,7 @@ export async function advanceIngest(args: IngestArgs): Promise<IngestProgress> {
       if (stage === "S0") {
         const upload = await run<{ files: { id: string }[] }>({ files, demo_ids, reuse_existing: true });
         state.file_ids = [...new Set(upload.output.files.map((file) => file.id))];
-        if (!state.file_ids.length) throw new Error("Nothing was ingested. Choose a non-empty file.");
+        if (!state.file_ids.length) throw new TrustedApplicationError("Nothing was ingested. Choose a non-empty file.");
       } else if (stage === "S1") {
         const existing = (await listParsedDocuments()).filter((doc) => state.file_ids.includes(doc.file_id));
         const missing = state.file_ids.filter((id) => !existing.some((doc) => doc.file_id === id));
@@ -164,11 +166,10 @@ export async function advanceIngest(args: IngestArgs): Promise<IngestProgress> {
           failures: { file_id: string; reason: string }[];
         }>({ file_ids: missing }) : null;
         if (parse?.output.failures.length) {
-          const failures = parse.output.failures.map((row) => `${row.file_id}: ${row.reason}`);
-          throw new Error(`Parsing failed: ${failures.join("; ")}`);
+          throw new TrustedApplicationError("Parsing failed. The uploaded files remain registered. Check the file format and retry parsing from this checkpoint; do not upload the files again.");
         }
         const documents = [...existing, ...(parse?.output.documents ?? [])];
-        if (!documents.length) throw new Error("Parsing produced no documents. Try again.");
+        if (!documents.length) throw new TrustedApplicationError("Parsing produced no documents. Try again.");
         state.document_ids = documents.map((doc) => doc.id);
         state.result.source_ids = documents.map((doc) => doc.source_id);
         comparisonSources = state.result.source_ids;

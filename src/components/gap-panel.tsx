@@ -1,5 +1,7 @@
 "use client";
 
+import { requestErrorMessage, RequestOutcomeError } from "@/lib/post-json";
+
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type RefObject } from "react";
 import Link from "next/link";
 import { SourceClaimReviewContent } from "./source-claim-review-content";
@@ -77,11 +79,11 @@ function GapPanelRecord({ gapId, priorityEditor, refreshVersion }: { gapId: stri
       setLoading(true);
       try {
         const response = await fetch(`/api/gaps/${encodeURIComponent(gapId)}`, { signal: controller.signal, cache: "no-store" });
-        if (!response.ok) throw new Error(response.status === 404 ? "This gap is missing or unavailable in this workspace." : response.status === 401 || response.status === 403 || response.status === 409 ? "You do not currently have access to this gap. Check your workspace or sign in again." : "Gap details could not be loaded. Try again.");
+        if (!response.ok) throw new RequestOutcomeError(response.status === 404 ? "This gap is missing or unavailable in this workspace." : response.status === 401 || response.status === 403 || response.status === 409 ? "You do not currently have access to this gap. Check your workspace or sign in again." : "Gap details could not be loaded. Try again.", "rejected", response.status);
         const body: GapRecord = await response.json();
         if (!controller.signal.aborted) setRecord(body);
       } catch (failure) {
-        if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : "Gap details could not be loaded. Try again.");
+        if (!controller.signal.aborted) setError(requestErrorMessage(failure, "Gap details could not be loaded. Try again."));
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }

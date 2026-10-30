@@ -40,7 +40,7 @@ test("source extraction continues from partial progress and retries the same fai
       await route.fulfill({ json: { ok: true, status: "partial", complete: false, block_count: 81, blocks_used: 80, blocks_processed: 80, continuation, gaps_inserted: 0, tactics_inserted: 0, stub: true } });
     } else {
       expect(body.continuation).toEqual(continuation);
-      if (calls === 2) await route.fulfill({ status: 400, json: { ok: false, status: "failed", error: "Provider unavailable. Try again.", continuation, blocks_processed: 80 } });
+      if (calls === 2) await route.fulfill({ status: 400, json: { ok: false, status: "failed", safe_error: true, error: "Provider unavailable. Try again.", continuation, blocks_processed: 80 } });
       else await route.fulfill({ json: { ok: true, status: "complete", complete: true, block_count: 81, blocks_used: 1, blocks_processed: 81, continuation: null, gaps_inserted: 1, tactics_inserted: 0, stub: true } });
     }
   });
@@ -70,9 +70,9 @@ test("source extraction retains retry state after transport and malformed JSON f
   await page.goto(workspaceUrl("/admin/accuracy/sources", seed.workspace_id));
   await page.getByRole("button", { name: "Inventory only", exact: true }).first().click();
   await expect.poll(() => calls, { message: `Extraction request must reach the route; page errors: ${pageErrors.join("; ")}` }).toBe(1);
-  await expect(page.getByRole("alert").filter({ hasText: "Extraction failed" })).toContainText("Could not reach");
+  await expect(page.getByRole("alert").filter({ hasText: "Extraction failed" })).toContainText("check the current state before trying again");
   await page.getByRole("button", { name: "Retry extraction", exact: true }).click();
-  await expect(page.getByRole("alert").filter({ hasText: "Extraction failed" })).toContainText("Extract failed");
+  await expect(page.getByRole("alert").filter({ hasText: "Extraction failed" })).toContainText("check the current state before trying again");
   await page.getByRole("button", { name: "Retry extraction", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "Extraction complete" })).toBeVisible();
 });

@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 /** Persist parsed source blocks and preserve human edits and their quoted evidence. */
 import { createHash } from "node:crypto";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
@@ -168,7 +169,7 @@ function requireKind(kind: string): ParseBlock["kind"] {
 
 function requireText(text: string | undefined | null): string {
   const trimmed = (text ?? "").trim();
-  if (!trimmed) throw new Error("Block text is required.");
+  if (!trimmed) throw new TrustedApplicationError("Block text is required.");
   return trimmed;
 }
 
@@ -582,7 +583,7 @@ export async function editParseBlock(args: {
   }
   if (args.kind !== undefined && args.kind !== block.kind) patch.kind = requireKind(args.kind);
   if (args.heading !== undefined && normHeading(args.heading) !== block.heading) patch.heading = normHeading(args.heading);
-  if (Object.keys(patch).length === 0) throw new Error("Nothing changed: the block already has these values.");
+  if (Object.keys(patch).length === 0) throw new TrustedApplicationError("Nothing changed: the block already has these values.");
 
   await db.update(t.accuracyParseBlocks).set(patch).where(eq(t.accuracyParseBlocks.id, block.id));
   await markHuman({ block, current_text: patch.text ?? block.text, actor: args.actor }, db);
@@ -708,13 +709,13 @@ export async function mergeParseBlocks(args: {
   let next: BlockRow | undefined;
   if (args.next_block_id) {
     next = await requireBlock(args.workspace_id, args.next_block_id, db);
-    if (next.source_file_id !== block.source_file_id) throw new Error("Only blocks of the same source can be merged.");
+    if (next.source_file_id !== block.source_file_id) throw new TrustedApplicationError("Only blocks of the same source can be merged.");
   } else {
     const rows = await readParseBlocks(args.workspace_id, block.source_file_id, db);
     next = rows.find((row) => row.index > block.index);
-    if (!next) throw new Error("This is the last block: there is nothing after it to merge.");
+    if (!next) throw new TrustedApplicationError("This is the last block: there is nothing after it to merge.");
   }
-  if (next.id === block.id) throw new Error("A block cannot be merged with itself.");
+  if (next.id === block.id) throw new TrustedApplicationError("A block cannot be merged with itself.");
   const deps = await dependentsFor(args.workspace_id, [block.id, next.id], db);
   const unresolved = deps.filter((dep) => dep.unresolved);
   if (unresolved.length) throw new ProvenanceConflictError(unresolved);
@@ -1107,7 +1108,7 @@ export async function createManualSource(args: {
   const blocks = args.blocks
     .map((block) => ({ ...block, text: (block.text ?? "").trim() }))
     .filter((block) => block.text);
-  if (blocks.length === 0) throw new Error("Add at least one block of text.");
+  if (blocks.length === 0) throw new TrustedApplicationError("Add at least one block of text.");
   for (const block of blocks) requireKind(block.kind ?? "prose");
   const filename = args.filename.trim() || "typed-source.txt";
   const fullText = blocks.map((block) => block.text).join("\n\n");

@@ -1,5 +1,7 @@
 /** Client helpers for the human-edit claim APIs. */
 
+import { postJson, type PostResult } from "@/lib/post-json";
+
 export const RATIONALE_MIN = 3;
 
 export function rationaleError(rationale: string): string | null {
@@ -8,31 +10,25 @@ export function rationaleError(rationale: string): string | null {
     : null;
 }
 
+/** Send a claim edit while keeping an unconfirmed write visible to its caller. */
 export async function sendJson(
   url: string,
   method: "POST" | "PATCH",
   body: Record<string, unknown>,
-): Promise<{ ok: boolean; error: string | null; json: Record<string, unknown> }> {
-  try {
-    const res = await fetch(url, {
-      method,
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-    const failed = !res.ok || json.ok === false;
-    return {
-      ok: !failed,
-      error: failed ? String(json.error ?? `Request failed (${res.status})`) : null,
-      json,
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : "Request failed",
-      json: {},
-    };
-  }
+): Promise<{ ok: boolean; error: string | null; json: Record<string, unknown>; outcome: PostResult<unknown>["outcome"] }> {
+  const result = await postJson<Record<string, unknown>>(url, body, { method });
+  const failed = !result.ok || result.json.ok === false;
+  const error = failed
+    ? result.json.safe_error === true && typeof result.json.error === "string"
+      ? result.json.error
+      : "We couldn't confirm the claim update. Check the current claim before trying again."
+    : null;
+  return {
+    ok: !failed,
+    error,
+    json: failed ? { ...result.json, error } : result.json,
+    outcome: result.ok && failed ? "unknown" : result.outcome,
+  };
 }
 
 /** Empty inputs → null so a cleared field is saved as cleared. */

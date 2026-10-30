@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     const body = await readJsonBody(request);
     const stage = String(body.stage ?? "") as StageId;
     if (!STAGE_IDS.includes(stage)) {
-      return NextResponse.json({ error: `Unknown stage ${body.stage}` }, { status: 400 });
+      return NextResponse.json({ safe_error: true, error: "Choose an available AI task and try again." }, { status: 400 });
     }
     const access = await ownerAccess();
     return await inAdminWorkspace(body, async (workspace) => {

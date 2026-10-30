@@ -50,8 +50,8 @@ export default async function AccuracyCoveragePage({
       ready = workshop.readiness;
       hasSnapshot = Boolean(await latestWorkshopSnapshot(workspaceId));
     }
-  } catch (error) {
-    loadError = error instanceof Error ? error.message : "Could not load coverage";
+  } catch {
+    loadError = "Could not load coverage. Reload this page to try again. If this continues, contact your Synapse administrator.";
   }
 
   const unknownWorkspace = Boolean(workspaceId) && !active && !loadError;

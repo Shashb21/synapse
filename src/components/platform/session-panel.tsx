@@ -164,7 +164,7 @@ export function SessionPanel({
         </form>
       ) : null}
 
-      {error ? <p role="alert" className="text-[12px] text-destructive">{error}</p> : null}
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
     </section>
   );
 }

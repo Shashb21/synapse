@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import type { z } from "zod";
 
 /**
@@ -52,7 +53,7 @@ export function fieldErrorMessage(label: string, issues: z.core.$ZodIssue[]): st
  */
 export function field<T>(schema: z.ZodType<T>, value: unknown, name: string, label = fieldLabel(name)): T {
   const parsed = schema.safeParse(value);
-  if (!parsed.success) throw new Error(fieldErrorMessage(label, parsed.error.issues));
+  if (!parsed.success) throw new TrustedApplicationError(fieldErrorMessage(label, parsed.error.issues));
   return parsed.data;
 }
 
@@ -61,7 +62,7 @@ export function optionalScore(value: unknown, label: string): number | undefined
   if (value === undefined || value === null || String(value).trim() === "") return undefined;
   const score = Number(value);
   if (!Number.isFinite(score) || score < 0 || score > 100) {
-    throw new Error(`${label} must be a number from 0 to 100.`);
+    throw new TrustedApplicationError(`${label} must be a number from 0 to 100.`);
   }
   return score;
 }
@@ -71,6 +72,6 @@ export function optionalMonths(value: unknown, name: string): number | null | un
   if (value === undefined) return undefined;
   if (value === null || String(value).trim() === "") return null;
   const months = Number(value);
-  if (!Number.isFinite(months)) throw new Error(`${fieldLabel(name)} must be a number of months.`);
+  if (!Number.isFinite(months)) throw new TrustedApplicationError(`${fieldLabel(name)} must be a number of months.`);
   return months;
 }

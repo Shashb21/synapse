@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 /**
  * Pure helpers shared by the accuracy parse store and the main-app S1 source
  * blocks for human block edits. Client-safe: no database, no LLM.
@@ -8,7 +9,7 @@ export const HUMAN_RATIONALE_MIN = 3;
 export function requireEditRationale(rationale: string | null | undefined): string {
   const trimmed = (rationale ?? "").trim();
   if (trimmed.length < HUMAN_RATIONALE_MIN) {
-    throw new Error("A short rationale (3+ characters) is required for every block edit.");
+    throw new TrustedApplicationError("A short rationale (3+ characters) is required for every block edit.");
   }
   return trimmed;
 }
@@ -45,7 +46,7 @@ export function splitAtOffset(text: string, offset: number): [string, string] {
   }
   const first = text.slice(0, offset).trim();
   const second = text.slice(offset).trim();
-  if (!first || !second) throw new Error("Both halves of a split must contain text.");
+  if (!first || !second) throw new TrustedApplicationError("Both halves of a split must contain text.");
   return [first, second];
 }
 
@@ -56,9 +57,9 @@ export function splitAtOffset(text: string, offset: number): [string, string] {
 export function resolveSplitOffset(text: string, args: { offset?: number; at_text?: string }): number {
   if (typeof args.offset === "number") return args.offset;
   const marker = (args.at_text ?? "").trim();
-  if (!marker) throw new Error("Give a split offset or the text the second block starts with.");
+  if (!marker) throw new TrustedApplicationError("Give a split offset or the text the second block starts with.");
   const at = text.indexOf(marker);
-  if (at <= 0) throw new Error("The second block's opening text was not found after the start of the block.");
+  if (at <= 0) throw new TrustedApplicationError("The second block's opening text was not found after the start of the block.", "not_found", 404);
   return at;
 }
 

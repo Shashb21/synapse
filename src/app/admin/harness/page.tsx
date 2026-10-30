@@ -3,7 +3,7 @@ import Link from "next/link";
 import { AdminMain, PageIntro } from "@/components/admin/admin-page";
 import { AiHarness } from "@/components/admin/ai-harness";
 import { requireOwnerPage } from "@/modules/auth/owner";
-import { AI_SECTIONS, noAiSections } from "@/modules/kernel/ai-sections";
+import { AI_SECTIONS } from "@/modules/kernel/ai-sections";
 import { aiSections, platformAiEnabled } from "@/modules/kernel/ai-switch";
 import { DEMO_PACK } from "@/lib/iegp/demo-pack";
 import { DOMAIN_LABELS, EVIDENCE_DOMAINS } from "@/lib/iegp/enums";
@@ -14,8 +14,8 @@ export const runtime = "nodejs";
 export default async function AiHarnessPage() {
   await requireOwnerPage();
   const [sections, aiOn] = await Promise.all([
-    aiSections().catch(() => noAiSections()),
-    platformAiEnabled().catch(() => true),
+    aiSections(),
+    platformAiEnabled(),
   ]);
   return (
     <AdminMain>

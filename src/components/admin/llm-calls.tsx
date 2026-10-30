@@ -88,7 +88,7 @@ export function LlmCallList({ calls }: { calls: LlmCallRecord[] }) {
               {call.usage?.reasoning_tokens ? ` (reasoning ${tokens(call.usage.reasoning_tokens)})` : ""} · est. cost{" "}
               {formatCost(call.cost_usd, call.cost_usd === null ? 1 : 0)}
             </p>
-            {call.error ? <p className="mt-1 text-[12px] text-destructive">{call.error}</p> : null}
+            {call.error ? <p className="mt-1 text-[12px] text-destructive">{"The AI request could not finish. Check provider availability and AI settings before running the task again."}</p> : null}
             <Text label="System prompt" value={call.system_prompt} />
             <Text label="User prompt" value={call.user_prompt} />
             <Text label="Reply" value={call.reply} />

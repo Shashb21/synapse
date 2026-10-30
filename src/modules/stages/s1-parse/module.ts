@@ -1,3 +1,4 @@
+import { customerErrorMessage } from "@/modules/kernel/stage-errors";
 import { queueSourceComparison } from "@/lib/ingest/compare-source";
 import { desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
@@ -242,7 +243,7 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
         // A provider error (billing, key, rate limit, outage) fails every file the same
         // way: stop the stage so the run fails and the cause reaches the person (KAN-68).
         if (error instanceof ProviderError) throw error;
-        const reason = error instanceof Error ? error.message : String(error);
+        const reason = customerErrorMessage(error);
         await markFileFailed({ id: file_id, note: reason });
         failures.push({ file_id, reason });
         ctx.run.note(`parse-failed:${file_id}`, { reason });

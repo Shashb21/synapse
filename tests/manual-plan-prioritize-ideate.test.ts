@@ -379,7 +379,7 @@ describe("S9 manual ideas and edits", () => {
 
     const refused = await post({ action: "edit_proposal", id: target.id, name: "Late", rationale: "Too late now" });
     expect(refused.status).toBe(400);
-    expect(String(refused.json.error)).toMatch(/already accepted/);
+    expect(String(refused.json.error)).toMatch(/already decided.*edit an accepted idea on the tactic/);
   });
 
   it("adds an idea through the plan API", async () => {

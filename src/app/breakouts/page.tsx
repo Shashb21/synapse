@@ -24,7 +24,7 @@ const PRIORITY_LABELS: Record<string, string> = {
 
 export default async function BreakoutsPage() {
   if (!BREAKOUTS_ENABLED) redirect("/");
-  const [state, placements] = await Promise.all([loadState(), listPlacements().catch(() => [])]);
+  const [state, placements] = await Promise.all([loadState(), listPlacements()]);
   const bands = new Map(placements.filter((row) => row.validated && row.band).map((row) => [row.gap_id, row.band!]));
   const groupsOf = (gapId: string) =>
     state.breakout_group_gaps.filter((row) => row.gap_id === gapId).map((row) => row.group_id);

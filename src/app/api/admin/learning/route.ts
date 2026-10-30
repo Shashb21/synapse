@@ -37,7 +37,7 @@ export async function GET(request: Request) {
         revisions: revisions.map(({ id, stage, parent_revision, instruction_text, creator, created_at, state, training_ids, heldout_ids }) => ({ id, stage, parent_revision, instruction_text, creator, created_at, state, training_count: training_ids.length, heldout_count: heldout_ids.length })),
       });
     });
-  } catch (error) { return stageErrorResponse(error, "Learning report could not load."); }
+  } catch (error) { return stageErrorResponse(error, "We couldn’t load the learning report. Reload this page to try loading it again."); }
 }
 
 /** Accept only action and stage; the server resolves actor, workspace and mandatory exclusions. */
@@ -53,5 +53,5 @@ export async function POST(request: Request) {
       const revision = await proposePromptRevision({ stage: body.stage, workspace_id: workspace.id, actor: access.actor, exclude_ids: [] });
       return NextResponse.json({ revision }, { status: 201 });
     });
-  } catch (error) { return stageErrorResponse(error, "Prompt candidate could not be created."); }
+  } catch (error) { return stageErrorResponse(error, "We couldn’t confirm the prompt revision action. Reload the learning report and check candidate, evaluation and active revision status before repeating it."); }
 }

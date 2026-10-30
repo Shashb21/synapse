@@ -1,3 +1,4 @@
+import { customerErrorMessage } from "@/modules/kernel/stage-errors";
 import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { registerAccuracyStack } from "@/accuracy";
@@ -16,12 +17,12 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const workspace_id = searchParams.get("workspace_id")?.trim() ?? "";
   if (!workspace_id) {
-    return NextResponse.json({ error: "workspace_id is required" }, { status: 400 });
+    return NextResponse.json({ safe_error: true, error: "workspace_id is required" }, { status: 400 });
   }
   try {
     return NextResponse.json(await readWorkspaceGantt(workspace_id));
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Gantt projection failed";
-    return NextResponse.json({ error: message }, { status: 400 });
+    const message = customerErrorMessage(error);
+    return NextResponse.json({ safe_error: true, error: message }, { status: 400 });
   }
 }

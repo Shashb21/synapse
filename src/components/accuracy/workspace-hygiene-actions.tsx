@@ -17,9 +17,11 @@ export function WorkspaceHygieneActions({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [checkRequired, setCheckRequired] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function run(action: HygieneAction) {
+    if (pending || checkRequired) return;
     if (action === "delete_workspace") {
       const ok = window.confirm(
         `Permanently delete “${workspaceName}”? This removes sources, parse blocks, claims, miss flags, runs, and plans. The org is removed if it has no other workspaces.`,
@@ -31,7 +33,8 @@ export function WorkspaceHygieneActions({
       const res = await postJson("/api/accuracy/hygiene", { action, workspace_id: workspaceId });
       const body = res.json as { ok?: boolean; error?: string };
       if (!res.ok || !body.ok) {
-        setError(body.error ?? "Hygiene action failed");
+        setCheckRequired(res.outcome === "unknown");
+        setError(body.error ?? "We couldn’t confirm this workspace change. Reload the workspace list before repeating it.");
         return;
       }
       router.refresh();
@@ -43,7 +46,7 @@ export function WorkspaceHygieneActions({
       {archived ? (
         <button
           type="button"
-          disabled={pending}
+          disabled={pending || checkRequired}
           onClick={() => run("unarchive_workspace")}
           className="border border-border bg-background px-2 py-1 text-[11px] text-foreground disabled:opacity-50"
         >
@@ -52,7 +55,7 @@ export function WorkspaceHygieneActions({
       ) : (
         <button
           type="button"
-          disabled={pending}
+          disabled={pending || checkRequired}
           onClick={() => run("archive_workspace")}
           className="border border-border bg-background px-2 py-1 text-[11px] text-foreground disabled:opacity-50"
         >
@@ -61,13 +64,14 @@ export function WorkspaceHygieneActions({
       )}
       <button
         type="button"
-        disabled={pending}
+        disabled={pending || checkRequired}
         onClick={() => run("delete_workspace")}
         className="border border-destructive/40 bg-background px-2 py-1 text-[11px] text-destructive disabled:opacity-50"
       >
         Delete
       </button>
-      {error ? <span className="text-[11px] text-destructive">{error}</span> : null}
+      {checkRequired ? <button type="button" className="underline text-sm" onClick={() => window.location.reload()}>Check workspace list</button> : null}
+      {error ? <span role="alert" className="text-sm text-destructive">{error}</span> : null}
     </div>
   );
 }

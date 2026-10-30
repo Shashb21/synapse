@@ -1,5 +1,7 @@
 "use client";
 
+import { requestErrorMessage } from "@/lib/post-json";
+
 import { useState } from "react";
 import { Loader2, LogIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -35,14 +37,14 @@ export function LoginPanel({
       window.location.assign(json.authorize_url ?? json.redirect ?? "/workspaces");
     } catch (err) {
       setPending(null);
-      setError(err instanceof Error ? err.message : "Sign-in failed.");
+      setError(requestErrorMessage(err, "Sign-in failed. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     }
   }
 
   return (
     <div className="grid gap-4">
       {error ? (
-        <p role="alert" data-testid="login-error" className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
+        <p role="alert" data-testid="login-error" className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </p>
       ) : null}

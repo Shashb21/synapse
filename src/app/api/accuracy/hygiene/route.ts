@@ -72,8 +72,8 @@ export async function POST(req: Request) {
   } catch (error) {
     const known = labRequestErrorResponse(error);
     if (known) return known;
-    const message = labErrorMessage(error, "Hygiene action failed");
+    const message = labErrorMessage(error, "We couldn’t confirm the workspace cleanup. Check current workspace contents before running cleanup again.");
     const status = message.startsWith("Unknown workspace") ? 404 : 400;
-    return NextResponse.json({ ok: false, error: message }, { status });
+    return NextResponse.json({ ok: false, safe_error: true, error: message }, { status });
   }
 }

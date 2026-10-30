@@ -13,7 +13,7 @@ const STAGE_LABELS: Record<string, string> = {
 // retrying uses its saved checkpoint and cannot run a second copy concurrently.
 const STEP_TIMEOUT_MS = 180_000;
 
-type ProgressReply = { job_id: string; done: boolean; stage: string | null; completed: number; total: number; code?: string; error?: string };
+type ProgressReply = { job_id: string; done: boolean; stage: string | null; completed: number; total: number; code?: string; error?: string; safe_error?: boolean };
 
 /** Advance ingestion to completion, reporting progress and preserving server errors. */
 export async function postIngest(
@@ -35,7 +35,7 @@ export async function postIngest(
         incremental: "true",
       }, { signal: requestSignal });
       if (requestSignal.aborted) return {
-        ok: false, status: 0,
+        ok: false, outcome: "unknown", status: 0,
         json: { error: signal?.aborted ? "Ingestion paused. Select the file again to continue." : "This step is taking longer than expected. Retry to continue from the last completed step; the server may still be finishing it." },
       };
       if (!res.ok) {
@@ -44,6 +44,7 @@ export async function postIngest(
           await new Promise((resolve) => setTimeout(resolve, 1_000));
           continue;
         }
+        if (res.outcome === "unknown" && res.json.safe_error !== true) return { ...res, json: { error: "Could not confirm ingestion progress. Check your connection. Retry to continue from the last completed step; earlier steps remain available." } };
         return {
           ...res,
           json: { ...(res.json && typeof res.json === "object" ? res.json : {}),
@@ -56,7 +57,7 @@ export async function postIngest(
           next.total < 2 || next.total > 5 || next.completed < completed || next.completed > next.total ||
           (job_id && next.job_id !== job_id) || (total !== undefined && next.total !== total) ||
           (next.done ? next.completed !== next.total || next.stage !== null : next.completed >= next.total || !next.stage || !STAGE_LABELS[next.stage] || next.completed <= completed)) {
-        return { ok: false, status: res.status, json: { error: "Could not confirm ingestion progress. Retry to continue from the last completed step." } };
+        return { ok: false, outcome: "unknown", status: res.status, json: { error: "Could not confirm ingestion progress. Retry to continue from the last completed step." } };
       }
       if (next.done) return res;
       job_id = next.job_id;
@@ -65,8 +66,8 @@ export async function postIngest(
       deadline = Date.now() + STEP_TIMEOUT_MS;
       onProgress(`${STAGE_LABELS[next.stage!]} (${completed + 1} of ${next.total})`);
     }
-    return { ok: false, status: 0, json: { error: "Ingestion paused. Select the file again to continue." } };
+    return { ok: false, outcome: "unknown", status: 0, json: { error: "Ingestion paused. Select the file again to continue." } };
   } catch {
-    return { ok: false, status: 0, json: { error: NETWORK_ERROR } };
+    return { ok: false, outcome: "unknown", status: 0, json: { error: NETWORK_ERROR } };
   }
 }

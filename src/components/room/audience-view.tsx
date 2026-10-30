@@ -22,6 +22,7 @@ const POLL_MS = 2500;
 export function AudienceView({ workspaceKey, initialState }: { workspaceKey: string; initialState: RoomState }) {
   const [shown, setShown] = useState<Frame>({ key: 0, href: initialState.href });
   const [pending, setPending] = useState<Frame | null>(null);
+  const [readUnavailable, setReadUnavailable] = useState(false);
   const [ended, setEnded] = useState(false);
   const revRef = useRef(initialState.rev);
   const hrefRef = useRef(initialState.href);
@@ -67,11 +68,13 @@ export function AudienceView({ workspaceKey, initialState }: { workspaceKey: str
       if (document.visibilityState !== "visible") return;
       try {
         const res = await fetch("/api/room", { cache: "no-store" });
-        if (!res.ok || stopped) return;
+        if (stopped) return;
+        if (!res.ok) { setReadUnavailable(true); return; }
         const json = (await res.json()) as { state?: RoomState };
-        if (json.state) apply(json.state);
+        if (json.state) { apply(json.state); setReadUnavailable(false); }
+        else setReadUnavailable(true);
       } catch {
-        // offline for a moment: the next poll catches up
+        if (!stopped) setReadUnavailable(true);
       }
     }, POLL_MS);
     return () => {
@@ -152,6 +155,7 @@ export function AudienceView({ workspaceKey, initialState }: { workspaceKey: str
           />
         );
       })}
+      {readUnavailable ? <p role="status" className="absolute left-3 top-3 z-10 max-w-md border border-border bg-background p-3 text-sm">The latest presentation could not load. The last slide remains visible while we reconnect. Ask the presenter to check the room if this continues.</p> : null}
       {ended ? (
         <div className="absolute inset-0 grid place-items-center bg-black text-[13px] text-white/70" data-testid="audience-ended">
           End of slide show.

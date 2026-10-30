@@ -4,7 +4,7 @@
  *
  * Customers never see the owner control panel, so they get a plain message
  * that points at their administrator and the manual path. Only the platform
- * owner gets the provider-by-provider detail and the link to /admin/control.
+ * owner gets setup recovery and the link to /admin/control.
  */
 
 export const NO_LLM_CODE = "no_llm";
@@ -15,16 +15,15 @@ export const OWNER_CONTROL_HREF = "/admin/control";
 export const NO_LLM_CUSTOMER_MESSAGE =
   "No AI model is connected. Ask your Synapse administrator to connect one, or carry on by hand.";
 
-/** The owner's version: the route detail the kernel reported, plus where to fix it. */
+/** The owner's setup recovery; untrusted route diagnostics are never displayed. */
 export function noLlmOwnerMessage(detail: string): string {
-  const text = detail.trim();
-  return text
-    ? text
-    : `No LLM provider has an API key. Set one in the server environment (status in ${OWNER_CONTROL_HREF}), then retry.`;
+  void detail;
+  return "No AI model is connected for this task. Open AI & routing, connect a provider and choose a model, then try again.";
 }
 
 export type NoLlmBody = {
   code: typeof NO_LLM_CODE;
+  safe_error: true;
   error: string;
   /** Present only for the owner. */
   admin_href?: string;
@@ -33,6 +32,6 @@ export type NoLlmBody = {
 /** The JSON body an API returns for a no-LLM failure, chosen by audience. */
 export function noLlmBody(detail: string, owner: boolean): NoLlmBody {
   return owner
-    ? { code: NO_LLM_CODE, error: noLlmOwnerMessage(detail), admin_href: OWNER_CONTROL_HREF }
-    : { code: NO_LLM_CODE, error: NO_LLM_CUSTOMER_MESSAGE };
+    ? { safe_error: true, code: NO_LLM_CODE, error: noLlmOwnerMessage(detail), admin_href: OWNER_CONTROL_HREF }
+    : { safe_error: true, code: NO_LLM_CODE, error: NO_LLM_CUSTOMER_MESSAGE };
 }

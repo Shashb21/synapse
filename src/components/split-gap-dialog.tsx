@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { DIMENSION_LABELS, type CoverageDimension } from "@/lib/iegp/enums";
 import type { PlanTactic } from "@/lib/iegp/engine";
-import { postJson } from "@/lib/post-json";
+import { postJson, requestErrorMessage } from "@/lib/post-json";
 
 
 function toggleId(list: string[], id: string): string[] {
@@ -200,7 +200,7 @@ export function SplitGapDialog({
       reset();
       setProposalNote("Proposal rejected. Fill the split in yourself or request another suggestion.");
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Could not reject the proposal.");
+      setError(requestErrorMessage(error, "Could not reject the proposal. Check the current state before trying again. If this continues, contact your Synapse administrator."));
     } finally {
       setPending(false);
     }
@@ -558,7 +558,7 @@ export function SplitGapDialog({
             </span>
           </label>
           {error ? (
-            <p role="alert" className="text-[12px] text-destructive">
+            <p role="alert" className="text-sm text-destructive">
               {error}
             </p>
           ) : null}

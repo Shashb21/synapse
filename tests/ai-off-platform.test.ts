@@ -67,7 +67,7 @@ describe("AI off: platform, pipeline, runs, control and setup", () => {
     for (const stage of ["S0", "S1", "S2", "S3", "S4", "S8", "S9"]) {
       const res = await post(stagePost, "/api/modules", { stage, input: {} });
       expect(res.status, stage).toBe(409);
-      expect(await res.json()).toEqual({ code: "ai_off", error: AI_OFF_MESSAGE });
+      expect(await res.json()).toEqual({ safe_error: true, code: "ai_off", error: AI_OFF_MESSAGE });
     }
     // Unknown stages are still a plain 400.
     expect((await post(stagePost, "/api/modules", { stage: "S99" })).status).toBe(400);
@@ -93,9 +93,9 @@ describe("AI off: platform, pipeline, runs, control and setup", () => {
       false,
     );
     expect(hidden).toBe("AI is off — add ideas by hand");
-    expect(render(createElement(RunStageButton, { stage: "S10", identity: IDENTITY }), false)).toContain("Run S10");
-    expect(render(createElement(RunStageButton, { stage: "S7", identity: IDENTITY }), false)).toContain("Run S7");
-    expect(render(createElement(RunStageButton, { stage: "S9", identity: IDENTITY }), true)).toContain("Run S9");
+    expect(render(createElement(RunStageButton, { stage: "S10", identity: IDENTITY }), false)).toContain("Build timeline");
+    expect(render(createElement(RunStageButton, { stage: "S7", identity: IDENTITY }), false)).toContain("Review coverage");
+    expect(render(createElement(RunStageButton, { stage: "S9", identity: IDENTITY }), true)).toContain("Generate ideas");
   });
 
   it("chains, upload, evals and hillclimb controls render nothing with AI off", () => {

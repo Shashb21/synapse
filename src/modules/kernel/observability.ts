@@ -1,3 +1,4 @@
+import { HISTORICAL_FAILURE_MESSAGE, projectFailureDiagnostics, projectRunSteps } from "./failure-presentation";
 import { desc, eq } from "drizzle-orm";
 import { db, ensurePlatformSchema } from "./db";
 import * as t from "./schema";
@@ -174,13 +175,13 @@ function toRecord(row: typeof t.moduleRuns.$inferSelect): RunRecord {
     finished_at: row.finished_at,
     duration_ms: row.duration_ms,
     actor: { name: row.actor_name, function: row.actor_function as Actor["function"] },
-    summary: row.summary,
-    error: row.error,
-    input: row.input,
-    output: row.output,
-    steps: (row.steps as RunStep[]) ?? [],
-    route: (row.route as ResolvedRoute | null) ?? null,
-    evals: (row.evals as EvalScore[]) ?? [],
+    summary: row.status === "error" ? HISTORICAL_FAILURE_MESSAGE : row.summary,
+    error: row.error === null ? null : HISTORICAL_FAILURE_MESSAGE,
+    input: projectFailureDiagnostics(row.input),
+    output: projectFailureDiagnostics(row.output),
+    steps: projectRunSteps((row.steps as RunStep[]) ?? [], row.status === "error"),
+    route: projectFailureDiagnostics(row.route) as ResolvedRoute | null,
+    evals: projectFailureDiagnostics(row.evals ?? []) as EvalScore[],
   };
 }
 

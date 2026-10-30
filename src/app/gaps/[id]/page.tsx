@@ -46,7 +46,6 @@ import { GapConfirmationAndObjective, GapRecordSections, NeedProvenance } from "
 import {
   buildTacticLibrary,
   relationshipFit,
-  computeGapStatus,
   coverageDimensionValues,
   liveGapsMappedToTactic,
   mappedTactics,
@@ -65,7 +64,7 @@ export default async function GapDetailPage({
   const [state, session, ai, priorityAxes] = await Promise.all([
     loadState(),
     sessionContext(),
-    aiSectionEnabled("partial_split").catch(() => false),
+    aiSectionEnabled("partial_split"),
     loadAxes(),
   ]);
   const identity: ActionIdentity = {

@@ -18,7 +18,7 @@ export default async function SourcesPage() {
   const comparisons = await listSourceComparisons();
   const [workspace, session] = await Promise.all([currentWorkspace(), currentSession()]);
   const mayClear = workspace?.role === "owner" && session && can(session.role, "reset_workspace");
-  const ai = await aiSectionEnabled("ingestion").catch(() => false);
+  const ai = await aiSectionEnabled("ingestion");
   // Demo source files are offered only in a workspace that holds the Velmara demo.
   const demo = await currentWorkspaceIsDemo();
   const blockCount = new Map<string, number>();

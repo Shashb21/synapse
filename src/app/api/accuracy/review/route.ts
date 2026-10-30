@@ -35,7 +35,7 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const workspace_id = url.searchParams.get("workspace_id")?.trim() ?? "";
     if (!workspace_id) {
-      return NextResponse.json({ ok: false, error: "workspace_id is required" }, { status: 400 });
+      return NextResponse.json({ ok: false, safe_error: true, error: "workspace_id is required" }, { status: 400 });
     }
     const aiOff = await refuseWhenAiOff();
     if (aiOff) return aiOff;
@@ -75,8 +75,8 @@ export async function GET(req: Request) {
     if (aiOff) return aiOff;
     const known = labRequestErrorResponse(error);
     if (known) return known;
-    const message = labErrorMessage(error, "Review load failed");
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    const message = labErrorMessage(error, "We couldn’t load the source review. Reload the review page. If this continues, check the workspace’s source list.");
+    return NextResponse.json({ ok: false, safe_error: true, error: message }, { status: 400 });
   }
 }
 
@@ -106,7 +106,7 @@ export async function POST(req: Request) {
     const blocks = await readParseBlocksByIds(body.workspace_id, [body.block_id]);
     const block = blocks[0];
     if (!block) {
-      return NextResponse.json({ ok: false, error: "Unknown block_id" }, { status: 400 });
+      return NextResponse.json({ ok: false, safe_error: true, error: "Unknown block_id" }, { status: 400 });
     }
 
     const actor = await labActor();
@@ -164,7 +164,7 @@ export async function POST(req: Request) {
   } catch (error) {
     const known = labRequestErrorResponse(error);
     if (known) return known;
-    const message = labErrorMessage(error, "Review action failed");
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    const message = labErrorMessage(error, "We couldn’t confirm the source review change. Check the source review before saving it again.");
+    return NextResponse.json({ ok: false, safe_error: true, error: message }, { status: 400 });
   }
 }

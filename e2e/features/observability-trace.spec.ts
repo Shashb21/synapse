@@ -73,17 +73,20 @@ test.describe("Observability and the run trace", () => {
     await expect(page.getByText(/Median duration/).first()).toBeVisible();
   });
 
-  test("records a failed run with its reason rather than losing it", async ({ page, request }) => {
+  test("records a rejected run with safe recovery guidance rather than losing its trace", async ({ page, request }) => {
     const rejected = await runStageExpectingError(request, "S4", { max_per_gap: 99 });
     expect(rejected.status).toBe(400);
 
     const state = await modulesState(request);
     const failed = state.runs.find((run) => run.stage === "S4" && run.status === "error");
     expect(failed, "a contract violation must still be traced").toBeTruthy();
-    expect(failed!.error).toMatch(/rejected its input/i);
+    const guidance = "This run could not finish. Review the workspace and AI settings before running this task again.";
+    expect(failed!.error).toBe(guidance);
+    const detail = await runRecord(request, failed!.id);
+    expect(detail).toMatchObject({ id: failed!.id, stage: "S4", status: "error", error: guidance });
 
     await page.goto(`/admin/runs/${failed!.id}`);
-    await expect(page.getByText(/rejected its input/i).first()).toBeVisible();
+    await expect(page.getByRole("alert")).toHaveText(guidance);
   });
 
   test("exposes what each stage is wired to and whether it can be scored", async ({ page, request }) => {

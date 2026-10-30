@@ -30,8 +30,8 @@ export default async function AccuracyWorkspacesPage({
   let loadError: string | null = null;
   try {
     workspaces = await listWorkspaces(undefined, { includeArchived });
-  } catch (error) {
-    loadError = error instanceof Error ? error.message : "Could not load workspaces";
+  } catch {
+    loadError = "Could not load workspaces. Reload this page to try again. If this continues, contact your Synapse administrator.";
   }
 
   const archivedCount = workspaces.filter((w) => w.archived_at).length;

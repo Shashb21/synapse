@@ -37,7 +37,7 @@ function SweepButton({
     const json = res.json as { error?: string; champion?: string };
     setBusy(false);
     if (!res.ok) {
-      setError(json.error ?? "Sweep failed");
+      setError(json.error ?? "We couldn’t confirm the run cleanup. Reload the run list before repeating it.");
       return;
     }
     setMessage(`Champion prompt: ${json.champion ?? "—"}`);
@@ -50,7 +50,7 @@ function SweepButton({
         Hillclimb {stage}
       </Button>
       {message ? <span className="text-[11px] text-muted-foreground">{message}</span> : null}
-      {error ? <span className="text-[11px] text-destructive">{error}</span> : null}
+      {error ? <span role="alert" className="text-sm text-destructive">{error}</span> : null}
     </div>
   );
 }

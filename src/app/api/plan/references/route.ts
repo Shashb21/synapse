@@ -9,7 +9,7 @@ export async function GET(request: Request) {
     await requireCustomerContext();
     const gapId = new URL(request.url).searchParams.get("gap_id") ?? "";
     const state = await loadState();
-    if (!state.gaps.some(gap => gap.id === gapId && !gap.retired)) return NextResponse.json({ error: "Gap not found" }, { status: 404 });
+    if (!state.gaps.some(gap => gap.id === gapId && !gap.retired)) return NextResponse.json({ safe_error: true, error: "Gap not found" }, { status: 404 });
     const placement = (await listPlacements()).find(row => row.gap_id === gapId);
     const references = inspectJudgementReferences(state, [gapId], placement?.suggested_references);
     return NextResponse.json({ references, version: placement?.version ?? null });

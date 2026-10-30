@@ -46,7 +46,7 @@ export async function POST(request: Request) {
         await saveRoomNote(body.slide_id, body.notes);
         return NextResponse.json({ ok: true });
       default:
-        return NextResponse.json({ error: "Unknown room op." }, { status: 400 });
+        return NextResponse.json({ safe_error: true, error: "Unknown room op." }, { status: 400 });
     }
   } catch (error) {
     return failure(error);

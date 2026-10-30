@@ -88,7 +88,7 @@ export function SourceExtractActions({
         restart_required?: boolean;
       };
       if (!res.ok || !json.ok) {
-        setError(json.error ?? "Extract failed");
+        setError(json.error ?? "We couldn’t confirm extraction. Reload the sources to check progress before continuing.");
         if (json.connect_path) setConnectPath(json.connect_path);
         if (json.restart_required) {
           setRestartRequired(true);
@@ -170,7 +170,7 @@ export function SourceExtractActions({
       </div>
       {pending ? <p role="status" className="text-[11px] text-muted-foreground">Extracting source batch…</p> : null}
       {error ? (
-        <p role="alert" className="text-[11px] text-destructive" data-testid="extract-outcome">
+        <p role="alert" className="text-sm text-destructive" data-testid="extract-outcome">
           Extraction failed. {error}
           {connectPath ? (
             <>

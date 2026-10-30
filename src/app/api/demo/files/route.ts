@@ -18,7 +18,7 @@ export async function GET(request: Request) {
     const name = new URL(request.url).searchParams.get("file");
     if (name) {
       const file = CLIENT_DEMO_PACK.find((f) => f.filename === name);
-      if (!file) return Response.json({ error: `No demo file called ${name}.` }, { status: 404 });
+      if (!file) return Response.json({ safe_error: true, error: "This demo file is not available. Choose another demo source." }, { status: 404 });
       return new Response(file.text, {
         headers: {
           "content-type": "text/plain; charset=utf-8",

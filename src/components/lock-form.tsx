@@ -218,7 +218,7 @@ export function LockForm({
             ) : null}
             {pending && progress ? <p role="status" className="text-[12px] text-muted-foreground">{progress}</p> : null}
             {error ? (
-              <p role="alert" className="text-[12px] text-destructive">
+              <p role="alert" className="text-sm text-destructive">
                 {error}
               </p>
             ) : null}

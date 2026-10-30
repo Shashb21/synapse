@@ -1,3 +1,4 @@
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 /** Cited source links and possible discrepancies; human corrections use canonical edit owners. */
 import { createHash } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
@@ -40,20 +41,20 @@ export function sourceReviewCitationCurrent(state: IegpState, review: Pick<Sourc
 /** Optimistic target token includes the actual record and affected relationship judgements. */
 export function sourceReviewTargetVersion(state: IegpState, review: Pick<SourceReview, "gap_id" | "tactic_id">, target: Target): string {
   const record = target === "gap" ? state.gaps.find(g => g.id === review.gap_id) : state.tactics.find(tactic => tactic.id === review.tactic_id);
-  if (!record) throw new Error("Correction target not found in this plan.");
+  if (!record) throw new TrustedApplicationError("Correction target not found in this plan.", "not_found", 404);
   const coverages = state.coverages.filter(c => target === "gap" ? c.gap_id === review.gap_id : c.tactic_id === review.tactic_id).sort((a, b) => a.id.localeCompare(b.id));
   const needs = target === "gap" ? state.need_gap_links.filter(l => l.gap_id === review.gap_id).map(l => state.needs.find(n => n.id === l.need_id)).sort((a, b) => (a?.id ?? "").localeCompare(b?.id ?? "")) : [];
   return hash({ record, coverages, needs });
 }
 function validateTargets(state: IegpState, args: Pick<SourceReviewInput, "gap_id" | "tactic_id" | "coverage_id">): void {
-  if (!args.gap_id && !args.tactic_id) throw new Error("Choose an affected gap or tactic in this plan.");
-  if (args.gap_id && !state.gaps.some(g => g.id === args.gap_id)) throw new Error("Affected gap not found in this plan.");
-  if (args.tactic_id && !state.tactics.some(tactic => tactic.id === args.tactic_id)) throw new Error("Affected tactic not found in this plan.");
+  if (!args.gap_id && !args.tactic_id) throw new TrustedApplicationError("Choose an affected gap or tactic in this plan.");
+  if (args.gap_id && !state.gaps.some(g => g.id === args.gap_id)) throw new TrustedApplicationError("Affected gap not found in this plan. Choose a gap from the current plan.");
+  if (args.tactic_id && !state.tactics.some(tactic => tactic.id === args.tactic_id)) throw new TrustedApplicationError("Affected tactic not found in this plan. Choose a tactic from the current plan.");
   if (args.coverage_id) {
     const coverage = state.coverages.find(c => c.id === args.coverage_id);
-    if (!coverage || !args.gap_id || !args.tactic_id || coverage.gap_id !== args.gap_id || coverage.tactic_id !== args.tactic_id) throw new Error("The affected relationship must match its gap and tactic in this plan.");
+    if (!coverage || !args.gap_id || !args.tactic_id || coverage.gap_id !== args.gap_id || coverage.tactic_id !== args.tactic_id) throw new TrustedApplicationError("The affected relationship must match its gap and tactic in this plan.");
   } else if (args.gap_id && args.tactic_id && !state.coverages.some(c => c.gap_id === args.gap_id && c.tactic_id === args.tactic_id)) {
-    throw new Error("Gap and tactic must have an affected relationship in this plan.");
+    throw new TrustedApplicationError("Gap and tactic must have an affected relationship in this plan.");
   }
 }
 async function lockTargets(args: Pick<SourceReviewInput, "source_id" | "gap_id" | "tactic_id">): Promise<void> {
@@ -69,7 +70,7 @@ async function createReview(kind: SourceReview["kind"], args: SourceReviewInput)
   await ensureSchema();
   return withWorkspaceTransaction(async () => {
     const rationale = requireRationale(args.rationale);
-    if (args.origin !== "human" && args.origin !== "ai") throw new Error("Source review origin is required.");
+    if (args.origin !== "human" && args.origin !== "ai") throw new TrustedApplicationError("Source review origin is required.");
     // Source review and S4 share this lock before taking source/tactic owners.
     await lockRelationships();
     const selected = await loadState();
@@ -80,7 +81,7 @@ async function createReview(kind: SourceReview["kind"], args: SourceReviewInput)
     await lockTargets(args);
     const state = await loadState();
     validateTargets(state, args);
-    if (!args.passage || !sourceReviewCitationCurrent(state, args)) throw new Error("Cite an actual passage in the retained source block in this plan.");
+    if (!args.passage || !sourceReviewCitationCurrent(state, args)) throw new TrustedApplicationError("Cite an actual passage in the retained source block in this plan.");
     const passage = args.passage.trim();
     const id = `SRCREVIEW-${hash({ kind, source: args.source_id, block: args.block_id, passage: normalize(passage), gap: args.gap_id || null, tactic: args.tactic_id || null, coverage: args.coverage_id || null, claim: kind === "discrepancy" ? normalize(rationale) : null })}`;
     const row: SourceReview = { id, version: newId("review"), kind, origin: args.origin, source_id: args.source_id,
@@ -108,35 +109,35 @@ export async function resolveSourceDiscrepancy(args: ActorArgs & {
   await withWorkspaceTransaction(async () => {
     const rationale = requireRationale(args.rationale);
     const initial = (await db().select().from(t.sourceReviews).where(eq(t.sourceReviews.id, args.review_id)))[0]?.record;
-    if (!initial) throw new Error("Source review not found in this plan.");
+    if (!initial) throw new TrustedApplicationError("Source review not found in this plan. Refresh the source review list.");
     await lockRelationships();
     await lockObjectiveContext();
     await lockTargets(initial);
     const current = (await db().select().from(t.sourceReviews).where(eq(t.sourceReviews.id, args.review_id)).for("update"))[0];
-    if (!current || !args.expected_version || current.version !== args.expected_version || current.record.status !== "pending") throw new Error("Source review changed; refresh before deciding.");
+    if (!current || !args.expected_version || current.version !== args.expected_version || current.record.status !== "pending") throw new TrustedApplicationError("Source review changed; refresh before deciding.");
     const row = current.record;
     const state = await loadState();
     validateTargets(state, row);
-    if (args.decision !== "accept" && args.decision !== "dismiss") throw new Error("Choose accept or dismiss.");
+    if (args.decision !== "accept" && args.decision !== "dismiss") throw new TrustedApplicationError("Choose accept or dismiss.");
     let correction: SourceReview["history"][number]["correction"];
     if (args.decision === "accept") {
-      if (!args.reviewed_change) throw new Error("Explicitly review the underlying correction before accepting.");
-      if (!sourceReviewCitationCurrent(state, row)) throw new Error("The cited source passage changed; inspect the saved citation and create a current finding before accepting.");
+      if (!args.reviewed_change) throw new TrustedApplicationError("Explicitly review the underlying correction before accepting.");
+      if (!sourceReviewCitationCurrent(state, row)) throw new TrustedApplicationError("The cited source passage changed; inspect the saved citation and create a current finding before accepting.");
       const target = args.correction_target;
-      if (target !== "gap" && target !== "tactic") throw new Error("Choose a gap or tactic correction.");
-      if (!args.expected_target_version || sourceReviewTargetVersion(state, row, target) !== args.expected_target_version) throw new Error("Correction target changed; refresh before reviewing.");
+      if (target !== "gap" && target !== "tactic") throw new TrustedApplicationError("Choose a gap or tactic correction.");
+      if (!args.expected_target_version || sourceReviewTargetVersion(state, row, target) !== args.expected_target_version) throw new TrustedApplicationError("Correction target changed; refresh before reviewing.");
       const field = args.correction_field;
-      if (!field || !(SOURCE_CORRECTION_FIELDS[target] as readonly string[]).includes(field) || typeof args.correction_value !== "string" || !args.correction_value.trim()) throw new Error("Choose a supported substantive correction field and value.");
+      if (!field || !(SOURCE_CORRECTION_FIELDS[target] as readonly string[]).includes(field) || typeof args.correction_value !== "string" || !args.correction_value.trim()) throw new TrustedApplicationError("Choose a supported substantive correction field and value.");
       const record = target === "gap" ? state.gaps.find(g => g.id === row.gap_id)! : state.tactics.find(tactic => tactic.id === row.tactic_id)!;
       correction = { target, field, before: String((record as unknown as Record<string, unknown>)[field] ?? ""), value: args.correction_value.trim() };
-      if (correction.before === correction.value) throw new Error("Review an actual underlying change before accepting.");
+      if (correction.before === correction.value) throw new TrustedApplicationError("Review an actual underlying change before accepting.");
       if (target === "gap") await modifyGap({ gap_id: row.gap_id!, expected_gap: gapEditSnapshot(state.gaps.find(gap => gap.id === row.gap_id)!), [field]: correction.value, rationale, actor_name: args.actor_name, actor_function: args.actor_function });
       else await modifyTactic({ tactic_id: row.tactic_id!, expected_tactic: tacticEditVersion(state.tactics.find(tactic => tactic.id === row.tactic_id)!), fields: { [field as TacticEditField]: correction.value }, rationale, actor_name: args.actor_name, actor_function: args.actor_function });
     }
     const updated: SourceReview = { ...row, version: newId("review"), status: args.decision === "accept" ? "accepted" : "dismissed",
       history: [...row.history, { decision: args.decision, rationale, at: nowIso(), actor: { name: args.actor_name, function: args.actor_function }, ...(correction ? { correction } : {}) }] };
     const written = await db().update(t.sourceReviews).set({ version: updated.version, record: updated }).where(and(eq(t.sourceReviews.id, row.id), eq(t.sourceReviews.version, args.expected_version))).returning();
-    if (!written.length) throw new Error("Source review changed; refresh before deciding.");
+    if (!written.length) throw new TrustedApplicationError("Source review changed; refresh before deciding.");
     await recordDecision(updated, args, args.decision === "accept" ? "accept" : "reject", JSON.stringify(row), rationale);
   });
 }

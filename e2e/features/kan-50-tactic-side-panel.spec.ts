@@ -167,7 +167,7 @@ test.describe("tactic side panel", () => {
     await page.route("**/api/iegp", async route => {
       if (route.request().method() === "POST" && route.request().postDataJSON().action === "modify_tactic") {
         bodies.push(route.request().postDataJSON());
-        if (bodies.length === 1) return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "Save failed; retry the same draft" }) });
+        if (bodies.length === 1) return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ safe_error: true, request_outcome: "rejected", error: "Save failed; retry the same draft" }) });
       }
       await route.continue();
     });
@@ -309,7 +309,8 @@ test.describe("tactic side panel", () => {
       await expect(page).toHaveURL(new RegExp(href!));
       expect(prompts).toEqual(["confirm", "confirm"]);
       finishSave();
-      await expect(form.getByRole("alert")).toContainText("Navigation guard save failure");
+      await expect(form.getByRole("alert")).toContainText("Check the current state before trying again");
+      await expect(form.getByRole("alert")).not.toContainText("Navigation guard save failure");
       await expect(reason).toHaveValue("Keep this full-record budget and reason");
     } finally { finishSave(); await page.unroute("**/api/iegp"); }
     page.removeAllListeners("dialog");
