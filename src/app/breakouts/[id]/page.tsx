@@ -13,7 +13,6 @@ import {
 import { DOMAIN_LABELS } from "@/lib/iegp/enums";
 import { buildPlanWorkspace } from "@/lib/iegp/engine";
 import { loadState } from "@/lib/iegp/store";
-import { capabilitiesOf } from "@/modules/auth/roles";
 import { loginOptions, sessionContext } from "@/modules/auth/session";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 
@@ -89,7 +88,7 @@ export default async function BreakoutRoomPage({
           signedIn={session.signed_in}
           demo={session.demo}
           providers={loginOptions().providers}
-          capabilities={capabilitiesOf(session.role)}
+          demoSession={session.session?.provider_id === "demo"}
         />
       </div>
     </AppShell>
