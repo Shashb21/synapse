@@ -41,6 +41,8 @@ export type LlmUsage = {
 /** Optional observers of one call. The reply is still returned as plain text. */
 export type LlmCallHooks = {
   onUsage?: (usage: LlmUsage) => void;
+  /** Per-call HTTP bound; omitted preserves ordinary provider retry policy. */
+  maxAttempts?: number;
 };
 
 /** The provider's API key, read on the server and sent only to that provider. */
@@ -104,7 +106,7 @@ function requestedWait(res: Response, text: string): number | null {
   return delay ? Number(delay[1]) * 1_000 : null;
 }
 
-async function postJson(url: string, headers: Record<string, string>, body: unknown, target: CallTarget) {
+async function postJson(url: string, headers: Record<string, string>, body: unknown, target: CallTarget, maxAttempts = RETRY.attempts) {
   for (let attempt = 1; ; attempt += 1) {
     // Time-limited (SYNAPSE_LLM_TIMEOUT_MS); a timeout is "unavailable" and not retried (KAN-20).
     const { res, text } = await fetchProvider(
@@ -130,7 +132,7 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
     // body for a model it serves; a real "model not found" always carries an error body.
     const transient =
       (error.kind === "rate_limit" && !error.info.daily_quota) || res.status === 503 || (res.status === 404 && !text.trim());
-    if (!transient || attempt >= RETRY.attempts) throw error;
+    if (!transient || attempt >= maxAttempts) throw error;
     const wait = requestedWait(res, text) ?? RETRY.base_ms * 2 ** (attempt - 1);
     await RETRY.sleep(Math.min(wait, RETRY.max_wait_ms));
   }
@@ -251,6 +253,7 @@ async function chatCompletions(args: {
       ...(args.json ? { response_format: { type: "json_object" } } : {}),
     },
     { ...args.target, api_key: args.auth.api_key },
+    args.hooks?.maxAttempts,
   );
   reportUsage(payload, args.hooks);
   return chatText(payload, { ...args.target, api_key: args.auth.api_key });
@@ -374,6 +377,7 @@ export const anthropicClaude: LlmProvider = {
         messages: [{ role: "user", content: request.user }],
       },
       { provider_id: "anthropic-claude", provider_name: "Anthropic", key_env: "ANTHROPIC_API_KEY", api_key: auth.api_key },
+      hooks?.maxAttempts,
     );
     reportUsage(payload, hooks);
     return anthropicText(payload);
@@ -424,6 +428,7 @@ export const googleGemini: LlmProvider = {
         },
       },
       { provider_id: "google-gemini", provider_name: "Google Gemini", key_env: "GEMINI_API_KEY", api_key: auth.api_key },
+      hooks?.maxAttempts,
     );
     reportUsage(payload, hooks);
     return geminiText(payload);

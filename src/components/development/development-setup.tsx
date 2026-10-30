@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { DevelopmentExecution } from "@/components/development/development-execution";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MAX_UPLOAD_BYTES, UPLOAD_ACCEPT } from "@/lib/ingest/upload-formats";
@@ -597,6 +598,7 @@ export function DevelopmentSetup() {
                 Upload structured reference
               </Button>
             </fieldset>
+            <DevelopmentExecution draft={draft} disabled={busy || stale || dirty} />
             <section
               aria-label="Saved documents"
               className="border-t border-border pt-5"

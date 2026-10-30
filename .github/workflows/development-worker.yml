@@ -1,0 +1,39 @@
+name: Development execution worker
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: development-execution-worker
+  cancel-in-progress: false
+jobs:
+  deliver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      WORKER_URL: ${{ secrets.DEVELOPMENT_WORKER_URL }}
+      WORKER_SECRET: ${{ secrets.DEVELOPMENT_WORKER_SECRET }}
+    steps:
+      - name: Deliver bounded authenticated worker invocations
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$WORKER_URL" || -z "$WORKER_SECRET" ]]; then
+            echo "Development worker is not configured; no executions delivered."
+            exit 0
+          fi
+          if [[ ! "$WORKER_URL" =~ ^https://[^/?\#]+/api/internal/development-worker$ ]]; then
+            echo "DEVELOPMENT_WORKER_URL must be the full HTTPS worker endpoint."
+            exit 1
+          fi
+          # No HTTP retries: database claims govern repeated delivery, including uncertain responses.
+          for iteration in {1..8}; do
+            reply=$(curl --silent --show-error --fail --max-time 190 \
+              --request POST --header "Authorization: Bearer $WORKER_SECRET" \
+              --header 'Content-Type: application/json' --data '{}' "$WORKER_URL")
+            if [[ "$(jq -r '.processed' <<< "$reply")" == "false" ]]; then
+              echo "No claimable Development work."
+              break
+            fi
+          done
