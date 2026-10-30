@@ -1,7 +1,8 @@
 /** Versioned rubric drafts and independent evaluations of exact saved generation outputs. */
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RouteFields, routeSelectClass } from "./development-route-fields";
@@ -96,8 +97,26 @@ function ratioText(measure: RatioMeasure): string {
   return measure.value === null ? `unscored (${measure.numerator}/${measure.denominator})` : `${measure.numerator}/${measure.denominator} (${(measure.value * 100).toFixed(1)}%)`;
 }
 
+// Presentation validation rejects missing legacy evidence rather than filling invented scores.
+const ratioView = z.object({ numerator: z.number().finite(), denominator: z.number().finite(), value: z.number().finite().nullable() });
+const evaluationView = z.object({
+  status: z.string(), error: z.string().nullable(),
+  manifest: z.object({ section: z.string(), execution_id: z.string(), attempt_id: z.string(), output_id: z.string(), profile: z.object({ id: z.string(), name: z.string(), version: z.number() }),
+    config: z.object({ sections: z.record(z.string(), z.object({ method: z.string(), route: z.object({ provider_id: z.string(), model: z.string() }) })) }),
+    route: z.object({ actual: z.object({ provider_id: z.string(), model: z.string(), reason: z.string().nullable().optional() }) }).nullable(),
+    criteria: z.array(z.object({ id: z.string(), name: z.string() })),
+    sources: z.array(z.object({ id: z.string(), filename: z.string(), review_status: z.string(), compatibility: z.string(), sha256: z.string(), parsed_sha256: z.string().nullable() })),
+    references: z.array(z.object({ id: z.string(), filename: z.string(), review_status: z.string(), compatibility: z.string(), sha256: z.string(), parsed_sha256: z.string().nullable() })),
+  }),
+  result: z.object({ checks: z.object({ passed: z.boolean(), items: z.array(z.object({ id: z.string(), passed: z.boolean(), detail: z.string() })) }),
+    rubric: z.object({ score: z.number().finite(), criteria: z.array(z.object({ criterion_id: z.string(), score: z.number().finite(), reason: z.string(), threshold_met: z.boolean().nullable() })) }).nullable(),
+    reference: z.object({ status: z.string(), reasons: z.array(z.string()), precision: ratioView, recall: ratioView, matches: z.array(z.object({ output_id: z.string(), reference_id: z.string(), reason: z.string() })), unmatched_output_ids: z.array(z.string()), unmatched_reference_ids: z.array(z.string()) }),
+  }).nullable(),
+});
+
 /** Render frozen evidence and the three independent result categories. */
-function EvaluationDetail({ evaluation }: { evaluation: Evaluation }) {
+export function EvaluationDetail({ evaluation }: { evaluation: Evaluation }) {
+  if (!evaluationView.safeParse(evaluation).success || !evaluation.manifest.config.sections[evaluation.manifest.section]) return <div className="space-y-2"><p>Evaluation evidence unavailable: incomplete or malformed saved metadata.</p><details><summary>Retained evaluation content</summary><pre className="whitespace-pre-wrap break-words text-xs">{JSON.stringify(evaluation, null, 2)}</pre></details></div>;
   const { manifest, result } = evaluation;
   const settings = manifest.config.sections[manifest.section];
   return <div className="min-w-0 space-y-3 break-words" aria-live="polite">
@@ -293,7 +312,7 @@ export function DevelopmentEvaluation({ draft, execution, providers, disabled, o
   /** Queue an exact persisted output binding; this action never invokes generation. */
   async function evaluate() {
     const signal = lifetime.current?.signal;
-    if (!execution || !attempt?.result || !profile || !signal || signal.aborted || locked || dirty || !delivery?.available || activeForOutput || requestForOutput) return;
+    if (!execution || !attempt?.result || !profile || !signal || signal.aborted || locked || dirty || !delivery?.available || activeForOutput || requestForOutput || attempt.status === "not_applicable") return;
     const input = startEvaluationSchema.safeParse({ execution_id: execution.id, attempt_id: attempt.id, output_id: attempt.result.output_id, section: attempt.section, profile_id: profile.id, profile_version: profile.version, reference_ids: references, config });
     if (!input.success) { setError(input.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")); return; }
     const submission: QueueRequest = { executionId: execution.id, attemptId: attempt.id, outputId: attempt.result.output_id, previousIds: history.map((item) => item.id), interrupted: false };
@@ -373,7 +392,8 @@ export function DevelopmentEvaluation({ draft, execution, providers, disabled, o
           {dirty && <p>Save or discard profile draft changes before evaluating.</p>}
           {activeForOutput && <p>An evaluation of this output is still active. Inspect its progress before requesting another.</p>}
           {requestForOutput?.interrupted && <p role="status">The queue request for this output has an uncertain outcome. It remains locked until saved history contains its evaluation. Reload evaluation data to check again; an empty history response does not confirm cancellation.</p>}
-          <Button disabled={dirty || !delivery?.available || activeForOutput || !!requestForOutput} onClick={() => void evaluate()}>{hasEvaluation ? "Re-evaluate saved output" : "Evaluate saved output"}</Button>
+          {attempt.status === "not_applicable" && <p>Not applicable: no eligible partial gap. Evaluation is disabled; no quality score is assigned.</p>}
+          <Button disabled={dirty || !delivery?.available || activeForOutput || !!requestForOutput || attempt.status === "not_applicable"} onClick={() => void evaluate()}>{hasEvaluation ? "Re-evaluate saved output" : "Evaluate saved output"}</Button>
         </>}
       </fieldset>
     </>}

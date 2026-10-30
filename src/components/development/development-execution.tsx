@@ -4,6 +4,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { RouteFields } from "./development-route-fields";
+import { CallEvidence, DevelopmentResults } from "./development-results";
+import { DevelopmentComparison } from "./development-comparison";
+import { executionConfigSchema } from "@/modules/development/execution-schema";
 import { DevelopmentEvaluation } from "./development-evaluation";
 import type { Experiment, DevelopmentSection } from "@/modules/development/schema";
 import type { ExecutionConfig, ExecutionRoute } from "@/modules/development/execution-schema";
@@ -25,7 +28,7 @@ function ExecutionDetail({ execution, metadata }: { execution: Execution; metada
   return <div className="space-y-3 break-words" aria-live="polite">
     <p>Generation: {execution.generation_status} · {terminal}/{execution.sections.length} sections finished</p>
     <p>Evaluations appear under their associated attempts.</p>
-    <p>Mode: {execution.manifest.config.mode === "standard" ? "Standard" : "Single pass"} · Revision {execution.manifest.revision}</p>
+    <p>Mode: {execution.manifest.config?.mode === "standard" ? "Standard" : execution.manifest.config?.mode === "single_pass" ? "Single pass" : "unavailable"} · Revision {execution.manifest.revision}</p>
 
     <p>Execution ID: {execution.id} · Created: {execution.created_at} · Updated: {execution.updated_at}</p>
     <details><summary className="cursor-pointer">Provenance and retry policy</summary><div className="space-y-2 pt-2">
@@ -42,9 +45,9 @@ function ExecutionDetail({ execution, metadata }: { execution: Execution; metada
       <p>Prerequisite attempts: {Object.entries(item.prerequisites ?? {}).map(([name, id]) => `${labels[name as DevelopmentSection] ?? name}: ${id}`).join(", ") || "none"}</p>
       {metadata[item.id] ? <p>Generation freshness: {metadata[item.id].freshness.current ? "current" : "outdated"}{metadata[item.id].freshness.reasons.length ? ` · ${metadata[item.id].freshness.reasons.join(", ")}` : ""}</p> : <p>Generation freshness: unavailable</p>}
       {metadata[item.id]?.evaluations.length ? metadata[item.id].evaluations.map((evaluation) => <p key={evaluation.id}>Evaluation: {evaluation.status} · {evaluation.freshness}{evaluation.reasons.length ? ` · ${evaluation.reasons.join(", ")}` : ""} · Profile: {evaluation.profile_id}{evaluation.profile_version ? `@${evaluation.profile_version}` : ""} · Evaluation ID: {evaluation.id} · Output: {evaluation.output_id} · Evaluator: {evaluation.evaluator_identity} · References: {evaluation.reference_ids.join(", ") || "none"} ({evaluation.reference_identity})</p>) : <p>Evaluation: {metadata[item.id] ? "unscored / not requested" : "unavailable"}</p>}
-      {item.result && <><p>Generated output: unreviewed{item.result.reason ? ` · ${item.result.reason}` : ""}</p><details><summary className="cursor-pointer">View generated output</summary><div className="space-y-2 pt-2"><p>Unreviewed candidates</p>{item.result.candidates.length ? <pre className="overflow-x-auto whitespace-pre-wrap break-words text-xs">{JSON.stringify(item.result.candidates, null, 2)}</pre> : <p>No unreviewed candidates.</p>}<p>Original stage output</p><pre className="overflow-x-auto whitespace-pre-wrap break-words text-xs">{JSON.stringify(item.result.output, null, 2)}</pre></div></details></>}
-      {Object.entries(execution.manifest.routes[item.section] ?? {}).map(([role, route]) => route && <p key={role} className="text-muted-foreground">{role}: requested {route.requested.provider_id} / {route.requested.model}, temperature {route.requested.temperature}, max tokens {route.requested.max_tokens}, fallbacks {route.requested.fallbacks.join(", ") || "none"}; actual {route.actual.provider_id} / {route.actual.model}, temperature {route.actual_temperature ?? "not sent"}{route.actual.reason ? ` · ${route.actual.reason}` : ""}</p>)}
-      {execution.calls.filter((call) => call.section_id === item.id).map((call) => <details key={call.id}><summary className="cursor-pointer">Call {call.ordinal}: {call.status}</summary><div className="space-y-1 pt-2 break-words"><p>Role: {call.request?.role ?? "unknown"} · Purpose: {call.request?.purpose ?? "unknown"} · Trace: {call.identity ?? call.id} · LLM call ID: {call.receipt?.llm_call_id ?? "unknown"}</p><p>Sent: {call.sending_at ?? "unknown"} · Settled: {call.settled_at ?? "unknown"}</p><p>Cost: {call.receipt?.cost_usd ?? call.failure_accounting?.cost_usd ?? "unknown"} · Price source: {call.receipt?.price_source ?? call.failure_accounting?.price_source ?? "unknown"}</p><p>Usage: {JSON.stringify(call.receipt?.usage ?? call.failure_accounting?.usage ?? "unknown")}</p><p>Frozen call route: {call.route ? JSON.stringify(call.route) : "unknown"}</p>{call.error && <p>{call.error}</p>}<pre className="overflow-x-auto whitespace-pre-wrap break-words text-xs">{call.receipt?.text ?? "No response recorded."}</pre></div></details>)}
+      <DevelopmentResults attempt={item} />
+      {Object.entries(execution.manifest.routes?.[item.section] ?? {}).map(([role, route]) => route && <p key={role} className="text-muted-foreground">{role}: requested {route.requested.provider_id} / {route.requested.model}, temperature {route.requested.temperature}, max tokens {route.requested.max_tokens}, fallbacks {route.requested.fallbacks.join(", ") || "none"}; actual {route.actual.provider_id} / {route.actual.model}, temperature {route.actual_temperature ?? "not sent"}{route.actual.reason ? ` · ${route.actual.reason}` : ""}</p>)}
+      {(execution.calls ?? []).filter((call) => call.section_id === item.id).map((call) => <CallEvidence key={call.id} call={call} />)}
     </div>)}
   </div>;
 }
@@ -66,6 +69,7 @@ export function DevelopmentExecution({ draft, disabled }: { draft: Experiment; d
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const [copyMessage, setCopyMessage] = useState("");
   const root = `/api/admin/development/${draft.id}/executions`;
   const comparisonInputs = JSON.stringify([root, draft.revision, config]);
   // A result belongs to exactly one controls/source version, including during render.
@@ -216,10 +220,23 @@ export function DevelopmentExecution({ draft, disabled }: { draft: Experiment; d
     } catch (failure) { setError(failure instanceof Error ? failure.message : "Unable to start execution. Check history before retrying."); }
     finally { setPending(false); }
   }
+  /** Copy a complete frozen configuration without synthesizing missing legacy defaults. */
+  function copyConfiguration(execution: Execution) {
+    const saved = execution.manifest?.config;
+    const parsed = executionConfigSchema.safeParse(saved);
+    const completeRoute = (route: ExecutionRoute | undefined) => !!route && ["provider_id", "model", "temperature", "max_tokens", "fallbacks"].every(key => Object.hasOwn(route, key));
+    if (!saved || !Object.hasOwn(saved, "mode") || !parsed.success || !completeRoute(saved.evaluator) || !sections.every(section => saved.stages?.[section]?.overrides && completeRoute(saved.stages[section].route) && Object.values(saved.stages[section].overrides).every(completeRoute))) {
+      setError("Saved configuration is incomplete or unsupported. It cannot be copied exactly."); return;
+    }
+    setConfig(structuredClone(saved)); setError("");
+    const sourceChanged = JSON.stringify((execution.manifest.sources ?? []).map(source => [source.id, source.sha256, source.parsed_sha256])) !== JSON.stringify(draft.documents.filter(source => source.role === "source").map(source => [source.id, source.sha256, source.parsed_sha256]));
+    setCopyMessage(`Copied configuration from execution ${execution.id} (source revision ${execution.manifest.revision}). Review settings, then explicitly Run a section or Run all sections to generate. Source snapshots: ${sourceChanged ? "changed or unavailable compared with the saved execution" : "match the saved execution"}. Current experiment sources and prerequisites apply; the server validates freshness before running.`);
+  }
   const locked = disabled || pending || loading || !config || !delivery?.available || history.some(active) || !draft.documents.some((item) => item.role === "source");
   return <section aria-label="Execution" className="space-y-4 border-t border-border pt-5">
     <h2 className="font-semibold">Execution</h2>
     <p className="text-muted-foreground">Generation uses source snapshots only. Outputs are unreviewed; evaluation uses saved outputs in the separate controls below. A fresh run may incur provider charges, including after an uncertain failure.</p>
+    {copyMessage && <p role="status">{copyMessage}</p>}
     {loading && <p>Loading execution settings and history…</p>}
     {error && <p role="alert" className="text-destructive">{error}</p>}
     {delivery && !delivery.available && <p>Execution delivery unavailable: {delivery.reason ?? "Check server configuration."}</p>}
@@ -233,8 +250,9 @@ export function DevelopmentExecution({ draft, disabled }: { draft: Experiment; d
       <div className="flex flex-wrap gap-2"><Button disabled={!!locked} onClick={() => void run("all")}>Run all sections</Button>{sections.map((section) => <Button key={section} variant="outline" disabled={!!locked} onClick={() => void run(section)}>{latest(section) ? "Rerun" : "Run"} {labels[section]}</Button>)}</div></>}
     <div className="border-t border-border pt-3 space-y-3"><div className="flex flex-wrap gap-2 items-center"><h3 className="font-semibold">Execution history</h3><Button variant="outline" disabled={pending || loading} onClick={() => { setPending(true); void refreshHistory().catch((failure) => setError(failure.message)).finally(() => setPending(false)); }}>Reload history</Button></div>
       {!history.length && !loading && <p>No executions yet.</p>}
-      {!!history.length && <><label className="block space-y-1">Selected execution<select className={selectClass} value={selected ?? ""} onChange={(event) => setSelected(event.target.value)}>{history.map((item) => <option key={item.id} value={item.id}>{item.created_at} · {item.generation_status} · {item.id}</option>)}</select></label>{current && <ExecutionDetail execution={current} metadata={metadata} />}{cursor && <Button variant="outline" disabled={pending} onClick={() => { setPending(true); void refreshHistory(cursor).catch((failure) => setError(failure.message)).finally(() => setPending(false)); }}>Load older executions</Button>}</>}
+      {!!history.length && <><label className="block space-y-1">Selected execution<select className={selectClass} value={selected ?? ""} onChange={(event) => setSelected(event.target.value)}>{history.map((item) => <option key={item.id} value={item.id}>{item.created_at} · {item.generation_status} · {item.id}</option>)}</select></label>{current && <><Button variant="outline" disabled={disabled || loading || pending} onClick={() => copyConfiguration(current)}>Copy selected configuration</Button><ExecutionDetail execution={current} metadata={metadata} /></>}{cursor && <Button variant="outline" disabled={pending} onClick={() => { setPending(true); void refreshHistory(cursor).catch((failure) => setError(failure.message)).finally(() => setPending(false)); }}>Load older executions</Button>}</>}
     </div>
+    <DevelopmentComparison onCopy={copyConfiguration} />
     <DevelopmentEvaluation key={draft.id} draft={draft} execution={current} providers={providers} disabled={disabled || loading || pending} onHistoryChange={() => { void refreshHistory().catch((failure) => setError(failure.message)); }} />
   </section>;
 }
