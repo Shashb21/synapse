@@ -7,7 +7,7 @@ import { STAGE_IDS } from "@/modules/kernel/contracts";
 import { noAiSections } from "@/modules/kernel/ai-sections";
 
 const reads = vi.hoisted(() => ({
-  master: vi.fn(), sections: vi.fn(), routes: vi.fn(), wiring: vi.fn(), identity: vi.fn(), owner: vi.fn(), resolve: vi.fn(),
+  master: vi.fn(), sections: vi.fn(), routes: vi.fn(), wiring: vi.fn(), identity: vi.fn(), owner: vi.fn(), resolve: vi.fn(), sessionProps: vi.fn(),
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("@/modules/kernel/ai-switch", () => ({ aiSwitch: reads.master, storedAiSections: reads.sections }));
@@ -16,7 +16,7 @@ vi.mock("@/modules/kernel/routing", async importOriginal => ({
 vi.mock("@/modules/kernel/registry", () => ({ stageWiring: reads.wiring }));
 vi.mock("@/modules/auth/session", () => ({ sessionContext: reads.identity, loginOptions: () => ({ providers: [] }) }));
 vi.mock("@/modules/auth/owner", () => ({ ownerAccess: reads.owner }));
-vi.mock("@/components/platform/session-panel", () => ({ SessionPanel: () => createElement("p", null, "Session") }));
+vi.mock("@/components/platform/session-panel", () => ({ SessionPanel: (props: object) => { reads.sessionProps(props); return createElement("p", { "data-testid": "session-context" }, "Session"); } }));
 import { ControlPanelView } from "@/components/platform/control-panel-view";
 import { NoRouteError } from "@/modules/llm/provider";
 
@@ -25,6 +25,7 @@ const wiring = STAGE_IDS.map(stage => ({ stage, active: null, available: [], act
 async function html() { return renderToStaticMarkup(await ControlPanelView({ params: {} })); }
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => undefined);
+  reads.sessionProps.mockReset();
   reads.master.mockReset().mockResolvedValue({ enabled: true, updated_by: null, updated_at: null, rationale: null });
   reads.sections.mockReset().mockResolvedValue({ sections: noAiSections() });
   reads.routes.mockReset().mockResolvedValue(configs);
@@ -106,5 +107,36 @@ describe("KAN-192 server reads", () => {
     const result = await html();
     expect(result).toContain("AI is off for this task. Enable it here when you are ready to use AI.");
     expect(reads.resolve).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("KAN-196 server session mapping", () => {
+  it.each([
+    { provider: "google", demo: true, demoSession: false },
+    { provider: "demo", demo: false, demoSession: true },
+  ])("maps $provider session truth independently of configured-provider demo mode", async ({ provider, demo, demoSession }) => {
+    reads.identity.mockResolvedValue({ session: { provider_id: provider, token: "private-session-token" }, actor: { name: "Ada", function: "medical_affairs" }, role: "medical_affairs", signed_in: true, demo });
+    const document = new DOMParser().parseFromString(await html(), "text/html");
+    const props = reads.sessionProps.mock.calls[0][0];
+    expect(props).toMatchObject({ actorName: "Ada", signedIn: true, demo, demoSession, owner: true });
+    expect(props).not.toHaveProperty("session");
+    expect(JSON.stringify(props)).not.toContain("private-session-token");
+    const panel = document.querySelector(".control-panel")!;
+    expect(panel.firstElementChild?.getAttribute("data-testid")).toBe("session-context");
+    expect(panel.children[1]?.getAttribute("data-testid")).toBe("ai-availability-summary");
+  });
+  it("never claims confirmed owner status when authorization is unavailable", async () => {
+    reads.owner.mockRejectedValue(new Error("private authorization diagnostic"));
+    await html();
+    expect(reads.sessionProps.mock.calls[0][0].owner).toBe(false);
+  });
+  it("puts unknown identity recovery first without inventing session props", async () => {
+    reads.identity.mockRejectedValue(new Error("private identity diagnostic"));
+    const document = new DOMParser().parseFromString(await html(), "text/html");
+    expect(reads.sessionProps).not.toHaveBeenCalled();
+    expect(document.querySelector(".control-panel")?.firstElementChild?.textContent).toContain("Session details unavailable. Retry configuration");
+    expect(document.body.textContent).not.toContain("private identity diagnostic");
+    expect(document.querySelector("details summary")?.textContent).not.toBe("Developer tools");
   });
 });
