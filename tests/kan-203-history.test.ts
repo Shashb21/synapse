@@ -113,7 +113,7 @@ it('discards a credential echoed by the provider while retaining a failed receip
     const experiment = await createExperiment('Credential echo', null, 'owner');
     const parsed = { blocks: [{ id: 'b', text: 'Evidence.', heading: 'Evidence', location: '1' }] };
     await updateExperiment(experiment.id, 1, { document: { id: `${experiment.id}-source`, experiment_id: experiment.id, role: 'source', compatibility: 'compatible', filename: 'source.txt', sha256: sha256('Evidence.'), parsed_sha256: sha256(canonicalParsedJson(parsed)), parsed_at: '2026-10-30T00:00:00Z', parser: { name: 'test', version: '1', model: null, prompt: null }, parsed } as never, content_base64: 'RXZpZGVuY2Uu' });
-    const execution = await startExecution(experiment.id, { revision: 2, target: 'gap_extraction', config: (await import('@/modules/development/execution-schema')).executionConfigSchema.parse({ mode: 'single_pass' }), prerequisites: {} });
+    const execution = await startExecution(experiment.id, { revision: 2, target: 'gap_extraction', config: (await import('@/modules/development/execution-schema')).executionConfigSchema.parse({ mode: 'single_pass' }), prerequisites: {}, cost_controls: { allowance_usd: 100, unknown_acknowledged: true } });
     await progressExecution(execution.id);
     const saved = await getExecution(experiment.id, execution.id);
     expect(saved.calls[0].status).toBe('failed');
@@ -230,7 +230,7 @@ it('exposes authenticated freshness, selected references, receipts and timestamp
     const ref = { ...source, id: `${e.id}-ref`, role: 'reference', section: 'gap_extraction', source_document_ids: [source.id] };
     await updateExperiment(e.id, 2, { document: ref as never, content_base64: 'RXZpZGVuY2Uu' });
     const config = executionConfigSchema.parse({ mode: 'single_pass' });
-    const run = await executionModule.startExecution(e.id, { revision: 3, target: 'gap_extraction', config, prerequisites: {} });
+    const run = await executionModule.startExecution(e.id, { revision: 3, target: 'gap_extraction', config, prerequisites: {}, cost_controls: { allowance_usd: 100, unknown_acknowledged: true } });
     const section = run.sections[0], output = 'a'.repeat(64);
     await sharedDb().execute(sql`update development_execution_sections set status='succeeded',result=${JSON.stringify({ output_id: output, prerequisite_ids: {}, trace_id: 'trace-1', output: { 'private-provider-key': { 'sk-abcdefghijk': 'legacy diagnostic' } } })}::jsonb,started_at=now(),finished_at=now() where id=${section.id}`);
     await sharedDb().execute(sql`update development_executions set generation_status='succeeded' where id=${run.id}`);

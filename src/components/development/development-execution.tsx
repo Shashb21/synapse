@@ -7,6 +7,8 @@ import { RouteFields } from "./development-route-fields";
 import { CallEvidence, DevelopmentResults } from "./development-results";
 import { DevelopmentComparison } from "./development-comparison";
 import { executionConfigSchema } from "@/modules/development/execution-schema";
+import { CostPreview, CostStartFields, DevelopmentCosts } from "./development-costs";
+import type { CostControls } from "@/modules/development/cost-schema";
 import { DevelopmentEvaluation } from "./development-evaluation";
 import type { Experiment, DevelopmentSection } from "@/modules/development/schema";
 import type { ExecutionConfig, ExecutionRoute } from "@/modules/development/execution-schema";
@@ -54,6 +56,7 @@ function ExecutionDetail({ execution, metadata }: { execution: Execution; metada
 
 /** Manage execution settings and read progress without driving worker delivery. */
 export function DevelopmentExecution({ draft, disabled }: { draft: Experiment; disabled: boolean }) {
+  const [costControls, setCostControls] = useState<CostControls>({ allowance_usd: 0, unknown_acknowledged: false });
   const [providers, setProviders] = useState<ProviderKeyView[]>([]);
   const [config, setConfig] = useState<ExecutionConfig | null>(null);
   const [history, setHistory] = useState<Execution[]>([]);
@@ -208,11 +211,14 @@ export function DevelopmentExecution({ draft, disabled }: { draft: Experiment; d
   }
   async function run(target: DevelopmentSection | "all") {
     if (!config) return;
+    if (!Number.isFinite(costControls.allowance_usd) || costControls.allowance_usd < 0) { setError("Enter a finite nonnegative generation allowance."); return; }
     const dependencies = prerequisites(target);
     if (!dependencies) { setError("Prerequisites are missing or stale. Run the required sections again."); return; }
     setPending(true); setError("");
+    // Each new execution needs its own acknowledgment, even after a lost response.
+    setCostControls(current => ({ ...current, unknown_acknowledged: false }));
     try {
-      const response = await fetch(root, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ revision: draft.revision, target, config, prerequisites: dependencies }) });
+      const response = await fetch(root, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ revision: draft.revision, target, config, prerequisites: dependencies, cost_controls: costControls }) });
       const body = await response.json();
       if (!response.ok) { if (response.status === 409) await refreshHistory(); throw new Error(typeof body.error === "string" ? body.error : "Unable to start execution."); }
       setHistory((items) => [body.execution, ...items]); setSelected(body.execution.id);
@@ -247,10 +253,12 @@ export function DevelopmentExecution({ draft, disabled }: { draft: Experiment; d
 
       <details className="border-t border-border pt-3"><summary className="cursor-pointer font-medium">Legacy evaluator route (legacy history comparisons only)</summary><div className="pt-3"><p>These settings apply only to older evaluation associations. Use the per-section evaluator settings below for new evaluations.</p><RouteFields providers={providers} value={config.evaluator} onChange={(evaluator) => setConfig({ ...config, evaluator })} /></div></details>
       <p className="text-muted-foreground">Matching requires current successful gap and tactic extraction. Partial splitting requires those results and matching built from them. Changed settings or sources can make prerequisites stale; the server checks them before every run.</p>
+      <CostStartFields value={costControls} onChange={setCostControls} />
+      <CostPreview root={`/api/admin/development/${draft.id}`} mode={config.mode} />
       <div className="flex flex-wrap gap-2"><Button disabled={!!locked} onClick={() => void run("all")}>Run all sections</Button>{sections.map((section) => <Button key={section} variant="outline" disabled={!!locked} onClick={() => void run(section)}>{latest(section) ? "Rerun" : "Run"} {labels[section]}</Button>)}</div></>}
     <div className="border-t border-border pt-3 space-y-3"><div className="flex flex-wrap gap-2 items-center"><h3 className="font-semibold">Execution history</h3><Button variant="outline" disabled={pending || loading} onClick={() => { setPending(true); void refreshHistory().catch((failure) => setError(failure.message)).finally(() => setPending(false)); }}>Reload history</Button></div>
       {!history.length && !loading && <p>No executions yet.</p>}
-      {!!history.length && <><label className="block space-y-1">Selected execution<select className={selectClass} value={selected ?? ""} onChange={(event) => setSelected(event.target.value)}>{history.map((item) => <option key={item.id} value={item.id}>{item.created_at} · {item.generation_status} · {item.id}</option>)}</select></label>{current && <><Button variant="outline" disabled={disabled || loading || pending} onClick={() => copyConfiguration(current)}>Copy selected configuration</Button><ExecutionDetail execution={current} metadata={metadata} /></>}{cursor && <Button variant="outline" disabled={pending} onClick={() => { setPending(true); void refreshHistory(cursor).catch((failure) => setError(failure.message)).finally(() => setPending(false)); }}>Load older executions</Button>}</>}
+      {!!history.length && <><label className="block space-y-1">Selected execution<select className={selectClass} value={selected ?? ""} onChange={(event) => setSelected(event.target.value)}>{history.map((item) => <option key={item.id} value={item.id}>{item.created_at} · {item.generation_status} · {item.id}</option>)}</select></label>{current && <><Button variant="outline" disabled={disabled || loading || pending} onClick={() => copyConfiguration(current)}>Copy selected configuration</Button><DevelopmentCosts key={current.id} root={`${root}/${current.id}/costs`} account={current.cost} disabled={disabled} onChange={cost => setHistory(items => items.map(item => item.id === current.id ? { ...item, cost } : item))} /><ExecutionDetail execution={current} metadata={metadata} /></>}{cursor && <Button variant="outline" disabled={pending} onClick={() => { setPending(true); void refreshHistory(cursor).catch((failure) => setError(failure.message)).finally(() => setPending(false)); }}>Load older executions</Button>}</>}
     </div>
     <DevelopmentComparison onCopy={copyConfiguration} />
     <DevelopmentEvaluation key={draft.id} draft={draft} execution={current} providers={providers} disabled={disabled || loading || pending} onHistoryChange={() => { void refreshHistory().catch((failure) => setError(failure.message)); }} />
