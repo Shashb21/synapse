@@ -34,6 +34,9 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
+  // Cold Next.js routes on hosted runners can exceed Playwright's 5s default.
+  // Assertions still poll for real UI state; local feedback keeps its usual limit.
+  expect: { timeout: process.env.CI ? 15_000 : 5_000 },
   use: {
     baseURL,
     trace: "on-first-retry",

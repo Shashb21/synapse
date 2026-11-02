@@ -53,7 +53,7 @@ test('shows uncertain preview, separate usage, explicit spending actions and pre
   await costs.getByRole('button', { name: 'Resume spending' }).click();
   await expect(costs.getByText('Spending authorized')).toBeVisible();
   await page.getByText('View generated output', { exact: true }).click();
-  await expect(page.getByText(/Preserved candidate/)).toBeVisible();
+  await expect(page.getByText('Preserved candidate', { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.screenshot({ path: '.superpowers/sdd/2026-10-30-kan-206-cost-controls/task-2-desktop.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
