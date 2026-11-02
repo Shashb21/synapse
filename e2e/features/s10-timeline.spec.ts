@@ -229,6 +229,9 @@ test.describe("S10 interactive Gantt IEGP", () => {
 
   // KAN-99 (owner decision): a reset starts the workspace over, frozen finals included.
   test("resetting the workspace removes the final plan, after a warning that says so", async ({ page, request }) => {
+    // This journey visits three routes and resets persisted state. Its total
+    // budget must cover the existing 60s reset wait plus cold route compilation.
+    test.setTimeout(120_000);
     const state = await planState(request);
     expect(state.plan?.status).toBe("final");
     await page.goto(`/plan/final?version=${state.plan!.version}`);
