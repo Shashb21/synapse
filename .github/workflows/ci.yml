@@ -93,7 +93,12 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npx playwright install --with-deps chromium
       # playwright.config.ts starts the dev server with the LLM test stub.
-      - run: npx playwright test --reporter=line
+      - name: Run browser tests with runner diagnostics
+        run: |
+          bash scripts/ci-resource-monitor.sh &
+          monitor_pid=$!
+          trap 'kill "$monitor_pid" 2>/dev/null || true; wait "$monitor_pid" 2>/dev/null || true' EXIT
+          npx playwright test --reporter=line
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@v4
