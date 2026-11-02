@@ -93,7 +93,7 @@ test("owner creates, uploads, saves and reopens a private experiment", async ({
       .getByText(/Evaluator-only.*provisional/),
   ).toBeVisible();
   await page.getByRole("button", { name: "Save name", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("Saved");
+  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toContainText("Saved");
   await page.reload();
   await page
     .getByRole("button", { name: `Open ${name} saved`, exact: true })
@@ -170,12 +170,12 @@ test("invalid upload and stale revision give recovery without losing edits", asy
   await page
     .getByRole("button", { name: "Reload saved draft", exact: true })
     .click();
-  await expect(page.getByRole("status")).toContainText("Reloaded");
+  await expect(page.getByRole("status").filter({ hasText: "Reloaded" })).toContainText("Reloaded");
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(
     `${name} edited`,
   );
   await page.getByRole("button", { name: "Save name", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("Saved");
+  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toContainText("Saved");
 });
 
 /** Build a one-page text PDF without a paid provider or external fixture dependency. */
@@ -225,6 +225,14 @@ test("read failure provides a labelled recovery action", async ({ page }) => {
 test("slow uploads disable competing writes and preserve the edited name", async ({
   page,
 }) => {
+  // Keep evaluation loading while upload progress is announced independently.
+  let releaseProfiles!: () => void;
+  const profilesGate = new Promise<void>((resolve) => { releaseProfiles = resolve; });
+  await page.route("**/api/admin/development/*/profiles", async (route) => {
+    const response = await route.fetch();
+    await profilesGate;
+    await route.fulfill({ response });
+  });
   const name = `Serialized ${Date.now()}`;
   await page.goto("/admin/development");
   await page.getByLabel("New experiment name").fill(name);
@@ -257,7 +265,7 @@ test("slow uploads disable competing writes and preserve the edited name", async
     .getByRole("button", { name: "Upload source", exact: true })
     .click();
   try {
-    await expect(page.getByRole("status")).toContainText(
+    await expect(page.getByRole("status").filter({ hasText: "Uploading and parsing" })).toContainText(
       "Uploading and parsing",
     );
     await expect(
@@ -271,7 +279,9 @@ test("slow uploads disable competing writes and preserve the edited name", async
     ).toBeDisabled();
   } finally {
     release();
+    releaseProfiles();
   }
+  await expect(page.getByText("Loading profiles and evaluation history…", { exact: true })).toHaveCount(0);
   await expect(page.getByText("source.txt", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(
     `${name} edited`,
