@@ -12,5 +12,5 @@ export async function GET(_request: Request, context: DraftContext) {
 }
 /** Create a new evaluator attempt; never invoke generation or mutate existing scores. */
 export async function POST(request: Request, context: DraftContext) {
-  return guarded(async () => json(ownerSafe({ evaluation: await startEvaluation((await context.params).id, await body(request, startEvaluationSchema)) }), 202));
+  return guarded(async actor => json(ownerSafe({ evaluation: await startEvaluation((await context.params).id, await body(request, startEvaluationSchema), actor) }), 202));
 }

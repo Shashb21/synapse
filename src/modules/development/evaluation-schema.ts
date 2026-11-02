@@ -1,5 +1,6 @@
 /** Independent per-section evaluator settings and exact immutable generation bindings. */
 import { z } from 'zod';
+import { costControlsSchema } from './cost-schema';
 import { sectionSchema } from './schema';
 import { executionRouteSchema } from './execution-schema';
 /** Maximum items on either side of a semantic comparison, aggregated across selected references. */
@@ -10,6 +11,7 @@ const sections = z.object(Object.fromEntries(sectionSchema.options.map(section =
 export const evaluationConfigSchema = z.object({ sections: sections.default(() => sections.parse({})) }).strict();
 export type EvaluationConfig = z.infer<typeof evaluationConfigSchema>;
 export const startEvaluationSchema = z.object({
+  cost_controls: costControlsSchema.optional(),
   execution_id: z.string().trim().min(1).max(200), attempt_id: z.string().trim().min(1).max(200), output_id: z.string().regex(/^[a-f0-9]{64}$/), section: sectionSchema,
   profile_id: z.string().trim().min(1).max(200).default('balanced'), profile_version: z.number().int().positive().default(1),
   reference_ids: z.array(z.string().trim().min(1).max(200)).max(20).default([]).refine(ids => new Set(ids).size === ids.length, 'Reference IDs must be unique.'),

@@ -23,7 +23,7 @@ let sourceId = '';
 
 const quote = 'Comparative effectiveness remains unknown. An ongoing observational study measures outcomes.';
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
-const request = (body: unknown) => new Request('http://localhost/api/admin/development', { method: 'POST', body: JSON.stringify(body) });
+const request = (body: unknown) => new Request('http://localhost/api/admin/development', { method: 'POST', body: JSON.stringify({ cost_controls: { allowance_usd: 100, unknown_acknowledged: true }, ...(body as object) }) });
 async function draft() {
   const experiment = await createExperiment('Execution proof', null, 'owner');
   const parsed = { blocks: [{ id: 'b1', text: quote, heading: 'Evidence', location: '1' }] };
@@ -302,6 +302,7 @@ it.each(['standard', 'single_pass'] as const)('uses explicit actual role routes 
   const route = (provider_id: string, model: string, temperature: number) => ({ provider_id, model, temperature, max_tokens: 4096, fallbacks: [] });
   const overrides = mode === 'standard' ? { critic: route('openai', 'gpt-5.1', 0.4), reviser: route('anthropic-claude', 'claude-sonnet-5-5', 0.5), internal_judge: route('google-gemini', 'gemini-3.8-flash', 0.6) } : { proposer: route('openai', 'gpt-5.1', 0.7) };
   const input = { revision: 2, target: 'gap_extraction', config: { mode, stages: { gap_extraction: { route: route('xai-grok', 'grok-4', 0.3), overrides } } }, prerequisites: {} };
+  await (await import('@/modules/kernel/routing')).routeConfig('S2');
   const before = await sharedDb().execute(sql`select * from routing_config order by stage`);
   const response = await POST(request(input), ctx(e.id));
   expect(response.status).toBe(202);
