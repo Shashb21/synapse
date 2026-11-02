@@ -57,7 +57,8 @@ jobs:
 
   e2e:
     name: e2e (playwright)
-    runs-on: ubuntu-latest
+    # Keep the browser environment stable across ubuntu-latest image migrations.
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     services:
       postgres:
