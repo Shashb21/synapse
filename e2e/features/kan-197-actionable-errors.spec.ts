@@ -3,7 +3,7 @@ import { expect, test, type Locator, type Page, type TestInfo } from "@playwrigh
 import postgres from "postgres";
 import { E2E_USER, freshWorkspace } from "../support/session";
 import { requireDisposableDatabase } from "../support/disposable-database";
-import { iegpAction, modulesState, planAction, planState, runStage } from "../support/synapse";
+import { controlAction, iegpAction, modulesState, planAction, planState, runStage } from "../support/synapse";
 
 const RAW = "SQL SELECT secret FROM customer_accounts; sk-kan197-secret PROVIDER_RESPONSE {stack: private-workspace}";
 const VIEWS = [
@@ -40,7 +40,15 @@ async function capture(page: Page, info: TestInfo, label: string) {
 
 test.describe("owner control panel", () => {
   for (const view of VIEWS) {
-    test(`${view.name}: raw failures are hidden, owner recovery works and validation stays specific`, async ({ page }, info) => {
+    test(`${view.name}: raw failures are hidden, owner recovery works and validation stays specific`, async ({ page, request }, info) => {
+      // The OpenAI draft must stay valid regardless of previously saved backups.
+      await controlAction(request, {
+        action: "set_route",
+        stage: "S2",
+        provider_id: "xai-grok",
+        model: "grok-4",
+        fallbacks: ["anthropic-claude"],
+      });
       await page.goto("/admin/control");
       await page.waitForLoadState("networkidle");
       await setView(page, view);
