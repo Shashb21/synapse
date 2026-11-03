@@ -42,9 +42,7 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    // Turbopack exhausted the 8 GB CI runner during cold route compilation.
-    // Use Next's supported Webpack compiler for CI's long browser journey.
-    command: `npx next dev${process.env.CI ? " --webpack" : ""} --hostname 127.0.0.1 --port ${port}`,
+    command: `npx next dev --hostname 127.0.0.1 --port ${port}`,
     url: baseURL,
     // Off by default, so the suite never attaches to a server on the dev database.
     reuseExistingServer: process.env.E2E_REUSE === "1",

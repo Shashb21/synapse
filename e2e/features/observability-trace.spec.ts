@@ -86,7 +86,8 @@ test.describe("Observability and the run trace", () => {
     expect(detail).toMatchObject({ id: failed!.id, stage: "S4", status: "error", error: guidance });
 
     await page.goto(`/admin/runs/${failed!.id}`);
-    await expect(page.getByRole("alert")).toHaveText(guidance);
+    // Next's route announcer also has role=alert; select the run's error.
+    await expect(page.getByRole("alert").filter({ hasText: guidance })).toHaveText(guidance);
   });
 
   test("exposes what each stage is wired to and whether it can be scored", async ({ page, request }) => {

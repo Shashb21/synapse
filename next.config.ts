@@ -34,6 +34,9 @@ export const RETIRED_PLAN_REDIRECTS: { source: string; destination: string }[] =
 const nextConfig: NextConfig = {
   serverExternalPackages: ["mammoth", "xlsx", "jszip", "docx"],
   experimental: {
+    // CI visits many cold routes on an 8 GB runner. Persist compiler data to
+    // disk and release it after each snapshot instead of waiting for pressure.
+    turbopackMemoryEviction: process.env.CI ? "full" : "auto",
     // forbidden() renders the Owner only page (403) for /admin.
     authInterrupts: true,
   },
