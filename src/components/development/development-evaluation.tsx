@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { presentationReason } from "./development-presentation";
 import { CostPreview, CostStartFields } from "./development-costs";
 import type { CostControls } from "@/modules/development/cost-schema";
 import { RouteFields, routeSelectClass } from "./development-route-fields";
@@ -121,8 +122,26 @@ export function EvaluationDetail({ evaluation }: { evaluation: Evaluation }) {
   if (!evaluationView.safeParse(evaluation).success || !evaluation.manifest.config.sections[evaluation.manifest.section]) return <div className="space-y-2"><p>Evaluation evidence unavailable: incomplete or malformed saved metadata.</p><details><summary>Retained evaluation content</summary><pre className="whitespace-pre-wrap break-words text-xs">{JSON.stringify(evaluation, null, 2)}</pre></details></div>;
   const { manifest, result } = evaluation;
   const settings = manifest.config.sections[manifest.section];
+  // This evaluation may belong to a different run from the open spending panel.
+  // Retained dispatch evidence takes precedence over method and pending state.
+  const accounting = evaluation.receipt ?? evaluation.failure_accounting;
+  const knownCost = accounting?.cost_usd;
+  const costSummary = typeof knownCost === "number" && Number.isFinite(knownCost) && knownCost >= 0
+    ? `Evaluation usage-derived cost: $${knownCost.toFixed(6)}. This is separate from estimates and manually reported spend.`
+    : accounting || evaluation.sending_at || ["sending", "received", "needs_attention"].includes(evaluation.status)
+      ? "Evaluation cost: unknown. Provider charges may apply; inspect the retained receipt before requesting another evaluation."
+      : settings.method === "checks_only"
+        ? "No provider call is needed for factual checks only."
+        : manifest.request === null && manifest.route === null
+          ? "No provider call is needed for this saved evaluation. Reference measures may remain unscored when compatible expected answers are unavailable."
+          : ["queued", "running"].includes(evaluation.status)
+          ? "Evaluation cost: pending. No provider dispatch has been recorded yet; charges may apply when it runs."
+          : evaluation.status === "failed" && evaluation.sending_at === null
+            ? "No provider call was sent for this evaluation."
+            : "Evaluation cost: unknown. Saved evidence does not establish the provider charge.";
   return <div className="min-w-0 space-y-3 break-words" aria-live="polite">
     <p className="font-medium">Evaluation status: {evaluation.status}</p>
+    <p>{costSummary}</p>
     <p>Frozen profile: {manifest.profile.name} · {manifest.profile.id}@{manifest.profile.version}</p>
     <p>Section: {labels[manifest.section]}</p>
     <details><summary className="cursor-pointer">Evaluation and output identifiers</summary><p className="break-all pt-2">Evaluation ID: {evaluation.id}<br />Frozen output: {manifest.output_id}<br />Execution: {manifest.execution_id} · Attempt: {manifest.attempt_id}</p></details>
@@ -134,6 +153,7 @@ export function EvaluationDetail({ evaluation }: { evaluation: Evaluation }) {
     {activeStatuses.has(evaluation.status) && <p>Waiting for durable worker progress. This page polls saved state; it does not dispatch provider calls.</p>}
     {evaluation.error && <p role="alert" className="text-destructive">{evaluation.error}</p>}
     {(evaluation.status === "needs_attention" || evaluation.status === "failed") && <p>No automatic resend. Inspect the retained receipt before explicitly requesting a fresh evaluation, which may incur provider charges.</p>}
+    {!result && !activeStatuses.has(evaluation.status) && <p>No saved evaluation result. Inspect the status and any error before explicitly requesting another evaluation.</p>}
     {result && <>
       <section aria-label="Factual checks" className="space-y-2 border-t border-border pt-3">
         <h4 className="font-medium">Factual checks: {result.checks.passed ? "passed" : "failed"}</h4>
@@ -358,8 +378,8 @@ export function DevelopmentEvaluation({ draft, execution, providers, disabled, o
   }
 
   return <section aria-label="Evaluation" className="min-w-0 space-y-4 border-t border-border pt-5">
-    <div className="flex flex-wrap items-center gap-3"><h4 className="font-semibold">Evaluation</h4><Button variant="outline" disabled={loading || pending} onClick={() => void reload()}>Reload evaluation data</Button></div>
-    <p className="max-w-prose text-muted-foreground">Evaluate saved outputs without generation. Factual checks, reference measures and provisional AI assessments are reported separately. A fresh evaluation may incur provider charges.</p>
+    <div className="flex flex-wrap items-center gap-3"><h4 className="font-semibold">Optional evaluation</h4><Button variant="outline" disabled={loading || pending} onClick={() => void reload()}>Reload evaluation data</Button></div>
+    <p className="max-w-prose text-muted-foreground">Evaluation is optional. Gold standards are expected answers used for reference comparison. A profile defines evaluation criteria and scoring anchors. Evaluator models assess saved output separately from the models that generated it. Evaluate saved outputs without generation. Factual checks, reference measures and provisional AI assessments are reported separately. A fresh evaluation may incur provider charges.</p>
     {loading && <p role="status">Loading profiles and evaluation history…</p>}
     {loadError && <p role="alert" className="break-words text-destructive">{loadError}</p>}
     {error && <p role="alert" className="break-words text-destructive">{error}</p>}
@@ -370,7 +390,7 @@ export function DevelopmentEvaluation({ draft, execution, providers, disabled, o
         <label className="block space-y-1">Saved evaluation profile<select className={routeSelectClass} value={profileKey} onChange={(event) => { const next = profiles.find((item) => `${item.id}@${item.version}` === event.target.value); if (next) { setProfileKey(event.target.value); setEditor(editProfile(next)); setCopy(false); setDirty(false); setError(""); } }}>{latestProfiles.map((item) => <option key={item.id} value={`${item.id}@${item.version}`}>{item.name} · version {item.version}{item.builtin ? " · built-in" : ""}</option>)}{profile && !latestProfiles.includes(profile) && <option value={profileKey}>{profile.name} · version {profile.version} · older version</option>}</select></label>
         <p>{profile.name} · {profile.id}@{profile.version} · {profile.builtin ? "read-only" : "saved version"}</p>
         <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => { setEditor({ ...editor, name: `${editor.name} copy` }); setCopy(true); setDirty(true); setError(""); }}>Save As custom profile</Button>{dirty && <Button variant="outline" onClick={() => { setEditor(editProfile(profile)); setCopy(false); setDirty(false); setError(""); }}>Discard draft changes</Button>}</div>
-        <details><summary className="cursor-pointer font-medium">Profile criteria and anchors</summary><div className="space-y-3 pt-3">
+        <details><summary className="cursor-pointer font-medium">Advanced evaluation settings</summary><div className="space-y-3 pt-3"><details><summary className="cursor-pointer font-medium">Profile criteria and anchors</summary><div className="space-y-3 pt-3">
           <p>{readOnly ? "Built-in criteria are immutable. Use Save As custom profile to edit a copy." : "Edits are an unsaved draft until saved as a new version. Evaluations always use a saved version."}</p>
           <fieldset disabled={readOnly} className="min-w-0 space-y-3">
             <label className="block space-y-1">Profile name<Input value={editor.name} onChange={(event) => { setEditor({ ...editor, name: event.target.value }); setDirty(true); }} /></label>
@@ -388,7 +408,7 @@ export function DevelopmentEvaluation({ draft, execution, providers, disabled, o
           {!readOnly && <Button disabled={!dirty} onClick={() => void saveProfile()}>{copy ? "Save new profile" : "Save new version"}</Button>}
         </div></details>
         <details className="border-t border-border pt-3"><summary className="cursor-pointer font-medium">Per-section evaluator settings</summary><div className="space-y-4 pt-3">{sections.map((section) => <fieldset key={section} aria-label={`${labels[section]} evaluator`} className="min-w-0 space-y-3 border-t border-border pt-3"><legend className="font-medium">{labels[section]}</legend><label className="block space-y-1">Method<select className={routeSelectClass} value={config.sections[section].method} onChange={(event) => setConfig({ ...config, sections: { ...config.sections, [section]: { ...config.sections[section], method: event.target.value as EvaluationConfig["sections"][DevelopmentSection]["method"] } } })}><option value="checks_only">Factual checks only</option><option value="rubric">Factual checks + rubric</option><option value="reference">Factual checks + reference comparison</option><option value="rubric_and_reference">Factual checks + rubric + reference comparison</option></select></label><fieldset disabled={config.sections[section].method === "checks_only"}><RouteFields providers={providers} value={config.sections[section].route} onChange={(route) => setConfig({ ...config, sections: { ...config.sections, [section]: { ...config.sections[section], route } } })} /></fieldset></fieldset>)}</div></details>
-      </fieldset>
+      </div></details></fieldset>
       <fieldset disabled={locked} className="min-w-0 space-y-3 border-t border-border pt-3">
         <legend className="font-medium">Saved output to evaluate</legend>
         {!attempt && <p>Select an execution with a completed retained output. Rejected proposals with saved output can also be evaluated.</p>}
@@ -406,6 +426,6 @@ export function DevelopmentEvaluation({ draft, execution, providers, disabled, o
         </>}
       </fieldset>
     </>}
-    <div className="min-w-0 space-y-3 border-t border-border pt-3"><h5 className="font-semibold">Immutable evaluation history</h5><p className="text-muted-foreground">Up to 100 recent attempts. Each record retains its own output, profile version, evaluator settings and reference review state.</p>{!history.length && !loading && <p>No evaluations yet. Choose a saved output above.</p>}{!!history.length && <><label className="block space-y-1">Selected evaluation<select className={routeSelectClass} value={selected} disabled={pending} onChange={(event) => setSelected(event.target.value)}>{history.map((item) => <option key={item.id} value={item.id}>{item.created_at} · {labels[item.manifest.section]} · {item.status} · {item.id}</option>)}</select></label>{current && <><p>Comparison with the selected saved output, profile, section settings and checked references: {comparison?.freshness}{comparison?.reasons.length ? ` · ${comparison.reasons.join(", ")}` : ""}</p><EvaluationDetail evaluation={current} /></>}</>}</div>
+    <div className="min-w-0 space-y-3 border-t border-border pt-3"><h5 className="font-semibold">Immutable evaluation history</h5><p className="text-muted-foreground">Up to 100 recent attempts. Each record retains its own output, profile version, evaluator settings and reference review state.</p>{!history.length && !loading && <p>No evaluations yet. Choose a saved output above.</p>}{!!history.length && <><label className="block space-y-1">Selected evaluation<select className={routeSelectClass} value={selected} disabled={pending} onChange={(event) => setSelected(event.target.value)}>{history.map((item) => <option key={item.id} value={item.id}>{item.created_at} · {labels[item.manifest.section]} · {item.status} · {item.id}</option>)}</select></label>{current && <><p>Comparison with the selected saved output, profile, section settings and checked references: {comparison?.freshness}{comparison?.reasons.length ? ` · ${comparison.reasons.map(presentationReason).join(", ")}` : ""}</p>{comparison?.freshness === "outdated" && <p>This saved assessment uses earlier selections. Review the output, profile, evaluator and references above, then choose Re-evaluate saved output. Earlier evidence remains unchanged.</p>}<EvaluationDetail evaluation={current} /></>}</>}</div>
   </section>;
 }
