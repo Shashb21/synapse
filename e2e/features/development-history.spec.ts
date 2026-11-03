@@ -1,3 +1,4 @@
+import { developmentStep, developmentDetails } from "../support/development-workflow";
 /** Reopened history uses scripted execution data and the isolated draft API. */
 import { expect, test } from '@playwright/test';
 
@@ -20,21 +21,30 @@ test('reopens historical attempts with independent freshness and call details', 
   await page.reload();
   await page.getByRole('button', { name: `Open ${name}` }).click();
   const execution = page.getByRole('region', { name: 'Execution', exact: true });
+  await developmentStep(page, "Test settings");
   await expect(execution.getByLabel('Execution mode')).toHaveValue('single_pass');
+  await developmentStep(page, "Results");
   await expect(execution.getByText(/Generation freshness: outdated/)).toContainText('newer_attempt');
+  await developmentStep(page, "Results");
   await expect(execution.getByText(/Evaluation: succeeded/)).toContainText('attempt_changed');
+  await developmentStep(page, "Results");
+  await developmentDetails(page, 'Saved model routes and call evidence');
   await execution.getByText('Call 1: succeeded').click();
   await expect(execution.getByText('Role response')).toBeVisible();
   await expect(execution.getByText(/Cost: unknown/)).toBeVisible();
   await expect(execution.getByText(/Role: proposer · Purpose: generation · Trace: trace-1/)).toBeVisible();
   await expect(execution.getByText(/Sent: sent · Settled: settled/)).toBeVisible();
   await expect(execution.getByText(/Usage:.*input_tokens/)).toBeVisible();
+  await developmentDetails(page, 'Attempt identifiers and prerequisites');
   await expect(execution.getByText(/Started: start · Finished: finish/)).toBeVisible();
+  await developmentStep(page, "Results");
   await execution.getByText('Provenance and retry policy').click();
-  await expect(execution.getByText(/Interrupted or uncertain sends are not automatically resent/)).toBeVisible();
+  await expect(execution.getByText(/Interrupted or uncertain sends are not automatically resent/).first()).toBeVisible();
   await expect(execution.getByText(/Code version: unknown/)).toBeVisible();
+  await developmentStep(page, "Test settings");
   await execution.getByLabel('Execution mode').selectOption('standard');
   await expect.poll(() => seenModes).toContain('standard');
+  await developmentStep(page, "Results");
   await expect(execution.getByLabel('Selected execution')).toHaveValue('old');
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.screenshot({ path: '.superpowers/sdd/2026-10-30-kan-203/task-2-desktop.png', fullPage: true });
@@ -65,16 +75,24 @@ test('loads older history while retaining the newest prerequisites and selected 
   await page.getByRole('button', { name: 'Create experiment' }).click();
   await expect.poll(() => listReads).toBeGreaterThan(0);
   const beforeUpload = listReads;
+  await developmentStep(page, "Documents");
   await page.getByLabel('Private source file').setInputFiles({ name: 'source.txt', mimeType: 'text/plain', buffer: Buffer.from('Evidence') });
+  await developmentStep(page, "Documents");
   await page.getByRole('button', { name: 'Upload source', exact: true }).click();
   await expect.poll(() => listReads).toBeGreaterThan(beforeUpload);
   const execution = page.getByRole('region', { name: 'Execution', exact: true });
+  await developmentStep(page, "Results");
   await execution.getByRole('button', { name: 'Load older executions' }).click();
+  await developmentStep(page, "Results");
   await execution.getByLabel('Selected execution').selectOption('old');
+  await developmentStep(page, "Results");
+  await developmentDetails(page, 'Attempt identifiers and prerequisites');
   await expect(execution.getByText('Attempt: old-gap', { exact: false })).toBeVisible();
+  await developmentStep(page, "Run");
   await execution.getByRole('button', { name: 'Run Matching and coverage' }).click();
   await expect(execution.getByRole('alert')).toContainText('Prerequisites are missing or stale');
   expect(posts).toBe(0);
+  await developmentStep(page, "Results");
   await expect(execution.getByLabel('Selected execution')).toHaveValue('old');
 });
 
@@ -104,14 +122,22 @@ for (const outcome of ['succeeded', 'failed'] as const) {
     await page.getByLabel('New experiment name').fill(name);
     await page.getByRole('button', { name: 'Create experiment' }).click();
     const execution = page.getByRole('region', { name: 'Execution', exact: true });
+    await developmentStep(page, "Results");
     await execution.getByRole('button', { name: 'Load older executions' }).click();
+    await developmentStep(page, "Results");
     await execution.getByLabel('Selected execution').selectOption('old-page');
+    await developmentStep(page, "Results");
     await expect(execution.getByText('Generation freshness: current')).toBeVisible();
+    await developmentStep(page, "Results");
     await expect(execution.getByText(/Evaluation: succeeded · current/)).toBeVisible();
     introduced = true;
+    await developmentStep(page, "Results");
     await execution.getByRole('button', { name: 'Reload history' }).click();
+    await developmentStep(page, "Results");
     await expect(execution.getByText(/Generation freshness: outdated/)).toContainText('newer_attempt');
+    await developmentStep(page, "Results");
     await expect(execution.getByText(/Evaluation: succeeded · outdated/)).toContainText('attempt_changed');
+    await developmentStep(page, "Results");
     await expect(execution.getByLabel('Selected execution')).toHaveValue('old-page');
   });
 }
@@ -147,31 +173,48 @@ for (const change of ['controls', 'source'] as const) {
       await page.getByLabel('New experiment name').fill(name);
       await page.getByRole('button', { name: 'Create experiment' }).click();
       const execution = page.getByRole('region', { name: 'Execution', exact: true });
+      await developmentStep(page, "Results");
       await execution.getByRole('button', { name: 'Load older executions' }).click();
+      await developmentStep(page, "Results");
       await execution.getByLabel('Selected execution').selectOption('old-page');
+      await developmentStep(page, "Results");
       await expect(execution.getByText('Generation freshness: current')).toBeVisible();
+      await developmentStep(page, "Results");
       await expect(execution.getByText('Evaluation: succeeded · current', { exact: false })).toBeVisible();
       changed = true;
       failing = true;
       if (change === 'controls') {
+        await developmentStep(page, "Test settings");
         await execution.getByText('Legacy evaluator route (legacy history comparisons only)').click();
+        await developmentStep(page, "Test settings");
         await execution.getByText('Legacy evaluator route (legacy history comparisons only)').locator('..').getByLabel('Temperature', { exact: true }).fill('0.7');
       } else {
+        await developmentStep(page, "Documents");
         await page.getByLabel('Private source file').setInputFiles({ name: 'source.txt', mimeType: 'text/plain', buffer: Buffer.from('Changed evidence') });
+        await developmentStep(page, "Documents");
         await page.getByRole('button', { name: 'Upload source', exact: true }).click();
       }
       await expect.poll(() => failures).toBeGreaterThan(0);
+      await developmentStep(page, "Results");
       await expect(execution.getByRole('alert')).toBeVisible();
       await expect(execution.getByText('Generation freshness: current')).toHaveCount(0);
+      await developmentStep(page, "Results");
       await expect(execution.getByText('Evaluation: succeeded · current', { exact: false })).toHaveCount(0);
       await expect(execution.getByText('Evaluation: unavailable', { exact: true })).toBeVisible();
+      await developmentStep(page, "Results");
       await expect(execution.getByLabel('Selected execution')).toHaveValue('old-page');
-      await expect(execution.getByText('Attempt: old-attempt', { exact: false })).toBeVisible();
+      await developmentStep(page, "Results");
+      await developmentDetails(page, 'Attempt identifiers and prerequisites');
+  await expect(execution.getByText('Attempt: old-attempt', { exact: false })).toBeVisible();
       failing = false;
+      await developmentStep(page, "Results");
       await execution.getByRole('button', { name: 'Reload history' }).click();
+      await developmentStep(page, "Results");
       await expect(execution.getByText(change === 'source' ? /Generation freshness: outdated/ : 'Generation freshness: current')).toBeVisible();
+      await developmentStep(page, "Results");
       await expect(execution.getByText(/Evaluation: succeeded · outdated/)).toContainText(change === 'controls' ? 'evaluator_changed' : 'attempt_changed');
       await expect(execution.getByRole('alert')).toHaveCount(0);
+      await developmentStep(page, "Results");
       await expect(execution.getByLabel('Selected execution')).toHaveValue('old-page');
     });
   }
@@ -202,16 +245,98 @@ test('a delayed refresh from previous controls cannot replace current comparison
   await page.getByLabel('New experiment name').fill(name);
   await page.getByRole('button', { name: 'Create experiment' }).click();
   const execution = page.getByRole('region', { name: 'Execution', exact: true });
+  await developmentStep(page, "Results");
   await expect(execution.getByText('Evaluation: succeeded · current', { exact: false })).toBeVisible();
+  await developmentStep(page, "Test settings");
   await execution.getByText('Legacy evaluator route (legacy history comparisons only)').click();
   holdNext = true;
+  await developmentStep(page, "Results");
   await execution.getByRole('button', { name: 'Reload history' }).click();
   await expect.poll(() => Boolean(release)).toBe(true);
+  await developmentStep(page, "Test settings");
   await execution.getByText('Legacy evaluator route (legacy history comparisons only)').locator('..').getByLabel('Temperature', { exact: true }).fill('0.7');
+  await developmentStep(page, "Results");
   await expect(execution.getByText(/Evaluation: succeeded · outdated/)).toContainText('evaluator_changed');
   release!();
   await expect.poll(() => settled).toBe(true);
+  await developmentStep(page, "Results");
   await expect(execution.getByText(/Evaluation: succeeded · outdated/)).toContainText('evaluator_changed');
+  await developmentStep(page, "Results");
   await expect(execution.getByText('Evaluation: succeeded · current', { exact: false })).toHaveCount(0);
+  await developmentStep(page, "Results");
   await expect(execution.getByLabel('Selected execution')).toHaveValue('saved');
 });
+
+
+for (const scenario of [
+  { newestFails: true, olderFails: false },
+  { newestFails: true, olderFails: true },
+  { newestFails: false, olderFails: true },
+]) {
+  test(`newest-history availability survives older-page ${scenario.olderFails ? 'failure' : 'success'} after newest ${scenario.newestFails ? 'failure' : 'success'}`, async ({ page, request }) => {
+    const name = `History availability ${Date.now()}`;
+    const created = await (await request.post('/api/admin/development', { data: { name, source_workspace_id: null } })).json();
+    const draft = (await (await request.post(`/api/admin/development/${created.experiment.id}/source-upload`, { data: { revision: created.experiment.revision, filename: 'saved.txt', content_base64: Buffer.from('Saved source').toString('base64') } })).json()).experiment;
+    const route = { provider_id: 'xai-grok', model: 'grok-4', temperature: 0.2, max_tokens: 16000, fallbacks: [] };
+    const sections = ['gap_extraction', 'tactic_extraction', 'matching_coverage', 'partial_splitting'];
+    const config = { mode: 'standard', stages: Object.fromEntries(sections.map(id => [id, { route, overrides: {} }])), evaluator: route };
+    const base = { created_at: '2026-11-03', updated_at: '2026-11-03', generation_status: 'succeeded', evaluation_status: 'not_requested', error: null, manifest: { revision: draft.revision, config, routes: {} }, calls: [], sections: [] };
+    const newest = { ...base, id: 'newest' };
+    const older = { ...base, id: 'older' };
+    let failNewest = false;
+    let newestReads = 0;
+    let olderReads = 0;
+    let posts = 0;
+    await page.route(`**/api/admin/development/${draft.id}/executions**`, async intercepted => {
+      const url = new URL(intercepted.request().url());
+      if (intercepted.request().method() === 'POST') {
+        posts++;
+        await intercepted.fulfill({ status: 409, json: { error: 'Unexpected generation request' } });
+      } else if (url.pathname.endsWith('/older')) {
+        await intercepted.fulfill({ json: { execution: older, history: {} } });
+      } else if (url.searchParams.has('cursor')) {
+        olderReads++;
+        await intercepted.fulfill(scenario.olderFails
+          ? { status: 503, json: { error: 'Older page unavailable' } }
+          : { json: { executions: [older], next_cursor: null, history: {}, delivery: { available: true, reason: null } } });
+      } else {
+        newestReads++;
+        await intercepted.fulfill(failNewest
+          ? { status: 503, json: { error: 'Newest page unavailable' } }
+          : { json: { executions: [newest], next_cursor: 'older-page', history: {}, delivery: { available: true, reason: null } } });
+      }
+    });
+    await page.goto('/admin/development');
+    await page.getByRole('button', { name: `Open ${name}`, exact: true }).click();
+    await expect.poll(() => newestReads).toBeGreaterThanOrEqual(2);
+    await developmentStep(page, 'Run');
+    const execution = page.getByRole('region', { name: 'Execution', exact: true });
+    const run = execution.getByRole('button', { name: 'Run all sections', exact: true });
+    await expect(run).toBeEnabled();
+    failNewest = scenario.newestFails;
+    await developmentStep(page, 'Results');
+    const reload = execution.getByRole('button', { name: 'Reload history', exact: true });
+    await reload.click();
+    await expect(reload).toBeEnabled();
+    if (scenario.newestFails) await expect(page.getByLabel('Next action')).toContainText('Reload history');
+    await execution.getByRole('button', { name: 'Load older executions' }).click();
+    await expect.poll(() => olderReads).toBe(1);
+    await expect(reload).toBeEnabled();
+    if (!scenario.olderFails) await expect(execution.getByLabel('Selected execution').locator('option[value="older"]')).toHaveCount(1);
+    await developmentStep(page, 'Run');
+    if (scenario.newestFails) {
+      await expect(run).toBeDisabled();
+      await expect(page.getByLabel('Next action')).toContainText('Reload history');
+    } else {
+      await expect(run).toBeEnabled();
+    }
+    failNewest = false;
+    await developmentStep(page, 'Results');
+    await reload.click();
+    await expect(reload).toBeEnabled();
+    await expect(page.getByLabel('Next action')).toContainText('Review saved outputs');
+    await developmentStep(page, 'Run');
+    await expect(run).toBeEnabled();
+    expect(posts).toBe(0);
+  });
+}

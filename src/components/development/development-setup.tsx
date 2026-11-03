@@ -1,8 +1,9 @@
 /** Interactive setup; all persistence and parsing stays behind the owner API. */
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DevelopmentExecution } from "@/components/development/development-execution";
+import { developmentWorkflow, workflowSteps, type WorkflowFacts, type WorkflowStep } from "./development-workflow";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MAX_UPLOAD_BYTES, UPLOAD_ACCEPT } from "@/lib/ingest/upload-formats";
@@ -36,6 +37,18 @@ async function fileContent(file: File): Promise<string> {
 
 /** Prepare, persist and reopen private source/reference snapshots. */
 export function DevelopmentSetup() {
+  const [openVersion, setOpenVersion] = useState(0);
+  const [step, setStep] = useState<WorkflowStep>("documents");
+  const [workflow, setWorkflow] = useState<WorkflowFacts>({ history: "loading", latestStatus: null, savedSettings: false, deliveryAvailable: false });
+  const chooseInitialStep = useRef(true);
+  const workflowButtons = useRef<Partial<Record<WorkflowStep, HTMLButtonElement | null>>>({});
+  const onWorkflowChange = useCallback((facts: WorkflowFacts, hasSources: boolean) => {
+    setWorkflow(facts);
+    if (facts.history !== "loading" && chooseInitialStep.current) {
+      chooseInitialStep.current = false;
+      setStep(developmentWorkflow(hasSources, facts).step);
+    }
+  }, []);
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [draft, setDraft] = useState<Experiment | null>(null);
@@ -178,6 +191,10 @@ export function DevelopmentSetup() {
 
   /** Clear selections owned by the previous draft, including native-file backing state. */
   function resetDraftSelections() {
+    setOpenVersion(current => current + 1);
+    setStep("documents");
+    setWorkflow({ history: "loading", latestStatus: null, savedSettings: false, deliveryAvailable: false });
+    chooseInitialStep.current = true;
     setSources([]);
     setAssociations([]);
     setSourceId("");
@@ -238,6 +255,12 @@ export function DevelopmentSetup() {
       accept(result.experiment);
       setMessage("Document saved. Any edited name still needs Save name.");
     });
+  }
+
+  const guidance = developmentWorkflow(!!draft?.documents.some(item => item.role === "source"), workflow);
+  function navigate(next: WorkflowStep) {
+    chooseInitialStep.current = false;
+    setStep(next);
   }
 
   return (
@@ -361,9 +384,9 @@ export function DevelopmentSetup() {
           </ul>
         </section>
         {draft && (
-          <div className="min-w-0 space-y-6" key={draft.id}>
+          <div className="min-w-0 space-y-6" key={`${draft.id}:${openVersion}`}>
             <section className="space-y-3" aria-label="Draft details">
-              <h2 className="font-semibold">Draft details</h2>
+              <h2 className="text-lg font-semibold break-words">{draft.name}</h2>
               <label className="block space-y-2">
                 Experiment name
                 <Input
@@ -412,18 +435,36 @@ export function DevelopmentSetup() {
                 >
                   Reload saved draft
                 </Button>
-                <span className="text-muted-foreground">
-                  Revision {draft.revision} · Draft
-                </span>
+
               </div>
+              <details><summary className="cursor-pointer font-medium">Technical draft details</summary>
+              <p className="mt-2 text-muted-foreground break-all">Draft ID: {draft.id} · Revision {draft.revision}</p>
               <p className="text-muted-foreground">
                 Workspace:{" "}
                 {workspaces.find(
                   (item) => item.id === draft.source_workspace_id,
                 )?.name ?? "Private uploads only"}
                 . Fixed for this experiment.
-              </p>
+              </p></details>
             </section>
+            <nav aria-label="Experiment workflow">
+              <ol className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+                {workflowSteps.map((item, index) => <li key={item.id} className="min-w-0">
+                  <button type="button" ref={(element) => { workflowButtons.current[item.id] = element; }} aria-current={step === item.id ? "step" : undefined}
+                    className={`w-full rounded-md border px-3 py-3 text-left focus-visible:outline-2 focus-visible:outline-ring ${step === item.id ? "border-primary bg-muted" : "border-border hover:bg-muted"}`}
+                    onClick={() => navigate(item.id)}>
+                    <span className="block font-medium">{index + 1}. {item.label}</span>
+                    <span className="mt-1 block text-xs text-muted-foreground">{step === item.id ? "Current · " : ""}{guidance.states[item.id]}</span>
+                  </button>
+                </li>)}
+              </ol>
+            </nav>
+            <div className="space-y-2 border-b border-border pb-4" aria-label="Next action">
+              <p role="status">{guidance.action}</p>
+              {step !== guidance.step && <Button variant="outline" onClick={() => { navigate(guidance.step); workflowButtons.current[guidance.step]?.focus(); }}>Go to {workflowSteps.find(item => item.id === guidance.step)?.label}</Button>}
+            </div>
+            <section hidden={step !== "documents"} aria-labelledby="documents-heading" className="space-y-5">
+              <h3 id="documents-heading" className="text-lg font-semibold">Documents</h3>
             <fieldset
               disabled={busy || stale}
               className="space-y-3 border-t border-border pt-5"
@@ -496,6 +537,7 @@ export function DevelopmentSetup() {
                 Upload source
               </Button>
             </fieldset>
+            <details><summary className="cursor-pointer font-medium">Optional evaluation references</summary>
             <fieldset
               disabled={busy || stale}
               className="space-y-3 border-t border-border pt-5"
@@ -552,9 +594,7 @@ export function DevelopmentSetup() {
                       />
                       <span>
                         {item.filename}
-                        <span className="block text-xs text-muted-foreground">
-                          Snapshot ID: {item.id}
-                        </span>
+                        <span className="block text-xs text-muted-foreground">Saved source snapshot</span>
                       </span>
                     </label>
                   ))}
@@ -598,12 +638,12 @@ export function DevelopmentSetup() {
                 Upload structured reference
               </Button>
             </fieldset>
-            <DevelopmentExecution draft={draft} disabled={busy || stale || dirty} />
+            </details>
             <section
               aria-label="Saved documents"
               className="border-t border-border pt-5"
             >
-              <h2 className="mb-3 font-semibold">Saved documents</h2>
+              <h4 className="mb-3 font-semibold">Saved documents</h4>
               {!draft.documents.length && (
                 <p className="text-muted-foreground">No documents saved.</p>
               )}
@@ -616,16 +656,25 @@ export function DevelopmentSetup() {
                         ? "Private source snapshot"
                         : `Evaluator-only · ${item.section ? sections[item.section] : "No section"} · ${item.review_status} · ${item.compatibility}`}
                     </p>
+                    {item.role === "source" && (
+                      <details>
+                        <summary className="cursor-pointer">Source snapshot identity</summary>
+                        <p className="mt-2 text-muted-foreground">Use this ID when preparing a structured reference JSON file.</p>
+                        <p className="break-all text-xs text-muted-foreground">Snapshot ID: <code aria-label="Source snapshot ID">{item.id}</code></p>
+                      </details>
+                    )}
                     {item.role === "reference" && (
-                      <p className="break-all text-xs text-muted-foreground">
+                      <details><summary className="cursor-pointer">Associated source identities</summary><p className="break-all text-xs text-muted-foreground">
                         Associated snapshots:{" "}
                         {item.source_document_ids.join(", ")}
-                      </p>
+                      </p></details>
                     )}
                   </li>
                 ))}
               </ul>
             </section>
+            </section>
+            <DevelopmentExecution draft={draft} disabled={busy || stale || dirty} step={step} onWorkflowChange={onWorkflowChange} />
           </div>
         )}
       </div>

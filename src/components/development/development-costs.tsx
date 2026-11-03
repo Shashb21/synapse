@@ -70,7 +70,7 @@ export function DevelopmentCosts({ root, account, onChange, disabled }: { root: 
   }
   if (!account) return <p>Historical spending data unavailable. Saved outputs remain available.</p>;
   return <section aria-label="Execution spending" className="space-y-3 border-t border-border pt-3">
-    <h3 className="font-semibold">Execution spending</h3>
+    <h4 className="font-semibold">Execution spending</h4>
     <p aria-live="polite">{account.paused ? `Spending paused: ${account.pause_reason ?? 'Paused by owner.'}` : 'Spending authorized'}</p>
     <p>Allowance: {dollars(account.allowance_usd)}</p><p>Allowance override: {account.override_enabled ? 'enabled' : 'disabled'} · Unknown charges: {account.unknown_acknowledged ? 'acknowledged for this execution' : 'not acknowledged'}</p>
     <p>Saved estimated total: {dollars(account.estimate.total_usd)}</p>
