@@ -109,14 +109,14 @@ async function arrange(page: Page, options: { missingProviders?: boolean; queued
       return;
     }
     const manifest = evaluation.manifest as { references: unknown[]; profile: EvaluationProfile };
-    Object.assign(evaluation, options.malformed ? { status: "failed", error: "Evaluator reply has an out-of-range score.", receipt: { llm_call_id: "trace-1", text: "malformed", usage: null, cost_usd: 0 } } : { status: "succeeded", result: { checks: { passed: false, items: [{ id: "quotation", passed: false, detail: "Quotation requires inspection." }] }, rubric: { score: 3, criteria: manifest.profile.defaults.map((criterion) => ({ criterion_id: criterion.id, score: 3, reason: "Source-supported assessment.", threshold_met: null })) }, reference: { status: manifest.references.length ? "scored" : "unscored", reasons: manifest.references.length ? [] : ["No reference documents selected."], precision: { numerator: 1, denominator: 1, value: manifest.references.length ? 1 : null }, recall: { numerator: 1, denominator: 1, value: manifest.references.length ? 1 : null }, matches: manifest.references.length ? [{ output_id: "candidate:0", reference_id: `${reference.id}:answer-1`, reason: "Same question." }] : [], unmatched_output_ids: [], unmatched_reference_ids: [] } } });
+    Object.assign(evaluation, options.malformed ? { status: "failed", error: "Evaluator reply has an out-of-range score.", receipt: { llm_call_id: "trace-1", text: "malformed", usage: null, cost_usd: 0 } } : { status: "succeeded", receipt: { llm_call_id: "trace-1", text: "scripted response", usage: null, cost_usd: null }, result: { checks: { passed: false, items: [{ id: "quotation", passed: false, detail: "Quotation requires inspection." }] }, rubric: { score: 3, criteria: manifest.profile.defaults.map((criterion) => ({ criterion_id: criterion.id, score: 3, reason: "Source-supported assessment.", threshold_met: null })) }, reference: { status: manifest.references.length ? "scored" : "unscored", reasons: manifest.references.length ? [] : ["No reference documents selected."], precision: { numerator: 1, denominator: 1, value: manifest.references.length ? 1 : null }, recall: { numerator: 1, denominator: 1, value: manifest.references.length ? 1 : null }, matches: manifest.references.length ? [{ output_id: "candidate:0", reference_id: `${reference.id}:answer-1`, reason: "Same question." }] : [], unmatched_output_ids: [], unmatched_reference_ids: [] } } });
     await route.fulfill({ json: { evaluation } });
   });
   await page.goto("/admin/development");
   await page.getByRole("button", { name: `Open ${name}` }).click();
-  if (!options.profileLoadFailure) await expect(page.getByRole("region", { name: "Evaluation", exact: true }).getByRole("button", { name: "Save As custom profile" })).toBeEnabled();
   await developmentStep(page, "Results");
-  return { name, draft, reference, saves, posts, releaseExecutions, releaseEvaluation, releasedResponse: () => releasedResponse, recoverProfiles: () => { profileLoadFailure = false; }, recoverHistory: (mode: "all" | "empty" | "older" = "all") => { recoveryHistoryFailure = false; historyMode = mode; }, releaseQueuedHistory, queuedHistoryStarted, releaseSucceededHistory, succeededHistoryStarted, generationPosts: () => generationPosts, polls: () => polls };
+  if (!options.profileLoadFailure) await expect(page.getByRole("region", { name: "Evaluation", exact: true }).getByRole("button", { name: "Save As custom profile" })).toBeEnabled();
+  return { name, draft, reference, saves, posts, execution, evaluations, releaseExecutions, releaseEvaluation, releasedResponse: () => releasedResponse, recoverProfiles: () => { profileLoadFailure = false; }, recoverHistory: (mode: "all" | "empty" | "older" = "all") => { recoveryHistoryFailure = false; historyMode = mode; }, releaseQueuedHistory, queuedHistoryStarted, releaseSucceededHistory, succeededHistoryStarted, generationPosts: () => generationPosts, polls: () => polls };
 }
 
 test("copies and versions profiles, evaluates a retained rejected output and reopens immutable history", async ({ page }) => {
@@ -125,6 +125,7 @@ test("copies and versions profiles, evaluates a retained rejected output and reo
   const panel = page.getByRole("region", { name: "Evaluation", exact: true });
   await expect(panel.getByText("Balanced · balanced@1 · read-only")).toBeVisible();
   await expect(panel.getByRole("button", { name: "Save As custom profile" })).toBeEnabled();
+  await panel.getByText("Advanced evaluation settings", { exact: true }).click();
   await panel.getByText("Profile criteria and anchors", { exact: true }).click();
   await expect(panel.getByLabel("Profile name", { exact: true })).toBeDisabled();
   // Act: keyboard-copy the immutable built-in, validate numeric input, then save append-only versions.
@@ -152,6 +153,7 @@ test("copies and versions profiles, evaluates a retained rejected output and reo
   await panel.getByRole("button", { name: "Save new version" }).click();
   await expect(panel.getByText("Clinical recovery · custom-profile@2 · saved version")).toBeVisible();
   expect(fixture.saves[1]).toMatchObject({ base_version: 1, sections: { tactic_extraction: [{ name: "Tactic-specific recovery" }, {}, {}, {}, {}] } });
+  if (!await panel.getByText("Per-section evaluator settings", { exact: true }).isVisible()) await panel.getByText("Advanced evaluation settings", { exact: true }).click();
   await panel.getByText("Per-section evaluator settings", { exact: true }).click();
   const gaps = panel.getByRole("group", { name: "Gap extraction evaluator", exact: true });
   const tactics = panel.getByRole("group", { name: "Tactic extraction evaluator", exact: true });
@@ -189,10 +191,20 @@ test("copies and versions profiles, evaluates a retained rejected output and reo
   await page.setViewportSize({ width: 1440, height: 1000 });
   await panel.scrollIntoViewIfNeeded();
   await page.screenshot({ path: ".superpowers/sdd/2026-10-30-kan204/task-2-desktop.png", fullPage: true });
+  await page.screenshot({ path: ".superpowers/sdd/ui-6-evaluation-desktop-viewport.png" });
+  await page.evaluate(() => { document.documentElement.style.zoom = '2'; });
+  await expect(panel.getByLabel("Selected evaluation")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: ".superpowers/sdd/ui-6-evaluation-zoom.png", fullPage: true });
+  await panel.getByText("Evaluation status: succeeded", { exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: ".superpowers/sdd/ui-6-evaluation-zoom-viewport.png" });
+  await page.evaluate(() => { document.documentElement.style.zoom = ''; });
   await page.setViewportSize({ width: 390, height: 844 });
   await panel.scrollIntoViewIfNeeded();
   await page.screenshot({ path: ".superpowers/sdd/2026-10-30-kan204/task-2-mobile.png", fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await panel.getByText("Evaluation status: succeeded", { exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: ".superpowers/sdd/ui-6-evaluation-mobile-viewport.png" });
 });
 
 test("keeps malformed evaluator failures separate from successful generation without automatic resend", async ({ page }) => {
@@ -216,6 +228,7 @@ test("blocks checks-only work when durable delivery is unavailable", async ({ pa
   const fixture = await arrange(page, { missingDelivery: true });
   const panel = page.getByRole("region", { name: "Evaluation", exact: true });
   // Act: select provider-free checks.
+  if (!await panel.getByText("Per-section evaluator settings", { exact: true }).isVisible()) await panel.getByText("Advanced evaluation settings", { exact: true }).click();
   await panel.getByText("Per-section evaluator settings", { exact: true }).click();
   await panel.getByRole("group", { name: "Gap extraction evaluator", exact: true }).getByLabel("Method").selectOption("checks_only");
   // Assert: the UI fails closed before queuing any job.
@@ -267,12 +280,14 @@ test("preserves unsaved profile and independent evaluator settings across execut
   const fixture = await arrange(page, { twoExecutions: true });
   const panel = page.getByRole("region", { name: "Evaluation", exact: true });
   await panel.getByRole("button", { name: "Save As custom profile" }).click();
+  await panel.getByText("Advanced evaluation settings", { exact: true }).click();
   await panel.getByText("Profile criteria and anchors", { exact: true }).click();
   await panel.getByLabel("Profile name", { exact: true }).fill("Unsaved experiment rubric");
   await panel.getByRole("group", { name: "Criterion 1", exact: true }).getByRole("textbox", { name: "Anchor 4", exact: true }).fill("Retain this unsaved anchor.");
   await panel.getByLabel("Criteria scope").selectOption("tactic_extraction");
   await panel.getByLabel("Use section-specific criteria for Tactic extraction").check();
   await panel.getByRole("group", { name: "Criterion 1", exact: true }).getByLabel("Name", { exact: true }).fill("Unsaved tactic criterion");
+  if (!await panel.getByText("Per-section evaluator settings", { exact: true }).isVisible()) await panel.getByText("Advanced evaluation settings", { exact: true }).click();
   await panel.getByText("Per-section evaluator settings", { exact: true }).click();
   const gaps = panel.getByRole("group", { name: "Gap extraction evaluator", exact: true });
   await gaps.getByLabel("Method").selectOption("rubric_and_reference");
@@ -403,6 +418,7 @@ for (const rejection of [{ status: 422, code: "evaluation_too_large" }, { status
     const panel = page.getByRole("region", { name: "Evaluation", exact: true });
     const evaluate = panel.getByRole("button", { name: "Evaluate saved output", exact: true });
     await panel.getByLabel(new RegExp("Use evaluation-reference.json")).check();
+    if (!await panel.getByText("Per-section evaluator settings", { exact: true }).isVisible()) await panel.getByText("Advanced evaluation settings", { exact: true }).click();
     await panel.getByText("Per-section evaluator settings", { exact: true }).click();
     const method = panel.getByRole("group", { name: "Gap extraction evaluator", exact: true }).getByLabel("Method");
     await method.selectOption("rubric_and_reference");
@@ -541,14 +557,48 @@ test('queued evaluator spending pause refreshes the shared account without a sta
 
 test("explains missing evaluator credentials while checks-only stays available", async ({ page }) => {
   await arrange(page, { missingProviders: true });
+  const rerun = page.getByRole("button", { name: "Rerun with current settings", exact: true });
+  await expect(rerun).toBeDisabled();
+  await expect(rerun).toHaveAttribute("aria-describedby", "results-run-readiness");
+  await expect(page.locator("#results-run-readiness")).toContainText("credentials");
   const panel = page.getByRole("region", { name: "Evaluation", exact: true });
   const evaluate = panel.getByRole("button", { name: "Evaluate saved output", exact: true });
   await expect(evaluate).toBeDisabled();
   await expect(evaluate).toHaveAttribute("aria-describedby", "evaluate-readiness");
   await expect(panel.locator("#evaluate-readiness")).toContainText("Configure credentials");
-  await panel.getByText("Per-section evaluator settings", { exact: true }).click();
+  await developmentDetails(page, "Advanced evaluation settings");
+  await developmentDetails(page, "Per-section evaluator settings");
   const gaps = panel.getByRole("group", { name: "Gap extraction evaluator", exact: true });
   await gaps.getByLabel("Method").selectOption("checks_only");
   await expect(gaps.locator("fieldset[disabled]")).toHaveAttribute("aria-describedby", "evaluator-route-gap_extraction");
   await expect(evaluate).toBeEnabled();
+});
+
+test("keeps a saved evaluation's unknown charge visible across runs and comparison", async ({ page }) => {
+  const fixture = await arrange(page, { twoExecutions: true });
+  const panel = page.getByRole("region", { name: "Evaluation", exact: true });
+  await panel.getByRole("button", { name: "Evaluate saved output", exact: true }).click();
+  await expect(panel.getByText("Evaluation status: succeeded", { exact: true })).toBeVisible({ timeout: 10000 });
+  await page.getByRole("combobox", { name: "Selected execution", exact: true }).selectOption("other-run");
+  await expect(panel.getByText(/^Evaluation cost: unknown/)).toBeVisible();
+  await expect(panel.getByText("Evaluator receipt, trace and usage", { exact: true }).locator("..")).not.toHaveAttribute("open");
+  await page.route("**/api/admin/development/comparison?**", intercepted => intercepted.fulfill({ json: { comparison: {
+    left: { execution: fixture.execution, evaluations: fixture.evaluations },
+    right: { execution: { ...fixture.execution, id: "other-run" }, evaluations: [] },
+    compatibility: { controlled: false, blockers: ["profile_version"], missing_evidence: [], varying_factors: [] },
+    sections: [], trial_note: "Each execution is one trial.",
+  } } }));
+  const comparison = page.getByRole("region", { name: "Saved comparison", exact: true });
+  await comparison.getByRole("combobox", { name: "Left experiment", exact: true }).selectOption(fixture.draft.id);
+  await comparison.getByRole("combobox", { name: "Right experiment", exact: true }).selectOption(fixture.draft.id);
+  await comparison.getByRole("combobox", { name: "Left saved execution", exact: true }).selectOption("saved-run");
+  await comparison.getByRole("combobox", { name: "Right saved execution", exact: true }).selectOption("other-run");
+  const assessment = comparison.locator("details").filter({ has: page.locator("summary", { hasText: "Evaluation evaluation-1" }) }).first();
+  await assessment.locator("summary").first().focus();
+  await page.keyboard.press("Enter");
+  await expect(assessment).toHaveAttribute("open", "");
+  await expect(assessment.getByText(/^Evaluation cost: unknown/)).toBeVisible();
+  await expect(assessment.getByText("Evaluator receipt, trace and usage", { exact: true }).locator("..")).not.toHaveAttribute("open");
+  await expect(assessment.locator("summary").first()).toBeFocused();
+  expect(fixture.generationPosts()).toBe(0);
 });

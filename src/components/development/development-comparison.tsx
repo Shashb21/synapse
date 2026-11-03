@@ -6,12 +6,13 @@ import { routeSelectClass } from './development-route-fields';
 import type { Experiment } from '@/modules/development/schema';
 import type { Execution } from '@/modules/development/execution-store';
 import type { ComparisonResult, ComparisonCompatibility } from '@/modules/development/comparison';
+import { presentationReason } from './development-presentation';
 import { CallEvidence, DevelopmentResults } from './development-results';
 import { EvaluationDetail } from './development-evaluation';
 
 /** Display every blocker and unknown independently of permitted varying factors. */
 function Compatibility({ value }: { value: ComparisonCompatibility }) {
-  return <div className="space-y-1"><p>{value.controlled ? 'Inputs and evaluation settings match for controlled comparison.' : 'Quality comparison is not controlled.'}</p><p>Differences: {value.blockers.join(', ') || 'none recorded'}</p><p>Missing evidence: {value.missing_evidence.join(', ') || 'none recorded'}</p><p>Varying factors: {value.varying_factors.join(', ') || 'none recorded'}</p></div>;
+  return <div className="space-y-1"><p>{value.controlled ? 'Inputs and evaluation settings match for controlled comparison.' : 'Quality comparison is not controlled.'}</p><p>Differences: {value.blockers.map(presentationReason).join(', ') || 'none recorded'}</p><p>Missing evidence: {value.missing_evidence.map(presentationReason).join(', ') || 'none recorded'}</p><p>Varying factors: {value.varying_factors.map(presentationReason).join(', ') || 'none recorded'}</p></div>;
 }
 /** Show configuration differences and exact evaluation-pair compatibility. */
 export function ComparisonEvidence({ comparison }: { comparison: ComparisonResult }) {

@@ -41,6 +41,6 @@ describe('section evidence', () => {
   it('shows compatibility reasons and explicit one-trial warning', () => {
     const value = { compatibility: { controlled: false, blockers: ['source_content', 'profile_version'], missing_evidence: ['evaluator'], varying_factors: ['generation_mode'] }, sections: [], trial_note: 'One trial per execution.' } as unknown as ComparisonResult;
     const html = renderToStaticMarkup(<ComparisonEvidence comparison={value} />);
-    for (const label of ['source_content', 'profile_version', 'evaluator', 'generation_mode', 'One trial', 'not controlled']) expect(html).toContain(label);
+    for (const label of ['Source document content', 'Evaluation profile version', 'evaluator', 'Generation mode', 'One trial', 'not controlled']) expect(html).toContain(label);
   });
 });
