@@ -8,7 +8,7 @@ import { parsedBlockSchema, type ParsedBlock } from "@/lib/schema";
 import { TACTIC_STATUSES, TACTIC_TYPES } from "@/lib/iegp/enums";
 import { NEED_PROPOSER_SYSTEM } from "../../modules/need-extract/prompts";
 import { INVENTORY_PROPOSER_SYSTEM } from "../../modules/inventory-extract/prompts";
-import { provenanceSpanSchema, validateQuoteAgainstBlock, type ProvenanceSpan } from "../../store/quote-validator";
+import { provenanceSpanSchema, validateQuoteAgainstBlock, type ProvenanceSpan } from "@/lib/ingest/quote-validator";
 import type { BaselineRouteSnapshot, BenchmarkRoute } from "./contracts";
 import type { FrozenReferencePack } from "./inputs";
 import type { LlmUsage } from "@/modules/llm/provider";

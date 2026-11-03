@@ -1,4 +1,4 @@
-import type { ParseBlock } from "@/accuracy/store/quote-validator";
+import type { ParseBlock } from "@/lib/ingest/quote-validator";
 
 export type CoveragePairLabels = {
   gap?: { name?: string; statement?: string };

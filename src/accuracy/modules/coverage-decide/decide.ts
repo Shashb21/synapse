@@ -1,7 +1,7 @@
 import type { AccuracyModuleContext } from "@/accuracy/kernel/contracts";
 import { completeJson } from "@/accuracy/kernel/routing";
 import { readParseBlocksByIds } from "@/accuracy/store/parse-store";
-import type { ParseBlock } from "@/accuracy/store/quote-validator";
+import type { ParseBlock } from "@/lib/ingest/quote-validator";
 import { completeAll, isTestStub } from "@/modules/kernel/llm";
 import { NoRouteError, ProviderError } from "@/modules/llm/provider";
 import { buildStateFromBlocks } from "./build-state-from-blocks";

@@ -46,10 +46,12 @@ export const MODEL_PRICES: ModelPrice[] = [
   },
 ];
 
+/** Estimates tokens at four characters per token, with a minimum of one. */
 export function estimateTokensFromText(text: string): number {
   return Math.max(1, Math.ceil(text.length / 4));
 }
 
+/** Estimates each message separately and totals prompt and completion usage. */
 export function usageFromMessages(system: string, user: string, completion: string) {
   const prompt_tokens = estimateTokensFromText(system) + estimateTokensFromText(user);
   const completion_tokens = estimateTokensFromText(completion);
@@ -60,6 +62,7 @@ export function usageFromMessages(system: string, user: string, completion: stri
   };
 }
 
+/** Finds an exact provider/model price, then falls back to the model family prefix. */
 export function priceForModel(provider_id: string, model: string): ModelPrice | null {
   const exact = MODEL_PRICES.find((p) => p.provider_id === provider_id && p.model === model);
   if (exact) return exact;
@@ -69,6 +72,7 @@ export function priceForModel(provider_id: string, model: string): ModelPrice | 
   return prefix ?? null;
 }
 
+/** Estimates USD from usage; unknown prices return null and OpenRouter free models return zero. */
 export function estimateCostUsd(args: {
   provider_id: string;
   model: string;
@@ -88,6 +92,7 @@ export function estimateCostUsd(args: {
   return { cost_usd: Math.round(cost_usd * 1_000_000) / 1_000_000, price_source: row.source_url };
 }
 
+/** Returns a shallow copy of the manually maintained price table. */
 export function listModelPrices(): ModelPrice[] {
   return [...MODEL_PRICES];
 }
@@ -109,7 +114,8 @@ export function priceKeyFor(provider_id: string, model: string): { provider_id: 
 
 /**
  * Estimated cost of one call from the provider's token counts (KAN-91). Null,
- * never 0, when the model's price is unknown or the counts are missing.
+ * when the model's price is unknown or both counts are missing; one missing count
+ * is treated as zero. Known zero usage and OpenRouter free models cost zero.
  */
 export function estimateCallCost(args: {
   provider_id: string;

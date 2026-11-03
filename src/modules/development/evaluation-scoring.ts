@@ -1,6 +1,6 @@
 /** Deterministic validity and provisional semantic scoring, independent of reviewed benchmark scoring. */
 import { z } from 'zod';
-import { validateQuoteAgainstBlock } from '@/accuracy/store/quote-validator';
+import { validateQuoteAgainstBlock } from '@/lib/ingest/quote-validator';
 import { EVIDENCE_DOMAINS, TACTIC_STATUSES, TACTIC_TYPES, COVERAGE_DIMENSIONS } from '@/lib/iegp/enums';
 import { countingCoverages } from '@/lib/iegp/engine';
 import { developmentMappingCoverages, mappingTableRowSchema } from '@/modules/stages/s4-kg-mapping/module';

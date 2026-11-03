@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { mechanicalModule } from "@/accuracy/modules/_factory";
-import { estimateCostUsd } from "@/accuracy/kernel/cost";
+import { estimateCostUsd } from "@/modules/llm/cost";
 import { AccuracyRunRecorder, closeAccuracyRun, openAccuracyRun } from "@/accuracy/kernel/observability";
 import { accuracyCompletionFor } from "@/accuracy/kernel/routing";
 import { runAccuracyModule } from "@/accuracy/kernel/run";

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { FrozenReferencePack } from './inputs';
 import type { ExtractFinding } from './extract';
-import { provenanceSpanSchema, validateQuoteAgainstBlock } from '../../store/quote-validator';
+import { provenanceSpanSchema, validateQuoteAgainstBlock } from '@/lib/ingest/quote-validator';
 export type ScoringStage = 'need_extract' | 'inventory_extract';
 const identityText = z.string().trim().min(1);
 const signed = { findingId: identityText, reviewerId: identityText, reviewedAt: z.iso.datetime({ offset: true }), signature: identityText, rationale: identityText };

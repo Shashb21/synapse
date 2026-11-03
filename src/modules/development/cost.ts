@@ -1,5 +1,5 @@
 /** Pure Development cost evidence: exact price identities, explicit unknowns and no billing guesses. */
-import { MODEL_PRICES, type ModelPrice } from '@/accuracy/kernel/cost';
+import { MODEL_PRICES, type ModelPrice } from '@/modules/llm/cost';
 import type { LlmRequest, LlmUsage } from '@/modules/llm/provider';
 export const COST_CATEGORIES = ['source_preparation', 'reference_preparation', 'proposer', 'critic', 'reviser', 'internal_judge', 'structural_repairs', 'json_retries', 'pair_assessments', 'external_evaluation'] as const;
 export type CostCategory = typeof COST_CATEGORIES[number];

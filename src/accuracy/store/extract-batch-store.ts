@@ -7,7 +7,7 @@ import { z } from "zod";
 import { accuracyDb, ensureAccuracySchema } from "./db";
 import { accuracyClaims, accuracyParseBlocks, accuracyProvenance, accuracySourceFiles } from "./schema";
 import { readParseBlocks } from "./parse-store";
-import { validateProvenance, type ParseBlock, type ProvenanceSpan } from "./quote-validator";
+import { validateProvenance, type ParseBlock, type ProvenanceSpan } from "@/lib/ingest/quote-validator";
 import type { AccuracyClaimMetadata, AccuracyClaimType } from "./claim-store";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { lockAccuracySource, type SourceConnection } from "./source-lock";

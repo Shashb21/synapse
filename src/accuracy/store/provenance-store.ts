@@ -3,7 +3,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { accuracyDb, ensureAccuracySchema } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
-import { provenanceSpanSchema, validateProvenance, type ProvenanceSpan } from "./quote-validator";
+import { provenanceSpanSchema, validateProvenance, type ProvenanceSpan } from "@/lib/ingest/quote-validator";
 import type { QuoteDependent } from "@/lib/ingest/manual-blocks";
 
 export type AccuracyTransaction = Parameters<Parameters<ReturnType<typeof accuracyDb>["transaction"]>[0]>[0];

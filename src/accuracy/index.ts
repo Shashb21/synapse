@@ -83,7 +83,7 @@ export {
   chromePlanLabelStatus,
   normalizePlanLabel,
 } from "./domain/plan-label";
-export { listModelPrices, estimateCostUsd } from "./kernel/cost";
+export { listModelPrices, estimateCostUsd } from "@/modules/llm/cost";
 export { rollupAccuracyRunCost, formatUsd } from "./kernel/cost-rollup";
 export type { AccuracyCostRollup } from "./kernel/cost-rollup";
 export {

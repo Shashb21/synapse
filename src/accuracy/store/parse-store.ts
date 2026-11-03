@@ -8,7 +8,7 @@ import { lockAccuracySource } from "./source-lock";
 import { reconcileDependents, repointMetadataProvenance, withProvenanceTransaction, type AccuracyExecutor } from "./provenance-store";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
-import type { ParseBlock } from "./quote-validator";
+import type { ParseBlock } from "@/lib/ingest/quote-validator";
 import { insertSourceFile } from "./source-store";
 import {
   describeOrphans,

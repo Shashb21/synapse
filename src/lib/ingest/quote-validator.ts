@@ -21,7 +21,7 @@ export type ParseBlock = {
   text: string;
 };
 
-/** Returns null when quote is not a substring of block text (accuracy gate). */
+/** Accepts trimmed substrings, allowing collapsed whitespace; failures include a reason. */
 export function validateQuoteAgainstBlock(args: {
   block: Pick<ParseBlock, "text">;
   quote: string;
@@ -39,6 +39,7 @@ export function validateQuoteAgainstBlock(args: {
   return { ok: false, reason: "quote_not_substring" };
 }
 
+/** Checks block/source identity before validating the quote; offsets are not checked. */
 export function validateProvenance(args: {
   block: Pick<ParseBlock, "id" | "source_file_id" | "text">;
   span: ProvenanceSpan;

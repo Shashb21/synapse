@@ -12,7 +12,7 @@ import { persistParseBlocks } from "@/accuracy/store/parse-store";
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { ensureAccuracySchema } from "@/accuracy/store/db";
-import { validateQuoteAgainstBlock } from "@/accuracy/store/quote-validator";
+import { validateQuoteAgainstBlock } from "@/lib/ingest/quote-validator";
 
 const BGB_PACK = "beone-bgb-58067-prmt5i";
 const TISLE_PACK = "beone-tislelizumab-iegp";

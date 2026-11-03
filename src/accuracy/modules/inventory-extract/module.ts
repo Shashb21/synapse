@@ -4,7 +4,7 @@ import { agenticModule } from "../_factory";
 import { runShallowAgenticCycle } from "../../kernel/agentic";
 import { completeJson } from "../../kernel/routing";
 import { isTestStub } from "@/modules/kernel/llm";
-import { provenanceSpanSchema, validateProvenance, type ParseBlock } from "../../store/quote-validator";
+import { provenanceSpanSchema, validateProvenance, type ParseBlock } from "@/lib/ingest/quote-validator";
 import { TACTIC_STATUSES, TACTIC_TYPES } from "@/lib/iegp/enums";
 import { newId } from "@/modules/kernel/ids";
 import type { AccuracyModuleContext } from "../../kernel/contracts";
