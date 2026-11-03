@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { GET as runGet } from "@/app/api/runs/[id]/route";
 import { LlmCallList, LlmTotalsLine } from "@/components/admin/llm-calls";
-import { estimateCallCost, priceKeyFor } from "@/accuracy/kernel/cost";
+import { estimateCallCost, priceKeyFor } from "@/modules/llm/cost";
 import type { ResolvedRoute } from "@/modules/kernel/contracts";
 import { closeRun, getRun, openRun, RunRecorder } from "@/modules/kernel/observability";
 import { llmTotalsByStage, listLlmCalls, redactPromptSecrets, totalsOf } from "@/modules/kernel/llm-calls";

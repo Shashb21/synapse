@@ -1,5 +1,5 @@
-import type { ParseBlock } from "./quote-validator";
-import { validateQuoteAgainstBlock } from "./quote-validator";
+import type { ParseBlock } from "@/lib/ingest/quote-validator";
+import { validateQuoteAgainstBlock } from "@/lib/ingest/quote-validator";
 
 /**
  * Verbatim parse-block preview for Sources.
