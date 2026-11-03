@@ -24,9 +24,9 @@ test('reopens historical attempts with independent freshness and call details', 
   await developmentStep(page, "Test settings");
   await expect(execution.getByLabel('Execution mode')).toHaveValue('single_pass');
   await developmentStep(page, "Results");
-  await expect(execution.getByText(/Generation freshness: outdated/)).toContainText('newer_attempt');
+  await expect(execution.getByText(/Generation freshness: outdated/)).toContainText('A newer attempt exists');
   await developmentStep(page, "Results");
-  await expect(execution.getByText(/Evaluation: succeeded/)).toContainText('attempt_changed');
+  await expect(execution.getByText(/Evaluation: succeeded/)).toContainText('The saved attempt or output changed');
   await developmentStep(page, "Results");
   await developmentDetails(page, 'Saved model routes and call evidence');
   await execution.getByText('Call 1: succeeded').click();
@@ -79,6 +79,8 @@ test('loads older history while retaining the newest prerequisites and selected 
   await page.getByLabel('File to add to this experiment').setInputFiles({ name: 'source.txt', mimeType: 'text/plain', buffer: Buffer.from('Evidence') });
   await developmentStep(page, "Documents");
   await page.getByRole('button', { name: 'Upload experiment document', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Experiment document saved.' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Saved documents', exact: true }).getByText('source.txt', { exact: true })).toBeVisible();
   await expect.poll(() => listReads).toBeGreaterThan(beforeUpload);
   const execution = page.getByRole('region', { name: 'Execution', exact: true });
   await developmentStep(page, "Results");
@@ -94,6 +96,7 @@ test('loads older history while retaining the newest prerequisites and selected 
   expect(posts).toBe(0);
   await developmentStep(page, "Results");
   await expect(execution.getByLabel('Selected execution')).toHaveValue('old');
+  await expect(execution.getByText('Review Test settings before rerunning. This action uses current settings and experiment documents; the selected saved run stays unchanged.', { exact: true })).toBeVisible();
 });
 
 for (const outcome of ['succeeded', 'failed'] as const) {
@@ -134,9 +137,9 @@ for (const outcome of ['succeeded', 'failed'] as const) {
     await developmentStep(page, "Results");
     await execution.getByRole('button', { name: 'Reload history' }).click();
     await developmentStep(page, "Results");
-    await expect(execution.getByText(/Generation freshness: outdated/)).toContainText('newer_attempt');
+    await expect(execution.getByText(/Generation freshness: outdated/)).toContainText('A newer attempt exists');
     await developmentStep(page, "Results");
-    await expect(execution.getByText(/Evaluation: succeeded · outdated/)).toContainText('attempt_changed');
+    await expect(execution.getByText(/Evaluation: succeeded · outdated/)).toContainText('The saved attempt or output changed');
     await developmentStep(page, "Results");
     await expect(execution.getByLabel('Selected execution')).toHaveValue('old-page');
   });
@@ -212,7 +215,7 @@ for (const change of ['controls', 'source'] as const) {
       await developmentStep(page, "Results");
       await expect(execution.getByText(change === 'source' ? /Generation freshness: outdated/ : 'Generation freshness: current')).toBeVisible();
       await developmentStep(page, "Results");
-      await expect(execution.getByText(/Evaluation: succeeded · outdated/)).toContainText(change === 'controls' ? 'evaluator_changed' : 'attempt_changed');
+      await expect(execution.getByText(/Evaluation: succeeded · outdated/)).toContainText(change === 'controls' ? 'Evaluator settings changed' : 'The saved attempt or output changed');
       await expect(execution.getByRole('alert')).toHaveCount(0);
       await developmentStep(page, "Results");
       await expect(execution.getByLabel('Selected execution')).toHaveValue('old-page');
@@ -256,11 +259,11 @@ test('a delayed refresh from previous controls cannot replace current comparison
   await developmentStep(page, "Test settings");
   await execution.getByText('Legacy evaluator route (legacy history comparisons only)').locator('..').getByLabel('Temperature', { exact: true }).fill('0.7');
   await developmentStep(page, "Results");
-  await expect(execution.getByText(/Evaluation: succeeded · outdated/)).toContainText('evaluator_changed');
+  await expect(execution.getByText(/Evaluation: succeeded · outdated/)).toContainText('Evaluator settings changed');
   release!();
   await expect.poll(() => settled).toBe(true);
   await developmentStep(page, "Results");
-  await expect(execution.getByText(/Evaluation: succeeded · outdated/)).toContainText('evaluator_changed');
+  await expect(execution.getByText(/Evaluation: succeeded · outdated/)).toContainText('Evaluator settings changed');
   await developmentStep(page, "Results");
   await expect(execution.getByText('Evaluation: succeeded · current', { exact: false })).toHaveCount(0);
   await developmentStep(page, "Results");
