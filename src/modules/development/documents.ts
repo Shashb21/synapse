@@ -128,7 +128,7 @@ export async function snapshotWorkspaceSource(
     throw new DevelopmentError(
       400,
       "workspace_required",
-      "This private-only experiment has no workspace sources. Upload a private source instead.",
+      "This experiment uses private uploads only. Use Upload files, or create a new experiment bound to the desired workspace.",
     );
   return withAdminWorkspace(async () => {
     const files = await db().execute(
@@ -139,7 +139,7 @@ export async function snapshotWorkspaceSource(
       throw new DevelopmentError(
         404,
         "not_found",
-        "That source does not belong to the experiment's source workspace.",
+        "That document is not available in this experiment’s workspace. Refresh workspace documents and choose another document.",
       );
     const parses = await db().execute(
       sql`select * from parsed_documents where file_id=${fileId} order by parsed_at desc limit 1`,
@@ -155,13 +155,13 @@ export async function snapshotWorkspaceSource(
       throw new DevelopmentError(
         422,
         "source_not_parsed",
-        "Parse this source in its workspace first, then import it again. Development requires an existing nonempty parsed snapshot.",
+        "This document has no readable parse. Parse it in its workspace first, then refresh workspace documents and add a copy again. You can also use Upload files.",
       );
     if (typeof file.content_base64 !== "string" || !file.content_base64)
       throw new DevelopmentError(
         422,
         "original_unavailable",
-        "This source has no retained original bytes. Upload the original file privately instead.",
+        "The original file is no longer retained in this workspace. Use Upload files to add the original file to this experiment.",
       );
     const buffer = uploadBytes(file.content_base64);
     const document = makeDocument(experiment, actor, {
@@ -364,7 +364,7 @@ export function validateAssociations(
     throw new DevelopmentError(
       400,
       "invalid_association",
-      "Associate the reference only with unique source snapshots in this experiment.",
+      "Associate the reference only with unique experiment documents in this experiment.",
     );
 }
 /** Prepare optional evaluator-only references; AI-derived answers remain provisional. */

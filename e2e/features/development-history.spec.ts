@@ -76,9 +76,9 @@ test('loads older history while retaining the newest prerequisites and selected 
   await expect.poll(() => listReads).toBeGreaterThan(0);
   const beforeUpload = listReads;
   await developmentStep(page, "Documents");
-  await page.getByLabel('Private source file').setInputFiles({ name: 'source.txt', mimeType: 'text/plain', buffer: Buffer.from('Evidence') });
+  await page.getByLabel('File to add to this experiment').setInputFiles({ name: 'source.txt', mimeType: 'text/plain', buffer: Buffer.from('Evidence') });
   await developmentStep(page, "Documents");
-  await page.getByRole('button', { name: 'Upload source', exact: true }).click();
+  await page.getByRole('button', { name: 'Upload experiment document', exact: true }).click();
   await expect.poll(() => listReads).toBeGreaterThan(beforeUpload);
   const execution = page.getByRole('region', { name: 'Execution', exact: true });
   await developmentStep(page, "Results");
@@ -190,9 +190,9 @@ for (const change of ['controls', 'source'] as const) {
         await execution.getByText('Legacy evaluator route (legacy history comparisons only)').locator('..').getByLabel('Temperature', { exact: true }).fill('0.7');
       } else {
         await developmentStep(page, "Documents");
-        await page.getByLabel('Private source file').setInputFiles({ name: 'source.txt', mimeType: 'text/plain', buffer: Buffer.from('Changed evidence') });
+        await page.getByLabel('File to add to this experiment').setInputFiles({ name: 'source.txt', mimeType: 'text/plain', buffer: Buffer.from('Changed evidence') });
         await developmentStep(page, "Documents");
-        await page.getByRole('button', { name: 'Upload source', exact: true }).click();
+        await page.getByRole('button', { name: 'Upload experiment document', exact: true }).click();
       }
       await expect.poll(() => failures).toBeGreaterThan(0);
       await developmentStep(page, "Results");

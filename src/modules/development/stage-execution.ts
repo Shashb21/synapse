@@ -81,9 +81,9 @@ export function developmentModuleIdentity(section: DevelopmentSection): SectionM
 
 /** Validate immutable snapshots and map their IDs directly to stage document/source IDs. */
 function parsedSources(sources: readonly DevelopmentDocument[]): ParsedDocumentRecord[] {
-  if (!sources.length || sources.length > 100 || new Set(sources.map(source => source.id)).size !== sources.length) throw new DevelopmentError(422, 'invalid_sources', 'Choose 1–100 unique source snapshots.');
+  if (!sources.length || sources.length > 100 || new Set(sources.map(source => source.id)).size !== sources.length) throw new DevelopmentError(422, 'invalid_sources', 'Choose 1–100 unique experiment documents.');
   return sources.map(source => {
-    if (source.role !== 'source' || source.compatibility !== 'compatible' || hash(source.parsed) !== source.parsed_sha256) throw new DevelopmentError(422, 'invalid_sources', 'Generation accepts only unchanged compatible source snapshots.');
+    if (source.role !== 'source' || source.compatibility !== 'compatible' || hash(source.parsed) !== source.parsed_sha256) throw new DevelopmentError(422, 'invalid_sources', 'Generation accepts only unchanged compatible experiment documents.');
     const parsed = z.object({ blocks: z.array(blockSchema).min(1).max(20000) }).parse(source.parsed);
     if (new Set(parsed.blocks.map(block => block.id)).size !== parsed.blocks.length) throw new DevelopmentError(422, 'invalid_sources', 'Source block IDs must be unique.');
     const characters = parsed.blocks.reduce((count, block) => count + block.text.length, 0);
@@ -159,7 +159,7 @@ export async function executeDevelopmentSection(args: ExecuteDevelopmentSectionI
   if (Object.keys(args.prerequisites).some(section => !dependencies.includes(section as DevelopmentSection))) throw new DevelopmentError(422, 'invalid_prerequisite', 'Supply exactly the section dependencies.');
   for (const dependency of dependencies) {
     const prior = args.prerequisites[dependency];
-    if (!prior || prior.section !== dependency || prior.generation_status !== 'succeeded' || prior.source_identity !== sourceIdentity || prior.output_id !== developmentOutputIdentity(prior)) throw new DevelopmentError(409, 'invalid_prerequisite', 'Run the current successful prerequisites for these exact source snapshots first.');
+    if (!prior || prior.section !== dependency || prior.generation_status !== 'succeeded' || prior.source_identity !== sourceIdentity || prior.output_id !== developmentOutputIdentity(prior)) throw new DevelopmentError(409, 'invalid_prerequisite', 'Run the current successful prerequisites for these exact experiment documents first.');
     prerequisiteIds[dependency] = prior.output_id;
   }
   let state = sourceState(sources, documents);

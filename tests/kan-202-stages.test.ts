@@ -122,7 +122,8 @@ describe('KAN-202 source-only stage lineage', () => {
   });
   it('rejects source references, changed parsed hashes and unrelated extra dependencies before calling', async () => {
     const complete = scripted('gap_extraction');
-    for (const invalid of [{ ...source, role: 'reference' }, { ...source, parsed_sha256: 'changed' }]) await expect(executeDevelopmentSection({ section: 'gap_extraction', sources: [invalid as DevelopmentDocument], prerequisites: {}, recorder, complete })).rejects.toMatchObject({ code: 'invalid_sources' });
+    await expect(executeDevelopmentSection({ section: 'gap_extraction', sources: [], prerequisites: {}, recorder, complete })).rejects.toMatchObject({ code: 'invalid_sources', message: 'Choose 1–100 unique experiment documents.' });
+    for (const invalid of [{ ...source, role: 'reference' }, { ...source, parsed_sha256: 'changed' }]) await expect(executeDevelopmentSection({ section: 'gap_extraction', sources: [invalid as DevelopmentDocument], prerequisites: {}, recorder, complete })).rejects.toMatchObject({ code: 'invalid_sources', message: 'Generation accepts only unchanged compatible experiment documents.' });
     const prerequisites = await extracted();
     await expect(executeDevelopmentSection({ section: 'gap_extraction', sources: [source], prerequisites, recorder, complete })).rejects.toMatchObject({ code: 'invalid_prerequisite' });
     expect(complete).not.toHaveBeenCalled();
@@ -131,7 +132,7 @@ describe('KAN-202 source-only stage lineage', () => {
     const prerequisites = await extracted();
     const complete = scripted('matching_coverage');
     for (const prior of [undefined, { ...prerequisites.gap_extraction, generation_status: 'rejected' }, { ...prerequisites.gap_extraction, candidates: [] }, { ...prerequisites.gap_extraction, source_identity: 'other-source' }]) {
-      await expect(executeDevelopmentSection({ section: 'matching_coverage', sources: [source], prerequisites: { ...prerequisites, gap_extraction: prior } as typeof prerequisites, recorder, complete })).rejects.toMatchObject({ code: 'invalid_prerequisite' });
+      await expect(executeDevelopmentSection({ section: 'matching_coverage', sources: [source], prerequisites: { ...prerequisites, gap_extraction: prior } as typeof prerequisites, recorder, complete })).rejects.toMatchObject({ code: 'invalid_prerequisite', message: 'Run the current successful prerequisites for these exact experiment documents first.' });
     }
     expect(complete).not.toHaveBeenCalled();
   });

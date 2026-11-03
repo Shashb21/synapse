@@ -244,7 +244,7 @@ export function DevelopmentExecution({ draft, disabled, step, onWorkflowChange }
     }
     setConfig(structuredClone(saved)); setError("");
     const sourceChanged = JSON.stringify((execution.manifest.sources ?? []).map(source => [source.id, source.sha256, source.parsed_sha256])) !== JSON.stringify(draft.documents.filter(source => source.role === "source").map(source => [source.id, source.sha256, source.parsed_sha256]));
-    setCopyMessage(`Copied configuration from execution ${execution.id} (source revision ${execution.manifest.revision}). Review settings, then explicitly Run a section or Run all sections to generate. Source snapshots: ${sourceChanged ? "changed or unavailable compared with the saved execution" : "match the saved execution"}. Current experiment sources and prerequisites apply; the server validates freshness before running.`);
+    setCopyMessage(`Copied configuration from execution ${execution.id} (source revision ${execution.manifest.revision}). Review settings, then explicitly Run a section or Run all sections to generate. Experiment documents: ${sourceChanged ? "changed or unavailable compared with the saved execution" : "match the saved execution"}. Current experiment documents and prerequisites apply; the server validates freshness before running.`);
   }
   const hasSources = draft.documents.some(item => item.role === "source");
   const latestStatus = history[0]?.generation_status ?? null;
@@ -254,7 +254,7 @@ export function DevelopmentExecution({ draft, disabled, step, onWorkflowChange }
   }, [historyState, latestStatus, savedSettings, delivery?.available, hasSources, onWorkflowChange]);
   const locked = disabled || pending || loading || !config || !delivery?.available || historyState !== "ready" || history.some(active) || !draft.documents.some((item) => item.role === "source");
   return <section aria-label="Execution" className="space-y-4" hidden={step === "documents"}>
-    <p className="text-muted-foreground">Generation uses source snapshots only. Outputs are unreviewed; evaluation uses saved outputs in Results. A fresh run may incur provider charges, including after an uncertain failure.</p>
+    <p className="text-muted-foreground">Generation uses experiment documents only. Outputs are unreviewed; evaluation uses saved outputs in Results. A fresh run may incur provider charges, including after an uncertain failure.</p>
     {copyMessage && <p role="status">{copyMessage}</p>}
     {loading && <p>Loading execution settings and history…</p>}
     {error && <p role="alert" className="text-destructive">{error}</p>}
@@ -271,7 +271,7 @@ export function DevelopmentExecution({ draft, disabled, step, onWorkflowChange }
     </section>
     <section hidden={step !== "run"} aria-labelledby="run-heading" className="space-y-4">
       <h3 id="run-heading" className="text-lg font-semibold">Run</h3>
-      {!hasSources && <p>Add a source snapshot in Documents before running.</p>}
+      {!hasSources && <p>Add an experiment document in Documents before running.</p>}
       {latestStatus && <p role="status">Latest run: {latestStatus}. View saved outputs and errors in Results.</p>}
       {config && <>
       <p className="text-muted-foreground">Matching requires current successful gap and tactic extraction. Partial splitting requires those results and matching built from them. Changed settings or sources can make prerequisites stale; the server checks them before every run.</p>
