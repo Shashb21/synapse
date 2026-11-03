@@ -15,7 +15,7 @@ What the deployment gives customers: SSO sign-in for seat holders only (no self 
 
 - [ ] Hosted Postgres (Vercel Postgres / Neon / RDS) with TLS.
 - [ ] `DATABASE_URL` = **pooled** connection string on Production (and Preview if you use it).
-- [ ] First request creates schema (`ensureSchema` + accuracy DDL). No separate migrate job.
+- [ ] First request creates schema (`ensureSchema`; retired Accuracy DDL is no longer invoked). No separate migrate job.
 
 ## 3. Environment variables
 
@@ -108,25 +108,23 @@ Local: `http://localhost:43217/api/auth/callback`. LLM providers need no redirec
 | `/admin/users` | After signing in as the `create-admin` account: the staff Users table |
 | `/admin/customers` | Customers with seats used / total; assign and unassign seats |
 | `/admin/control` | AI master switch; each LLM provider shows "Key set" or "No key" and its env var (Grok default); per-stage routing; no API-key fields |
-| `/control`, `/pipeline`, `/runs`, `/accuracy` | Redirect to the matching `/admin/...` page (owner only) |
+| `/control`, `/pipeline`, `/runs` | Redirect to the matching `/admin/...` page (owner only) |
 | `/workspaces` | Create a workspace: **Start blank** (default) or **Start with demo data (Velmara)**; a demo workspace shows a **Demo** badge |
 | `/` | Blank workspace: Upload (AI on) or Start (AI off) |
+| `/admin/development`, `/admin/development/evaluation-tools` | Owner experiments and retained local evaluation tools |
+| `/accuracy`, `/api/accuracy`, `/admin/accuracy` and descendants | Retired: 404; Admin paths enforce owner access first |
 | `/timeline` | Every prioritized gap with its activities; create, date, drag and sequence by hand; PNG export; save as final (Medical Affairs only) |
-| `/admin/accuracy` | Accuracy lab (owner only): workspace list; create / seed / archive / delete |
-| `/admin/accuracy/routing` | Per call-kind routing + live price table |
-| `/admin/accuracy/audit?workspace_id=…` | Event trail + estimated-spend rollup |
-| `/admin/accuracy/runs?workspace_id=…` | Module runs; stale `running` rows can be swept |
 
 Set a provider's API key (e.g. `XAI_API_KEY`) in the Vercel environment and redeploy if you need live AI; its card on `/admin/control` then reads "Key set". Upload a PDF or PPTX on `/sources` with AI on to confirm the parse stage's LLM parses it; with AI off, `/sources` is read only and nothing is uploaded or parsed.
 
-## 7. Post-deploy hygiene
+## 7. Retained historical data
 
-- [ ] Archive or delete leftover gold-seed workspaces on `/admin/accuracy`.
-- [ ] On `/admin/accuracy/runs`, **Sweep stale runs** (or wait — listing auto-abandons `running` rows older than 30 minutes).
-- [ ] Check **Audit → Estimated spend** after a live extract so cost rollup is non-zero.
+- [ ] Preserve Accuracy tables, sources, audit history and artifacts; no automatic migration or disposal is part of retirement.
+- [ ] Use Development for experiments and AI & routing for deployed settings.
+- [ ] Record operator-confirmed access and backup coverage separately; code inventory does not prove private backups exist. Follow the [retirement runbook](operations/accuracy-retirement.md).
 
 ## Related
 
 - [`deployment-vercel.md`](./deployment-vercel.md) — Vercel project + Postgres walkthrough
 - [`deployment-live.md`](./deployment-live.md) — provider API keys and Grok routing
-- [`accuracy-first-build.md`](./accuracy-first-build.md) — accuracy stack map
+- [`accuracy-first-build.md`](./accuracy-first-build.md) — historical Accuracy stack map (retired)

@@ -131,7 +131,8 @@ Ingest (`src/app/api/iegp/ingest-pipeline.ts`) is the stage chain S0 → S1 → 
 | `/admin/control` | owner only: AI master and section switches, per-provider key status, per-stage routing |
 | `/admin/harness` | owner only: run each AI use case on its own against the live model |
 | `/admin/evals`, `/admin/catalog` | owner only: gold evals, registered modules and prompt variants |
-| `/admin/accuracy` | owner only: the accuracy lab (reference packs, ledger, coverage, plan, timeline) |
+| `/admin/development` | owner only: experiments, execution, evaluation, comparison and costs |
+| `/admin/development/evaluation-tools` | owner only: retained historical benchmark/reference tools; [retirement runbook](operations/accuracy-retirement.md) |
 | `/admin/modules` | owner only: module versions |
 
 ## Testing

@@ -1,5 +1,7 @@
 # Accuracy-first development orchestration
 
+> **Historical — Accuracy retired (KAN-212, 2026-11-03).** Retained for lineage; routes, runtime paths and maintenance SQL below are not current operating instructions. Do not run cleanup or disposal from this archive. Use the [retirement and retention runbook](operations/accuracy-retirement.md) for current ownership, protected storage and rollback.
+
 **Branch:** `cursor/accuracy-app-ready-b7b5`  
 **Coordinator:** parent Project agent + worker `bc-483e609a`  
 **Policy:** No TypeSafe Jev; schema-locked LLMs (server API keys); BeOne reference gold per pack.

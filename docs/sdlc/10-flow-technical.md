@@ -117,4 +117,4 @@ Shared tables: `workspaces` (with `demo`; the legacy `ai_enabled` column no long
 | `/timeline` | timeline model and plan history | `/api/plan` |
 | `/room`, `/room/audience` | room state (switched off: `ROOM_ENABLED = false`, redirects to the plan) | `/api/room` |
 | `/workspaces/[id]` | workspace, members, the AI state (read only) | `/api/workspaces/[id]`, `/members`; `/api/iegp` `load_demo` and `reset`. `/api/workspaces/[id]/ai` refuses every change since KAN-53 |
-| `/admin/*` | owner console | `/api/admin/*`, `/api/control`, `/api/accuracy/*` |
+| `/admin/*` | owner console | `/api/admin/*`, `/api/control` (Accuracy APIs are retired; see [retirement runbook](../operations/accuracy-retirement.md)) |

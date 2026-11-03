@@ -26,7 +26,7 @@ Every plan change is recorded in the workspace, and a copy goes to the platform 
 
 ## Model calls (KAN-91)
 
-Every model call is stored whole in the platform table `llm_calls`. This covers stage runs (`completionFor`) and accuracy runs. Each row holds:
+Every model call is stored whole in the platform table `llm_calls`. This covers current stage runs (`completionFor`) and retains historical Accuracy call records; retirement does not delete them. Each row holds:
 
 - `run_id`, `stage`, `step`, `purpose` and `attempt`;
 - the provider, model and parameters;
@@ -35,7 +35,7 @@ Every model call is stored whole in the platform table `llm_calls`. This covers 
   - Anthropic `usage`, including cached prompt tokens;
   - OpenAI, OpenRouter and xAI `usage`;
   - Gemini `usageMetadata`, where thinking tokens count as output;
-- an estimated cost from `src/accuracy/kernel/cost.ts`. It is null when the model's price is unknown;
+- an estimated cost from `src/modules/llm/cost.ts`. It is null when the model's price is unknown;
 - the latency;
 - the status, and the error when the call failed.
 

@@ -114,9 +114,8 @@ Open:
 | `/` | Upload (AI on) or Start (AI off) in the open workspace |
 | `/admin/control` | AI master switch; five providers, each "Key set" or "No key" with its env var, Grok default, no API-key fields |
 | `/admin/customers`, `/admin/users` | Customers and seats; staff password accounts |
-| `/admin/accuracy` | Accuracy lab workspaces (create, seed, archive, delete) |
-| `/admin/accuracy/routing` | Per call-kind routing + live price table |
-| `/admin/accuracy/audit?workspace_id=…` | Event trail + estimated-spend rollup |
+| `/admin/development`, `/admin/development/evaluation-tools` | Owner experiments and retained local evaluation tools |
+| `/accuracy`, `/api/accuracy`, `/admin/accuracy` and descendants | Retired: 404; Admin paths enforce owner access first |
 | `/timeline` | Hand-built IEGP timeline |
 
 The full list is in [`deploy-checklist.md`](./deploy-checklist.md) §6. After setting `XAI_API_KEY` and redeploying, **xAI · Grok** on `/admin/control` reads "Key set".
@@ -126,4 +125,4 @@ The full list is in [`deploy-checklist.md`](./deploy-checklist.md) §6. After se
 - **Node:** CI uses 22; `package.json` `engines` requests Node ≥ 22.
 - **Port:** Vercel sets `PORT` automatically; local dev uses `43217` via `npm run dev` only.
 - **No custom server** — standard Next.js App Router output.
-- **Hygiene:** listing `/accuracy/runs` auto-abandons `running` rows older than 30 minutes; operators can also POST `/api/accuracy/hygiene` (`sweep_stale_runs`, `archive_workspace`, `delete_workspace`).
+- **Retained storage:** Accuracy routes and hygiene APIs are retired. Preserve historical tables and artifacts; see the [retirement runbook](operations/accuracy-retirement.md).

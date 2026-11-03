@@ -1,5 +1,7 @@
 # KAN-100 isolated benchmark CLI
 
+Development owns these retained local tools after Accuracy retirement. Current customer experiments use Development; deployed routing and switches remain in AI & routing. Historical stages/scores are not current-pipeline validation. See the [retention and rollback runbook](operations/accuracy-retirement.md).
+
 KAN-106 supplies explicit `prepare`, `run` and `review` commands around the restart-safe batch. Account verification, vendor-specific BeOne processing permission and the actual resolved baseline snapshot remain pending. Passing synthetic tests does not establish readiness for live scoring.
 
 Use `benchmarkConfigSchema` and `BenchmarkConfig` from `src/modules/development/evaluation/benchmark/contracts.ts`; invoke `checkPreflight(config, envNames)` from `preflight.ts`. Pass environment names only. The returned `{ ready, blockers, estimatedTotalUsd }` contains no credentials. Validation failures return generic errors without echoing supplied values. No module loads `.env`, reads settings from a database, resolves a production route or calls a provider.
