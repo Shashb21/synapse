@@ -47,8 +47,14 @@ export default defineConfig({
     // Off by default, so the suite never attaches to a server on the dev database.
     reuseExistingServer: process.env.E2E_REUSE === "1",
     timeout: 120_000,
+    // Let Next close its dev server and flush traces before Playwright force-kills it.
+    // Next's self-hosting guide recommends a 10–30 second shutdown window.
+    gracefulShutdown: { signal: "SIGTERM", timeout: 30_000 },
     env: {
       ...process.env,
+      // Next's dev CLI otherwise force-kills its server child after 100 ms.
+      // Leave time inside Playwright's 30-second shutdown window for cleanup.
+      NEXT_EXIT_TIMEOUT_MS: "25000",
       // Set here, so Next does not take the dev DATABASE_URL from .env.local.
       DATABASE_URL: databaseUrl,
       SYNAPSE_TEST_STUB_LLM: "1",

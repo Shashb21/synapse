@@ -100,6 +100,8 @@ jobs:
       - run: npx playwright install --with-deps chromium
       # playwright.config.ts starts the dev server with the LLM test stub.
       - name: Run browser tests with runner diagnostics
+        env:
+          DEBUG: pw:webserver
         run: |
           bash scripts/ci-resource-monitor.sh &
           monitor_pid=$!
