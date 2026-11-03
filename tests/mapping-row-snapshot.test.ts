@@ -74,12 +74,21 @@ describe("mapping-row opening snapshots", () => {
 });
 
 describe("mapping-row route snapshots", () => {
-  beforeEach(async () => { await persistState(fixture().state); });
+  let fixtureGapId: string;
+
+  beforeEach(async () => {
+    const { state, gapId } = fixture();
+    fixtureGapId = gapId;
+    await persistState(state);
+  });
 
   it("saves unchanged relationships from a reversed legacy token", async () => {
     // Arrange: reverse only the request's opening order, without changing persisted records.
     const state = await loadState();
-    const gapId = state.gaps[0].id;
+    // Loaded gap order must not determine which fixture relationship is exercised.
+    state.gaps.sort((left, right) => Number(left.id === fixtureGapId) - Number(right.id === fixtureGapId));
+    expect(state.gaps[0].id).not.toBe(fixtureGapId);
+    const gapId = fixtureGapId;
     const expected_relationship = relationshipVersion({
       coverages: state.coverages.filter(row => row.gap_id === gapId).reverse(),
       decisions: state.mapping_suggestions.filter(row => row.gap_id === gapId).reverse(),
@@ -101,7 +110,10 @@ describe("mapping-row route snapshots", () => {
 
   it("rejects a stale content token without saving the requested selection", async () => {
     const state = await loadState();
-    const gapId = state.gaps[0].id;
+    // Exercise the same fixture even when database rows arrive in a different order.
+    state.gaps.sort((left, right) => Number(left.id === fixtureGapId) - Number(right.id === fixtureGapId));
+    expect(state.gaps[0].id).not.toBe(fixtureGapId);
+    const gapId = fixtureGapId;
     const expected_relationship = openingToken(state, gapId);
     state.coverages[0].overall_rationale = "Assessment updated after opening";
     await persistState(state);
