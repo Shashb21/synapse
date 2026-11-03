@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import JSZip from "jszip";
 import { describe, expect, it } from "vitest";
-import { freezeReferencePack, type FreezeReferencePackInput } from "@/accuracy/eval/benchmark/inputs";
+import { freezeReferencePack, type FreezeReferencePackInput } from "@/modules/development/evaluation/benchmark/inputs";
 const bytes = Buffer.from("synthetic original");
 const digest = (value: Buffer) => createHash("sha256").update(value).digest("hex");
 function fixture(): FreezeReferencePackInput {

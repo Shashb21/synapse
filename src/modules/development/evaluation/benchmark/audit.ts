@@ -1,7 +1,7 @@
 /** Pure existing completeness process, isolated from DB-backed critic/routing. */
 import { z } from 'zod';
-import { COMPLETENESS_CRITIC_SYSTEM, completenessCriticUser } from '../../modules/completeness-audit/prompts';
-import { completenessVerdictSchema, selectBlocksToJudge, flagsFromVerdicts, citedBlockIds, collapseAuditText, excerptFromBlock, type MissFlag, type CompletenessVerdict } from '../../modules/completeness-audit/engine';
+import { COMPLETENESS_CRITIC_SYSTEM, completenessCriticUser } from '../historical/completeness-audit/prompts';
+import { completenessVerdictSchema, selectBlocksToJudge, flagsFromVerdicts, citedBlockIds, collapseAuditText, excerptFromBlock, type MissFlag, type CompletenessVerdict } from '../historical/completeness-audit/engine';
 import type { FrozenReferencePack } from './inputs';
 import type { ExtractFinding } from './extract';
 import type { ScoringStage } from './scoring';

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { checkPreflight } from "../src/accuracy/eval/benchmark/preflight";
-import type { BenchmarkConfig } from "../src/accuracy/eval/benchmark/contracts";
+import { checkPreflight } from "../src/modules/development/evaluation/benchmark/preflight";
+import type { BenchmarkConfig } from "../src/modules/development/evaluation/benchmark/contracts";
 
 function config(): BenchmarkConfig {
   return {
