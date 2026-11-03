@@ -1,5 +1,5 @@
+/** Pure historical benchmark configuration and frozen caller-owned route contracts. */
 import { z } from "zod";
-import type { ResolvedAccuracyRoute } from "../../kernel/contracts";
 
 const text = z.string().trim().min(1);
 const money = z.number().finite().nonnegative().nullable();
@@ -41,9 +41,19 @@ export const benchmarkConfigSchema = z.strictObject({
 });
 export type BenchmarkConfig = z.infer<typeof benchmarkConfigSchema>;
 export type BenchmarkRoute = BenchmarkConfig["routes"][number];
-/** Reuse the existing resolved contract for caller-supplied runtime snapshots. */
-export type BaselineRouteSnapshot = Pick<ResolvedAccuracyRoute,
-  "call_kind" | "role" | "provider_id" | "model" | "params" | "fallbacks" | "degraded" | "reason">;
+/** Caller-supplied historical route snapshot, structurally matching the retained contract.
+ * No live routing, credentials, or Accuracy runtime are loaded here.
+ */
+export type BaselineRouteSnapshot = {
+  call_kind: "upload" | "parse" | "inventory_extract" | "need_extract" | "merge_dedupe" | "completeness_audit" | "pair_generate" | "coverage_decide" | "coverage_critic" | "validation_gate" | "partial_split" | "status_derive" | "prioritize" | "ideate" | "gantt_project";
+  role: "proposer" | "critic" | "reviser" | "judge" | "none";
+  provider_id: string;
+  model: string;
+  params: { temperature: number; max_tokens: number };
+  fallbacks: string[];
+  degraded: boolean;
+  reason: string | null;
+};
 export type PreflightResult = {
   ready: boolean;
   blockers: string[];

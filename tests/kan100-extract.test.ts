@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { extractStage, type ExtractRequest, type ExtractTransport } from "@/accuracy/eval/benchmark/extract";
+import { extractStage, type ExtractRequest, type ExtractTransport } from "@/modules/development/evaluation/benchmark/extract";
 
 function request(configuration: "extract" | "baseline" = "extract"): ExtractRequest {
   return {

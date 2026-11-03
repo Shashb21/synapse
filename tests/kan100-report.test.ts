@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { renderBenchmarkReport } from '@/accuracy/eval/benchmark/report';
-import { scoreStage, scoringIdentity } from '@/accuracy/eval/benchmark/scoring';
-import type { FrozenReferencePack } from '@/accuracy/eval/benchmark/inputs';
-import type { BatchResult, BatchRun } from '@/accuracy/eval/benchmark/batch';
-import type { BenchmarkRoute } from '@/accuracy/eval/benchmark/contracts';
-import type { ExtractFinding } from '@/accuracy/eval/benchmark/extract';
+import { renderBenchmarkReport } from '@/modules/development/evaluation/benchmark/report';
+import { scoreStage, scoringIdentity } from '@/modules/development/evaluation/benchmark/scoring';
+import type { FrozenReferencePack } from '@/modules/development/evaluation/benchmark/inputs';
+import type { BatchResult, BatchRun } from '@/modules/development/evaluation/benchmark/batch';
+import type { BenchmarkRoute } from '@/modules/development/evaluation/benchmark/contracts';
+import type { ExtractFinding } from '@/modules/development/evaluation/benchmark/extract';
 function fixture() {
   const packs: FrozenReferencePack[] = ['synthetic-a', 'synthetic-b'].map(packId => ({ packId, filename: `${packId}.txt`, sourceCodeVersion: 'code', parserVersion: 'parser', frozenAt: '2026-10-13T12:00:00Z', originalFileHash: 'original', sourceHash: 'source', referenceHash: 'reference', packHash: 'pack', referenceVersion: 'v1', source: { blocks: [{ id: 'b', text: 'Older patients; renal impairment.', kind: 'bullet', location: { kind: 'slide', ref: '1' } }] }, gold: Object.fromEntries(['needs', 'tactics'].map(stage => [stage, { items: [{ id: 'older', statement: 'Older patients', blockIds: ['b'] }, { id: 'renal', statement: 'Renal impairment', blockIds: ['b'] }, { id: 'chart', statement: 'Image-only evidence', blockIds: [], parsingLoss: { reason: 'Image not parsed', location: { kind: 'slide', ref: '2' } } }], parsingLossIds: ['chart'], review: { status: 'approved', reviewerId: 'human', reviewedAt: '2026-10-13T12:00:00Z', referenceVersion: 'v1' } }])) as FrozenReferencePack['gold'] }));
   const runs: BatchRun[] = [];

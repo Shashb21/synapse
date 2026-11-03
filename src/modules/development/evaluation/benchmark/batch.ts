@@ -8,7 +8,7 @@ import type { FrozenReferencePack } from './inputs';
 import { extractStage, type ExtractRequest, type ExtractResult, type ExtractState, type ExtractTransport } from './extract';
 import { scoreStage, scoringIdentity, type HumanJudgments, type StageScore, type ScoringStage } from './scoring';
 import { FROZEN_AUDIT_PROCESS_HASH, prepareAudit, validateAudit, auditOutput, scoreAudit, type AuditChunk, type AuditOutput, type AuditHumanRecords, type AuditScore } from './audit';
-import type { CompletenessVerdict } from '../../modules/completeness-audit/engine';
+import type { CompletenessVerdict } from '../historical/completeness-audit/engine';
 import { artifactDigest, analysisCsv, PrivateBatchStorage } from './artifacts';
 
 export type BatchPricing = {
