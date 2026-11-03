@@ -56,13 +56,16 @@ jobs:
       - run: npx vitest run
 
   e2e:
-    name: e2e (playwright ${{ matrix.shard }}/4)
+    name: e2e (playwright ${{ matrix.shard }}/${{ matrix.total }})
     # Each shard has its own server and Postgres service. Keep dependent tests
-    # within a file together and retain one worker per database.
+    # within a file together and retain one worker per database. Eight shorter
+    # shards bound compiled-route accumulation: the former 91-test shard
+    # restarted Next at its heap threshold around tests 49 and 80.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        total: [8]
     # Keep browser checks stable across ubuntu-latest image migrations.
     runs-on: ubuntu-24.04
     timeout-minutes: 40
@@ -104,7 +107,7 @@ jobs:
           bash scripts/ci-resource-monitor.sh &
           monitor_pid=$!
           trap 'kill "$monitor_pid" 2>/dev/null || true; wait "$monitor_pid" 2>/dev/null || true' EXIT
-          npx playwright test --reporter=line --shard=${{ matrix.shard }}/4
+          npx playwright test --reporter=line --shard=${{ matrix.shard }}/${{ matrix.total }}
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@v4
