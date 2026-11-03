@@ -33,7 +33,7 @@ test("owner creates, uploads, saves and reopens a private experiment", async ({
     .getByLabel("Experiment name", { exact: true })
     .fill(`${name} saved`);
   await developmentStep(page, "Documents");
-  await page.getByLabel("Private source file").setInputFiles({
+  await page.getByLabel("File to add to this experiment").setInputFiles({
     name: "source.txt",
     mimeType: "text/plain",
     buffer: Buffer.from(
@@ -41,7 +41,7 @@ test("owner creates, uploads, saves and reopens a private experiment", async ({
     ),
   });
   await page
-    .getByRole("button", { name: "Upload source", exact: true })
+    .getByRole("button", { name: "Upload experiment document", exact: true })
     .click();
   await expect(page.getByText("source.txt", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(
@@ -50,8 +50,8 @@ test("owner creates, uploads, saves and reopens a private experiment", async ({
   // Read the immutable identity from Documents before any execution or reference exists.
   const savedSource = page.getByRole("region", { name: "Saved documents" })
     .getByRole("listitem").filter({ hasText: "source.txt" });
-  await savedSource.getByText("Source snapshot identity", { exact: true }).click();
-  const snapshotId = savedSource.getByLabel("Source snapshot ID", { exact: true });
+  await savedSource.getByText("Document details", { exact: true }).click();
+  const snapshotId = savedSource.getByLabel("Experiment document ID", { exact: true });
   await expect(snapshotId).toBeVisible();
   const sourceId = (await snapshotId.innerText()).trim();
   expect(sourceId).not.toBe("");
@@ -82,6 +82,8 @@ test("owner creates, uploads, saves and reopens a private experiment", async ({
     .getByRole("button", { name: "Upload structured reference", exact: true })
     .click();
   await expect(page.getByText("reference.json", { exact: true })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Evaluation reference saved." })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Saved documents" }).getByRole("listitem").filter({ hasText: "reference.json" })).toContainText("Evaluator-only");
   expect(generationRequests).toBe(0);
   await developmentStep(page, "Documents");
   await developmentDetails(page, "Optional evaluation references");
@@ -144,13 +146,13 @@ test("invalid upload and stale revision give recovery without losing edits", asy
     name,
   );
   await developmentStep(page, "Documents");
-  await page.getByLabel("Private source file").setInputFiles({
+  await page.getByLabel("File to add to this experiment").setInputFiles({
     name: "bad.exe",
     mimeType: "application/octet-stream",
     buffer: Buffer.from("invalid"),
   });
   await page
-    .getByRole("button", { name: "Upload source", exact: true })
+    .getByRole("button", { name: "Upload experiment document", exact: true })
     .click();
   await expect(page.getByRole("main").getByRole("alert")).toBeVisible();
   const { experiments } = await (
@@ -268,13 +270,13 @@ test("slow uploads disable competing writes and preserve the edited name", async
     await route.fulfill({ response });
   });
   await developmentStep(page, "Documents");
-  await page.getByLabel("Private source file").setInputFiles({
+  await page.getByLabel("File to add to this experiment").setInputFiles({
     name: "source.txt",
     mimeType: "text/plain",
     buffer: Buffer.from("Need evidence for comparative survival."),
   });
   await page
-    .getByRole("button", { name: "Upload source", exact: true })
+    .getByRole("button", { name: "Upload experiment document", exact: true })
     .click();
   try {
     await expect(page.getByRole("status").filter({ hasText: "Uploading and parsing" })).toContainText(
@@ -287,7 +289,7 @@ test("slow uploads disable competing writes and preserve the edited name", async
       page.getByRole("button", { name: "Reload saved draft", exact: true }),
     ).toBeDisabled();
     await expect(
-      page.getByRole("button", { name: "Upload source", exact: true }),
+      page.getByRole("button", { name: "Upload experiment document", exact: true }),
     ).toBeDisabled();
   } finally {
     release();
@@ -318,7 +320,7 @@ test("creating another draft clears every pending file selection", async ({
     name,
   );
   await developmentStep(page, "Documents");
-  await page.getByLabel("Private source file").setInputFiles({
+  await page.getByLabel("File to add to this experiment").setInputFiles({
     name: "old.txt",
     mimeType: "text/plain",
     buffer: Buffer.from("Old source"),
@@ -345,25 +347,25 @@ test("creating another draft clears every pending file selection", async ({
     `${name} second`,
   );
   for (const label of [
-    "Private source file",
+    "File to add to this experiment",
     "Reference PDF",
     "Structured reference JSON",
   ]) {
     await expect(page.getByLabel(label, { exact: true })).toHaveValue("");
   }
   await expect(
-    page.getByRole("button", { name: "Upload source", exact: true }),
+    page.getByRole("button", { name: "Upload experiment document", exact: true }),
   ).toBeDisabled();
   expect(uploads).toBe(0);
   // A fresh source enables only its own upload; references must still need fresh files.
   await developmentStep(page, "Documents");
-  await page.getByLabel("Private source file").setInputFiles({
+  await page.getByLabel("File to add to this experiment").setInputFiles({
     name: "fresh.txt",
     mimeType: "text/plain",
     buffer: Buffer.from("Fresh evidence"),
   });
   await page
-    .getByRole("button", { name: "Upload source", exact: true })
+    .getByRole("button", { name: "Upload experiment document", exact: true })
     .click();
   await developmentStep(page, "Documents");
   await developmentDetails(page, "Optional evaluation references");
@@ -415,15 +417,16 @@ test("created draft remains visible when source choices fail and retry only read
     name,
   );
   await expect(page.getByLabel("New experiment name")).toHaveValue("");
-  await expect(page.getByRole("button", { name: "Retry loading sources", exact: true })).toHaveAttribute("aria-describedby", "retry-status");
-  await expect(page.locator("#retry-status")).toHaveText("Retry loading source choices.");
+  await expect(page.getByRole("button", { name: "Refresh workspace documents", exact: true })).toHaveAttribute("aria-describedby", "retry-status");
+  await expect(page.locator("#retry-status")).toHaveText("Refresh workspace documents.");
+  await page.getByLabel("Experiment name", { exact: true }).fill(`${name} edited`);
+  await page.getByLabel("File to add to this experiment").setInputFiles({ name: "pending.txt", mimeType: "text/plain", buffer: Buffer.from("Unsaved selection") });
   await page
-    .getByRole("button", { name: "Retry loading sources", exact: true })
+    .getByRole("button", { name: "Refresh workspace documents", exact: true })
     .click();
   await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
-  await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(
-    name,
-  );
+  await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(`${name} edited`);
+  await expect(page.getByLabel("File to add to this experiment")).toHaveValue(/pending.txt/);
   expect(reads).toBe(2);
   expect(creates).toBe(1);
   const { experiments } = await (
@@ -495,10 +498,10 @@ test("reopened draft shows saved documents when source choices fail", async ({
       .getByRole("region", { name: "Saved documents" })
       .getByText("saved-source.txt", { exact: true }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Retry loading sources", exact: true })).toHaveAttribute("aria-describedby", "retry-status");
-  await expect(page.locator("#retry-status")).toHaveText("Retry loading source choices.");
+  await expect(page.getByRole("button", { name: "Refresh workspace documents", exact: true })).toHaveAttribute("aria-describedby", "retry-status");
+  await expect(page.locator("#retry-status")).toHaveText("Refresh workspace documents.");
   await page
-    .getByRole("button", { name: "Retry loading sources", exact: true })
+    .getByRole("button", { name: "Refresh workspace documents", exact: true })
     .click();
   // Assert: immutable saved data remains available without another detail read or mutation.
   await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);

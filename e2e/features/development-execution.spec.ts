@@ -26,9 +26,9 @@ test("owner configures and starts a frozen execution", async ({ page }) => {
   await page.getByLabel("New experiment name").fill(name);
   await page.getByRole("button", { name: "Create experiment" }).click();
   await developmentStep(page, "Documents");
-  await page.getByLabel("Private source file").setInputFiles({ name: "source.txt", mimeType: "text/plain", buffer: Buffer.from("Need comparative evidence.") });
+  await page.getByLabel("File to add to this experiment").setInputFiles({ name: "source.txt", mimeType: "text/plain", buffer: Buffer.from("Need comparative evidence.") });
   await developmentStep(page, "Documents");
-  await page.getByRole("button", { name: "Upload source", exact: true }).click();
+  await page.getByRole("button", { name: "Upload experiment document", exact: true }).click();
   await expect(page.getByText("source.txt", { exact: true })).toBeVisible();
   await developmentStep(page, "Test settings");
   await page.getByText("Gap extraction route and roles").click();
@@ -66,9 +66,9 @@ test("history shows frozen routes, unreviewed outputs and stale prerequisites", 
   await page.getByLabel("New experiment name").fill(name);
   await page.getByRole("button", { name: "Create experiment" }).click();
   await developmentStep(page, "Documents");
-  await page.getByLabel("Private source file").setInputFiles({ name: "source.txt", mimeType: "text/plain", buffer: Buffer.from("Need comparative evidence.") });
+  await page.getByLabel("File to add to this experiment").setInputFiles({ name: "source.txt", mimeType: "text/plain", buffer: Buffer.from("Need comparative evidence.") });
   await developmentStep(page, "Documents");
-  await page.getByRole("button", { name: "Upload source", exact: true }).click();
+  await page.getByRole("button", { name: "Upload experiment document", exact: true }).click();
   await expect(page.getByText("source.txt", { exact: true })).toBeVisible();
   // Act: run all, inspect history and explicitly rerun a dependent section.
   await developmentStep(page, "Run");
@@ -152,9 +152,9 @@ test("conflict discovers and polls an execution started elsewhere", async ({ pag
     await page.getByLabel("New experiment name").fill(name);
     await page.getByRole("button", { name: "Create experiment" }).click();
     await developmentStep(page, "Documents");
-    await page.getByLabel("Private source file").setInputFiles({ name: "source.txt", mimeType: "text/plain", buffer: Buffer.from("Need comparative evidence.") });
+    await page.getByLabel("File to add to this experiment").setInputFiles({ name: "source.txt", mimeType: "text/plain", buffer: Buffer.from("Need comparative evidence.") });
     await developmentStep(page, "Documents");
-    await page.getByRole("button", { name: "Upload source", exact: true }).click();
+    await page.getByRole("button", { name: "Upload experiment document", exact: true }).click();
     await expect(page.getByText("source.txt", { exact: true })).toBeVisible();
     const execution = page.getByRole("region", { name: "Execution", exact: true });
     await developmentStep(page, "Results");

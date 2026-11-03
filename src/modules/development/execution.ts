@@ -69,7 +69,7 @@ function bindPrerequisites(manifest: ExecutionManifest, input: StartExecutionInp
   for (const section of required) {
     const latest = history.find(attempt => attempt.section === section);
     const expected = input.prerequisites[section];
-    if (!latest || latest.status !== 'succeeded' || !latest.result || !expected || expected.attempt_id !== latest.id || expected.output_id !== latest.result.output_id || generationIdentity(latest.manifest, section) !== generationIdentity(manifest, section)) throw new DevelopmentError(409, 'invalid_prerequisite', 'Run the latest successful prerequisites with these source snapshots and generation settings first, then reload their exact identities.');
+    if (!latest || latest.status !== 'succeeded' || !latest.result || !expected || expected.attempt_id !== latest.id || expected.output_id !== latest.result.output_id || generationIdentity(latest.manifest, section) !== generationIdentity(manifest, section)) throw new DevelopmentError(409, 'invalid_prerequisite', 'Run the latest successful prerequisites with these experiment documents and generation settings first, then reload their exact identities.');
     manifest.prerequisites[section] = { attempt_id: latest.id, output_id: latest.result.output_id, result: latest.result };
   }
   for (const section of required) for (const dependency of SECTION_DEPENDENCIES[section]) {
@@ -131,7 +131,7 @@ export async function startExecution(experimentId: string, raw: StartExecutionIn
   const sections = input.target === 'all' ? [...SECTIONS] : [input.target];
   for (const section of sections) await requireSectionAi(section);
   const sources = experiment.documents.filter(document => document.role === 'source');
-  if (!sources.length || sources.length > 100 || sources.some(source => source.compatibility !== 'compatible' || hash(source.parsed) !== source.parsed_sha256)) throw new DevelopmentError(422, 'invalid_sources', 'Choose 1–100 unchanged compatible source snapshots before starting.');
+  if (!sources.length || sources.length > 100 || sources.some(source => source.compatibility !== 'compatible' || hash(source.parsed) !== source.parsed_sha256)) throw new DevelopmentError(422, 'invalid_sources', 'Choose 1–100 unchanged compatible experiment documents before starting.');
   let routes;
   try { routes = freezeRoutes(input.config, sections); }
   catch (error) { if (error instanceof NoRouteError) throw new DevelopmentError(409, 'route_unavailable', error.message); throw error; }

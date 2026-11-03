@@ -34,8 +34,8 @@ test("documents, settings, run and results preserve edits and derive the next ac
   await page.getByRole("button", { name: "Create experiment" }).click();
   const nav = page.getByRole("navigation", { name: "Experiment workflow" });
   await expect(nav.getByRole("button", { name: /^1\. Documents/ })).toHaveAttribute("aria-current", "step");
-  await expect(page.getByLabel("Next action")).toContainText("Add and save a source document");
-  await page.getByLabel("Private source file").setInputFiles({ name: "workflow.txt", mimeType: "text/plain", buffer: Buffer.from("Comparative evidence remains uncertain.") });
+  await expect(page.getByLabel("Next action")).toContainText("Add and save an experiment document");
+  await page.getByLabel("File to add to this experiment").setInputFiles({ name: "workflow.txt", mimeType: "text/plain", buffer: Buffer.from("Comparative evidence remains uncertain.") });
   await page.getByLabel("Experiment name", { exact: true }).fill(`${name} edited`);
   await nav.getByRole("button", { name: /^1\. Documents/ }).focus();
   await page.keyboard.press("Tab");
@@ -55,9 +55,9 @@ test("documents, settings, run and results preserve edits and derive the next ac
   await expect(gap.getByLabel("Critic override", { exact: true })).toBeDisabled();
   await developmentDetails(page, "Legacy evaluator route");
   await developmentStep(page, "Documents");
-  await expect(page.getByLabel("Private source file")).toHaveValue(/workflow.txt/);
+  await expect(page.getByLabel("File to add to this experiment")).toHaveValue(/workflow.txt/);
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(`${name} edited`);
-  await page.getByRole("button", { name: "Upload source", exact: true }).click();
+  await page.getByRole("button", { name: "Upload experiment document", exact: true }).click();
   await expect(page.getByText("workflow.txt", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Next action")).toContainText("Review test settings");
   await expect(nav.getByRole("button", { name: /^2\. Test settings/ })).toContainText("Not started");

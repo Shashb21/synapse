@@ -6,7 +6,7 @@ import { DevelopmentExecution } from "@/components/development/development-execu
 import { developmentWorkflow, workflowSteps, type WorkflowFacts, type WorkflowStep } from "./development-workflow";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { MAX_UPLOAD_BYTES, UPLOAD_ACCEPT } from "@/lib/ingest/upload-formats";
+import { MAX_UPLOAD_BYTES, UPLOAD_ACCEPT, uploadKindOf } from "@/lib/ingest/upload-formats";
 import type {
   DevelopmentSection,
   Experiment,
@@ -26,16 +26,16 @@ const selectClass =
 
 /** Convert a bounded file to the API's base64 representation. */
 async function fileContent(file: File): Promise<string> {
-  if (!file.size) throw new Error("Choose a nonempty file.");
+  if (!file.size) throw new Error("That file is empty. Choose a file containing readable text.");
   if (file.size > MAX_UPLOAD_BYTES)
-    throw new Error("Choose a file of 3 MiB or smaller.");
+    throw new Error("That file exceeds 3 MiB. Split it into smaller files and choose one again.");
   const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary);
 }
 
-/** Prepare, persist and reopen private source/reference snapshots. */
+/** Prepare, persist and reopen experiment documents and evaluation references. */
 export function DevelopmentSetup() {
   const [openVersion, setOpenVersion] = useState(0);
   const [step, setStep] = useState<WorkflowStep>("documents");
@@ -214,6 +214,7 @@ export function DevelopmentSetup() {
         signal,
       );
       setSources(available.sources);
+      setSourceId(current => available.sources.some(item => item.id === current) ? current : "");
       setSourceReadFailed(false);
     } catch (failure) {
       if (!signal.aborted) setSourceReadFailed(true);
@@ -237,7 +238,10 @@ export function DevelopmentSetup() {
 
   async function upload(file: File | null, format?: "pdf" | "structured") {
     if (!draft || !file) return;
-    await perform("Uploading and parsing…", async (signal) => {
+    await perform("Preparing document: Uploading and parsing…", async (signal) => {
+      if (!format && uploadKindOf(file.name).kind === "refused") {
+        throw new Error("Unsupported file format. Choose PDF, DOCX, PPTX, XLSX, TXT or Markdown in Upload files.");
+      }
       const content_base64 = await fileContent(file);
       const result = await api<{ experiment: Experiment }>(
         `${root}/${draft.id}/${format ? "reference-upload" : "source-upload"}`,
@@ -253,7 +257,7 @@ export function DevelopmentSetup() {
         },
       );
       accept(result.experiment);
-      setMessage("Document saved. Any edited name still needs Save name.");
+      setMessage(`${format ? "Evaluation reference" : "Experiment document"} saved. Any edited name still needs Save name.`);
     });
   }
 
@@ -288,21 +292,21 @@ export function DevelopmentSetup() {
         <label className="space-y-2">
           New experiment name
           <Input
+            aria-describedby="create-reason"
             value={newName}
             onChange={(event) => setNewName(event.target.value)}
             required
             maxLength={120}
-            aria-describedby="create-reason"
             disabled={busy || dirty}
           />
         </label>
         <label className="space-y-2">
-          Source workspace
+          Workspace for this experiment
           <select
             className={selectClass}
+            aria-describedby="workspace-help create-reason"
             value={workspace}
             onChange={(event) => setWorkspace(event.target.value)}
-            aria-describedby="create-reason"
             disabled={busy || dirty}
           >
             <option value="">Private uploads only</option>
@@ -317,6 +321,10 @@ export function DevelopmentSetup() {
         <Button type="submit" aria-describedby="create-reason" disabled={busy || dirty || !newName.trim()}>
           Create experiment
         </Button>
+        <p id="workspace-help" className="text-muted-foreground sm:col-span-3">
+          Choose a workspace before creating the experiment. Each experiment stays bound to that one workspace.
+          Private uploads only exposes no existing workspace documents.
+        </p>
       </form>
       <p
         role="status"
@@ -328,30 +336,30 @@ export function DevelopmentSetup() {
             ? "Unsaved name. Save it before opening another experiment."
             : "Choose or create an experiment.")}
       </p>
-      {error && (
+      {(error || (draft && sourceReadFailed)) && (
         <div
           role="alert"
           className="border border-destructive p-3 text-destructive rounded-lg"
         >
           {error}{" "}
-          {(!draft || sourceReadFailed) && <p id="retry-status">{busy ? "Wait for the current operation before retrying." : draft ? "Retry loading source choices." : "Retry loading the page."}</p>}
+          {(!draft || sourceReadFailed) && <p id="retry-status">{busy ? "Wait for the current operation before retrying." : draft ? "Refresh workspace documents." : "Retry loading the page."}</p>}
           {draft && sourceReadFailed && (
             <>
               <span>
-                Your draft is saved. Source choices could not be loaded.{" "}
+                Your experiment is saved. Workspace documents could not be loaded. Refresh the choices or use Upload files; your edits will be kept.{" "}
               </span>
               <Button
                 variant="outline"
                 aria-describedby="retry-status"
                 disabled={busy}
                 onClick={() =>
-                  void perform("Loading sources…", async (signal) => {
+                  void perform("Refreshing workspace documents…", async (signal) => {
                     await loadSources(draft.id, signal);
-                    setMessage("Source choices loaded.");
+                    setMessage("Workspace documents refreshed. Your edits have been kept.");
                   })
                 }
               >
-                Retry loading sources
+                Refresh workspace documents
               </Button>
             </>
           )}
@@ -482,21 +490,22 @@ export function DevelopmentSetup() {
               disabled={busy || stale}
               className="space-y-3 border-t border-border pt-5"
             >
-              <legend className="font-semibold">Source snapshots</legend>
+              <legend className="font-semibold">Experiment documents</legend>
               <p className="text-muted-foreground">
-                Private snapshots for this experiment. Customer documents remain
-                unchanged.
+                Each saved document is a fixed copy for reproducible tests. Changes to the original do not update this copy, and the original stays unchanged.
               </p>
               {draft.source_workspace_id && (
                 <div className="space-y-2">
+                  <h4 className="font-medium">Workspace documents</h4>
+                  <p className="text-muted-foreground">Choose a document from {workspaces.find(item => item.id === draft.source_workspace_id)?.name ?? "this experiment’s workspace"}. A readable workspace parse and retained original are required.</p>
                   <label className="block space-y-2">
-                    Workspace source
+                    Workspace document
                     <select
                       className={selectClass}
                       value={sourceId}
                       onChange={(event) => setSourceId(event.target.value)}
                     >
-                      <option value="">Choose an authorized source</option>
+                      <option value="">Choose a workspace document</option>
                       {sources.map((item) => (
                         <option key={item.id} value={item.id}>
                           {item.filename} · {item.status}
@@ -504,13 +513,14 @@ export function DevelopmentSetup() {
                       ))}
                     </select>
                   </label>
-                  <p id="source-choice-reason">{sourceId ? "Source selected." : "Choose an authorized source to copy."}</p>
+                  {!sourceReadFailed && !sources.length && <p className="text-muted-foreground">No documents in this workspace. Use Upload files, or add a document in the workspace and refresh these choices.</p>}
+                  <p id="source-choice-reason">{sourceReadFailed ? "Refresh workspace documents before adding a copy." : busy ? "Wait for the current operation." : stale ? "Refresh the experiment before adding a copy." : sourceId ? "Workspace document selected." : "Select a workspace document before adding a copy."}</p>
                   <Button
                     variant="outline"
                     aria-describedby="source-choice-reason"
-                    disabled={!sourceId || busy || stale}
+                    disabled={!sourceId || busy || stale || sourceReadFailed}
                     onClick={() =>
-                      void perform("Copying source…", async (signal) => {
+                      void perform("Preparing document: copying saved workspace content…", async (signal) => {
                         const result = await api<{ experiment: Experiment }>(
                           `${root}/${draft.id}/sources`,
                           signal,
@@ -521,16 +531,22 @@ export function DevelopmentSetup() {
                           },
                         );
                         accept(result.experiment);
-                        setMessage("Source snapshot saved.");
+                        setMessage("Experiment document saved.");
                       })
                     }
                   >
-                    Copy source snapshot
+                    Add a copy to this experiment
                   </Button>
+                  {!sourceReadFailed && <Button variant="outline" aria-describedby="document-lock" disabled={busy} onClick={() => void perform("Refreshing workspace documents…", async (signal) => {
+                    await loadSources(draft.id, signal);
+                    setMessage("Workspace documents refreshed. Your edits have been kept.");
+                  })}>Refresh workspace documents</Button>}
                 </div>
               )}
+              {!draft.source_workspace_id && <p className="text-muted-foreground">This experiment uses private uploads only and cannot access existing workspace documents. Use Upload files below, or create a new experiment bound to the workspace you need.</p>}
+              <h4 className="font-medium">Upload files</h4>
               <label className="block space-y-2">
-                Private source file
+                File to add to this experiment
                 <input
                   className="block w-full text-sm"
                   type="file"
@@ -551,7 +567,7 @@ export function DevelopmentSetup() {
                 disabled={!sourceFile || busy || stale}
                 onClick={() => void upload(sourceFile)}
               >
-                Upload source
+                Upload experiment document
               </Button>
             </fieldset>
             <details><summary className="cursor-pointer font-medium">Optional evaluation references</summary>
@@ -564,9 +580,9 @@ export function DevelopmentSetup() {
                 Optional evaluation references
               </legend>
               <p className="text-muted-foreground">
-                Evaluator-only: never used as generation sources. AI-parsed PDFs
+                Optional gold standards for evaluation only; never used as generation documents. AI-parsed PDFs
                 are provisional, not human approval. Missing references do not
-                block future source generation.
+                block generation.
               </p>
               <label className="block space-y-2">
                 Reference section
@@ -585,10 +601,10 @@ export function DevelopmentSetup() {
                 </select>
               </label>
               <fieldset className="space-y-2">
-                <legend className="mb-2">Associate source snapshots</legend>
+                <legend className="mb-2">Associate experiment documents</legend>
                 {!draft.documents.some((item) => item.role === "source") && (
                   <p className="text-muted-foreground">
-                    Add a source snapshot before uploading references.
+                    Add an experiment document before uploading references.
                   </p>
                 )}
                 {draft.documents
@@ -612,7 +628,7 @@ export function DevelopmentSetup() {
                       />
                       <span>
                         {item.filename}
-                        <span className="block text-xs text-muted-foreground">Saved source snapshot</span>
+                        <span className="block text-xs text-muted-foreground">Saved experiment document</span>
                       </span>
                     </label>
                   ))}
@@ -626,7 +642,7 @@ export function DevelopmentSetup() {
                   onChange={(event) => setPdf(event.target.files?.[0] ?? null)}
                 />
               </label>
-              <p id="pdf-reason">{!pdf ? "Choose a reference PDF. " : ""}{!associations.length ? "Associate at least one source snapshot." : ""}</p>
+              <p id="pdf-reason">{!pdf ? "Choose a reference PDF. " : ""}{!associations.length ? "Associate at least one experiment document." : ""}</p>
               <Button
                 variant="outline"
                 aria-describedby="pdf-reason"
@@ -648,9 +664,9 @@ export function DevelopmentSetup() {
               </label>
               <p className="text-muted-foreground">
                 Maximum 3 MiB each. JSON version 1 must match the selected
-                section and snapshot IDs.
+                section and experiment document IDs.
               </p>
-              <p id="structured-reason">{!structured ? "Choose a structured reference file. " : ""}{!associations.length ? "Associate at least one source snapshot." : ""}</p>
+              <p id="structured-reason">{!structured ? "Choose a structured reference file. " : ""}{!associations.length ? "Associate at least one experiment document." : ""}</p>
               <Button
                 variant="outline"
                 aria-describedby="structured-reason"
@@ -675,22 +691,23 @@ export function DevelopmentSetup() {
                     <p className="font-medium">{item.filename}</p>
                     <p className="text-muted-foreground">
                       {item.role === "source"
-                        ? "Private source snapshot"
+                        ? "Ready for generation"
                         : `Evaluator-only · ${item.section ? sections[item.section] : "No section"} · ${item.review_status} · ${item.compatibility}`}
                     </p>
-                    {item.role === "source" && (
-                      <details>
-                        <summary className="cursor-pointer">Source snapshot identity</summary>
-                        <p className="mt-2 text-muted-foreground">Use this ID when preparing a structured reference JSON file.</p>
-                        <p className="break-all text-xs text-muted-foreground">Snapshot ID: <code aria-label="Source snapshot ID">{item.id}</code></p>
-                      </details>
-                    )}
-                    {item.role === "reference" && (
-                      <details><summary className="cursor-pointer">Associated source identities</summary><p className="break-all text-xs text-muted-foreground">
-                        Associated snapshots:{" "}
-                        {item.source_document_ids.join(", ")}
-                      </p></details>
-                    )}
+                    <details>
+                      <summary className="cursor-pointer">Document details</summary>
+                      <dl className="mt-2 space-y-1 text-xs text-muted-foreground break-all">
+                        <div><dt className="inline font-medium">Origin: </dt><dd className="inline">{item.origin === "workspace" ? "Workspace document" : "Private upload"}</dd></div>
+                        <div><dt className="inline font-medium">Saved: </dt><dd className="inline">{item.created_at}</dd></div>
+                        <div><dt className="inline font-medium">Document ID: </dt><dd className="inline"><code aria-label="Experiment document ID">{item.id}</code></dd></div>
+                        <div><dt className="inline font-medium">Original content hash: </dt><dd className="inline">{item.sha256}</dd></div>
+                        <div><dt className="inline font-medium">Parsed content hash: </dt><dd className="inline">{item.parsed_sha256}</dd></div>
+                        <div><dt className="inline font-medium">Parser: </dt><dd className="inline">{item.parser.name} · {item.parser.version}</dd></div>
+                        {item.source_file_id && <div><dt className="inline font-medium">Workspace file ID: </dt><dd className="inline">{item.source_file_id}</dd></div>}
+                        {item.role === "reference" && <div><dt className="inline font-medium">Associated document IDs: </dt><dd className="inline">{item.source_document_ids.join(", ")}</dd></div>}
+                      </dl>
+                      {item.role === "source" && <p className="mt-2 text-muted-foreground">Use the document ID when preparing a structured reference JSON file.</p>}
+                    </details>
                   </li>
                 ))}
               </ul>

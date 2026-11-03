@@ -76,7 +76,13 @@ it('claims before sending, replays saved raw replies and concurrent deliveries c
 });
 it('requires owner access and latest prerequisite identities, and validates provider settings', async () => {
   const e = await draft();
-  expect((await start(e.id, 2, 'matching_coverage')).status).toBe(409);
+  const missingPrerequisite = await start(e.id, 2, 'matching_coverage');
+  expect(missingPrerequisite.status).toBe(409);
+  expect(await missingPrerequisite.json()).toMatchObject({ code: 'invalid_prerequisite', error: 'Run the latest successful prerequisites with these experiment documents and generation settings first, then reload their exact identities.' });
+  const empty = await createExperiment('Empty documents', null, 'owner');
+  const missingDocuments = await start(empty.id, empty.revision);
+  expect(missingDocuments.status).toBe(422);
+  expect(await missingDocuments.json()).toMatchObject({ code: 'invalid_sources', error: 'Choose 1–100 unchanged compatible experiment documents before starting.' });
   expect((await start(e.id, 2, 'all', { mode: 'single_pass', stages: { gap_extraction: { route: { provider_id: 'missing', model: 'invalid' } } } } as never)).status).toBe(400);
   vi.spyOn(owner, 'ownerGate').mockResolvedValue(NextResponse.json({ code: 'owner_only' }, { status: 403 }));
   expect((await start(e.id)).status).toBe(403);

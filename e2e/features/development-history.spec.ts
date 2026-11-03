@@ -86,10 +86,10 @@ test('loads older history while retaining the newest prerequisites and selected 
   await expect.poll(() => listReads).toBeGreaterThan(0);
   const beforeUpload = listReads;
   await developmentStep(page, "Documents");
-  await page.getByLabel('Private source file').setInputFiles({ name: 'source.txt', mimeType: 'text/plain', buffer: Buffer.from('Evidence') });
+  await page.getByLabel('File to add to this experiment').setInputFiles({ name: 'source.txt', mimeType: 'text/plain', buffer: Buffer.from('Evidence') });
   await developmentStep(page, "Documents");
-  await page.getByRole('button', { name: 'Upload source', exact: true }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Document saved.' })).toBeVisible();
+  await page.getByRole('button', { name: 'Upload experiment document', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Experiment document saved.' })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Saved documents', exact: true }).getByText('source.txt', { exact: true })).toBeVisible();
   await expect.poll(() => listReads).toBeGreaterThan(beforeUpload);
   const execution = page.getByRole('region', { name: 'Execution', exact: true });
@@ -106,6 +106,7 @@ test('loads older history while retaining the newest prerequisites and selected 
   expect(posts).toBe(0);
   await developmentStep(page, "Results");
   await expect(execution.getByLabel('Selected execution')).toHaveValue('old');
+  await expect(execution.getByText('Review Test settings before rerunning. This action uses current settings and experiment documents; the selected saved run stays unchanged.', { exact: true })).toBeVisible();
 });
 
 for (const outcome of ['succeeded', 'failed'] as const) {
@@ -202,9 +203,9 @@ for (const change of ['controls', 'source'] as const) {
         await execution.getByText('Legacy evaluator route (legacy history comparisons only)').locator('..').getByLabel('Temperature', { exact: true }).fill('0.7');
       } else {
         await developmentStep(page, "Documents");
-        await page.getByLabel('Private source file').setInputFiles({ name: 'source.txt', mimeType: 'text/plain', buffer: Buffer.from('Changed evidence') });
+        await page.getByLabel('File to add to this experiment').setInputFiles({ name: 'source.txt', mimeType: 'text/plain', buffer: Buffer.from('Changed evidence') });
         await developmentStep(page, "Documents");
-        await page.getByRole('button', { name: 'Upload source', exact: true }).click();
+        await page.getByRole('button', { name: 'Upload experiment document', exact: true }).click();
       }
       await expect.poll(() => failures).toBeGreaterThan(0);
       await developmentStep(page, "Results");

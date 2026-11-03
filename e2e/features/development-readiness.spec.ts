@@ -31,8 +31,8 @@ test('explains readiness and an active execution', async ({ page, request }) => 
   await expect(run).toHaveAttribute('aria-describedby', 'run-readiness');
   await page.getByRole('button', { name: 'Go to Documents to add or review sources' }).focus();
   await page.keyboard.press('Enter');
-  await page.getByLabel('Private source file').setInputFiles({ name: 'source.txt', mimeType: 'text/plain', buffer: Buffer.from('Evidence for testing.') });
-  await page.getByRole('button', { name: 'Upload source', exact: true }).click();
+  await page.getByLabel('File to add to this experiment').setInputFiles({ name: 'source.txt', mimeType: 'text/plain', buffer: Buffer.from('Evidence for testing.') });
+  await page.getByRole('button', { name: 'Upload experiment document', exact: true }).click();
   await expect(page.getByText('source.txt', { exact: true })).toBeVisible();
   await developmentStep(page, 'Test settings');
   await page.getByLabel('Execution mode').selectOption('single_pass');
