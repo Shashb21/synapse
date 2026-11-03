@@ -8,6 +8,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 vi.mock('next/headers', () => ({ cookies: async () => ({ get: () => undefined }), headers: async () => new Headers() }));
 vi.mock('@/lib/demo/mode', () => ({ replaysDemo: async () => false }));
 import { sql } from 'drizzle-orm';
+import { preservePersistedControls } from './support/persisted-controls';
 import { sharedDb } from '@/lib/iegp/db';
 import { POST } from '@/app/api/control/route';
 import { routeConfig, setRouteConfig, completionFor } from '@/modules/kernel/routing';
@@ -20,6 +21,7 @@ import * as llm from '@/modules/kernel/llm';
 import * as owner from '@/modules/auth/owner';
 import { sessionContext } from '@/modules/auth/session';
 
+let restoreControls: (() => Promise<void>) | undefined;
 const actor = 'KAN-211 ownership proof';
 const control = (patch: Record<string, unknown> = {}) => POST(new Request('http://localhost/api/control', {
   method: 'POST', headers: { 'content-type': 'application/json' },
@@ -27,6 +29,7 @@ const control = (patch: Record<string, unknown> = {}) => POST(new Request('http:
 }));
 
 beforeEach(async () => {
+  restoreControls = await preservePersistedControls();
   vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unscripted network is forbidden in KAN-211.'));
   vi.spyOn(llm, 'isTestStub').mockReturnValue(false);
   vi.stubEnv('XAI_API_KEY', 'test-only-never-send');
@@ -35,7 +38,10 @@ beforeEach(async () => {
   await setRouteConfig({ stage: 'S3', provider_id: 'openai', model: 'gpt-5.1', temperature: 0.2, max_tokens: 3333, fallbacks: [], actor_name: 'unrelated live owner' });
   await setAccuracyRouteConfig({ call_kind: 'need_extract', agent_role: 'proposer', provider_id: 'openai', model: 'gpt-5.1', temperature: 1.2, max_tokens: 999, actor_name: 'legacy experiment owner' });
 });
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+afterEach(async () => {
+  try { await restoreControls?.(); }
+  finally { restoreControls = undefined; vi.restoreAllMocks(); vi.unstubAllEnvs(); }
+});
 
 it('saves only the intended live stage and sends its persisted values despite a conflicting Accuracy route, with attributed before/after audit', async () => {
   const auditIdentity = await sessionContext();

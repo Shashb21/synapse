@@ -1,6 +1,7 @@
 /** Durable owner API tests: arrange a source draft, act through routes/workers, assert receipts. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { sql } from 'drizzle-orm';
+import { preservePersistedControls } from './support/persisted-controls';
 import { NextResponse } from 'next/server';
 import { sharedDb } from '@/lib/iegp/db';
 import { createExperiment, updateExperiment } from '@/modules/development/store';
@@ -23,6 +24,7 @@ import '@/modules';
 import { setRouteConfig } from '@/modules/kernel/routing';
 import { setAccuracyRouteConfig } from '@/accuracy/kernel/routing';
 import { activeModule, activateModule } from '@/modules/kernel/registry';
+let restoreControls: (() => Promise<void>) | undefined;
 let sourceId = '';
 
 const quote = 'Comparative effectiveness remains unknown. An ongoing observational study measures outcomes.';
@@ -37,6 +39,7 @@ async function draft() {
 }
 const start = (id: string, revision = 2, target = 'all', config = { mode: 'single_pass' }, prerequisites = {}) => POST(request({ revision, target, config, prerequisites }), ctx(id));
 beforeEach(async () => {
+  restoreControls = await preservePersistedControls();
   vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unscripted network is forbidden in execution tests.'));
   vi.stubEnv('SYNAPSE_DEVELOPMENT_DELIVERY', 'github_actions');
   vi.stubEnv('CRON_SECRET', 'isolated-test-worker-secret-long-enough');
@@ -44,7 +47,10 @@ beforeEach(async () => {
   vi.spyOn(llm, 'isTestStub').mockReturnValue(false);
   for (const section of ['gap_extraction', 'tactic_extraction', 'mapping', 'partial_split'] as const) await setAiSection({ section, enabled: true, actor_name: 'test' });
 });
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+afterEach(async () => {
+  try { await restoreControls?.(); }
+  finally { restoreControls = undefined; vi.restoreAllMocks(); vi.unstubAllEnvs(); }
+});
 it('refuses unavailable delivery, stale revisions and concurrent conflicting starts; manifests contain sources only', async () => {
   const e = await draft();
   vi.stubEnv('SYNAPSE_DEVELOPMENT_DELIVERY', '');
