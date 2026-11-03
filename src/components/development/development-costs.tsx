@@ -1,7 +1,7 @@
 /** Execution spending controls are independent of immutable model settings and outputs. */
 "use client";
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { CostControls, CostAction } from '@/modules/development/cost-schema';
@@ -13,6 +13,7 @@ function dollars(value: number | null) { return value === null ? 'unknown' : `US
 
 /** Show a provider-free preview with explicit uncertainty and category coverage. */
 export function CostPreview({ root, evaluationOnly = false, mode = 'standard' }: { root: string; evaluationOnly?: boolean; mode?: 'standard' | 'single_pass' }) {
+  const previewStatusId = useId();
   const [estimate, setEstimate] = useState<CostEstimate | null>(null);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
@@ -29,7 +30,8 @@ export function CostPreview({ root, evaluationOnly = false, mode = 'standard' }:
     finally { setPending(false); }
   }
   return <div className="space-y-2">
-    <Button variant="outline" disabled={pending} onClick={() => void preview()}>Preview {evaluationOnly ? 'evaluation' : 'generation'} cost</Button>
+    <Button variant="outline" aria-describedby={previewStatusId} disabled={pending} onClick={() => void preview()}>Preview {evaluationOnly ? 'evaluation' : 'generation'} cost</Button>
+    <p id={previewStatusId}>{pending ? "Loading cost preview…" : "Preview uses no provider calls."}</p>
     {error && <p role="alert" className="text-destructive">{error}</p>}
     {estimate && previewKey === key && <div aria-live="polite" className="space-y-2"><p>Estimated total: {dollars(estimate.total_usd)}</p>{estimate.uncertainty.map(reason => <p key={reason}>{reason}</p>)}<p>One HTTP attempt per raw request. Unknown charges can exceed the allowance.</p><details><summary>Estimate categories</summary>{estimate.categories.map(item => <p key={item.category}>{item.category}: {item.calls_min}–{item.calls_max ?? 'unknown'} calls · {dollars(item.cost_usd)} · {item.reason}</p>)}</details></div>}
   </div>;
@@ -79,7 +81,8 @@ export function DevelopmentCosts({ root, account, onChange, disabled }: { root: 
     <p>Unknown usage calls: {account.unknown_usage_calls} · Unknown active reservations: {account.unknown_active_reservations} · Known reserved: {dollars(account.reserved_usd)}</p>
     <p>Known usage is a subtotal; unknown charges can exceed the allowance.</p>
     {error && <p role="alert" className="text-destructive">{error}</p>}
-    <fieldset disabled={pending || disabled} className="space-y-3"><legend className="font-medium">Spending actions</legend>
+    <p id="spending-lock">{pending ? "Saving spending action…" : disabled ? "Save or refresh the experiment before changing spending." : "Spending actions are available."}</p>
+    <fieldset disabled={pending || disabled} aria-describedby="spending-lock" className="space-y-3"><legend className="font-medium">Spending actions</legend>
       <label className="block space-y-1">Increase allowance (USD)<Input type="number" min="0" step="any" value={increase} onChange={event => setIncrease(event.target.value)} /></label>
       <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => { if (!increase.trim() || !Number.isFinite(Number(increase)) || Number(increase) <= 0) { setError('Enter a finite positive allowance increase.'); return; } void act({ action: 'increase', amount_usd: Number(increase) }); }}>Increase allowance</Button>
       <Button variant="outline" onClick={() => void act({ action: 'override', enabled: !account.override_enabled })}>{account.override_enabled ? 'Disable' : 'Enable'} allowance override</Button>
@@ -89,7 +92,7 @@ export function DevelopmentCosts({ root, account, onChange, disabled }: { root: 
     </fieldset>
     <p>Owner-reported total: {account.reported_total ? `${account.reported_total.currency} ${account.reported_total.amount}` : 'not reported'}</p>
     <p>Owner reports are not verified provider billing. Execution totals are not allocated to sections.</p>
-    <fieldset disabled={pending || disabled} className="space-y-3"><legend className="font-medium">Report or correct total after generation and evaluation finish</legend>
+    <fieldset disabled={pending || disabled} aria-describedby="spending-lock" className="space-y-3"><legend className="font-medium">Report or correct total after generation and evaluation finish</legend>
       <label className="block space-y-1">Reported total amount<Input type="number" step="any" value={amount} onChange={event => setAmount(event.target.value)} /></label>
       <label className="block space-y-1">Reported currency<Input value={currency} onChange={event => setCurrency(event.target.value)} /></label>
       <label className="block space-y-1">Correction note<Input maxLength={2000} value={note} onChange={event => setNote(event.target.value)} /></label>

@@ -9,6 +9,14 @@ const base = { created_at: '2026-10-30', updated_at: '2026-10-30', generation_st
 const saved = { ...base, id: 'saved', manifest: { revision: 1, config: config('single_pass'), routes: {}, sources: [], references: [] }, sections: [attempt('gap_extraction', { accepted: [], rejected: [{ name: '<script>untrusted()</script>', source_quote: 'Missing comparative outcomes', duplicate_of: 'gap-previous', critic_note: 'Rejected due to overlap' }] }, [], 'rejected'), attempt('tactic_extraction', { accepted: [{ name: 'Evidence study', evidence_question: 'Compare outcomes', source_quote: 'Study protocol', status: 'planned' }], rejected: [] }), attempt('matching_coverage', { rows: [{ gap_id: 'gap-one', gap_name: 'Comparative need', mappings: [{ tactic_id: 'tactic-one', coverage: 'partially_addressed', rationale: 'Study is planned', dimensions: { population: 'partial' }, references: [{ entity_type: 'source', entity_id: 'source-one', reason: 'Protocol' }] }] }] }), attempt('partial_splitting', { proposals: [] }, [], 'not_applicable')] };
 const older = { ...saved, id: 'older', manifest: { ...saved.manifest, config: config('standard') }, sections: [attempt('gap_extraction', '<img src=x onerror=untrusted()>', [], 'failed')] };
 async function arrange(page: Page, generationStatus?: string) {
+  // These saved-output scenarios assume a configured evaluator. Script availability
+  // like the execution replies below; no real credentials or provider calls are used.
+  await page.route('**/api/control', async intercepted => {
+    const response = await intercepted.fetch();
+    const body = await response.json();
+    body.provider_keys = body.provider_keys.map((provider: Record<string, unknown>) => ({ ...provider, status: 'configured' }));
+    await intercepted.fulfill({ response, json: body });
+  });
   const name = `KAN205 results ${Date.now()}`;
   const response = await page.request.post('/api/admin/development', { data: { name, source_workspace_id: null } });
   expect(response.ok(), `Create experiment: ${response.status()} ${await response.text()}`).toBe(true);

@@ -2,6 +2,16 @@ import { developmentStep, developmentDetails } from "../support/development-work
 /** Owner execution controls use scripted responses; no provider calls are made. */
 import { expect, test } from "@playwright/test";
 
+// Execution API responses are scripted; expose matching credential status to readiness.
+test.beforeEach(async ({ page }) => {
+  await page.route('**/api/control', async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.provider_keys = body.provider_keys.map((provider: Record<string, unknown>) => ({ ...provider, status: 'configured' }));
+    await route.fulfill({ response, json: body });
+  });
+});
+
 test("owner configures and starts a frozen execution", async ({ page }) => {
   // Arrange: the draft uses the isolated server; execution responses are scripted.
   const name = `Execution ${Date.now()}`;
@@ -73,10 +83,10 @@ test("history shows frozen routes, unreviewed outputs and stale prerequisites", 
   await developmentDetails(page, "Saved model routes and call evidence");
   await expect(execution.getByText(/proposer: requested/).first()).toBeVisible();
   await developmentStep(page, "Run");
-  await execution.getByRole("button", { name: "Rerun Matching and coverage" }).click();
-  await expect(execution.getByRole("alert")).toContainText("prerequisite changed");
-  expect(posts).toBe(2);
-  expect(rerunPayloads[0]?.prerequisites).toEqual({ gap_extraction: { attempt_id: "attempt-0", output_id: "0".repeat(64) }, tactic_extraction: { attempt_id: "attempt-1", output_id: "1".repeat(64) } });
+  await expect(execution.getByRole("button", { name: "Rerun Matching and coverage" })).toBeDisabled();
+  await expect(execution.locator("#readiness-matching_coverage")).toContainText("prerequisites");
+  expect(posts).toBe(1);
+  expect(rerunPayloads).toHaveLength(0);
   await page.reload();
   await page.getByRole("button", { name: `Open ${name}` }).click();
   await developmentStep(page, "Results");

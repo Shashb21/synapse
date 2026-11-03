@@ -2,6 +2,16 @@ import { developmentStep, developmentDetails } from "../support/development-work
 /** Reopened history uses scripted execution data and the isolated draft API. */
 import { expect, test } from '@playwright/test';
 
+// Execution API responses are scripted; expose matching credential status to readiness.
+test.beforeEach(async ({ page }) => {
+  await page.route('**/api/control', async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.provider_keys = body.provider_keys.map((provider: Record<string, unknown>) => ({ ...provider, status: 'configured' }));
+    await route.fulfill({ response, json: body });
+  });
+});
+
 test('reopens historical attempts with independent freshness and call details', async ({ page }) => {
   const name = `History detail ${Date.now()}`;
   const route = { provider_id: 'xai-grok', model: 'grok-4', temperature: 0.2, max_tokens: 16000, fallbacks: [] };
@@ -91,8 +101,8 @@ test('loads older history while retaining the newest prerequisites and selected 
   await developmentDetails(page, 'Attempt identifiers and prerequisites');
   await expect(execution.getByText('Attempt: old-gap', { exact: false })).toBeVisible();
   await developmentStep(page, "Run");
-  await execution.getByRole('button', { name: 'Run Matching and coverage' }).click();
-  await expect(execution.getByRole('alert')).toContainText('Prerequisites are missing or stale');
+  await expect(execution.getByRole('button', { name: 'Run Matching and coverage' })).toBeDisabled();
+  await expect(execution.locator('#readiness-matching_coverage')).toContainText('prerequisites');
   expect(posts).toBe(0);
   await developmentStep(page, "Results");
   await expect(execution.getByLabel('Selected execution')).toHaveValue('old');

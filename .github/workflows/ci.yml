@@ -56,13 +56,13 @@ jobs:
       - run: npx vitest run
 
   e2e:
-    name: e2e (playwright ${{ matrix.shard }}/12)
-    # Each shard has its own server and Postgres service. Keep dependent tests
-    # within a file together and retain one worker per database.
+    name: e2e (playwright ${{ matrix.shard }}/16)
+    # Each selected file gets a fresh server; each shard has its own Postgres service.
+    # Keep dependent tests within a file together and one worker per database.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
     # Keep browser checks stable across ubuntu-latest image migrations.
     runs-on: ubuntu-24.04
     timeout-minutes: 40
@@ -100,12 +100,13 @@ jobs:
       - run: npx playwright install --with-deps chromium
       # playwright.config.ts starts the dev server with the LLM test stub.
       - name: Run browser tests with runner diagnostics
+        env:
+          DEBUG: pw:webserver
         run: |
           bash scripts/ci-resource-monitor.sh &
           monitor_pid=$!
           trap 'kill "$monitor_pid" 2>/dev/null || true; wait "$monitor_pid" 2>/dev/null || true' EXIT
-          # Release the entire dev compiler heap between files; keep native shard selection.
-          node scripts/ci-playwright-specs.mjs --shard=${{ matrix.shard }}/12
+          node --import tsx scripts/ci-file-shards.ts ${{ matrix.shard }}
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@v4

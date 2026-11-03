@@ -8,6 +8,7 @@ import { RouteFields } from "./development-route-fields";
 import { presentationReason } from "./development-presentation";
 import { CallEvidence, DevelopmentResults } from "./development-results";
 import { DevelopmentComparison } from "./development-comparison";
+import { currentPrerequisites, effectiveRoute, generationReadiness } from "./development-readiness";
 import { executionConfigSchema } from "@/modules/development/execution-schema";
 import { CostPreview, CostStartFields, DevelopmentCosts } from "./development-costs";
 import type { CostControls } from "@/modules/development/cost-schema";
@@ -29,7 +30,7 @@ const active = (execution: Execution) => execution.generation_status === "queued
 /** Display frozen configuration, progress and unreviewed section output. */
 function ExecutionDetail({ execution, metadata }: { execution: Execution; metadata: Record<string, AttemptHistoryMetadata> }) {
   const terminal = execution.sections.filter((item) => !["queued", "running"].includes(item.status)).length;
-  return <div className="space-y-3 break-words" aria-live="polite">
+  return <div className="space-y-3 break-words">
     <p>Generation: {execution.generation_status} · {terminal}/{execution.sections.length} sections finished</p>
     <p>Viewing a saved run. Its output and settings are preserved; current edits do not rewrite this record.</p>
     <p>Mode: {execution.manifest.config?.mode === "standard" ? "Standard" : execution.manifest.config?.mode === "single_pass" ? "Single pass" : "unavailable"} · Revision {execution.manifest.revision}</p>
@@ -62,7 +63,7 @@ function ExecutionDetail({ execution, metadata }: { execution: Execution; metada
 }
 
 /** Manage execution settings and read progress without driving worker delivery. */
-export function DevelopmentExecution({ draft, disabled, step, onWorkflowChange }: { draft: Experiment; disabled: boolean; step: WorkflowStep; onWorkflowChange: (facts: WorkflowFacts, hasSources: boolean) => void }) {
+export function DevelopmentExecution({ draft, disabled, disabledReason, step, onNavigate, onStaleRevision, onWorkflowChange }: { draft: Experiment; disabled: boolean; disabledReason?: string; step: WorkflowStep; onNavigate: (step: WorkflowStep) => void; onStaleRevision: () => void; onWorkflowChange: (facts: WorkflowFacts, hasSources: boolean) => void }) {
   const [loadVersion, setLoadVersion] = useState(0);
   const [historyState, setHistoryState] = useState<WorkflowFacts["history"]>("loading");
   const [costControls, setCostControls] = useState<CostControls>({ allowance_usd: 0, unknown_acknowledged: false });
@@ -215,14 +216,10 @@ export function DevelopmentExecution({ draft, disabled, step, onWorkflowChange }
   }, [config, draft.revision, root, loading]);
   const latest = (section: DevelopmentSection): SectionAttempt | undefined => history.flatMap((item) => item.sections).find((item) => item.section === section);
   function prerequisites(target: DevelopmentSection | "all") {
-    const required: DevelopmentSection[] = target === "matching_coverage" ? ["gap_extraction", "tactic_extraction"] : target === "partial_splitting" ? ["gap_extraction", "tactic_extraction", "matching_coverage"] : [];
-    const result: Partial<Record<DevelopmentSection, { attempt_id: string; output_id: string }>> = {};
-    for (const section of required) { const attempt = latest(section); if (!attempt || attempt.status !== "succeeded" || !attempt.result || metadata[attempt.id]?.freshness.current === false) return null; result[section] = { attempt_id: attempt.id, output_id: attempt.result.output_id }; }
-    if (target === "partial_splitting") { const matching = latest("matching_coverage"); if (matching?.prerequisites.gap_extraction !== result.gap_extraction?.attempt_id || matching?.prerequisites.tactic_extraction !== result.tactic_extraction?.attempt_id) return null; }
-    return result;
+    return currentPrerequisites(target, history.flatMap(item => item.sections), metadata);
   }
   async function run(target: DevelopmentSection | "all") {
-    if (!config) return;
+    if (!config || readiness(target).length) return;
     if (!Number.isFinite(costControls.allowance_usd) || costControls.allowance_usd < 0) { setError("Enter a finite nonnegative generation allowance."); return; }
     const dependencies = prerequisites(target);
     if (!dependencies) { setError("Prerequisites are missing or stale. Run the required sections again."); return; }
@@ -232,10 +229,10 @@ export function DevelopmentExecution({ draft, disabled, step, onWorkflowChange }
     try {
       const response = await fetch(root, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ revision: draft.revision, target, config, prerequisites: dependencies, cost_controls: costControls }) });
       const body = await response.json();
-      if (!response.ok) { if (response.status === 409) await refreshHistory(); throw new Error(typeof body.error === "string" ? body.error : "Unable to start execution."); }
+      if (!response.ok) { if (body.code === "stale_revision") onStaleRevision(); if (response.status === 409) await refreshHistory(); throw new Error(typeof body.error === "string" ? body.error : "Unable to start execution."); }
       setHistory((items) => [body.execution, ...items]); setSelected(body.execution.id);
       await refreshHistory();
-    } catch (failure) { setError(failure instanceof Error ? failure.message : "Unable to start execution. Check history before retrying."); }
+    } catch (failure) { setHistoryState("unavailable"); setError(`${failure instanceof Error ? failure.message : "Unable to start execution."} Check and reload history before retrying; the request may have been accepted.`); }
     finally { setPending(false); }
   }
   /** Copy a complete frozen configuration without synthesizing missing legacy defaults. */
@@ -256,7 +253,14 @@ export function DevelopmentExecution({ draft, disabled, step, onWorkflowChange }
   useEffect(() => {
     onWorkflowChange({ history: historyState, latestStatus, savedSettings, deliveryAvailable: !!delivery?.available }, hasSources);
   }, [historyState, latestStatus, savedSettings, delivery?.available, hasSources, onWorkflowChange]);
-  const locked = disabled || pending || loading || !config || !delivery?.available || historyState !== "ready" || history.some(active) || !draft.documents.some((item) => item.role === "source");
+  const readiness = (target: DevelopmentSection | "all") => {
+    const blockers = generationReadiness({ disabled, disabledReason, pending, loading, historyState, deliveryAvailable: !!delivery?.available, active: history.some(active), hasSources, config, providers, allowance: costControls.allowance_usd }, target);
+    const sources = draft.documents.filter(item => item.role === "source");
+    if (sources.length && (sources.length > 100 || sources.some(item => item.compatibility !== "compatible"))) blockers.push("Choose 1–100 compatible experiment documents before running.");
+    if (target !== "all" && !prerequisites(target)) blockers.push("Run the latest successful prerequisites with current sources and settings first; reload history if freshness is unavailable.");
+    return blockers;
+  };
+  const allBlockers = readiness("all");
   return <section aria-label="Execution" className="space-y-4" hidden={step === "documents"}>
     <p className="text-muted-foreground">Generation uses experiment documents only. Outputs are unreviewed; evaluation uses saved outputs in Results. A fresh run may incur provider charges, including after an uncertain failure.</p>
     {copyMessage && <p role="status">{copyMessage}</p>}
@@ -267,8 +271,8 @@ export function DevelopmentExecution({ draft, disabled, step, onWorkflowChange }
     <h3 id="settings-heading" className="text-lg font-semibold">Test settings</h3>
     <p className="text-muted-foreground">Review the mode and model routes. Settings are saved with each execution; changing these controls does not run generation.</p>
     {config && <><label className="block space-y-1">Execution mode<select aria-label="Execution mode" className={selectClass} value={config.mode} onChange={(event) => { const mode = event.target.value as ExecutionConfig["mode"]; setConfig({ ...config, mode, stages: mode === "single_pass" ? Object.fromEntries(sections.map((section) => [section, { ...config.stages[section], overrides: config.stages[section].overrides.proposer ? { proposer: config.stages[section].overrides.proposer } : {} }])) as ExecutionConfig["stages"] : config.stages }); }}><option value="standard">Standard</option><option value="single_pass">Single pass (experimental)</option></select></label>
-      <p className="text-muted-foreground">Single pass omits critique, revision and internal acceptance; switching to it removes those role overrides. Structural repair may still make additional calls.</p>
-      {sections.map((section) => <details key={section} className="border-t border-border pt-3"><summary className="cursor-pointer font-medium">{labels[section]} route and roles</summary><div className="space-y-3 pt-3"><RouteFields providers={providers} value={config.stages[section].route} onChange={(route) => setConfig({ ...config, stages: { ...config.stages, [section]: { ...config.stages[section], route } } })} />{roles.map((role) => <div key={role}><label className="flex gap-2 items-center"><input type="checkbox" aria-label={`${roleLabels[role]} override`} disabled={config.mode === "single_pass" && role !== "proposer"} checked={!!config.stages[section].overrides[role]} onChange={(event) => { const overrides = { ...config.stages[section].overrides }; if (event.target.checked) overrides[role] = structuredClone(config.stages[section].route); else delete overrides[role]; setConfig({ ...config, stages: { ...config.stages, [section]: { ...config.stages[section], overrides } } }); }} />{roleLabels[role]} override</label>{config.stages[section].overrides[role] && <div className="mt-3"><RouteFields providers={providers} value={config.stages[section].overrides[role]!} onChange={(route) => setConfig({ ...config, stages: { ...config.stages, [section]: { ...config.stages[section], overrides: { ...config.stages[section].overrides, [role]: route } } } })} /></div>}</div>)}</div></details>)}
+      <p id="single-pass-explanation" className="text-muted-foreground">Single pass omits critique, revision and internal acceptance; switching to it removes those role overrides. Structural repair may still make additional calls.</p>
+      {sections.map((section) => <details key={section} className="border-t border-border pt-3"><summary className="cursor-pointer font-medium">{labels[section]} route and roles</summary><div className="space-y-3 pt-3"><RouteFields providers={providers} value={config.stages[section].route} onChange={(route) => setConfig({ ...config, stages: { ...config.stages, [section]: { ...config.stages[section], route } } })} />{roles.map((role) => <div key={role}><label className="flex gap-2 items-center"><input type="checkbox" aria-label={`${roleLabels[role]} override`} aria-describedby="single-pass-explanation" disabled={config.mode === "single_pass" && role !== "proposer"} checked={!!config.stages[section].overrides[role]} onChange={(event) => { const overrides = { ...config.stages[section].overrides }; if (event.target.checked) overrides[role] = structuredClone(config.stages[section].route); else delete overrides[role]; setConfig({ ...config, stages: { ...config.stages, [section]: { ...config.stages[section], overrides } } }); }} />{roleLabels[role]} override</label>{config.stages[section].overrides[role] && <div className="mt-3"><RouteFields providers={providers} value={config.stages[section].overrides[role]!} onChange={(route) => setConfig({ ...config, stages: { ...config.stages, [section]: { ...config.stages[section], overrides: { ...config.stages[section].overrides, [role]: route } } } })} /></div>}</div>)}</div></details>)}
 
       <details className="border-t border-border pt-3"><summary className="cursor-pointer font-medium">Legacy evaluator route (legacy history comparisons only)</summary><div className="pt-3"><p>These settings apply only to older evaluation associations. Use the per-section evaluator settings in Results for new evaluations.</p><RouteFields providers={providers} value={config.evaluator} onChange={(evaluator) => setConfig({ ...config, evaluator })} /></div></details>
     </>}
@@ -281,16 +285,22 @@ export function DevelopmentExecution({ draft, disabled, step, onWorkflowChange }
       <p className="text-muted-foreground">Matching requires current successful gap and tactic extraction. Partial splitting requires those results and matching built from them. Changed settings or sources can make prerequisites stale; the server checks them before every run.</p>
       <CostStartFields value={costControls} onChange={setCostControls} />
       <CostPreview root={`/api/admin/development/${draft.id}`} mode={config.mode} />
-      <div className="flex flex-wrap gap-2"><Button disabled={!!locked} onClick={() => void run("all")}>Run all sections</Button>{sections.map((section) => <Button key={section} variant="outline" disabled={!!locked} onClick={() => void run(section)}>{latest(section) ? "Rerun" : "Run"} {labels[section]}</Button>)}</div></>}
+      {historyState === "unavailable" && <><p id="run-history-status">{pending || loading ? "Wait for the current history operation." : "Reload saved history to check whether a run is active."}</p><Button variant="outline" aria-describedby="run-history-status" disabled={pending || loading} onClick={() => { setPending(true); void refreshHistory().finally(() => setPending(false)); }}>Reload history before running</Button></>}
+      <div id="run-readiness" role="status" aria-live="polite">{allBlockers.length ? <><p>Before running all sections:</p><ul className="list-disc pl-5">{allBlockers.map(blocker => <li key={blocker}>{blocker}</li>)}</ul></> : <p>Ready to run all sections.</p>}</div>
+      <div className="flex flex-wrap gap-2">{allBlockers.some(blocker => /source snapshot|experiment document/.test(blocker)) && <Button variant="outline" onClick={() => onNavigate("documents")}>Go to Documents to add or review sources</Button>}{allBlockers.some(blocker => /model settings|credentials/.test(blocker)) && <Button variant="outline" onClick={() => onNavigate("settings")}>Go to Test settings</Button>}</div>
+      <p>Mode: {config.mode === "single_pass" ? "Single pass (proposer only)" : "Standard (proposer, critic, reviser and internal judge)"}. A zero allowance or unknown prices can pause execution; review the spending controls above.</p>
+      <details><summary className="cursor-pointer">Active model roles</summary>{sections.map(section => <div key={section}><p className="font-medium">{labels[section]}</p>{(config.mode === "single_pass" ? roles.slice(0, 1) : roles).map(role => { const route = config.stages[section].overrides[role] ?? config.stages[section].route; const actual = effectiveRoute(route, providers); return <p key={role}>{roleLabels[role]}: {actual ? `${actual.provider_id} / ${actual.model}${actual.fallback ? ` (fallback: ${route.provider_id} credentials unavailable)` : ""}` : "No configured provider available"}</p>; })}</div>)}</details>
+      <div className="flex flex-wrap gap-2"><Button aria-describedby="run-readiness" disabled={!!allBlockers.length} onClick={() => void run("all")}>Run all sections</Button>{sections.map((section) => { const blockers = readiness(section); const shared = allBlockers.every(blocker => blockers.includes(blocker)); return <div key={section}><Button variant="outline" aria-describedby={`${shared ? "run-readiness " : ""}readiness-${section}`} disabled={!!blockers.length} onClick={() => void run(section)}>{latest(section) ? "Rerun" : "Run"} {labels[section]}</Button><div id={`readiness-${section}`}>{(shared ? blockers.filter(blocker => !allBlockers.includes(blocker)) : blockers).map(blocker => <p key={blocker}>{blocker}</p>)}</div></div>; })}</div></>}
     </section>
     <section hidden={step !== "results"} aria-labelledby="results-heading" className="space-y-4">
     <h3 id="results-heading" className="text-lg font-semibold">Results</h3>
     <p>Read generated output first. Evaluation is optional; saved history and comparison preserve earlier evidence.</p>
     {loading && <p role="status">Loading saved runs…</p>}
-    <div className="border-t border-border pt-3 space-y-3"><div className="flex flex-wrap gap-2 items-center"><h4 className="font-semibold">Saved run history</h4><Button variant="outline" disabled={pending || loading} onClick={() => { if (!config) { setLoading(true); setHistoryState("loading"); setLoadVersion(current => current + 1); return; } setPending(true); void refreshHistory().catch((failure) => setError(failure.message)).finally(() => setPending(false)); }}>Reload history</Button></div>
+    <div className="border-t border-border pt-3 space-y-3"><div className="flex flex-wrap gap-2 items-center"><h4 className="font-semibold">Saved run history</h4><Button variant="outline" aria-describedby="history-action-status" disabled={pending || loading} onClick={() => { if (!config) { setLoading(true); setHistoryState("loading"); setLoadVersion(current => current + 1); return; } setPending(true); void refreshHistory().catch((failure) => setError(failure.message)).finally(() => setPending(false)); }}>Reload history</Button></div>
+      <p id="history-action-status">{pending || loading ? "Wait for the current history operation." : "History actions are available."}</p>
       {!history.length && historyState === "ready" && <p>No executions yet. Add experiment documents and use Run to generate output. Evaluation is optional.</p>}
       {historyState === "unavailable" && <p>Saved history unavailable. Reload history before starting another run.</p>}
-      {!!history.length && <><label className="block space-y-1">Selected execution<select className={selectClass} value={selected ?? ""} onChange={(event) => setSelected(event.target.value)}>{history.map((item) => <option key={item.id} value={item.id}>{item.created_at} · {item.generation_status} · {item.id}</option>)}</select></label>{current && <><Button variant="outline" disabled={disabled || loading || pending} onClick={() => copyConfiguration(current)}>Copy selected configuration</Button><ExecutionDetail execution={current} metadata={metadata} /><p>Review Test settings before rerunning. This action uses current settings and experiment documents; the selected saved run stays unchanged.</p><Button variant="outline" disabled={!!locked} onClick={() => void run("all")}>Rerun with current settings</Button><DevelopmentCosts key={current.id} root={`${root}/${current.id}/costs`} account={current.cost} disabled={disabled} onChange={cost => setHistory(items => items.map(item => item.id === current.id ? { ...item, cost } : item))} /></>}{cursor && <Button variant="outline" disabled={pending} onClick={() => { setPending(true); void refreshHistory(cursor).catch((failure) => setError(failure.message)).finally(() => setPending(false)); }}>Load older executions</Button>}</>}
+      {!!history.length && <><label className="block space-y-1">Selected execution<select className={selectClass} value={selected ?? ""} onChange={(event) => setSelected(event.target.value)}>{history.map((item) => <option key={item.id} value={item.id}>{item.created_at} · {item.generation_status} · {item.id}</option>)}</select></label>{current && <><Button variant="outline" aria-describedby="copy-config-status" disabled={disabled || loading || pending} onClick={() => copyConfiguration(current)}>Copy selected configuration</Button><p id="copy-config-status">{disabled ? "Save or refresh the experiment before copying settings." : loading || pending ? "Wait for the current operation before copying settings." : "Copy settings to review before running."}</p><ExecutionDetail execution={current} metadata={metadata} /><p>Review Test settings before rerunning. This action uses current settings and experiment documents; the selected saved run stays unchanged.</p><div id="results-run-readiness" role="status">{allBlockers.length ? <><p>Before rerunning all sections:</p><ul className="list-disc pl-5">{allBlockers.map(blocker => <li key={blocker}>{blocker}</li>)}</ul></> : <p>Ready to rerun all sections.</p>}</div><Button variant="outline" aria-describedby="results-run-readiness" disabled={!!allBlockers.length} onClick={() => void run("all")}>Rerun with current settings</Button><DevelopmentCosts key={current.id} root={`${root}/${current.id}/costs`} account={current.cost} disabled={disabled} onChange={cost => setHistory(items => items.map(item => item.id === current.id ? { ...item, cost } : item))} /></>}{cursor && <Button variant="outline" aria-describedby="history-action-status" disabled={pending || loading} onClick={() => { setPending(true); void refreshHistory(cursor).catch((failure) => setError(failure.message)).finally(() => setPending(false)); }}>Load older executions</Button>}</>}
     </div>
     <DevelopmentEvaluation key={draft.id} draft={draft} execution={current} providers={providers} disabled={disabled || loading || pending} onHistoryChange={() => { void refreshHistory().catch((failure) => setError(failure.message)); }} />
     <DevelopmentComparison onCopy={copyConfiguration} />
