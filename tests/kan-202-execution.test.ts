@@ -22,7 +22,7 @@ import { POST as deliver } from '@/app/api/internal/development-worker/route';
 import { setAiEnabled } from '@/modules/kernel/ai-switch';
 import '@/modules';
 import { setRouteConfig } from '@/modules/kernel/routing';
-import { setAccuracyRouteConfig } from '@/accuracy/kernel/routing';
+import { seedHistoricalRoute } from './support/persisted-controls';
 import { activeModule, activateModule } from '@/modules/kernel/registry';
 let restoreControls: (() => Promise<void>) | undefined;
 let sourceId = '';
@@ -314,7 +314,7 @@ it.each(['standard', 'single_pass'] as const)('uses explicit actual role routes 
   const input = { revision: 2, target: 'gap_extraction', config: { mode, stages: { gap_extraction: { route: route('xai-grok', 'grok-4', 0.3), overrides } } }, prerequisites: {} };
   // Seed real rows: empty-table comparisons could hide accidental writes to defaults.
   await setRouteConfig({ stage: 'S2', provider_id: 'openai', model: 'gpt-5.1', temperature: 0.12, max_tokens: 2345, fallbacks: [], actor_name: 'KAN-211 live sentinel' });
-  await setAccuracyRouteConfig({ call_kind: 'need_extract', agent_role: 'proposer', provider_id: 'openai', model: 'gpt-5.1', temperature: 1.1, max_tokens: 999, actor_name: 'KAN-211 legacy sentinel' });
+  await seedHistoricalRoute(1.1, 'KAN-211 legacy sentinel');
   await activateModule({ stage: 'S2', module_id: (await activeModule('S2')).manifest.id, actor_name: 'KAN-211 module sentinel' });
   await setAiEnabled({ enabled: true, actor_name: 'KAN-211 switch sentinel' });
   const snapshot = async () => ({

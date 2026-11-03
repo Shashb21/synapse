@@ -6,10 +6,6 @@ import { recordLlmCall, listLlmCalls } from "@/modules/kernel/llm-calls";
 import { db, sharedDb } from "@/modules/kernel/db";
 import * as schema from "@/modules/kernel/schema";
 import { GET as runApi } from "@/app/api/runs/[id]/route";
-import { AccuracyRunRecorder, openAccuracyRun, closeAccuracyRun, listAccuracyRuns } from "@/accuracy/kernel/observability";
-import { accuracyDb } from "@/accuracy/store/db";
-import * as accuracySchema from "@/accuracy/store/schema";
-import { GET as accuracyApi } from "@/app/api/accuracy/runs/route";
 import { HISTORICAL_FAILURE_MESSAGE, projectFailureDiagnostics, projectRunSteps } from "@/modules/kernel/failure-presentation";
 const secret = "SELECT password FROM private_accounts provider response token=opaque-sample-secret";
 const actor = { name: "Failure fixture", function: "medical_affairs" as const };
@@ -33,17 +29,6 @@ describe("safe historical run reads", () => {
       expect(JSON.stringify(await getRun(recorder.id))).not.toContain(secret); expect(JSON.stringify(await listRuns({ stage: "S2" }))).not.toContain(secret); expect(JSON.stringify(await listLlmCalls(recorder.id))).not.toContain(secret);
       const [stored] = await db().select().from(schema.moduleRuns).where(eq(schema.moduleRuns.id, recorder.id)); expect(stored.error).toBe(secret); expect(stored.steps).toEqual(expect.arrayContaining([expect.objectContaining({ data: expect.objectContaining({ error: secret }) })]));
     } finally { await sharedDb().execute(sql`delete from llm_calls where id=${callId}`); await db().delete(schema.moduleRuns).where(eq(schema.moduleRuns.id, recorder.id)); }
-  });
-  it("projects Accuracy errors, failed-step detail and nested errors without altering records or evaluations", async () => {
-    const recorder = new AccuracyRunRecorder({ org_id: "fixture", workspace_id: "kan197-" + crypto.randomUUID(), call_kind: "need_extract", agent_role: "none", module_id: "kan197.historical", module_version: "1", actor, input: {} });
-    await openAccuracyRun(recorder); await closeAccuracyRun({ recorder, status: "error", error: secret, summary: secret, output: { claim: "Evidence gap" } });
-    await accuracyDb().update(accuracySchema.accuracyModuleRuns).set({ steps: [{ name: "llm:extract", detail: secret, data: { error: secret, response: secret } }, { name: "science", data: { score: 0.6 } }], evals: [{ name: "coverage", value: 0.8 }] }).where(eq(accuracySchema.accuracyModuleRuns.id, recorder.id));
-    try {
-      const response = await accuracyApi(new Request("http://localhost/api/accuracy/runs?workspace_id=" + recorder.workspace_id)); const body = await response.json();
-      expect(response.status).toBe(200); expect(JSON.stringify(body)).not.toContain(secret); expect(body.runs[0].error).toMatch(/could not finish.*review/i); expect(body.runs[0].steps[0].detail).toBeNull(); expect(body.runs[0].steps[0].data).toEqual({ error: body.runs[0].error }); expect(body.runs[0].steps[1].data).toEqual({ score: 0.6 }); expect(body.runs[0].evals).toEqual([{ name: "coverage", value: 0.8 }]);
-      expect(JSON.stringify(await listAccuracyRuns(recorder.workspace_id))).not.toContain(secret);
-      const [stored] = await accuracyDb().select().from(accuracySchema.accuracyModuleRuns).where(eq(accuracySchema.accuracyModuleRuns.id, recorder.id)); expect(stored.error).toBe(secret);
-    } finally { await accuracyDb().delete(accuracySchema.accuracyModuleRuns).where(eq(accuracySchema.accuracyModuleRuns.id, recorder.id)); }
   });
 });
 

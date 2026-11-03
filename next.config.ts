@@ -5,9 +5,6 @@ import type { NextConfig } from "next";
  * for bookmarks; they land on the owner-gated page, never a customer one.
  */
 export const ADMIN_REDIRECTS: { source: string; destination: string }[] = [
-  { source: "/accuracy/control", destination: "/admin/accuracy/routing" },
-  { source: "/accuracy", destination: "/admin/accuracy" },
-  { source: "/accuracy/:path*", destination: "/admin/accuracy/:path*" },
   { source: "/control", destination: "/admin/control" },
   { source: "/control-panel", destination: "/admin/control" },
   { source: "/settings/control", destination: "/admin/control" },

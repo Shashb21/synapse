@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 /**
  * The owner console (/admin): the owner gets in, everyone else gets "Owner
- * only" (403), and the old lab URLs redirect into it. Under the test stub the
+ * only" (403), and the remaining lab URLs redirect into it. Under the test stub the
  * demo session is the owner; the synapse_test_as=customer cookie opts a test
  * out of that so the customer view can be checked.
  */
@@ -17,7 +17,6 @@ test.describe("owner console", () => {
     for (const [label, href] of [
       ["Overview", "/admin"],
       ["AI & routing", "/admin/control"],
-      ["Accuracy", "/admin/accuracy"],
       ["Pipeline", "/admin/pipeline"],
       ["Runs & traces", "/admin/runs"],
       ["Evals", "/admin/evals"],
@@ -55,7 +54,6 @@ test.describe("owner console", () => {
     await context.addCookies([{ name: "synapse_test_as", value: "customer", url: baseURL! }]);
     const request = page.request;
     const checks = [
-      request.get("/api/accuracy/orchestration"),
       request.get("/api/control"),
       request.get("/api/modules"),
       request.post("/api/control", {
@@ -86,7 +84,6 @@ test.describe("owner console", () => {
 
   test("the owner reaches the admin APIs", async ({ request }) => {
     expect((await request.get("/api/control")).status()).toBe(200);
-    expect((await request.get("/api/accuracy/orchestration")).status()).toBe(200);
   });
 
   test("the customer app does not link to the owner console", async ({ page }) => {
@@ -97,9 +94,6 @@ test.describe("owner console", () => {
 
 test.describe("old lab URLs redirect into /admin", () => {
   for (const [from, to] of [
-    ["/accuracy", "/admin/accuracy"],
-    ["/accuracy/ledger?workspace_id=ws-x", "/admin/accuracy/ledger?workspace_id=ws-x"],
-    ["/accuracy/control", "/admin/accuracy/routing"],
     ["/control", "/admin/control"],
     ["/control-panel", "/admin/control"],
     ["/pipeline", "/admin/pipeline"],
