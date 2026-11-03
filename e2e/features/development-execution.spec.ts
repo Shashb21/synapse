@@ -1,3 +1,4 @@
+import { developmentStep, developmentDetails } from "../support/development-workflow";
 /** Owner execution controls use scripted responses; no provider calls are made. */
 import { expect, test } from "@playwright/test";
 
@@ -14,13 +15,18 @@ test("owner configures and starts a frozen execution", async ({ page }) => {
   await page.goto("/admin/development");
   await page.getByLabel("New experiment name").fill(name);
   await page.getByRole("button", { name: "Create experiment" }).click();
+  await developmentStep(page, "Documents");
   await page.getByLabel("Private source file").setInputFiles({ name: "source.txt", mimeType: "text/plain", buffer: Buffer.from("Need comparative evidence.") });
+  await developmentStep(page, "Documents");
   await page.getByRole("button", { name: "Upload source", exact: true }).click();
   await expect(page.getByText("source.txt", { exact: true })).toBeVisible();
+  await developmentStep(page, "Test settings");
   await page.getByText("Gap extraction route and roles").click();
   // Act: select the experimental mode and request a fresh run.
+  await developmentStep(page, "Test settings");
   await page.getByLabel("Execution mode").selectOption("single_pass");
   await expect(page.getByLabel("Critic override", { exact: true }).first()).toBeDisabled();
+  await developmentStep(page, "Run");
   await page.getByRole("button", { name: "Run all sections" }).click();
   // Assert: a safe conflict is shown and no implicit retry occurs.
   await expect(page.getByRole("region", { name: "Execution", exact: true }).getByRole("alert")).toContainText("Prerequisites changed");
@@ -49,23 +55,31 @@ test("history shows frozen routes, unreviewed outputs and stale prerequisites", 
   await page.goto("/admin/development");
   await page.getByLabel("New experiment name").fill(name);
   await page.getByRole("button", { name: "Create experiment" }).click();
+  await developmentStep(page, "Documents");
   await page.getByLabel("Private source file").setInputFiles({ name: "source.txt", mimeType: "text/plain", buffer: Buffer.from("Need comparative evidence.") });
+  await developmentStep(page, "Documents");
   await page.getByRole("button", { name: "Upload source", exact: true }).click();
   await expect(page.getByText("source.txt", { exact: true })).toBeVisible();
   // Act: run all, inspect history and explicitly rerun a dependent section.
+  await developmentStep(page, "Run");
   await page.getByRole("button", { name: "Run all sections" }).focus();
   await page.keyboard.press("Enter");
   const execution = page.getByRole("region", { name: "Execution", exact: true });
+  await developmentStep(page, "Results");
   await expect(execution.getByText("Generation: succeeded · 4/4 sections finished")).toBeVisible();
+  await developmentStep(page, "Results");
   await expect(execution.getByText("Partial splitting: not_applicable")).toBeVisible();
   await expect(execution.getByText(/Generated output: unreviewed/).first()).toBeVisible();
+  await developmentDetails(page, "Saved model routes and call evidence");
   await expect(execution.getByText(/proposer: requested/).first()).toBeVisible();
+  await developmentStep(page, "Run");
   await execution.getByRole("button", { name: "Rerun Matching and coverage" }).click();
   await expect(execution.getByRole("alert")).toContainText("prerequisite changed");
   expect(posts).toBe(2);
   expect(rerunPayloads[0]?.prerequisites).toEqual({ gap_extraction: { attempt_id: "attempt-0", output_id: "0".repeat(64) }, tactic_extraction: { attempt_id: "attempt-1", output_id: "1".repeat(64) } });
   await page.reload();
   await page.getByRole("button", { name: `Open ${name}` }).click();
+  await developmentStep(page, "Results");
   await expect(execution.getByText("Partial splitting: not_applicable")).toBeVisible();
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.screenshot({ path: ".superpowers/sdd/2026-10-30-kan-202/task-3-desktop.png", fullPage: true });
@@ -90,8 +104,11 @@ test("polls only the selected active execution and shows terminal errors", async
   await page.getByRole("button", { name: "Create experiment" }).click();
   const execution = page.getByRole("region", { name: "Execution", exact: true });
   // Act and assert: polling reads detail, then stops after the terminal state.
+  await developmentStep(page, "Run");
   await expect(execution.getByRole("button", { name: "Run all sections" })).toBeDisabled();
+  await developmentStep(page, "Results");
   await expect(execution.getByText(/Generation: needs_attention/)).toBeVisible({ timeout: 10000 });
+  await developmentStep(page, "Results");
   await expect(execution.getByText("Gap extraction: blocked")).toBeVisible();
   await expect(execution.getByText("Inspect the uncertain request before retrying.")).toBeVisible();
   expect(details).toBe(1);
@@ -124,15 +141,20 @@ test("conflict discovers and polls an execution started elsewhere", async ({ pag
     await page.goto("/admin/development");
     await page.getByLabel("New experiment name").fill(name);
     await page.getByRole("button", { name: "Create experiment" }).click();
+    await developmentStep(page, "Documents");
     await page.getByLabel("Private source file").setInputFiles({ name: "source.txt", mimeType: "text/plain", buffer: Buffer.from("Need comparative evidence.") });
+    await developmentStep(page, "Documents");
     await page.getByRole("button", { name: "Upload source", exact: true }).click();
     await expect(page.getByText("source.txt", { exact: true })).toBeVisible();
     const execution = page.getByRole("region", { name: "Execution", exact: true });
+    await developmentStep(page, "Results");
     await expect(execution.getByText("No executions yet.")).toBeVisible();
     // Act: a concurrent execution causes a conflict and authoritative refresh.
+    await developmentStep(page, "Run");
     await execution.getByRole("button", { name: "Run all sections" }).click();
     // Assert: it is selected and detail polling reaches its terminal state.
     await expect(execution.getByRole("alert")).toContainText("already active");
+    await developmentStep(page, "Results");
     await expect(execution.getByText(/Generation: failed/)).toBeVisible({ timeout: 10000 });
     expect(listReads).toBeGreaterThanOrEqual(2);
     expect(detailReads).toBeGreaterThanOrEqual(1);
@@ -160,27 +182,34 @@ test("shows unreviewed extraction candidates in single pass history", async ({ p
   await page.getByRole("button", { name: "Create experiment" }).click();
   const execution = page.getByRole("region", { name: "Execution", exact: true });
   // Act and assert: definition fields expose proposals separately from retained raw output.
+  await developmentStep(page, "Results");
   await execution.getByText("View generated output").nth(0).click();
+  await developmentStep(page, "Results");
   await execution.getByText("View generated output").nth(1).click();
   await expect(execution.getByRole("definition").filter({ hasText: /^Comparative effectiveness remains unknown\.$/ })).toBeVisible();
   await expect(execution.getByRole("definition").filter({ hasText: /^Comparative outcomes remain uncertain\.$/ })).toBeVisible();
   await expect(execution.getByRole("definition").filter({ hasText: /^What are patient outcomes\?$/ })).toBeVisible();
   await expect(execution.getByRole("definition").filter({ hasText: /^An outcomes study is ongoing\.$/ })).toBeVisible();
   await expect(execution.getByText(/"accepted":\s*\[\]/).first()).toBeVisible();
+  await developmentStep(page, "Results");
   await execution.getByText("View generated output").nth(2).click();
   const emptySplittingOutput = execution.locator("pre").filter({ hasText: '"stage_results":[]' });
   await expect(emptySplittingOutput).toBeVisible();
   await expect(emptySplittingOutput).toContainText('"candidates":[]');
+  await developmentStep(page, "Results");
   await execution.getByLabel("Selected execution").selectOption("standard");
   const standardOutput = execution.locator("details").filter({ hasText: "View generated output" });
   if (await standardOutput.getAttribute("open") === null) {
+    await developmentStep(page, "Results");
     await standardOutput.getByText("View generated output").click();
   }
   await expect(execution.getByRole("definition").filter({ hasText: /^Standard unreviewed candidate$/ })).toBeVisible();
   await expect(execution.getByRole("definition").filter({ hasText: /^Standard accepted stage output$/ })).toBeVisible();
   await page.reload();
   await page.getByRole("button", { name: `Open ${name}` }).click();
+  await developmentStep(page, "Results");
   await execution.getByText("View generated output").nth(0).click();
+  await developmentStep(page, "Results");
   await execution.getByText("View generated output").nth(1).click();
   await expect(execution.getByRole("definition").filter({ hasText: /^Comparative effectiveness remains unknown\.$/ })).toBeVisible();
   await expect(execution.getByRole("definition").filter({ hasText: /^What are patient outcomes\?$/ })).toBeVisible();

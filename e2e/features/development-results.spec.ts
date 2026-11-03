@@ -1,3 +1,4 @@
+import { developmentStep } from "../support/development-workflow";
 /** Saved results and comparison use scripted replies, never paid model calls. */
 import { expect, test, type Page } from '@playwright/test';
 const sectionIds = ['gap_extraction', 'tactic_extraction', 'matching_coverage', 'partial_splitting'];
@@ -30,20 +31,27 @@ test('all four sections preserve evidence, malformed history, explicit configura
   await expect(region.getByText(/Delivered evidence coverage: a relevant/)).toBeVisible();
   await expect(region.locator('summary').filter({ hasText: '<script>untrusted()</script>' })).toBeVisible();
   expect(await page.locator('script').filter({ hasText: 'untrusted()' }).count()).toBe(0);
+  await developmentStep(page, "Results");
   await expect(region.getByText(/Generation freshness: outdated/).first()).toContainText('source_changed');
   const evaluation = page.getByRole('region', { name: 'Evaluation', exact: true });
   await evaluation.getByLabel('Saved output').selectOption('attempt-partial_splitting');
   await expect(evaluation.getByRole('button', { name: 'Evaluate saved output', exact: true })).toBeDisabled();
+  await developmentStep(page, "Results");
   await region.getByRole('combobox', { name: 'Selected execution', exact: true }).selectOption('older');
   await expect(region.getByText(/Structured evidence unavailable/)).toBeVisible();
+  await developmentStep(page, "Results");
   await region.getByText('View generated output', { exact: true }).click();
   await expect(region.getByText(/<img src=x onerror=untrusted\(\)>/)).toBeVisible();
+  await developmentStep(page, "Results");
   await region.getByRole('button', { name: 'Copy selected configuration' }).click();
+  await developmentStep(page, "Test settings");
   await expect(region.getByLabel('Execution mode')).toHaveValue('standard');
   await expect(region.getByRole('status').filter({ hasText: 'Copied configuration from execution older' })).toContainText('explicitly Run');
+  await developmentStep(page, "Test settings");
   await region.getByText('Gap extraction route and roles').click();
   await expect(region.getByText('Gap extraction route and roles').locator('..').getByLabel('Temperature', { exact: true }).first()).toHaveValue('0.37');
   expect(posts()).toBe(0);
+  await developmentStep(page, "Results");
   await region.getByRole('combobox', { name: 'Selected execution', exact: true }).selectOption('saved');
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.screenshot({ path: '.superpowers/sdd/2026-10-30-kan-205/results-desktop.png', fullPage: true });
@@ -76,6 +84,7 @@ test('compares saved modes and blocks differing input and rubric claims without 
   await expect(comparison.getByText(/Varying factors:/)).toContainText('generation_mode');
   await expect(comparison.getByText(/One trial cannot establish statistical superiority/)).toBeVisible();
   await comparison.getByRole('button', { name: 'Copy right configuration' }).click();
+  await developmentStep(page, "Test settings");
   await expect(page.getByLabel('Execution mode')).toHaveValue('standard');
   expect(posts()).toBe(0);
   await page.setViewportSize({ width: 1440, height: 1000 });

@@ -91,7 +91,7 @@ function CriterionFields({ value, index, onChange, onRemove }: { value: Criterio
 
 /** Show original and parsed identities without presenting provisional references as reviewed. */
 function DocumentIdentity({ document, kind }: { document: DevelopmentDocument; kind: "Source" | "Reference" }) {
-  return <p className="break-all">{kind} snapshot: {document.filename} · {document.id} · {document.review_status} · {document.compatibility}<br />Original SHA-256: {document.sha256}<br />Parsed SHA-256: {document.parsed_sha256}</p>;
+  return <details><summary className="cursor-pointer break-words">{kind} snapshot: {document.filename} · {document.review_status} · {document.compatibility}</summary><p className="break-all pt-2">Document ID: {document.id}<br />Original SHA-256: {document.sha256}<br />Parsed SHA-256: {document.parsed_sha256}</p></details>;
 }
 
 /** Keep empty denominators unscored instead of assigning an invented perfect value. */
@@ -123,7 +123,9 @@ export function EvaluationDetail({ evaluation }: { evaluation: Evaluation }) {
   const settings = manifest.config.sections[manifest.section];
   return <div className="min-w-0 space-y-3 break-words" aria-live="polite">
     <p className="font-medium">Evaluation status: {evaluation.status}</p>
-    <p className="break-all">Evaluation ID: {evaluation.id}<br />Frozen profile: {manifest.profile.name} · {manifest.profile.id}@{manifest.profile.version}<br />Frozen output: {manifest.output_id}<br />Execution: {manifest.execution_id} · Attempt: {manifest.attempt_id} · {labels[manifest.section]}</p>
+    <p>Frozen profile: {manifest.profile.name} · {manifest.profile.id}@{manifest.profile.version}</p>
+    <p>Section: {labels[manifest.section]}</p>
+    <details><summary className="cursor-pointer">Evaluation and output identifiers</summary><p className="break-all pt-2">Evaluation ID: {evaluation.id}<br />Frozen output: {manifest.output_id}<br />Execution: {manifest.execution_id} · Attempt: {manifest.attempt_id}</p></details>
     <p>Frozen method: {settings.method} · Requested evaluator: {settings.route.provider_id} / {settings.route.model}</p>
     {manifest.route && <p>Resolved evaluator: {manifest.route.actual.provider_id} / {manifest.route.actual.model}{manifest.route.actual.reason ? ` · ${manifest.route.actual.reason}` : ""}</p>}
     {manifest.sources.map((document) => <DocumentIdentity key={document.id} document={document} kind="Source" />)}
@@ -356,7 +358,7 @@ export function DevelopmentEvaluation({ draft, execution, providers, disabled, o
   }
 
   return <section aria-label="Evaluation" className="min-w-0 space-y-4 border-t border-border pt-5">
-    <div className="flex flex-wrap items-center gap-3"><h2 className="font-semibold">Evaluation</h2><Button variant="outline" disabled={loading || pending} onClick={() => void reload()}>Reload evaluation data</Button></div>
+    <div className="flex flex-wrap items-center gap-3"><h4 className="font-semibold">Evaluation</h4><Button variant="outline" disabled={loading || pending} onClick={() => void reload()}>Reload evaluation data</Button></div>
     <p className="max-w-prose text-muted-foreground">Evaluate saved outputs without generation. Factual checks, reference measures and provisional AI assessments are reported separately. A fresh evaluation may incur provider charges.</p>
     {loading && <p role="status">Loading profiles and evaluation history…</p>}
     {loadError && <p role="alert" className="break-words text-destructive">{loadError}</p>}
@@ -404,6 +406,6 @@ export function DevelopmentEvaluation({ draft, execution, providers, disabled, o
         </>}
       </fieldset>
     </>}
-    <div className="min-w-0 space-y-3 border-t border-border pt-3"><h3 className="font-semibold">Immutable evaluation history</h3><p className="text-muted-foreground">Up to 100 recent attempts. Each record retains its own output, profile version, evaluator settings and reference review state.</p>{!history.length && !loading && <p>No evaluations yet. Choose a saved output above.</p>}{!!history.length && <><label className="block space-y-1">Selected evaluation<select className={routeSelectClass} value={selected} disabled={pending} onChange={(event) => setSelected(event.target.value)}>{history.map((item) => <option key={item.id} value={item.id}>{item.created_at} · {labels[item.manifest.section]} · {item.status} · {item.id}</option>)}</select></label>{current && <><p>Comparison with the selected saved output, profile, section settings and checked references: {comparison?.freshness}{comparison?.reasons.length ? ` · ${comparison.reasons.join(", ")}` : ""}</p><EvaluationDetail evaluation={current} /></>}</>}</div>
+    <div className="min-w-0 space-y-3 border-t border-border pt-3"><h5 className="font-semibold">Immutable evaluation history</h5><p className="text-muted-foreground">Up to 100 recent attempts. Each record retains its own output, profile version, evaluator settings and reference review state.</p>{!history.length && !loading && <p>No evaluations yet. Choose a saved output above.</p>}{!!history.length && <><label className="block space-y-1">Selected evaluation<select className={routeSelectClass} value={selected} disabled={pending} onChange={(event) => setSelected(event.target.value)}>{history.map((item) => <option key={item.id} value={item.id}>{item.created_at} · {labels[item.manifest.section]} · {item.status} · {item.id}</option>)}</select></label>{current && <><p>Comparison with the selected saved output, profile, section settings and checked references: {comparison?.freshness}{comparison?.reasons.length ? ` · ${comparison.reasons.join(", ")}` : ""}</p><EvaluationDetail evaluation={current} /></>}</>}</div>
   </section>;
 }

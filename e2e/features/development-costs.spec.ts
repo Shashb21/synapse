@@ -1,3 +1,4 @@
+import { developmentStep } from "../support/development-workflow";
 /** Spending controls use scripted owner APIs and never contact a provider. */
 import { test, expect, type Page } from '@playwright/test';
 
@@ -31,14 +32,20 @@ async function arrange(page: Page) {
 
 test('shows uncertain preview, separate usage, explicit spending actions and preserved outputs', async ({ page }) => {
   const { actions } = await arrange(page);
+  await developmentStep(page, "Run");
   await expect(page.getByText('Fetched preview has unknown pricing.', { exact: true })).toHaveCount(0);
   const previewRequest = page.waitForRequest(request => request.url().endsWith('/cost-estimate'));
+  await developmentStep(page, "Run");
   await page.getByRole('button', { name: 'Preview generation cost' }).click();
   expect((await previewRequest).postDataJSON()).toEqual({ mode: 'standard', evaluation_only: false });
+  await developmentStep(page, "Run");
   await expect(page.getByText('Estimated total: unknown', { exact: true })).toBeVisible();
+  await developmentStep(page, "Run");
   await page.getByText('Estimate categories', { exact: true }).click();
   await expect(page.getByText('proposer: 1–unknown calls · unknown · Dynamic prompts', { exact: true })).toBeVisible();
+  await developmentStep(page, "Run");
   await expect(page.getByText('Fetched preview has unknown pricing.', { exact: true })).toBeVisible();
+  await developmentStep(page, "Results");
   const costs = page.getByRole('region', { name: 'Execution spending' });
   await expect(costs.getByText('Generation known usage: USD 0.12')).toBeVisible();
   await expect(costs.getByText('Evaluation known usage: USD 0.03')).toBeVisible();
@@ -52,6 +59,7 @@ test('shows uncertain preview, separate usage, explicit spending actions and pre
   expect(actions.map(a => a.action)).toEqual(['increase', 'override', 'acknowledge_unknown']);
   await costs.getByRole('button', { name: 'Resume spending' }).click();
   await expect(costs.getByText('Spending authorized')).toBeVisible();
+  await developmentStep(page, "Results");
   await page.getByText('View generated output', { exact: true }).click();
   await expect(page.getByText('Preserved candidate', { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 1440, height: 1000 });
@@ -63,6 +71,7 @@ test('shows uncertain preview, separate usage, explicit spending actions and pre
 
 test('rejects invalid reported spend and appends corrections without allocating totals', async ({ page }) => {
   const { actions } = await arrange(page);
+  await developmentStep(page, "Results");
   const costs = page.getByRole('region', { name: 'Execution spending' });
   await costs.getByLabel('Reported total amount').fill('-1');
   await costs.getByRole('button', { name: 'Save reported total' }).click();
@@ -87,15 +96,20 @@ test('rejects invalid reported spend and appends corrections without allocating 
 
 test('new execution authorization starts unchecked and does not carry into the next run', async ({ page }) => {
   const { starts } = await arrange(page);
+  await developmentStep(page, "Run");
   const execution = page.getByRole('region', { name: 'Execution', exact: true });
   const acknowledgment = execution.getByLabel(/I acknowledge unknown provider charges/).first();
   await expect(acknowledgment).not.toBeChecked();
+  await developmentStep(page, "Run");
   await execution.getByLabel('Generation allowance (USD)').fill('-2');
+  await developmentStep(page, "Run");
   await execution.getByRole('button', { name: 'Run all sections' }).click();
   await expect(execution.getByRole('alert').first()).toContainText('finite nonnegative generation allowance');
   expect(starts).toHaveLength(0);
+  await developmentStep(page, "Run");
   await execution.getByLabel('Generation allowance (USD)').fill('2');
   await acknowledgment.check();
+  await developmentStep(page, "Run");
   await execution.getByRole('button', { name: 'Run all sections' }).click();
   await expect.poll(() => starts.length).toBe(1);
   expect(starts[0].cost_controls).toEqual({ allowance_usd: 2, unknown_acknowledged: true });
@@ -110,10 +124,14 @@ test('failed preview can be retried without showing saved estimates as a fetched
     return requests === 1 ? route.fulfill({ status: 503, json: { error: 'Estimate unavailable. Try preview again.' } }) : route.fulfill({ json: { estimate: { total_usd: null, uncertainty: ['Recovered preview.'], categories: [] } } });
   });
   const preview = page.getByRole('button', { name: 'Preview generation cost' });
+  await developmentStep(page, "Run");
   await preview.click();
   await expect(page.getByRole('alert').filter({ hasText: 'Estimate unavailable. Try preview again.' })).toBeVisible();
+  await developmentStep(page, "Run");
   await expect(page.getByText('Estimated total: unknown', { exact: true })).toHaveCount(0);
+  await developmentStep(page, "Run");
   await preview.click();
+  await developmentStep(page, "Run");
   await expect(page.getByText('Recovered preview.', { exact: true })).toBeVisible();
   expect(requests).toBe(2);
 });
@@ -122,9 +140,11 @@ test('lost spending action response explains uncertainty before manual retry', a
   const { draft } = await arrange(page);
   let actions = 0;
   await page.route(`**/api/admin/development/${draft.id}/executions/cost-run/costs`, route => { actions++; return route.abort('failed'); });
+  await developmentStep(page, "Results");
   const costs = page.getByRole('region', { name: 'Execution spending' });
   await costs.getByLabel('Increase allowance (USD)').fill('3');
   await costs.getByRole('button', { name: 'Increase allowance', exact: true }).click();
+  await developmentStep(page, "Results");
   await expect(costs.getByRole('alert')).toContainText('The action may have been saved. Reload history before retrying.');
   expect(actions).toBe(1);
   await expect(costs.getByText('Allowance: USD 2', { exact: true })).toBeVisible();

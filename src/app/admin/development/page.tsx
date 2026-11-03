@@ -12,8 +12,8 @@ export default async function DevelopmentPage() {
     <AdminMain>
       <h1 className="text-xl font-semibold">Development</h1>
       <p className="mt-2 mb-6 max-w-prose text-sm text-muted-foreground">
-        Prepare private experiments, run generation, and save optional evaluation
-        references. Evaluation is separate and is not run here.
+        Prepare private experiments, add documents, configure and run generation,
+        then review, evaluate and compare saved results here.
       </p>
       <DevelopmentSetup />
     </AdminMain>

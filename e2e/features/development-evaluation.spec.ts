@@ -1,3 +1,4 @@
+import { developmentDetails, developmentStep } from "../support/development-workflow";
 /** Saved-output evaluations use scripted durable replies and never call a paid provider. */
 import { expect, test, type Page } from "@playwright/test";
 import { balancedProfile, type EvaluationProfile } from "../../src/modules/development/profile-schema";
@@ -107,6 +108,7 @@ async function arrange(page: Page, options: { queuedSpendingPause?: boolean; mal
   await page.goto("/admin/development");
   await page.getByRole("button", { name: `Open ${name}` }).click();
   if (!options.profileLoadFailure) await expect(page.getByRole("region", { name: "Evaluation", exact: true }).getByRole("button", { name: "Save As custom profile" })).toBeEnabled();
+  await developmentStep(page, "Results");
   return { name, draft, reference, saves, posts, releaseExecutions, releaseEvaluation, releasedResponse: () => releasedResponse, recoverProfiles: () => { profileLoadFailure = false; }, recoverHistory: (mode: "all" | "empty" | "older" = "all") => { recoveryHistoryFailure = false; historyMode = mode; }, releaseQueuedHistory, queuedHistoryStarted, releaseSucceededHistory, succeededHistoryStarted, generationPosts: () => generationPosts, polls: () => polls };
 }
 
@@ -195,6 +197,7 @@ test("keeps malformed evaluator failures separate from successful generation wit
   // Assert: failure is inspectable, generation remains successful, and no resend occurs.
   await expect(panel.getByText("Evaluation status: failed", { exact: true })).toBeVisible({ timeout: 10000 });
   await expect(panel.getByText("Evaluator reply has an out-of-range score.", { exact: true })).toBeVisible();
+  await developmentStep(page, "Results");
   await expect(page.getByText(/Generation: succeeded/)).toBeVisible();
   await expect(panel.getByText(/No automatic resend/)).toBeVisible();
   expect(fixture.posts).toHaveLength(1);
@@ -222,6 +225,7 @@ test("reloads usable profiles after an initial load failure", async ({ page }) =
   await expect(panel.getByRole("alert")).toContainText("Profile service unavailable");
   // Select the initial execution only after the experiment-level loading error is visible.
   fixture.releaseExecutions();
+  await developmentStep(page, "Results");
   await expect(page.getByLabel("Selected execution")).toHaveValue("saved-run");
   await expect(panel.getByRole("alert")).toContainText("Profile service unavailable");
   await expect(panel.getByRole("button", { name: "Reload evaluation data" })).toBeEnabled();
@@ -271,8 +275,10 @@ test("preserves unsaved profile and independent evaluator settings across execut
   await panel.getByLabel("Additional evaluation allowance (USD)").fill("7");
   await panel.getByLabel(/I acknowledge unknown provider charges/).check();
   // Act: inspect another saved execution and return.
+  await developmentStep(page, "Results");
   await page.getByLabel("Selected execution").selectOption("other-run");
   await expect(panel.getByText(/Execution: other-run · Attempt: other-attempt/)).toBeVisible();
+  await developmentStep(page, "Results");
   await page.getByLabel("Selected execution").selectOption("saved-run");
   await expect(panel.getByLabel("Additional evaluation allowance (USD)")).toHaveValue("0");
   await expect(panel.getByLabel(/I acknowledge unknown provider charges/)).not.toBeChecked();
@@ -320,8 +326,10 @@ test("reconciles an interrupted queue response before allowing the original outp
   await expect.poll(() => fixture.posts.length).toBe(1);
   const cancelled = page.waitForEvent("requestfailed", { predicate: (request) => request.method() === "POST" && request.url().endsWith(`/development/${fixture.draft.id}/evaluations`) });
   // Act: switch away before the response, then immediately inspect the original output again.
+  await developmentStep(page, "Results");
   await page.getByLabel("Selected execution").selectOption("other-run");
   await cancelled;
+  await developmentStep(page, "Results");
   await page.getByLabel("Selected execution").selectOption("saved-run");
   // Assert: authoritative history recovers the retained job; the active original output stays locked.
   await expect(panel.getByLabel("Selected evaluation")).toHaveValue("evaluation-1");
@@ -331,8 +339,10 @@ test("reconciles an interrupted queue response before allowing the original outp
   await expect.poll(() => fixture.releasedResponse()).toBe(true);
   await expect(panel.getByText("Evaluation status: succeeded", { exact: true })).toBeVisible({ timeout: 10000 });
   // Another output remains independently evaluable through an explicit owner action.
+  await developmentStep(page, "Results");
   await page.getByLabel("Selected execution").selectOption("other-run");
   await panel.getByRole("button", { name: "Evaluate saved output", exact: true }).click();
+  await developmentDetails(page, "Evaluation and output identifiers");
   await expect(panel.getByText(`Frozen output: ${"b".repeat(64)}`, { exact: false })).toBeVisible();
   expect(fixture.posts).toHaveLength(2);
   expect(fixture.posts[1]).toMatchObject({ execution_id: "other-run", attempt_id: "other-attempt", output_id: "b".repeat(64) });
@@ -347,8 +357,10 @@ test("keeps an uncertain original output locked after failed, empty or older his
   await expect(panel.getByText("Evaluation status: succeeded", { exact: true })).toBeVisible({ timeout: 10000 });
   await panel.getByRole("button", { name: "Re-evaluate saved output", exact: true }).click();
   await expect.poll(() => fixture.posts.length).toBe(2);
+  await developmentStep(page, "Results");
   await page.getByLabel("Selected execution").selectOption("other-run");
   await expect(panel.getByRole("alert")).toContainText("Saved history unavailable");
+  await developmentStep(page, "Results");
   await page.getByLabel("Selected execution").selectOption("saved-run");
   // Act: even an empty successful read cannot prove that an interrupted POST did not persist.
   await expect(panel.getByRole("button", { name: /^(Re-evaluate|Evaluate) saved output$/ })).toBeDisabled();
@@ -428,8 +440,11 @@ test("refreshes execution history when an evaluation is queued and settled", asy
   const execution = page.getByRole("region", { name: "Execution", exact: true });
   await panel.getByRole("button", { name: "Evaluate saved output", exact: true }).click();
   await expect(execution.getByText(/Evaluation: queued · unavailable/)).toBeVisible();
+  await developmentStep(page, "Results");
   await expect(execution.getByText(/Evaluation: succeeded · unavailable/)).toBeVisible({ timeout: 10000 });
-  await expect(execution.getByText(/Evaluation: succeeded · unavailable/)).toContainText("evaluation-1");
+  await developmentStep(page, "Results");
+  await developmentDetails(page, "Associated evaluation identifiers");
+  await expect(execution.getByText("Evaluation ID: evaluation-1", { exact: false }).filter({ visible: true })).toBeVisible();
   await expect(panel.getByText(/Comparison with the selected saved output.*current/)).toBeVisible();
   expect(fixture.posts).toHaveLength(1);
 });
@@ -441,12 +456,15 @@ test("ignores a delayed queued execution history after the evaluation succeeds",
   const execution = page.getByRole("region", { name: "Execution", exact: true });
   await panel.getByRole("button", { name: "Evaluate saved output", exact: true }).click();
   await fixture.queuedHistoryStarted;
+  await developmentStep(page, "Results");
   await expect(execution.getByText(/Evaluation: succeeded · unavailable/)).toBeVisible({ timeout: 10000 });
   const oldResponse = page.waitForResponse(response => response.url().includes(`/development/${fixture.draft.id}/executions?`) && response.request().method() === "GET");
   fixture.releaseQueuedHistory();
   await oldResponse;
+  await developmentStep(page, "Results");
   await expect(execution.getByText(/Evaluation: succeeded · unavailable/)).toBeVisible();
   await expect(execution.getByText(/Evaluation: queued · unavailable/)).toHaveCount(0);
+  await developmentStep(page, "Results");
   await expect(execution.getByText(/Evaluation: succeeded · unavailable/)).toBeVisible();
   await expect(panel.getByLabel("Selected evaluation").locator('option[value="evaluation-1"]')).toContainText("succeeded");
   expect(fixture.posts).toHaveLength(1);
@@ -461,16 +479,23 @@ test("keeps both pages fresh when loading older history during a succeeded refre
   await panel.getByRole("button", { name: "Evaluate saved output", exact: true }).click();
   await fixture.succeededHistoryStarted;
   await expect(execution.getByText("Evaluation: unavailable", { exact: true })).toBeVisible();
+  await developmentStep(page, "Results");
   await execution.getByRole("button", { name: "Load older executions" }).click();
+  await developmentStep(page, "Results");
   await expect(execution.getByLabel("Selected execution").locator('option[value="older-run"]')).toHaveCount(1);
   const oldResponse = page.waitForResponse(response => response.url().includes(`/development/${fixture.draft.id}/executions?`) && !response.url().includes("cursor=") && response.request().method() === "GET");
   fixture.releaseSucceededHistory();
   await oldResponse;
+  await developmentStep(page, "Results");
   await expect(execution.getByText("Generation freshness: current")).toBeVisible();
+  await developmentStep(page, "Results");
   await expect(execution.getByText(/Evaluation: succeeded · unavailable/)).toBeVisible();
   await expect(panel.getByLabel("Selected evaluation").locator('option[value="evaluation-1"]')).toContainText("succeeded");
+  await developmentStep(page, "Results");
   await expect(execution.getByRole("button", { name: "Load older executions" })).toHaveCount(0);
+  await developmentStep(page, "Results");
   await execution.getByLabel("Selected execution").selectOption("older-run");
+  await developmentStep(page, "Results");
   await expect(execution.getByText("Generation freshness: current")).toBeVisible();
   await expect(execution.getByText("Evaluation: unscored / not requested")).toBeVisible();
   expect(fixture.posts).toHaveLength(1);
@@ -489,6 +514,7 @@ test('queued evaluator spending pause refreshes the shared account without a sta
   await expect(costs.getByText('Evaluation known usage: USD 0.03', { exact: true })).toBeVisible();
   await expect(panel.getByText('Evaluation status: queued', { exact: true })).toBeVisible();
   await expect(costs.getByRole('button', { name: 'Resume spending', exact: true })).toBeVisible();
+  await developmentStep(page, "Results");
   await page.getByRole('region', { name: 'Execution', exact: true }).getByLabel('Selected execution').selectOption('other-run');
   await expect(costs.getByText('Spending authorized', { exact: true })).toBeVisible();
   const previousPolls = fixture.polls();
@@ -499,6 +525,7 @@ test('queued evaluator spending pause refreshes the shared account without a sta
   }, { timeout: 10000 });
   // Let React paint the account refresh while the other execution remains selected.
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await developmentStep(page, "Results");
   await expect(page.getByRole('region', { name: 'Execution', exact: true }).getByLabel('Selected execution')).toHaveValue('other-run');
   await expect(costs.getByText('Spending authorized', { exact: true })).toBeVisible();
   await expect(costs.getByText('Evaluation known usage: USD 0', { exact: true })).toBeVisible();

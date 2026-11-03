@@ -1,10 +1,14 @@
+import { developmentStep, developmentDetails } from "../support/development-workflow";
 /** Browser proof for private Development drafts, using the isolated test server. */
 import { expect, test } from "@playwright/test";
 
 test("owner creates, uploads, saves and reopens a private experiment", async ({
   page,
-  request,
 }) => {
+  let generationRequests = 0;
+  page.on("request", (request) => {
+    if (request.method() === "POST" && /\/executions$/.test(new URL(request.url()).pathname)) generationRequests++;
+  });
   // Arrange: authenticated owner; the server uses a disposable database and stub parser.
   const name = `Development ${Date.now()}`;
   await page.goto("/admin/development");
@@ -28,6 +32,7 @@ test("owner creates, uploads, saves and reopens a private experiment", async ({
   await page
     .getByLabel("Experiment name", { exact: true })
     .fill(`${name} saved`);
+  await developmentStep(page, "Documents");
   await page.getByLabel("Private source file").setInputFiles({
     name: "source.txt",
     mimeType: "text/plain",
@@ -42,19 +47,18 @@ test("owner creates, uploads, saves and reopens a private experiment", async ({
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(
     `${name} saved`,
   );
-  const experiments = await (
-    await request.get("/api/admin/development")
-  ).json();
-  const draft = experiments.experiments.find(
-    (item: { name: string }) => item.name === name,
-  );
-  const detail = await (
-    await request.get(`/api/admin/development/${draft.id}`)
-  ).json();
-  const source = detail.experiment.documents.find(
-    (item: { role: string }) => item.role === "source",
-  );
+  // Read the immutable identity from Documents before any execution or reference exists.
+  const savedSource = page.getByRole("region", { name: "Saved documents" })
+    .getByRole("listitem").filter({ hasText: "source.txt" });
+  await savedSource.getByText("Source snapshot identity", { exact: true }).click();
+  const snapshotId = savedSource.getByLabel("Source snapshot ID", { exact: true });
+  await expect(snapshotId).toBeVisible();
+  const sourceId = (await snapshotId.innerText()).trim();
+  expect(sourceId).not.toBe("");
+  await developmentDetails(page, "Optional evaluation references");
   await page.getByLabel(`Associate source.txt`).check();
+  await developmentStep(page, "Documents");
+  await developmentDetails(page, "Optional evaluation references");
   await page.getByLabel("Structured reference JSON").setInputFiles({
     name: "reference.json",
     mimeType: "application/json",
@@ -62,13 +66,13 @@ test("owner creates, uploads, saves and reopens a private experiment", async ({
       JSON.stringify({
         version: 1,
         section: "gap_extraction",
-        source_document_ids: [source.id],
+        source_document_ids: [sourceId],
         expected_answers: [
           {
             id: "g1",
             statement: "Need comparative survival evidence",
             quote: "Need comparative survival evidence",
-            source_document_id: source.id,
+            source_document_id: sourceId,
           },
         ],
       }),
@@ -78,6 +82,9 @@ test("owner creates, uploads, saves and reopens a private experiment", async ({
     .getByRole("button", { name: "Upload structured reference", exact: true })
     .click();
   await expect(page.getByText("reference.json", { exact: true })).toBeVisible();
+  expect(generationRequests).toBe(0);
+  await developmentStep(page, "Documents");
+  await developmentDetails(page, "Optional evaluation references");
   await page.getByLabel("Reference PDF", { exact: true }).setInputFiles({
     name: "expert.pdf",
     mimeType: "application/pdf",
@@ -98,13 +105,14 @@ test("owner creates, uploads, saves and reopens a private experiment", async ({
   await page
     .getByRole("button", { name: `Open ${name} saved`, exact: true })
     .click();
+  await developmentStep(page, "Documents");
   // Assert: source and evaluator-only reference survive a fresh read.
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(
     `${name} saved`,
   );
   await expect(page.getByText("source.txt", { exact: true })).toBeVisible();
   await expect(page.getByText("reference.json", { exact: true })).toBeVisible();
-  await expect(page.getByText(/Evaluator-only/).first()).toBeVisible();
+  await expect(page.getByRole("region", { name: "Saved documents" }).getByText(/Evaluator-only/).first()).toBeVisible();
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.screenshot({
     path: ".superpowers/sdd/2026-10-30-kan-201/development-desktop.png",
@@ -135,6 +143,7 @@ test("invalid upload and stale revision give recovery without losing edits", asy
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(
     name,
   );
+  await developmentStep(page, "Documents");
   await page.getByLabel("Private source file").setInputFiles({
     name: "bad.exe",
     mimeType: "application/octet-stream",
@@ -256,6 +265,7 @@ test("slow uploads disable competing writes and preserve the edited name", async
     await gate;
     await route.fulfill({ response });
   });
+  await developmentStep(page, "Documents");
   await page.getByLabel("Private source file").setInputFiles({
     name: "source.txt",
     mimeType: "text/plain",
@@ -305,16 +315,21 @@ test("creating another draft clears every pending file selection", async ({
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(
     name,
   );
+  await developmentStep(page, "Documents");
   await page.getByLabel("Private source file").setInputFiles({
     name: "old.txt",
     mimeType: "text/plain",
     buffer: Buffer.from("Old source"),
   });
+  await developmentStep(page, "Documents");
+  await developmentDetails(page, "Optional evaluation references");
   await page.getByLabel("Reference PDF", { exact: true }).setInputFiles({
     name: "old.pdf",
     mimeType: "application/pdf",
     buffer: referencePdf(),
   });
+  await developmentStep(page, "Documents");
+  await developmentDetails(page, "Optional evaluation references");
   await page.getByLabel("Structured reference JSON").setInputFiles({
     name: "old.json",
     mimeType: "application/json",
@@ -339,6 +354,7 @@ test("creating another draft clears every pending file selection", async ({
   ).toBeDisabled();
   expect(uploads).toBe(0);
   // A fresh source enables only its own upload; references must still need fresh files.
+  await developmentStep(page, "Documents");
   await page.getByLabel("Private source file").setInputFiles({
     name: "fresh.txt",
     mimeType: "text/plain",
@@ -347,6 +363,8 @@ test("creating another draft clears every pending file selection", async ({
   await page
     .getByRole("button", { name: "Upload source", exact: true })
     .click();
+  await developmentStep(page, "Documents");
+  await developmentDetails(page, "Optional evaluation references");
   await page.getByLabel("Associate fresh.txt", { exact: true }).check();
   await expect(
     page.getByRole("button", { name: "Upload reference PDF", exact: true }),
@@ -477,6 +495,7 @@ test("reopened draft shows saved documents when source choices fail", async ({
     .click();
   // Assert: immutable saved data remains available without another detail read or mutation.
   await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
+  await developmentStep(page, "Documents");
   await expect(
     page.getByText("saved-source.txt", { exact: true }),
   ).toBeVisible();
