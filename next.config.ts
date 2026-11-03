@@ -32,15 +32,6 @@ export const RETIRED_PLAN_REDIRECTS: { source: string; destination: string }[] =
 ];
 
 const nextConfig: NextConfig = {
-  ...(process.env.CI
-    ? {
-        // Release unused Webpack dev pages sooner on memory-constrained CI runners.
-        onDemandEntries: {
-          maxInactiveAge: 25 * 1000,
-          pagesBufferLength: 2,
-        },
-      }
-    : {}),
   serverExternalPackages: ["mammoth", "xlsx", "jszip", "docx"],
   experimental: {
     // CI visits many cold routes on an 8 GB runner. Persist compiler data to

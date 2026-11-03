@@ -42,8 +42,7 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    // CI's Turbopack server exhausted runner memory; use the Webpack path verified locally.
-    command: `npx next dev${process.env.CI ? " --webpack" : ""} --hostname 127.0.0.1 --port ${port}`,
+    command: `npx next dev --hostname 127.0.0.1 --port ${port}`,
     url: baseURL,
     // Off by default, so the suite never attaches to a server on the dev database.
     reuseExistingServer: process.env.E2E_REUSE === "1",
