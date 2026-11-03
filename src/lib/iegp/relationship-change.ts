@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { DrizzleQueryError, eq, sql } from "drizzle-orm";
 import * as tables from "./schema";
 import { db, withWorkspaceTransaction } from "./db";
-import { gapResolutionVersion, relationshipSnapshot, relationshipVersion } from "./relationship-version";
+import { gapResolutionVersion, mappingRowRelationshipVersion, relationshipSnapshot, relationshipVersion } from "./relationship-version";
 import { matchesSuppliedJudgementRecords, inspectJudgementReferences, suppliedJudgementRecords, type JudgementReference } from "./judgement-references";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import { tacticEditVersion } from "./tactic-edit-version";
@@ -107,7 +107,8 @@ export function requireRelationshipSnapshot(state: IegpState, body: Record<strin
   const current = body.action === "save_mapping_row"
     ? { coverages: state.coverages.filter(row => row.gap_id === gapId), decisions: state.mapping_suggestions.filter(row => row.gap_id === gapId) }
     : relationshipSnapshot(state, gapId, tacticId);
-  if (relationshipVersion(expected) !== relationshipVersion(current)) {
+  const version = body.action === "save_mapping_row" ? mappingRowRelationshipVersion : relationshipVersion;
+  if (version(expected) !== version(current)) {
     throw new TrustedApplicationError("Relationship changed or its opening snapshot is missing. Your input and reason have not been saved. Reload the latest record and retry.");
   }
 }

@@ -11,6 +11,32 @@ export function relationshipVersion(value: unknown): string {
   return JSON.stringify(canonical(value));
 }
 
+/** Sort a relationship collection without altering malformed input or nested arrays. */
+function orderedMappingRows(value: unknown, key: "id" | "tactic_id"): unknown {
+  if (!Array.isArray(value) || !value.every(row => row && typeof row === "object" && typeof row[key] === "string")) return value;
+  return [...value].sort((a, b) => a[key].localeCompare(b[key]) || relationshipVersion(a).localeCompare(relationshipVersion(b)));
+}
+
+/**
+ * Serialize a mapping row's relationship sets independently of database row order.
+ * Coverage IDs and decision tactic IDs identify records within one gap. Only
+ * these two top-level collections are unordered; nested arrays retain their order.
+ * Accepts parsed opening tokens too, so already-open forms use the same rules.
+ * Malformed input retains its content and cannot match a valid current snapshot.
+ *
+ * @param value - The gap's coverage and decision snapshot, or untrusted parsed input.
+ * @returns A stable comparison token that preserves all relationship content.
+ */
+export function mappingRowRelationshipVersion(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return relationshipVersion(value);
+  const snapshot = value as Record<string, unknown>;
+  return relationshipVersion({
+    ...snapshot,
+    coverages: orderedMappingRows(snapshot.coverages, "id"),
+    decisions: orderedMappingRows(snapshot.decisions, "tactic_id"),
+  });
+}
+
 export function relationshipSnapshot(state: IegpState, gapId: string, tacticId: string) {
   return {
     coverages: state.coverages.filter(row => row.gap_id === gapId && row.tactic_id === tacticId).sort((a, b) => a.id.localeCompare(b.id)),

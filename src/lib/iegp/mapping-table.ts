@@ -1,5 +1,5 @@
 import { inspectJudgementReferences, type InspectableReference } from "./judgement-references";
-import { relationshipSnapshot, relationshipVersion } from "./relationship-version";
+import { mappingRowRelationshipVersion, relationshipSnapshot, relationshipVersion } from "./relationship-version";
 import { z } from "zod";
 import {
   mappingTableRowSchema,
@@ -104,7 +104,7 @@ export function buildMappingTableView(
   const tacticName = (id: string) => state.tactics.find((t) => t.id === id)?.name ?? id;
   return gaps.map((gap) => {
     const relationship_versions = Object.fromEntries(state.tactics.map(tactic => [tactic.id, relationshipVersion(relationshipSnapshot(state, gap.id, tactic.id))]));
-    const relationships_version = relationshipVersion({ coverages: state.coverages.filter(row => row.gap_id === gap.id), decisions: state.mapping_suggestions.filter(row => row.gap_id === gap.id) });
+    const relationships_version = mappingRowRelationshipVersion({ coverages: state.coverages.filter(row => row.gap_id === gap.id), decisions: state.mapping_suggestions.filter(row => row.gap_id === gap.id) });
     const locked = state.coverages.filter((c) => !c.expansion_id && c.gap_id === gap.id).map((c) => c.tactic_id);
     const decisions = decisionsFor(state, gap.id);
     const unreviewed = locked.filter((id) => decisions[id]?.status !== "accepted");
