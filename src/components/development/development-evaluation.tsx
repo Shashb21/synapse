@@ -1,6 +1,7 @@
 /** Versioned rubric drafts and independent evaluations of exact saved generation outputs. */
 "use client";
 
+import Link from "next/link";
 import React, { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -358,7 +359,7 @@ export function DevelopmentEvaluation({ draft, execution, providers, disabled, o
   return <section aria-label="Evaluation" className="min-w-0 space-y-4 border-t border-border pt-5">
     <div className="flex flex-wrap items-center gap-3"><h2 className="font-semibold">Evaluation</h2><Button variant="outline" disabled={loading || pending} onClick={() => void reload()}>Reload evaluation data</Button></div>
     <p className="max-w-prose text-muted-foreground">Evaluate saved outputs without generation. Factual checks, reference measures and provisional AI assessments are reported separately. A fresh evaluation may incur provider charges.</p>
-    <p><a href="/admin/development/evaluation-tools" className="underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-ring">Evaluation tools and historical benchmarks</a></p>
+    <p><Link href="/admin/development/evaluation-tools" className="underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-ring">Evaluation tools and historical benchmarks</Link></p>
     {loading && <p role="status">Loading profiles and evaluation history…</p>}
     {loadError && <p role="alert" className="break-words text-destructive">{loadError}</p>}
     {error && <p role="alert" className="break-words text-destructive">{error}</p>}

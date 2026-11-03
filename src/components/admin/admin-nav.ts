@@ -5,7 +5,6 @@ export type AdminSectionId =
   | "customers"
   | "users"
   | "development"
-  | "accuracy"
   | "harness"
   | "pipeline"
   | "runs"
@@ -38,12 +37,6 @@ export const ADMIN_SECTIONS: AdminSection[] = [
     href: "/admin/users",
     label: "Users",
     summary: "Your staff's email and password accounts: create, reset passwords, roles, verify, disable, unlock.",
-  },
-  {
-    id: "accuracy",
-    href: "/admin/accuracy",
-    label: "Accuracy",
-    summary: "The accuracy lab: workspaces, sources, review, ledger, coverage, plan, timeline, audit, routing, runs.",
   },
   { id: "development", href: "/admin/development", label: "Development", summary: "Private experiment drafts, source snapshots and evaluator-only references." },
   {

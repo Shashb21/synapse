@@ -57,17 +57,6 @@ test.describe.serial("AI switched off by an admin", () => {
     expect(((await res.json()) as { code?: string }).code).toBe("ai_off");
   });
 
-  test("the accuracy app leads with adding gaps and tactics", async ({ page, request }) => {
-    const created = await request.post("/api/accuracy/workspaces", {
-      data: { name: "E2E AI off", slug: `e2e-ai-off-${Date.now()}` },
-    });
-    expect(created.ok()).toBeTruthy();
-    await page.goto("/accuracy");
-    await expect(page.getByTestId("accuracy-manual-start")).toBeVisible();
-    await expect(page.getByText(/add gaps/i).first()).toBeVisible();
-    await expect(page.getByText(/add tactics/i).first()).toBeVisible();
-  });
-
   test("the control panel switch flips AI with one click, no reason asked", async ({ page }) => {
     await page.goto("/control");
     const toggle = page.getByTestId("ai-toggle");

@@ -18,8 +18,6 @@ import { db } from "@/lib/iegp/db";
 import { loadState } from "@/lib/iegp/store";
 import { gapVersionsFor, WORKSPACE_RESET_ACTION } from "@/lib/iegp/gap-history";
 import { POST as controlPost } from "@/app/api/control/route";
-import { POST as accuracyRoutingPost } from "@/app/api/accuracy/routing/route";
-import { accuracyRouteConfig } from "@/accuracy/kernel/routing";
 import { listAuditEvents, type AuditEvent } from "@/modules/kernel/audit";
 import { aiSwitch, storedAiSections } from "@/modules/kernel/ai-switch";
 import { routeConfig, routeConfigs, setRouteConfig, stageHasRoute, type RouteConfig } from "@/modules/kernel/routing";
@@ -120,21 +118,6 @@ describe("KAN-89: configuration changes are audited", () => {
     expect(lessons.meta).toEqual({ limit: 0, ok: 0, failed: 0, pending: 0 });
   });
 
-  it("records accuracy-lab routing changes", async () => {
-    const since = new Date().toISOString();
-    const current = await accuracyRouteConfig("parse", "proposer");
-    const res = await post(accuracyRoutingPost, "/api/accuracy/routing", {
-      action: "set_route",
-      call_kind: "parse",
-      agent_role: "proposer",
-      provider_id: current.provider_id,
-      model: current.model,
-    });
-    expect(res.status).toBe(200);
-    const event = await latest("accuracy.set_route", "parse:proposer", since);
-    expect(event.before).toMatchObject({ provider_id: current.provider_id, model: current.model });
-    expect(event.after).toMatchObject({ provider_id: current.provider_id, model: current.model });
-  });
 
   it("records the prioritization axes and a scope's axes in their workspace", async () => {
     const since = new Date().toISOString();

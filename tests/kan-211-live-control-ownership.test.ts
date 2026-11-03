@@ -13,7 +13,7 @@ import { sharedDb } from '@/lib/iegp/db';
 import { POST } from '@/app/api/control/route';
 import { routeConfig, setRouteConfig, completionFor } from '@/modules/kernel/routing';
 import { resolveRouteForRun } from '@/modules/kernel/run';
-import { setAccuracyRouteConfig } from '@/accuracy/kernel/routing';
+import { seedHistoricalRoute } from './support/persisted-controls';
 import { getAuditEvent, listAuditEvents } from '@/modules/kernel/audit';
 import { RunRecorder } from '@/modules/kernel/observability';
 import { xaiGrok, findProvider } from '@/modules/llm/provider';
@@ -36,7 +36,7 @@ beforeEach(async () => {
   vi.stubEnv('OPENAI_API_KEY', 'test-only-never-send');
   await setRouteConfig({ stage: 'S2', provider_id: 'openai', model: 'gpt-5.1', temperature: 0.1, max_tokens: 2222, fallbacks: [], actor_name: 'prior live owner' });
   await setRouteConfig({ stage: 'S3', provider_id: 'openai', model: 'gpt-5.1', temperature: 0.2, max_tokens: 3333, fallbacks: [], actor_name: 'unrelated live owner' });
-  await setAccuracyRouteConfig({ call_kind: 'need_extract', agent_role: 'proposer', provider_id: 'openai', model: 'gpt-5.1', temperature: 1.2, max_tokens: 999, actor_name: 'legacy experiment owner' });
+  await seedHistoricalRoute(1.2, 'legacy experiment owner');
 });
 afterEach(async () => {
   try { await restoreControls?.(); }

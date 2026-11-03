@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { ADMIN_PATH_HEADER, gateFor, isAdminPage, PRESENT_HEADER, PROXY_SESSION_COOKIE, PROXY_WORKSPACE_COOKIE } from "@/modules/auth/gate";
+import { ADMIN_PATH_HEADER, gateFor, isAdminPage, isRetiredAccuracyPath, PRESENT_HEADER, PROXY_SESSION_COOKIE, PROXY_WORKSPACE_COOKIE } from "@/modules/auth/gate";
 import { verifyWorkspaceCookie } from "@/modules/workspaces/context";
 import { BodyTooLargeError, bodyLimitFor, declaredTooLarge } from "@/lib/http/body-limit";
 import { REQUEST_ID_HEADER, requestIdFor } from "@/modules/kernel/request-id";
@@ -7,6 +7,7 @@ import { REQUEST_ID_HEADER, requestIdFor } from "@/modules/kernel/request-id";
 /** Customer routes need a session and a workspace; see modules/auth/gate.ts for the rules. */
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
+  if (isRetiredAccuracyPath(pathname)) return forward(request, new Headers(request.headers));
   // An oversized API body is refused before anything reads it (KAN-20).
   const limit = bodyLimitFor(pathname, request.headers.get("content-type"));
   if (limit !== null && declaredTooLarge(request.headers.get("content-length"), limit)) {

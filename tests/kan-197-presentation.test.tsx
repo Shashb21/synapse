@@ -16,7 +16,6 @@ vi.mock("@/components/ui/dialog", () => ({
 }));
 import { ActionDialog } from "@/components/platform/action-dialog";
 import { WorkspaceContents } from "@/components/workspaces/workspace-contents";
-import { SourceUploadForm } from "@/components/accuracy/source-upload-form";
 import { AiStatusProvider } from "@/components/platform/ai-status";
 import { ModularUploadForm, ChainRunner } from "@/components/platform/pipeline-runner";
 import { LearningConsole } from "@/components/platform/learning-console";
@@ -74,15 +73,6 @@ describe("KAN-197 presentation", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(button("Check current sources")).toBeDefined();
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("confirm");
-  });
-  it("states upload partial completion without raw parser diagnostics", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, filename: "notes.txt", parser: "text", parse_error: "SQL sk-test secret", block_count: 0 })));
-    render(<SourceUploadForm workspaceId="w" />);
-    Object.defineProperty(container.querySelector('input[type="file"]'), "files", { value: [new File(["notes"], "notes.txt")] });
-    await submit();
-    expect(container.querySelector('[role="status"]')?.textContent).toContain("registered");
-    expect(container.textContent).toContain("reading its contents did not finish");
-    expect(container.textContent).toContain("Add block"); expect(container.textContent).not.toContain("sk-test");
   });
   it("retains uploaded-source input and avoids uploading it twice when parsing fails", async () => {
     const fetch = vi.fn().mockResolvedValueOnce(Response.json({ ok: true, summary: "Source uploaded" })).mockResolvedValueOnce(Response.json({ error: "SQL sk-test" }, { status: 500 })); vi.stubGlobal("fetch", fetch);

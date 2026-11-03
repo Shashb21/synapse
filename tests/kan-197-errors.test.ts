@@ -5,7 +5,6 @@ import { customerErrorMessage, tagStageError, TrustedApplicationError } from "@/
 import { ProviderError } from "@/modules/llm/provider-error";
 import { noLlmBody } from "@/modules/kernel/no-llm";
 import { postJson } from "@/lib/post-json";
-import { sendJson as sendClaimJson } from "@/components/accuracy/claim-api";
 import { sendJson } from "@/components/workspaces/model";
 
 const secret = "database password=sample-secret SELECT * FROM private_accounts";
@@ -76,11 +75,6 @@ describe("safe message boundaries", () => {
   it("does not infer a rejected write from a server failure response", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ safe_error: true, error: "The final check failed after saving." }, { status: 500 })));
     expect(await postJson("/api/change", {})).toMatchObject({ ok: false, outcome: "unknown" });
-  });
-  it("does not confirm an unreadable claim edit or reflect transport details", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response("<html>OK</html>")).mockRejectedValueOnce(new Error(secret)));
-    expect(await sendClaimJson("/api/accuracy/claims", "PATCH", {})).toMatchObject({ ok: false, outcome: "unknown" });
-    expect((await sendClaimJson("/api/accuracy/claims", "PATCH", {})).error).not.toContain(secret);
   });
   it("confirms valid object responses and preserves safe validation", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(Response.json({ ok: true })).mockResolvedValueOnce(Response.json({ error: "A title is required.", safe_error: true }, { status: 400 })));

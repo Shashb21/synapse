@@ -96,14 +96,13 @@ Customer app:
 
 `/matrix` is kept only as a redirect to Prioritize (`/?place=plan`) so old bookmarks work.
 
-Owner console (owner only: `OWNER_EMAILS` or an admin/operator account). The old top-level URLs (`/control`, `/pipeline`, `/runs`, `/evals`, `/catalog`, `/sdlc`, `/docs`, `/accuracy/*`) redirect here:
+Owner console (owner only: `OWNER_EMAILS` or an admin/operator account). The old top-level URLs (`/control`, `/pipeline`, `/runs`, `/evals`, `/catalog`, `/sdlc`, `/docs`) redirect here:
 
 | Route | What |
 | --- | --- |
 | `/admin/control` | AI master switch and per-section switches, provider API key status (keys are env-only), per-stage model routing |
 | `/admin/customers` | Customers, seats sold and assigned |
 | `/admin/users` | Staff email and password accounts |
-| `/admin/accuracy` | The accuracy lab (owner testing tool) |
 | `/admin/pipeline`, `/admin/runs` | Run any stage or the chain; run traces and signals |
 | `/admin/evals`, `/admin/catalog`, `/admin/modules` | Gold evals, registered modules and prompt variants, module versions |
 | `/admin/sdlc`, `/admin/docs` | Specs in `docs/sdlc` |

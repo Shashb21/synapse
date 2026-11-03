@@ -3,16 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => undefined, set: () => undefined, delete: () => undefined }) }));
 import "@/modules";
 import { POST as planPost } from "@/app/api/plan/route";
-import { PATCH as claimsPatch } from "@/app/api/accuracy/claims/route";
-import { POST as priorityPost } from "@/app/api/accuracy/claims/priority/route";
-import { POST as mergePost } from "@/app/api/accuracy/claims/merge/route";
 import { resetDemo } from "@/lib/iegp/store";
 import { addTimelineActivity, timelineModel } from "@/modules/stages/s10-timeline/module";
 import { setAiEnabled } from "@/modules/kernel/ai-switch";
-import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 
 const actor = { name: "Error regression", function: "medical_affairs" as const };
-const secret = "private-claim-or-stored-name";
 /** Arrange a JSON request for the public route handler. */
 function request(path: string, body: unknown, method = "POST") {
   return new Request(`http://localhost${path}`, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -36,23 +31,4 @@ describe("KAN-197 owned route failures", () => {
     if (!enabled) expect(body.error).not.toMatch(/Rebuild|AI & routing/);
   });
 
-  it("preserves missing-claim 404 for edit, priority, merge, unmerge and dismiss", async () => {
-    const org_id = await createOrganization("KAN-197 missing claims");
-    const workspace_id = await createWorkspace({ org_id, name: "KAN-197 missing claims", slug: `kan197-${crypto.randomUUID()}` });
-    const base = { workspace_id, claim_id: secret, rationale: "Check missing claim" };
-    const responses = [
-      await claimsPatch(request("/api/accuracy/claims", { ...base, patch: { statement: "Changed statement" } }, "PATCH")),
-      await priorityPost(request("/api/accuracy/claims/priority", { ...base, priority: "high" })),
-      await mergePost(request("/api/accuracy/claims/merge", { ...base, action: "merge", survivor_id: secret, duplicate_id: "other-missing-claim" })),
-      await mergePost(request("/api/accuracy/claims/merge", { ...base, action: "unmerge" })),
-      await mergePost(request("/api/accuracy/claims/merge", { ...base, action: "dismiss" })),
-    ];
-    for (const response of responses) {
-      const body = await response.json();
-      expect(response.status).toBe(404);
-      expect(body).toMatchObject({ safe_error: true, code: "not_found" });
-      expect(body.error).toContain("Claim");
-      expect(body.error).not.toContain(secret);
-    }
-  });
 });
