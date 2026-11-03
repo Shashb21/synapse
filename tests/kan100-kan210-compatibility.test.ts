@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { copyFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import identity from './fixtures/kan210-original/identity.json';
@@ -51,7 +51,12 @@ describe('historical evaluation relocation compatibility', () => {
     vi.setSystemTime(new Date(identity.capturedAt));
     for (const [source, target] of [['inputs', inputs], ['artifacts', storage]]) {
       await mkdir(path.join(root, target), { recursive: true, mode: 0o700 });
-      for (const name of await readdir(path.join(fixture, source))) await copyFile(path.join(fixture, source, name), path.join(root, target, name));
+      for (const name of await readdir(path.join(fixture, source))) {
+        const destination = path.join(root, target, name);
+        await copyFile(path.join(fixture, source, name), destination);
+        // Git checkouts use 0644; saved runtime evidence must be private regardless of source mode.
+        await chmod(destination, 0o600);
+      }
     }
     const [config, packs, runtime, decisions, approvals, checkpoint] = await Promise.all(['config', 'packs', 'runtime', 'decisions', 'approvals', 'checkpoint'].map(name => json(`inputs/${name}.json`)));
     const noPaid = vi.fn(() => { throw new Error('Provider/credential access forbidden during saved-run compatibility verification'); });
