@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   accuracyAuthAllowsLive,
   inspectLiveExtractGate,
@@ -9,6 +9,10 @@ import {
 import { registerAccuracyStack } from "@/accuracy";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import * as t from "@/modules/kernel/schema";
+
+import { preservePersistedControls } from "./support/persisted-controls";
+import { setAccuracyRouteConfig } from "@/accuracy/kernel/routing";
+let restoreControls: (() => Promise<void>) | undefined;
 
 const KEY_ENVS = [
   "SYNAPSE_TEST_STUB_LLM",
@@ -67,6 +71,13 @@ describe("live extract API-key gate", () => {
       });
   }
 
+  beforeEach(async () => {
+    restoreControls = await preservePersistedControls(["accuracy_routing_config"]);
+    // These tests exercise Grok plus its explicit fallback chain, not prior admin edits.
+    await setAccuracyRouteConfig({ call_kind: "need_extract", agent_role: "proposer",
+      provider_id: "xai-grok", model: "grok-4", fallbacks: ["anthropic-claude", "openai"], actor_name: "extract gate fixture" });
+  });
+
   afterEach(async () => {
     for (const name of KEY_ENVS) {
       if (!(name in saved)) continue;
@@ -74,7 +85,11 @@ describe("live extract API-key gate", () => {
       else process.env[name] = saved[name];
       delete saved[name];
     }
-    await clearLegacyOauth();
+    try { await clearLegacyOauth(); }
+    finally {
+      try { await restoreControls?.(); }
+      finally { restoreControls = undefined; }
+    }
   });
 
   it("accuracyAuthAllowsLive accepts any provider's API key, Claude included without a workspace id (KAN-65)", () => {

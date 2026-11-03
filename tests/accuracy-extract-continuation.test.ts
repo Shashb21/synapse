@@ -1,6 +1,8 @@
 /** Behavioral extraction regressions: real API, modules and PostgreSQL; only model completion is fake. */
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
+import { preservePersistedControls } from "./support/persisted-controls";
+import { setAccuracyDefaultProvider } from "@/accuracy/kernel/routing";
 import postgres from "postgres";
 
 const priorPlatformPool = vi.hoisted(() => {
@@ -42,19 +44,28 @@ import { insertSourceFile, listSourceFiles } from "@/accuracy/store/source-store
 import { createOrganization, createWorkspace, deleteWorkspace, getWorkspace } from "@/accuracy/store/tenant";
 import { accuracyParseBlocks } from "@/accuracy/store/schema";
 
+let restoreControls: (() => Promise<void>) | undefined;
 const actor = { name: "Owner", function: "medical_affairs" as const };
 const priorStub = process.env.SYNAPSE_TEST_STUB_LLM;
 const priorKey = process.env.XAI_API_KEY;
-beforeEach(() => {
+beforeEach(async () => {
+  restoreControls = await preservePersistedControls(["accuracy_routing_config"]);
+  // Route every real gate to the fake-key provider, independent of saved admin settings.
+  await setAccuracyDefaultProvider({ provider_id: "xai-grok", actor_name: "continuation fixture" });
   process.env.SYNAPSE_TEST_STUB_LLM = "0";
   process.env.XAI_API_KEY = "test-only-fake-key";
   provider.calls = [];
   provider.reply = () => ({ gaps: [], tactics: [] });
 });
-afterEach(() => {
-  process.env.SYNAPSE_TEST_STUB_LLM = priorStub;
-  if (priorKey === undefined) delete process.env.XAI_API_KEY;
-  else process.env.XAI_API_KEY = priorKey;
+afterEach(async () => {
+  try { await restoreControls?.(); }
+  finally {
+    restoreControls = undefined;
+    if (priorStub === undefined) delete process.env.SYNAPSE_TEST_STUB_LLM;
+    else process.env.SYNAPSE_TEST_STUB_LLM = priorStub;
+    if (priorKey === undefined) delete process.env.XAI_API_KEY;
+    else process.env.XAI_API_KEY = priorKey;
+  }
 });
 
 async function fixture(count = 81) {
