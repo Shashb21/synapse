@@ -225,6 +225,8 @@ test("read failure provides a labelled recovery action", async ({ page }) => {
   await expect(page.getByRole("main").getByRole("alert")).toContainText(
     "Unable to load experiments",
   );
+  await expect(page.getByRole("button", { name: "Retry page load" })).toHaveAttribute("aria-describedby", "retry-status");
+  await expect(page.locator("#retry-status")).toHaveText("Retry loading the page.");
   await page.unroute("**/api/admin/development");
   await page.getByRole("button", { name: "Retry page load" }).click();
   await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
@@ -413,6 +415,8 @@ test("created draft remains visible when source choices fail and retry only read
     name,
   );
   await expect(page.getByLabel("New experiment name")).toHaveValue("");
+  await expect(page.getByRole("button", { name: "Retry loading sources", exact: true })).toHaveAttribute("aria-describedby", "retry-status");
+  await expect(page.locator("#retry-status")).toHaveText("Retry loading source choices.");
   await page
     .getByRole("button", { name: "Retry loading sources", exact: true })
     .click();
@@ -485,11 +489,14 @@ test("reopened draft shows saved documents when source choices fail", async ({
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(
     name,
   );
+  await developmentStep(page, "Documents");
   await expect(
     page
       .getByRole("region", { name: "Saved documents" })
       .getByText("saved-source.txt", { exact: true }),
   ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Retry loading sources", exact: true })).toHaveAttribute("aria-describedby", "retry-status");
+  await expect(page.locator("#retry-status")).toHaveText("Retry loading source choices.");
   await page
     .getByRole("button", { name: "Retry loading sources", exact: true })
     .click();

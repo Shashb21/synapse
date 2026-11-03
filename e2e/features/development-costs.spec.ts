@@ -2,6 +2,16 @@ import { developmentStep } from "../support/development-workflow";
 /** Spending controls use scripted owner APIs and never contact a provider. */
 import { test, expect, type Page } from '@playwright/test';
 
+// Execution API responses are scripted; expose matching credential status to readiness.
+test.beforeEach(async ({ page }) => {
+  await page.route('**/api/control', async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.provider_keys = body.provider_keys.map((provider: Record<string, unknown>) => ({ ...provider, status: 'configured' }));
+    await route.fulfill({ response, json: body });
+  });
+});
+
 async function arrange(page: Page) {
   const created = await page.request.post('/api/admin/development', { data: { name: `Costs ${Date.now()}`, source_workspace_id: null } });
   const draft = (await created.json()).experiment;
@@ -103,8 +113,8 @@ test('new execution authorization starts unchecked and does not carry into the n
   await developmentStep(page, "Run");
   await execution.getByLabel('Generation allowance (USD)').fill('-2');
   await developmentStep(page, "Run");
-  await execution.getByRole('button', { name: 'Run all sections' }).click();
-  await expect(execution.getByRole('alert').first()).toContainText('finite nonnegative generation allowance');
+  await expect(execution.getByRole('button', { name: 'Run all sections' })).toBeDisabled();
+  await expect(execution.locator('#run-readiness')).toContainText('finite nonnegative generation allowance');
   expect(starts).toHaveLength(0);
   await developmentStep(page, "Run");
   await execution.getByLabel('Generation allowance (USD)').fill('2');

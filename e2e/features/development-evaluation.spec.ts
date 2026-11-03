@@ -6,7 +6,14 @@ import { evaluationConfigSchema } from "../../src/modules/development/evaluation
 import type { Experiment } from "../../src/modules/development/schema";
 
 /** Create real isolated source/reference snapshots, while scripting generation and evaluator I/O. */
-async function arrange(page: Page, options: { queuedSpendingPause?: boolean; malformed?: boolean; missingDelivery?: boolean; profileLoadFailure?: boolean; pollFailure?: boolean; twoExecutions?: boolean; holdEvaluationNumber?: number; recoveryHistoryFailure?: boolean; firstQueueFailure?: { status: number; code: string }; holdQueuedHistory?: boolean; holdSucceededHistory?: boolean; paginated?: boolean } = {}) {
+async function arrange(page: Page, options: { missingProviders?: boolean; queuedSpendingPause?: boolean; malformed?: boolean; missingDelivery?: boolean; profileLoadFailure?: boolean; pollFailure?: boolean; twoExecutions?: boolean; holdEvaluationNumber?: number; recoveryHistoryFailure?: boolean; firstQueueFailure?: { status: number; code: string }; holdQueuedHistory?: boolean; holdSucceededHistory?: boolean; paginated?: boolean } = {}) {
+  // Provider responses are scripted; no real credentials or model calls are used.
+  await page.route("**/api/control", async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.provider_keys = body.provider_keys.map((provider: Record<string, unknown>) => ({ ...provider, status: options.missingProviders ? "missing" : "configured" }));
+    await route.fulfill({ response, json: body });
+  });
   const name = `Evaluation ${Date.now()}`;
   const created = await page.request.post("/api/admin/development", { data: { name, source_workspace_id: null } });
   expect(created.ok(), `Create experiment: ${created.status()} ${await created.text()}`).toBe(true);
@@ -529,4 +536,19 @@ test('queued evaluator spending pause refreshes the shared account without a sta
   await expect(page.getByRole('region', { name: 'Execution', exact: true }).getByLabel('Selected execution')).toHaveValue('other-run');
   await expect(costs.getByText('Spending authorized', { exact: true })).toBeVisible();
   await expect(costs.getByText('Evaluation known usage: USD 0', { exact: true })).toBeVisible();
+});
+
+
+test("explains missing evaluator credentials while checks-only stays available", async ({ page }) => {
+  await arrange(page, { missingProviders: true });
+  const panel = page.getByRole("region", { name: "Evaluation", exact: true });
+  const evaluate = panel.getByRole("button", { name: "Evaluate saved output", exact: true });
+  await expect(evaluate).toBeDisabled();
+  await expect(evaluate).toHaveAttribute("aria-describedby", "evaluate-readiness");
+  await expect(panel.locator("#evaluate-readiness")).toContainText("Configure credentials");
+  await panel.getByText("Per-section evaluator settings", { exact: true }).click();
+  const gaps = panel.getByRole("group", { name: "Gap extraction evaluator", exact: true });
+  await gaps.getByLabel("Method").selectOption("checks_only");
+  await expect(gaps.locator("fieldset[disabled]")).toHaveAttribute("aria-describedby", "evaluator-route-gap_extraction");
+  await expect(evaluate).toBeEnabled();
 });

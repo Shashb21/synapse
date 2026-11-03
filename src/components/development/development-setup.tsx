@@ -292,6 +292,7 @@ export function DevelopmentSetup() {
             onChange={(event) => setNewName(event.target.value)}
             required
             maxLength={120}
+            aria-describedby="create-reason"
             disabled={busy || dirty}
           />
         </label>
@@ -301,6 +302,7 @@ export function DevelopmentSetup() {
             className={selectClass}
             value={workspace}
             onChange={(event) => setWorkspace(event.target.value)}
+            aria-describedby="create-reason"
             disabled={busy || dirty}
           >
             <option value="">Private uploads only</option>
@@ -311,7 +313,8 @@ export function DevelopmentSetup() {
             ))}
           </select>
         </label>
-        <Button type="submit" disabled={busy || dirty || !newName.trim()}>
+        <p id="create-reason">{busy ? "Wait for the current operation." : dirty ? "Save the edited name before creating another experiment." : !newName.trim() ? "Enter a name to create an experiment." : "Ready to create an experiment."}</p>
+        <Button type="submit" aria-describedby="create-reason" disabled={busy || dirty || !newName.trim()}>
           Create experiment
         </Button>
       </form>
@@ -331,6 +334,7 @@ export function DevelopmentSetup() {
           className="border border-destructive p-3 text-destructive rounded-lg"
         >
           {error}{" "}
+          {(!draft || sourceReadFailed) && <p id="retry-status">{busy ? "Wait for the current operation before retrying." : draft ? "Retry loading source choices." : "Retry loading the page."}</p>}
           {draft && sourceReadFailed && (
             <>
               <span>
@@ -338,6 +342,7 @@ export function DevelopmentSetup() {
               </span>
               <Button
                 variant="outline"
+                aria-describedby="retry-status"
                 disabled={busy}
                 onClick={() =>
                   void perform("Loading sources…", async (signal) => {
@@ -353,6 +358,7 @@ export function DevelopmentSetup() {
           {!draft && (
             <Button
               variant="outline"
+              aria-describedby="retry-status"
               disabled={busy}
               onClick={() => window.location.reload()}
             >
@@ -374,6 +380,7 @@ export function DevelopmentSetup() {
                   className="w-full break-words rounded-lg border border-border px-3 py-2 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
                   aria-label={`Open ${item.name}`}
                   aria-current={draft?.id === item.id ? "true" : undefined}
+                  aria-describedby="create-reason"
                   disabled={busy || dirty}
                   onClick={() => void open(item)}
                 >
@@ -390,6 +397,7 @@ export function DevelopmentSetup() {
               <label className="block space-y-2">
                 Experiment name
                 <Input
+                  aria-describedby="save-name-reason"
                   value={name}
                   maxLength={120}
                   onChange={(event) => setName(event.target.value)}
@@ -397,7 +405,9 @@ export function DevelopmentSetup() {
                 />
               </label>
               <div className="flex flex-wrap items-center gap-2">
+                <p id="save-name-reason">{busy ? "Wait for the current operation." : stale ? "Reload the saved draft before saving." : !name.trim() ? "Enter an experiment name." : !dirty ? "No name changes to save." : "Ready to save the name."}</p>
                 <Button
+                  aria-describedby="save-name-reason"
                   disabled={busy || stale || !name.trim() || !dirty}
                   onClick={() =>
                     void perform("Saving…", async (signal) => {
@@ -417,6 +427,7 @@ export function DevelopmentSetup() {
                 </Button>
                 <Button
                   variant="outline"
+                  aria-describedby="save-name-reason"
                   disabled={busy}
                   onClick={() =>
                     void perform("Reloading…", async (signal) => {
@@ -465,7 +476,9 @@ export function DevelopmentSetup() {
             </div>
             <section hidden={step !== "documents"} aria-labelledby="documents-heading" className="space-y-5">
               <h3 id="documents-heading" className="text-lg font-semibold">Documents</h3>
+            <p id="document-lock">{busy ? "Wait for the current operation." : stale ? "Reload the saved draft before changing documents." : "Document actions are available."}</p>
             <fieldset
+              aria-describedby="document-lock"
               disabled={busy || stale}
               className="space-y-3 border-t border-border pt-5"
             >
@@ -491,8 +504,10 @@ export function DevelopmentSetup() {
                       ))}
                     </select>
                   </label>
+                  <p id="source-choice-reason">{sourceId ? "Source selected." : "Choose an authorized source to copy."}</p>
                   <Button
                     variant="outline"
+                    aria-describedby="source-choice-reason"
                     disabled={!sourceId || busy || stale}
                     onClick={() =>
                       void perform("Copying source…", async (signal) => {
@@ -529,8 +544,10 @@ export function DevelopmentSetup() {
                 PDF, DOCX, PPTX, XLSX, TXT or Markdown; maximum 3 MiB. Uploads
                 are parsed before saving.
               </p>
+              <p id="source-file-reason">{sourceFile ? "Source file selected." : "Choose a source file to upload."}</p>
               <Button
                 variant="outline"
+                aria-describedby="source-file-reason"
                 disabled={!sourceFile || busy || stale}
                 onClick={() => void upload(sourceFile)}
               >
@@ -539,6 +556,7 @@ export function DevelopmentSetup() {
             </fieldset>
             <details><summary className="cursor-pointer font-medium">Optional evaluation references</summary>
             <fieldset
+              aria-describedby="document-lock"
               disabled={busy || stale}
               className="space-y-3 border-t border-border pt-5"
             >
@@ -608,8 +626,10 @@ export function DevelopmentSetup() {
                   onChange={(event) => setPdf(event.target.files?.[0] ?? null)}
                 />
               </label>
+              <p id="pdf-reason">{!pdf ? "Choose a reference PDF. " : ""}{!associations.length ? "Associate at least one source snapshot." : ""}</p>
               <Button
                 variant="outline"
+                aria-describedby="pdf-reason"
                 disabled={!pdf || !associations.length || busy || stale}
                 onClick={() => void upload(pdf, "pdf")}
               >
@@ -630,8 +650,10 @@ export function DevelopmentSetup() {
                 Maximum 3 MiB each. JSON version 1 must match the selected
                 section and snapshot IDs.
               </p>
+              <p id="structured-reason">{!structured ? "Choose a structured reference file. " : ""}{!associations.length ? "Associate at least one source snapshot." : ""}</p>
               <Button
                 variant="outline"
+                aria-describedby="structured-reason"
                 disabled={!structured || !associations.length || busy || stale}
                 onClick={() => void upload(structured, "structured")}
               >
@@ -674,7 +696,7 @@ export function DevelopmentSetup() {
               </ul>
             </section>
             </section>
-            <DevelopmentExecution draft={draft} disabled={busy || stale || dirty} step={step} onWorkflowChange={onWorkflowChange} />
+            <DevelopmentExecution draft={draft} disabled={busy || stale || dirty} disabledReason={busy ? "Wait for the current operation to finish." : stale ? "Reload the saved draft before running; your edited name will be kept." : dirty ? "Save the edited experiment name before running." : undefined} step={step} onNavigate={navigate} onStaleRevision={() => setStale(true)} onWorkflowChange={onWorkflowChange} />
           </div>
         )}
       </div>

@@ -1,5 +1,15 @@
 /** Four-step Development workflow against isolated persistence and scripted execution I/O. */
 import { expect, test } from "@playwright/test";
+
+// Execution API responses are scripted; expose matching credential status to readiness.
+test.beforeEach(async ({ page }) => {
+  await page.route('**/api/control', async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.provider_keys = body.provider_keys.map((provider: Record<string, unknown>) => ({ ...provider, status: 'configured' }));
+    await route.fulfill({ response, json: body });
+  });
+});
 import { developmentDetails, developmentStep } from "../support/development-workflow";
 
 const artifact = ".superpowers/sdd/2026-11-03-ui-2-development-workflow";
