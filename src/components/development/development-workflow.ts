@@ -22,7 +22,7 @@ export function developmentWorkflow(hasSources: boolean, facts: WorkflowFacts) {
     results: "Not started",
   };
   let step: WorkflowStep = hasSources ? "settings" : "documents";
-  let action = hasSources ? "Review test settings, then go to Run. Settings are saved with an execution." : "Add and save a source document to begin.";
+  let action = hasSources ? "Review test settings, then go to Run. Settings are saved with an execution." : "Add and save an experiment document to begin.";
   if (facts.history !== "ready") {
     states.results = facts.history === "loading" ? "Loading" : "Needs attention";
     if (hasSources) step = "results";

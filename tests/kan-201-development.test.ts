@@ -317,6 +317,38 @@ describe("KAN-201 owner Development setup", () => {
       ),
     ).toEqual(before);
   });
+  it("explains missing originals and readable parses without changing saved or customer documents", async () => {
+    // Arrange: a bound workspace has one missing original and one unreadable parse.
+    const w = await createWorkspace({ name: "UI-3 recovery", owner: "ui3@test.invalid" });
+    const initial = await draft(w.id);
+    await runInWorkspace({ workspace_id: w.id, schema: w.schema_name }, async () => {
+      for (const [id, content, blocks] of [
+        ["missing-original", "", [{ text: "Readable evidence" }]],
+        ["missing-parse", encoded("Evidence"), [{ text: "   " }]],
+      ] as const) {
+        await db().execute(sql`insert into source_files (id,workspace_id,filename,title,source_type,stakeholder_function,mime,bytes,checksum,content_base64,status,uploaded_by,uploaded_at) values (${id},${w.id},'evidence.txt','Evidence','text','medical_affairs','text/plain',8,'checksum',${content},'uploaded','customer',${new Date().toISOString()})`);
+        await db().execute(sql`insert into parsed_documents (id,file_id,source_id,parser,parser_version,blocks,quality,parsed_at,duration_ms) values (${id},${id},${id},'llm','2.0.0',${JSON.stringify(blocks)}::jsonb,'{}',${new Date().toISOString()},1)`);
+      }
+    });
+    const customerState = () => runInWorkspace({ workspace_id: w.id, schema: w.schema_name }, async () => ({
+      files: await db().execute(sql`select * from source_files order by id`),
+      parses: await db().execute(sql`select * from parsed_documents order by id`),
+    }));
+    const before = await customerState();
+    // Act / Assert: each failure offers the correct recovery and leaves all data unchanged.
+    for (const [id, code, recovery] of [
+      ["missing-original", "original_unavailable", "Upload files"],
+      ["missing-parse", "source_not_parsed", "readable parse"],
+    ]) {
+      const response = await importSource(req({ revision: initial.revision, source_file_id: id }), ctx(initial.id));
+      expect(response.status).toBe(422);
+      const body = await response.json();
+      expect(body.code).toBe(code);
+      expect(body.error).toContain(recovery);
+    }
+    expect((await (await get(req({}), ctx(initial.id))).json()).experiment).toEqual(initial);
+    expect(await customerState()).toEqual(before);
+  });
   it("checks ingestion AI-off policy before even test-stub parsing", async () => {
     const initial = await draft();
     await setAiSection({

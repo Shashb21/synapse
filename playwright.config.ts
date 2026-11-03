@@ -42,7 +42,8 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: `npx next dev --hostname 127.0.0.1 --port ${port}`,
+    // Turbopack exhausted CI runner memory while compiling this suite's cold routes.
+    command: `npx next dev --webpack --hostname 127.0.0.1 --port ${port}`,
     url: baseURL,
     // Off by default, so the suite never attaches to a server on the dev database.
     reuseExistingServer: process.env.E2E_REUSE === "1",

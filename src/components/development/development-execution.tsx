@@ -248,7 +248,7 @@ export function DevelopmentExecution({ draft, disabled, step, onWorkflowChange }
     }
     setConfig(structuredClone(saved)); setError("");
     const sourceChanged = JSON.stringify((execution.manifest.sources ?? []).map(source => [source.id, source.sha256, source.parsed_sha256])) !== JSON.stringify(draft.documents.filter(source => source.role === "source").map(source => [source.id, source.sha256, source.parsed_sha256]));
-    setCopyMessage(`Copied configuration from execution ${execution.id} (source revision ${execution.manifest.revision}). Review settings, then explicitly Run a section or Run all sections to generate. Source snapshots: ${sourceChanged ? "changed or unavailable compared with the saved execution" : "match the saved execution"}. Current experiment sources and prerequisites apply; the server validates freshness before running.`);
+    setCopyMessage(`Copied configuration from execution ${execution.id} (source revision ${execution.manifest.revision}). Review settings, then explicitly Run a section or Run all sections to generate. Experiment documents: ${sourceChanged ? "changed or unavailable compared with the saved execution" : "match the saved execution"}. Current experiment documents and prerequisites apply; the server validates freshness before running.`);
   }
   const hasSources = draft.documents.some(item => item.role === "source");
   const latestStatus = history[0]?.generation_status ?? null;
@@ -258,7 +258,7 @@ export function DevelopmentExecution({ draft, disabled, step, onWorkflowChange }
   }, [historyState, latestStatus, savedSettings, delivery?.available, hasSources, onWorkflowChange]);
   const locked = disabled || pending || loading || !config || !delivery?.available || historyState !== "ready" || history.some(active) || !draft.documents.some((item) => item.role === "source");
   return <section aria-label="Execution" className="space-y-4" hidden={step === "documents"}>
-    <p className="text-muted-foreground">Generation uses source snapshots only. Outputs are unreviewed; evaluation uses saved outputs in Results. A fresh run may incur provider charges, including after an uncertain failure.</p>
+    <p className="text-muted-foreground">Generation uses experiment documents only. Outputs are unreviewed; evaluation uses saved outputs in Results. A fresh run may incur provider charges, including after an uncertain failure.</p>
     {copyMessage && <p role="status">{copyMessage}</p>}
     {loading && <p>Loading execution settings and history…</p>}
     {error && <p role="alert" className="text-destructive">{error}</p>}
@@ -275,7 +275,7 @@ export function DevelopmentExecution({ draft, disabled, step, onWorkflowChange }
     </section>
     <section hidden={step !== "run"} aria-labelledby="run-heading" className="space-y-4">
       <h3 id="run-heading" className="text-lg font-semibold">Run</h3>
-      {!hasSources && <p>Add a source snapshot in Documents before running.</p>}
+      {!hasSources && <p>Add an experiment document in Documents before running.</p>}
       {latestStatus && <p role="status">Latest run: {latestStatus}. View saved outputs and errors in Results.</p>}
       {config && <>
       <p className="text-muted-foreground">Matching requires current successful gap and tactic extraction. Partial splitting requires those results and matching built from them. Changed settings or sources can make prerequisites stale; the server checks them before every run.</p>
@@ -288,9 +288,9 @@ export function DevelopmentExecution({ draft, disabled, step, onWorkflowChange }
     <p>Read generated output first. Evaluation is optional; saved history and comparison preserve earlier evidence.</p>
     {loading && <p role="status">Loading saved runs…</p>}
     <div className="border-t border-border pt-3 space-y-3"><div className="flex flex-wrap gap-2 items-center"><h4 className="font-semibold">Saved run history</h4><Button variant="outline" disabled={pending || loading} onClick={() => { if (!config) { setLoading(true); setHistoryState("loading"); setLoadVersion(current => current + 1); return; } setPending(true); void refreshHistory().catch((failure) => setError(failure.message)).finally(() => setPending(false)); }}>Reload history</Button></div>
-      {!history.length && historyState === "ready" && <p>No executions yet. Add source documents and use Run to generate output. Evaluation is optional.</p>}
+      {!history.length && historyState === "ready" && <p>No executions yet. Add experiment documents and use Run to generate output. Evaluation is optional.</p>}
       {historyState === "unavailable" && <p>Saved history unavailable. Reload history before starting another run.</p>}
-      {!!history.length && <><label className="block space-y-1">Selected execution<select className={selectClass} value={selected ?? ""} onChange={(event) => setSelected(event.target.value)}>{history.map((item) => <option key={item.id} value={item.id}>{item.created_at} · {item.generation_status} · {item.id}</option>)}</select></label>{current && <><Button variant="outline" disabled={disabled || loading || pending} onClick={() => copyConfiguration(current)}>Copy selected configuration</Button><ExecutionDetail execution={current} metadata={metadata} /><p>Review Test settings before rerunning. This action uses current settings and source snapshots; the selected saved run stays unchanged.</p><Button variant="outline" disabled={!!locked} onClick={() => void run("all")}>Rerun with current settings</Button><DevelopmentCosts key={current.id} root={`${root}/${current.id}/costs`} account={current.cost} disabled={disabled} onChange={cost => setHistory(items => items.map(item => item.id === current.id ? { ...item, cost } : item))} /></>}{cursor && <Button variant="outline" disabled={pending} onClick={() => { setPending(true); void refreshHistory(cursor).catch((failure) => setError(failure.message)).finally(() => setPending(false)); }}>Load older executions</Button>}</>}
+      {!!history.length && <><label className="block space-y-1">Selected execution<select className={selectClass} value={selected ?? ""} onChange={(event) => setSelected(event.target.value)}>{history.map((item) => <option key={item.id} value={item.id}>{item.created_at} · {item.generation_status} · {item.id}</option>)}</select></label>{current && <><Button variant="outline" disabled={disabled || loading || pending} onClick={() => copyConfiguration(current)}>Copy selected configuration</Button><ExecutionDetail execution={current} metadata={metadata} /><p>Review Test settings before rerunning. This action uses current settings and experiment documents; the selected saved run stays unchanged.</p><Button variant="outline" disabled={!!locked} onClick={() => void run("all")}>Rerun with current settings</Button><DevelopmentCosts key={current.id} root={`${root}/${current.id}/costs`} account={current.cost} disabled={disabled} onChange={cost => setHistory(items => items.map(item => item.id === current.id ? { ...item, cost } : item))} /></>}{cursor && <Button variant="outline" disabled={pending} onClick={() => { setPending(true); void refreshHistory(cursor).catch((failure) => setError(failure.message)).finally(() => setPending(false)); }}>Load older executions</Button>}</>}
     </div>
     <DevelopmentEvaluation key={draft.id} draft={draft} execution={current} providers={providers} disabled={disabled || loading || pending} onHistoryChange={() => { void refreshHistory().catch((failure) => setError(failure.message)); }} />
     <DevelopmentComparison onCopy={copyConfiguration} />
