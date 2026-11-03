@@ -267,6 +267,7 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
 
     /** One model answer for this gap, asked again while it is incomplete or invalid. */
     const askOne = async <T,>(args: {
+      role: "proposer" | "critic" | "reviser" | "internal_judge";
       what: string;
       system: string;
       purpose: string;
@@ -281,6 +282,7 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
         remedy: REMEDY,
         ask: async (_missing, attempt) => {
           const payload = await ctx.complete({
+            role: args.role,
             system: args.system,
             user: JSON.stringify({
               worked_examples: reviewerHints || undefined,
@@ -299,6 +301,7 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
 
     const propose = (round: number, previous?: Proposal, objection?: string) =>
       askOne({
+        role: round === 1 ? "proposer" : "reviser",
         what: "split proposal",
         system: SPLIT_PROPOSER_SYSTEM,
         purpose: "split-proposer",
@@ -351,6 +354,7 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
           // final revision here and the judge below only reports its ruling.
           if (round === PROPOSER_CRITIC_EXCHANGES + 1) {
             judgement = await askOne({
+              role: "internal_judge",
               what: "split judgement",
               system: SPLIT_JUDGE_SYSTEM,
               purpose: "split-judge",
@@ -375,6 +379,7 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
         return Promise.all(
           proposals.map(async (proposal) => {
             const review = await askOne({
+              role: "critic",
               what: "split review",
               system: SPLIT_CRITIC_SYSTEM,
               purpose: "split-critic",
@@ -410,6 +415,11 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
         }),
     }, { kinds: ["residual_split"], text: `${gap.name} ${gap.statement}` });
 
+    if (ctx.execution_policy === "single_pass") return {
+      output: { mode: outcome.mode, proposal: null, applied: false, edit_id: null },
+      agentic: outcome, summary: `Unreviewed split proposal for ${gap.id}`, evals: outcome.metrics,
+    };
+
     // Only a split the model judge accepted is shown. A rejected split is never
     // swapped for an earlier draft; the user fills the split in or runs S6 again.
     const accepted = outcome.judged.find((item) => item.verdict === "accept");
@@ -419,6 +429,7 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
       : null;
 
     return {
+      agentic: outcome,
       output: { mode: outcome.mode, proposal, applied: false, edit_id: null },
       summary: proposal
         ? `Proposed a split for ${gap.id}`

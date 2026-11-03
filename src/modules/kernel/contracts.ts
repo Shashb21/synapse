@@ -214,8 +214,11 @@ export type ResolvedRoute = {
   reason: string | null;
 };
 
+export type CompletionRole = "proposer" | "critic" | "reviser" | "internal_judge";
+
 /** JSON completion bound to a resolved route and to the run's observability. */
 export type JsonCompletion = (args: {
+  role?: CompletionRole;
   system: string;
   user: string;
   purpose: string;
@@ -223,6 +226,9 @@ export type JsonCompletion = (args: {
 }) => Promise<unknown>;
 
 export type ModuleContext = {
+  execution_policy?: "standard" | "single_pass";
+  /** Enables source-only candidate eligibility, never customer acceptance. Requires evaluation replay. */
+  execution_scope?: "development";
   workspace_id: string;
   actor: Actor;
   role: string;
@@ -236,6 +242,8 @@ export type ModuleContext = {
 };
 
 export type ModuleResult<O> = {
+  /** Real dialogue data retained for isolated experiments, including rejected proposals. */
+  agentic?: { proposed: unknown[]; unreviewed: unknown[]; judged: unknown[]; withdrawn: unknown[] };
   output: O;
   /** One-line human summary shown in the observability list. */
   summary: string;

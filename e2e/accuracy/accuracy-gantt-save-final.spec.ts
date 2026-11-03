@@ -85,6 +85,8 @@ async function shot(page: Page, name: string) {
 
 test.describe("accuracy Gantt save-final truth", () => {
   test("click detail, export PNG, save-final hash and audit bundle", async ({ page, request }) => {
+    // This flow includes screenshots, raster export and a potentially cold save route.
+    test.setTimeout(90_000);
     const workspace_id = await seedDatedGantt(request);
     await page.goto(workspaceUrl("/admin/accuracy/timeline", workspace_id));
     await expect(page.getByRole("heading", { name: /^timeline$/i })).toBeVisible();
@@ -123,7 +125,14 @@ test.describe("accuracy Gantt save-final truth", () => {
     await page.getByPlaceholder(/final iegp truth/i).fill(
       "Signed off after ledger review of OS follow-up.",
     );
+    const saveResponse = page.waitForResponse(
+      response => response.url().includes("/api/accuracy/gantt/save-final") && response.request().method() === "POST",
+      { timeout: 45_000 },
+    );
     await page.getByRole("button", { name: /^save as final$/i }).click();
+    const response = await saveResponse;
+    expect(response.ok(), await response.text()).toBe(true);
+    expect(await response.json()).toMatchObject({ ok: true, plan: { version: 1, status: "final", workspace_id } });
     // The refresh can clear the success message; the saved version remains visible.
     await expect(page.getByText(/latest plan v1 \(final\)/i)).toBeVisible();
     const hash = page.getByTestId("gantt-snapshot-hash");

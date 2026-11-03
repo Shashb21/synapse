@@ -45,6 +45,8 @@ export function isAdminPage(pathname: string): boolean {
 
 /** What a path needs before it may be served. */
 export function gateFor(pathname: string): Gate {
+  // This exact endpoint authenticates its scheduler bearer secret in its own handler.
+  if (pathname === "/api/internal/development-worker") return "open";
   if (under(pathname, PUBLIC_PREFIXES) || under(pathname, ADMIN_PREFIXES) || isAsset(pathname)) return "open";
   if (under(pathname, SESSION_ONLY_PREFIXES)) return "session";
   return "workspace";

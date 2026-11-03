@@ -79,6 +79,7 @@ export type AgenticRound = {
 };
 
 export type AgenticOutcome<C> = {
+  unreviewed: C[];
   mode: "llm" | "deterministic";
   /** The first proposal, before any critique. */
   proposed: C[];
@@ -184,6 +185,12 @@ export async function runAgenticCycle<C>(
     "initial proposal",
   );
   const proposed = first.candidates;
+  if (ctx.execution_policy === "single_pass") {
+    ctx.run.note("single-pass:unreviewed", { omitted_roles: ["critic", "reviser", "internal_judge"] });
+    return { mode: first.via === "llm" ? "llm" : "deterministic", proposed,
+      unreviewed: proposed, rounds: [], critiques: [], withdrawn: [], judged: [],
+      accepted: [], rejected: [], metrics: [{ name: "proposed", value: proposed.length, unit: "count" }] };
+  }
   let candidates = first.candidates;
   let usedLlm = first.via === "llm";
   let critiques: Critique[] = [];
@@ -275,6 +282,7 @@ export async function runAgenticCycle<C>(
   ctx.run.note("exchanges", rounds, `${rounds.length} proposer↔critic exchange(s) before the judge`);
 
   return {
+    unreviewed: [],
     mode: usedLlm ? "llm" : "deterministic",
     proposed,
     rounds,

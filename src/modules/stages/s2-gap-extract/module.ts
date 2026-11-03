@@ -240,7 +240,7 @@ type RevisionItem = {
  */
 async function reviseWithModel(
   ctx: ModuleContext,
-  args: { document: ParsedDocumentRecord; hints: string; exchange: string; items: RevisionItem[] },
+  args: { document: ParsedDocumentRecord; hints: string; exchange: string; items: RevisionItem[]; role?: "proposer" | "reviser" },
 ): Promise<Map<string, GapCandidate | null>> {
   const byId = new Map(args.items.map((item) => [item.candidate.id, item]));
   const lastProblems = new Map<string, string[]>();
@@ -250,6 +250,7 @@ async function reviseWithModel(
     remedy: REMEDY,
     ask: async (missing, attempt) => {
       const payload = (await ctx.complete({
+        role: args.role ?? "reviser",
         system: augmentSystemPrompt(GAP_REVISER_SYSTEM),
         user: JSON.stringify({
           source_document: titleOf(args.document),
@@ -309,6 +310,7 @@ async function proposeFromDocument(
   hints: string,
 ): Promise<GapCandidate[]> {
   const payload = (await ctx.complete({
+    role: "proposer",
     system: augmentSystemPrompt(GAP_PROPOSER_SYSTEM),
     user: gapProposerUser({ title: titleOf(document), blocks: document.blocks, hints }),
     purpose: `gap-proposer:${document.id}`,
@@ -327,6 +329,7 @@ async function proposeFromDocument(
           document,
           hints,
           exchange: "initial proposal",
+          role: "proposer",
           items: incomplete.map((draft) => ({
             candidate: {
               id: draft.id,
@@ -365,6 +368,7 @@ async function reviewWithModel(
     remedy: REMEDY,
     ask: async (missing, attempt) => {
       const payload = (await ctx.complete({
+        role: "critic",
         system: GAP_CRITIC_SYSTEM,
         user: JSON.stringify({
           exchange: `${args.round} of ${PROPOSER_CRITIC_EXCHANGES}`,
@@ -508,6 +512,7 @@ async function judgeWithModel(
     remedy: REMEDY,
     ask: async (missing, attempt) => {
       const payload = (await ctx.complete({
+        role: "internal_judge",
         system: GAP_JUDGE_SYSTEM,
         user: JSON.stringify({
           worked_examples: args.hints || undefined,
@@ -735,6 +740,11 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       },
     }, { kinds: ["gap_suggestion"], text: documents.flatMap((document) => document.blocks.map((block) => block.text)).join(" ").slice(0, 20_000) });
 
+    if (ctx.execution_policy === "single_pass") return {
+      output: { mode: outcome.mode, proposed: outcome.proposed.length, accepted: [], rejected: [], committed_gap_ids: [], committed_need_ids: [], joined_gap_ids: [], suggestion_ids: [] },
+      agentic: outcome, summary: `${outcome.unreviewed.length} unreviewed gap proposal(s)`, evals: outcome.metrics,
+    };
+
     // The candidate row each judged candidate became: an overlap keeps a pointer to it,
     // so a rejected suggestion can still be promoted by hand later.
     const rowIdByCandidate = new Map(outcome.judged.map((item) => [item.candidate.id, newId("gc")]));
@@ -897,6 +907,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
     });
 
     return {
+      agentic: outcome,
       output: {
         mode: outcome.mode,
         proposed: outcome.proposed.length,

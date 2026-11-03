@@ -221,7 +221,7 @@ type ProposerRow = {
  */
 async function answerRows(
   ctx: ModuleContext,
-  args: { document: ParsedDocumentRecord; hints: string; rows: ProposerRow[]; purpose: string },
+  args: { document: ParsedDocumentRecord; hints: string; rows: ProposerRow[]; purpose: string; role?: "proposer" | "reviser" },
 ): Promise<Map<string, ProposerAnswer>> {
   const rowById = new Map(args.rows.map((row) => [row.id, { ...row }]));
   return completeAll({
@@ -231,6 +231,7 @@ async function answerRows(
     remedy: REMEDY,
     ask: async (missing, attempt) => {
       const payload = (await ctx.complete({
+        role: args.role ?? "reviser",
         system: augmentSystemPrompt(TACTIC_REVISER_SYSTEM),
         user: JSON.stringify({
           worked_examples: args.hints || undefined,
@@ -278,6 +279,7 @@ async function llmProposals(
   const out: TacticCandidate[] = [];
   for (const document of documents) {
     const payload = (await ctx.complete({
+      role: "proposer",
       system: augmentSystemPrompt(TACTIC_PROPOSER_SYSTEM),
       user: [hints, `Source: ${document.source_id}`, documentText(document)].filter(Boolean).join("\n\n"),
       purpose: `tactic-proposer:${document.id}`,
@@ -296,7 +298,7 @@ async function llmProposals(
     }
     const fixed =
       invalid.length > 0
-        ? await answerRows(ctx, { document, hints, rows: invalid, purpose: "tactic-proposer-fix" })
+        ? await answerRows(ctx, { document, hints, rows: invalid, purpose: "tactic-proposer-fix", role: "proposer" })
         : new Map<string, ProposerAnswer>();
     for (const row of proposed) {
       if (row.candidate) {
@@ -362,6 +364,7 @@ async function llmReviews(
   args: { candidates: TacticCandidate[]; library: LibraryTactic[]; hints: string; round: number; retry: boolean },
 ): Promise<Map<string, Review>> {
   const payload = (await ctx.complete({
+    role: "critic",
     system: augmentSystemPrompt(TACTIC_CRITIC_SYSTEM),
     user: JSON.stringify({
       worked_examples: args.hints || undefined,
@@ -406,6 +409,7 @@ async function llmDecisions(
 ): Promise<Map<string, Decision>> {
   const critiqueOf = (id: string) => args.critiques.find((critique) => critique.subject === id);
   const payload = (await ctx.complete({
+    role: "internal_judge",
     system: augmentSystemPrompt(TACTIC_JUDGE_SYSTEM),
     user: JSON.stringify({
       worked_examples: args.hints || undefined,
@@ -627,6 +631,12 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
         }),
     }, { kinds: ["tactic_suggestion"], text: documents.flatMap((document) => document.blocks.map((block) => block.text)).join(" ").slice(0, 20_000) });
 
+    if (ctx.execution_policy === "single_pass") return {
+      output: { mode: outcome.mode, proposed: outcome.proposed.length, accepted: [], rejected: [], committed_tactic_ids: [], suggestion_ids: [] },
+      agentic: { ...outcome, unreviewed: outcome.unreviewed.map(candidate => { const proposal = { ...candidate }; delete (proposal as Partial<TacticCandidate>).match; return proposal; }) },
+      summary: `${outcome.unreviewed.length} unreviewed tactic proposal(s)`, evals: outcome.metrics,
+    };
+
     const survivors = outcome.judged.map((item) => item.candidate);
     const decisions = await ctx.run.step(
       "judge:model",
@@ -742,6 +752,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
     });
 
     return {
+      agentic: { ...outcome, judged },
       output: {
         mode: outcome.mode,
         proposed: outcome.proposed.length,
