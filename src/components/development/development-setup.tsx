@@ -2,6 +2,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { DevelopmentDemoDocuments } from "@/components/development/development-demo-documents";
 import { DevelopmentExecution } from "@/components/development/development-execution";
 import { developmentWorkflow, workflowSteps, type WorkflowFacts, type WorkflowStep } from "./development-workflow";
 import { Button } from "@/components/ui/button";
@@ -544,6 +545,7 @@ export function DevelopmentSetup() {
                 </div>
               )}
               {!draft.source_workspace_id && <p className="text-muted-foreground">This experiment uses private uploads only and cannot access existing workspace documents. Use Upload files below, or create a new experiment bound to the workspace you need.</p>}
+              <DevelopmentDemoDocuments key={draft.id} draft={draft} perform={perform} accept={accept} />
               <h4 className="font-medium">Upload files</h4>
               <label className="block space-y-2">
                 File to add to this experiment
@@ -697,7 +699,7 @@ export function DevelopmentSetup() {
                     <details>
                       <summary className="cursor-pointer">Document details</summary>
                       <dl className="mt-2 space-y-1 text-xs text-muted-foreground break-all">
-                        <div><dt className="inline font-medium">Origin: </dt><dd className="inline">{item.origin === "workspace" ? "Workspace document" : "Private upload"}</dd></div>
+                        <div><dt className="inline font-medium">Origin: </dt><dd className="inline">{item.origin === "workspace" ? "Workspace document" : item.demo ? "Private demo file" : "Private upload"}</dd></div>
                         <div><dt className="inline font-medium">Saved: </dt><dd className="inline">{item.created_at}</dd></div>
                         <div><dt className="inline font-medium">Document ID: </dt><dd className="inline"><code aria-label="Experiment document ID">{item.id}</code></dd></div>
                         <div><dt className="inline font-medium">Original content hash: </dt><dd className="inline">{item.sha256}</dd></div>

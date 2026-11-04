@@ -24,6 +24,9 @@ export const saveDraftSchema = z
 export const sourceImportSchema = z
   .object({ revision: z.number().int().positive(), source_file_id: id })
   .strict();
+export const demoDocumentSchema = z
+  .object({ revision: z.number().int().positive(), demo_id: id })
+  .strict();
 export const sourceUploadSchema = z
   .object({
     revision: z.number().int().positive(),
@@ -141,6 +144,8 @@ export type DevelopmentDocument = {
   source_document_ids: string[];
   review_status: "not_applicable" | "unreviewed" | "provisional";
   compatibility: "compatible" | "incompatible";
+  /** Present only for sources chosen from the bundled client demo files. */
+  demo?: { pack: "client-demo"; id: string };
 };
 export type Experiment = {
   id: string;
