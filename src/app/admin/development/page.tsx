@@ -1,4 +1,5 @@
 /** Owner-only setup for isolated development experiments. */
+import { developmentStyles as styles } from "@/components/development/development-styles";
 import { AdminMain } from "@/components/admin/admin-page";
 import { DevelopmentSetup } from "@/components/development/development-setup";
 import { requireOwnerPage } from "@/modules/auth/owner";
@@ -10,8 +11,8 @@ export default async function DevelopmentPage() {
   await requireOwnerPage();
   return (
     <AdminMain>
-      <h1 className="text-xl font-semibold">Development</h1>
-      <p className="mt-2 mb-6 max-w-prose text-sm text-muted-foreground">
+      <h1 className={styles.pageTitle}>Development</h1>
+      <p className={`${styles.explanation} mt-3 mb-8`}>
         Prepare private experiments, add documents, configure and run generation,
         then review, evaluate and compare saved results here.
       </p>

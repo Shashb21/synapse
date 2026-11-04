@@ -1,6 +1,7 @@
 /** Interactive setup; all persistence and parsing stays behind the owner API. */
 "use client";
 
+import { developmentStyles as styles } from "./development-styles";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DevelopmentDemoDocuments } from "@/components/development/development-demo-documents";
 import { DevelopmentExecution } from "@/components/development/development-execution";
@@ -23,7 +24,7 @@ const sections: Record<DevelopmentSection, string> = {
   partial_splitting: "Partial splitting",
 };
 const selectClass =
-  "w-full rounded-lg border border-input bg-background px-2 py-2 text-sm focus-visible:outline-2 focus-visible:outline-ring";
+  "w-full min-w-0 rounded-lg border border-input bg-background px-2 py-2 text-sm font-normal focus-visible:outline-2 focus-visible:outline-ring";
 
 /** Convert a bounded file to the API's base64 representation. */
 async function fileContent(file: File): Promise<string> {
@@ -269,9 +270,9 @@ export function DevelopmentSetup() {
   }
 
   return (
-    <div className="space-y-6 text-sm">
+    <div className="min-w-0 space-y-8 text-sm leading-6 [overflow-wrap:anywhere]">
       <form
-        className="grid items-end gap-3 border-b border-border pb-6 sm:grid-cols-[1fr_1fr_auto]"
+        className="grid min-w-0 items-end gap-4 border-b border-border pb-8 sm:grid-cols-2"
         onSubmit={(event) => {
           event.preventDefault();
           void perform("Creating experiment…", async (signal) => {
@@ -290,9 +291,9 @@ export function DevelopmentSetup() {
           });
         }}
       >
-        <label className="space-y-2">
+        <label className={styles.label}>
           New experiment name
-          <Input
+          <Input className="text-sm font-normal"
             aria-describedby="create-reason"
             value={newName}
             onChange={(event) => setNewName(event.target.value)}
@@ -301,7 +302,7 @@ export function DevelopmentSetup() {
             disabled={busy || dirty}
           />
         </label>
-        <label className="space-y-2">
+        <label className={styles.label}>
           Workspace for this experiment
           <select
             className={selectClass}
@@ -318,11 +319,13 @@ export function DevelopmentSetup() {
             ))}
           </select>
         </label>
+        <div className="flex min-w-0 flex-wrap items-center gap-3 sm:col-span-2">
         <p id="create-reason">{busy ? "Wait for the current operation." : dirty ? "Save the edited name before creating another experiment." : !newName.trim() ? "Enter a name to create an experiment." : "Ready to create an experiment."}</p>
-        <Button type="submit" aria-describedby="create-reason" disabled={busy || dirty || !newName.trim()}>
+        <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1" type="submit" aria-describedby="create-reason" disabled={busy || dirty || !newName.trim()}>
           Create experiment
         </Button>
-        <p id="workspace-help" className="text-muted-foreground sm:col-span-3">
+        </div>
+        <p id="workspace-help" className={`${styles.explanation} sm:col-span-2`}>
           Choose a workspace before creating the experiment. Each experiment stays bound to that one workspace.
           Private uploads only exposes no existing workspace documents.
         </p>
@@ -349,7 +352,7 @@ export function DevelopmentSetup() {
               <span>
                 Your experiment is saved. Workspace documents could not be loaded. Refresh the choices or use Upload files; your edits will be kept.{" "}
               </span>
-              <Button
+              <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1"
                 variant="outline"
                 aria-describedby="retry-status"
                 disabled={busy}
@@ -365,7 +368,7 @@ export function DevelopmentSetup() {
             </>
           )}
           {!draft && (
-            <Button
+            <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1"
               variant="outline"
               aria-describedby="retry-status"
               disabled={busy}
@@ -376,17 +379,17 @@ export function DevelopmentSetup() {
           )}
         </div>
       )}
-      <div className="grid gap-6 md:grid-cols-[220px_minmax(0,1fr)]">
-        <section aria-label="Experiments">
-          <h2 className="mb-3 font-semibold">Experiments</h2>
+      <div className="grid min-w-0 gap-8 md:grid-cols-[220px_minmax(0,1fr)]">
+        <section aria-label="Experiments" className="min-w-0">
+          <h2 className={`${styles.subsection} mb-3`}>Experiments</h2>
           {!experiments.length && (
-            <p className="text-muted-foreground">No drafts yet.</p>
+            <p className={styles.explanation}>No drafts yet.</p>
           )}
           <ul className="max-h-64 space-y-2 overflow-y-auto pr-1 md:max-h-[60vh]">
             {experiments.map((item) => (
               <li key={item.id}>
                 <button
-                  className="w-full break-words rounded-lg border border-border px-3 py-2 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
+                  className="w-full [overflow-wrap:anywhere] rounded-lg border border-border px-3 py-2 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
                   aria-label={`Open ${item.name}`}
                   aria-current={draft?.id === item.id ? "true" : undefined}
                   aria-describedby="create-reason"
@@ -400,12 +403,12 @@ export function DevelopmentSetup() {
           </ul>
         </section>
         {draft && (
-          <div className="min-w-0 space-y-6" key={`${draft.id}:${openVersion}`}>
-            <section className="space-y-3" aria-label="Draft details">
-              <h2 className="text-lg font-semibold break-words">{draft.name}</h2>
-              <label className="block space-y-2">
+          <div className="min-w-0 space-y-8" key={`${draft.id}:${openVersion}`}>
+            <section className="min-w-0 space-y-4" aria-label="Draft details">
+              <h2 className={styles.title}>{draft.name}</h2>
+              <label className={styles.label}>
                 Experiment name
-                <Input
+                <Input className="text-sm font-normal"
                   aria-describedby="save-name-reason"
                   value={name}
                   maxLength={120}
@@ -415,7 +418,7 @@ export function DevelopmentSetup() {
               </label>
               <div className="flex flex-wrap items-center gap-2">
                 <p id="save-name-reason">{busy ? "Wait for the current operation." : stale ? "Reload the saved draft before saving." : !name.trim() ? "Enter an experiment name." : !dirty ? "No name changes to save." : "Ready to save the name."}</p>
-                <Button
+                <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1"
                   aria-describedby="save-name-reason"
                   disabled={busy || stale || !name.trim() || !dirty}
                   onClick={() =>
@@ -434,7 +437,7 @@ export function DevelopmentSetup() {
                 >
                   Save name
                 </Button>
-                <Button
+                <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1"
                   variant="outline"
                   aria-describedby="save-name-reason"
                   disabled={busy}
@@ -457,9 +460,9 @@ export function DevelopmentSetup() {
                 </Button>
 
               </div>
-              <details><summary className="cursor-pointer font-medium">Technical draft details</summary>
-              <p className="mt-2 text-muted-foreground break-all">Draft ID: {draft.id} · Revision {draft.revision}</p>
-              <p className="text-muted-foreground">
+              <details><summary className={`cursor-pointer ${styles.subsection}`}>Technical draft details</summary>
+              <p className={`${styles.metadata} mt-3`}>Draft ID: {draft.id} · Revision {draft.revision}</p>
+              <p className={styles.explanation}>
                 Workspace:{" "}
                 {workspaces.find(
                   (item) => item.id === draft.source_workspace_id,
@@ -474,32 +477,32 @@ export function DevelopmentSetup() {
                     className={`w-full rounded-md border px-3 py-3 text-left focus-visible:outline-2 focus-visible:outline-ring ${step === item.id ? "border-primary bg-muted" : "border-border hover:bg-muted"}`}
                     onClick={() => navigate(item.id)}>
                     <span className="block font-medium">{index + 1}. {item.label}</span>
-                    <span className="mt-1 block text-xs text-muted-foreground">{step === item.id ? "Current · " : ""}{guidance.states[item.id]}</span>
+                    <span className={`${styles.metadata} mt-2 block`}>{step === item.id ? "Current · " : ""}{guidance.states[item.id]}</span>
                   </button>
                 </li>)}
               </ol>
             </nav>
             <div className="space-y-2 border-b border-border pb-4" aria-label="Next action">
               <p role="status">{guidance.action}</p>
-              {step !== guidance.step && <Button variant="outline" onClick={() => { navigate(guidance.step); workflowButtons.current[guidance.step]?.focus(); }}>Go to {workflowSteps.find(item => item.id === guidance.step)?.label}</Button>}
+              {step !== guidance.step && <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1" variant="outline" onClick={() => { navigate(guidance.step); workflowButtons.current[guidance.step]?.focus(); }}>Go to {workflowSteps.find(item => item.id === guidance.step)?.label}</Button>}
             </div>
-            <section hidden={step !== "documents"} aria-labelledby="documents-heading" className="space-y-5">
-              <h3 id="documents-heading" className="text-lg font-semibold">Documents</h3>
-            <p id="document-lock">{busy ? "Wait for the current operation." : stale ? "Reload the saved draft before changing documents." : "Document actions are available."}</p>
+            <section hidden={step !== "documents"} aria-labelledby="documents-heading" className="min-w-0 space-y-6">
+              <div className="space-y-3"><h3 id="documents-heading" className={styles.title}>Documents</h3>
+            <p id="document-lock">{busy ? "Wait for the current operation." : stale ? "Reload the saved draft before changing documents." : "Document actions are available."}</p></div>
             <fieldset
               aria-describedby="document-lock"
               disabled={busy || stale}
-              className="space-y-3 border-t border-border pt-5"
+              className="min-w-0 space-y-6 border-t border-border pt-3"
             >
-              <legend className="font-semibold">Experiment documents</legend>
-              <p className="text-muted-foreground">
+              <legend className={styles.subsection}>Experiment documents</legend>
+              <p className={styles.explanation}>
                 Each saved document is a fixed copy for reproducible tests. Changes to the original do not update this copy, and the original stays unchanged.
               </p>
               {draft.source_workspace_id && (
-                <div className="space-y-2">
-                  <h4 className="font-medium">Workspace documents</h4>
-                  <p className="text-muted-foreground">Choose a document from {workspaces.find(item => item.id === draft.source_workspace_id)?.name ?? "this experiment’s workspace"}. A readable workspace parse and retained original are required.</p>
-                  <label className="block space-y-2">
+                <div className="min-w-0 space-y-3">
+                  <h4 className={styles.subsection}>Workspace documents</h4>
+                  <p className={styles.explanation}>Choose a document from {workspaces.find(item => item.id === draft.source_workspace_id)?.name ?? "this experiment’s workspace"}. A readable workspace parse and retained original are required.</p>
+                  <label className={styles.label}>
                     Workspace document
                     <select
                       className={selectClass}
@@ -514,9 +517,9 @@ export function DevelopmentSetup() {
                       ))}
                     </select>
                   </label>
-                  {!sourceReadFailed && !sources.length && <p className="text-muted-foreground">No documents in this workspace. Use Upload files, or add a document in the workspace and refresh these choices.</p>}
+                  {!sourceReadFailed && !sources.length && <p className={styles.explanation}>No documents in this workspace. Use Upload files, or add a document in the workspace and refresh these choices.</p>}
                   <p id="source-choice-reason">{sourceReadFailed ? "Refresh workspace documents before adding a copy." : busy ? "Wait for the current operation." : stale ? "Refresh the experiment before adding a copy." : sourceId ? "Workspace document selected." : "Select a workspace document before adding a copy."}</p>
-                  <Button
+                  <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1"
                     variant="outline"
                     aria-describedby="source-choice-reason"
                     disabled={!sourceId || busy || stale || sourceReadFailed}
@@ -538,19 +541,20 @@ export function DevelopmentSetup() {
                   >
                     Add a copy to this experiment
                   </Button>
-                  {!sourceReadFailed && <Button variant="outline" aria-describedby="document-lock" disabled={busy} onClick={() => void perform("Refreshing workspace documents…", async (signal) => {
+                  {!sourceReadFailed && <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1" variant="outline" aria-describedby="document-lock" disabled={busy} onClick={() => void perform("Refreshing workspace documents…", async (signal) => {
                     await loadSources(draft.id, signal);
                     setMessage("Workspace documents refreshed. Your edits have been kept.");
                   })}>Refresh workspace documents</Button>}
                 </div>
               )}
-              {!draft.source_workspace_id && <p className="text-muted-foreground">This experiment uses private uploads only and cannot access existing workspace documents. Use Upload files below, or create a new experiment bound to the workspace you need.</p>}
+              {!draft.source_workspace_id && <p className={styles.explanation}>This experiment uses private uploads only and cannot access existing workspace documents. Use Upload files below, or create a new experiment bound to the workspace you need.</p>}
               <DevelopmentDemoDocuments key={draft.id} draft={draft} perform={perform} accept={accept} />
-              <h4 className="font-medium">Upload files</h4>
-              <label className="block space-y-2">
+              <div role="group" aria-labelledby="upload-heading" className="min-w-0 space-y-3">
+              <h4 id="upload-heading" className={styles.subsection}>Upload files</h4>
+              <label className={styles.label}>
                 File to add to this experiment
                 <input
-                  className="block w-full text-sm"
+                  className="block w-full min-w-0 text-sm font-normal"
                   type="file"
                   accept={UPLOAD_ACCEPT}
                   onChange={(event) =>
@@ -558,12 +562,12 @@ export function DevelopmentSetup() {
                   }
                 />
               </label>
-              <p className="text-muted-foreground">
+              <p className={styles.explanation}>
                 PDF, DOCX, PPTX, XLSX, TXT or Markdown; maximum 3 MiB. Uploads
                 are parsed before saving.
               </p>
               <p id="source-file-reason">{sourceFile ? "Source file selected." : "Choose a source file to upload."}</p>
-              <Button
+              <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1"
                 variant="outline"
                 aria-describedby="source-file-reason"
                 disabled={!sourceFile || busy || stale}
@@ -571,22 +575,23 @@ export function DevelopmentSetup() {
               >
                 Upload experiment document
               </Button>
+              </div>
             </fieldset>
-            <details><summary className="cursor-pointer font-medium">Optional evaluation references</summary>
+            <details><summary className={`cursor-pointer ${styles.subsection}`}>Optional evaluation references</summary>
             <fieldset
               aria-describedby="document-lock"
               disabled={busy || stale}
-              className="space-y-3 border-t border-border pt-5"
+              className="min-w-0 space-y-6 border-t border-border pt-3"
             >
-              <legend className="font-semibold">
+              <legend className={styles.subsection}>
                 Optional evaluation references
               </legend>
-              <p className="text-muted-foreground">
+              <p className={styles.explanation}>
                 Optional gold standards for evaluation only; never used as generation documents. AI-parsed PDFs
                 are provisional, not human approval. Missing references do not
                 block generation.
               </p>
-              <label className="block space-y-2">
+              <label className={styles.label}>
                 Reference section
                 <select
                   className={selectClass}
@@ -603,9 +608,9 @@ export function DevelopmentSetup() {
                 </select>
               </label>
               <fieldset className="space-y-2">
-                <legend className="mb-2">Associate experiment documents</legend>
+                <legend className={`${styles.subsection} mb-3`}>Associate experiment documents</legend>
                 {!draft.documents.some((item) => item.role === "source") && (
-                  <p className="text-muted-foreground">
+                  <p className={styles.explanation}>
                     Add an experiment document before uploading references.
                   </p>
                 )}
@@ -614,7 +619,7 @@ export function DevelopmentSetup() {
                   .map((item) => (
                     <label
                       key={item.id}
-                      className="flex items-start gap-2 break-all"
+                      className="flex min-w-0 items-start gap-2 text-sm font-medium [overflow-wrap:anywhere]"
                     >
                       <input
                         type="checkbox"
@@ -630,22 +635,22 @@ export function DevelopmentSetup() {
                       />
                       <span>
                         {item.filename}
-                        <span className="block text-xs text-muted-foreground">Saved experiment document</span>
+                        <span className={`${styles.metadata} block`}>Saved experiment document</span>
                       </span>
                     </label>
                   ))}
               </fieldset>
-              <label className="block space-y-2">
+              <label className={styles.label}>
                 Reference PDF
                 <input
-                  className="block w-full"
+                  className="block w-full min-w-0 font-normal"
                   type="file"
                   accept=".pdf"
                   onChange={(event) => setPdf(event.target.files?.[0] ?? null)}
                 />
               </label>
               <p id="pdf-reason">{!pdf ? "Choose a reference PDF. " : ""}{!associations.length ? "Associate at least one experiment document." : ""}</p>
-              <Button
+              <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1"
                 variant="outline"
                 aria-describedby="pdf-reason"
                 disabled={!pdf || !associations.length || busy || stale}
@@ -653,10 +658,10 @@ export function DevelopmentSetup() {
               >
                 Upload reference PDF
               </Button>
-              <label className="block space-y-2">
+              <label className={styles.label}>
                 Structured reference JSON
                 <input
-                  className="block w-full"
+                  className="block w-full min-w-0 font-normal"
                   type="file"
                   accept=".json"
                   onChange={(event) =>
@@ -664,12 +669,12 @@ export function DevelopmentSetup() {
                   }
                 />
               </label>
-              <p className="text-muted-foreground">
+              <p className={styles.explanation}>
                 Maximum 3 MiB each. JSON version 1 must match the selected
                 section and experiment document IDs.
               </p>
               <p id="structured-reason">{!structured ? "Choose a structured reference file. " : ""}{!associations.length ? "Associate at least one experiment document." : ""}</p>
-              <Button
+              <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1"
                 variant="outline"
                 aria-describedby="structured-reason"
                 disabled={!structured || !associations.length || busy || stale}
@@ -681,24 +686,24 @@ export function DevelopmentSetup() {
             </details>
             <section
               aria-label="Saved documents"
-              className="border-t border-border pt-5"
+              className="min-w-0 border-t border-border pt-6"
             >
-              <h4 className="mb-3 font-semibold">Saved documents</h4>
+              <h4 className={`${styles.subsection} mb-3`}>Saved documents</h4>
               {!draft.documents.length && (
-                <p className="text-muted-foreground">No documents saved.</p>
+                <p className={styles.explanation}>No documents saved.</p>
               )}
               <ul className="divide-y divide-border">
                 {draft.documents.map((item) => (
-                  <li key={item.id} className="py-3 break-words">
+                  <li key={item.id} className="space-y-2 py-4 [overflow-wrap:anywhere]">
                     <p className="font-medium">{item.filename}</p>
-                    <p className="text-muted-foreground">
+                    <p className={styles.explanation}>
                       {item.role === "source"
                         ? "Ready for generation"
                         : `Evaluator-only · ${item.section ? sections[item.section] : "No section"} · ${item.review_status} · ${item.compatibility}`}
                     </p>
                     <details>
-                      <summary className="cursor-pointer">Document details</summary>
-                      <dl className="mt-2 space-y-1 text-xs text-muted-foreground break-all">
+                      <summary className="cursor-pointer [overflow-wrap:anywhere]">Document details</summary>
+                      <dl className={`${styles.metadata} mt-3 space-y-2`}>
                         <div><dt className="inline font-medium">Origin: </dt><dd className="inline">{item.origin === "workspace" ? "Workspace document" : item.demo ? "Private demo file" : "Private upload"}</dd></div>
                         <div><dt className="inline font-medium">Saved: </dt><dd className="inline">{item.created_at}</dd></div>
                         <div><dt className="inline font-medium">Document ID: </dt><dd className="inline"><code aria-label="Experiment document ID">{item.id}</code></dd></div>
@@ -708,7 +713,7 @@ export function DevelopmentSetup() {
                         {item.source_file_id && <div><dt className="inline font-medium">Workspace file ID: </dt><dd className="inline">{item.source_file_id}</dd></div>}
                         {item.role === "reference" && <div><dt className="inline font-medium">Associated document IDs: </dt><dd className="inline">{item.source_document_ids.join(", ")}</dd></div>}
                       </dl>
-                      {item.role === "source" && <p className="mt-2 text-muted-foreground">Use the document ID when preparing a structured reference JSON file.</p>}
+                      {item.role === "source" && <p className={`${styles.explanation} mt-3`}>Use the document ID when preparing a structured reference JSON file.</p>}
                     </details>
                   </li>
                 ))}
