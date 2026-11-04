@@ -1,4 +1,4 @@
-import { developmentStep } from "../support/development-workflow";
+import { developmentStep, developmentDetails } from "../support/development-workflow";
 /** Spending controls use scripted owner APIs and never contact a provider. */
 import { test, expect, type Page } from '@playwright/test';
 
@@ -52,7 +52,7 @@ test('shows uncertain preview, separate usage, explicit spending actions and pre
   await expect(page.getByText('Estimated total: unknown', { exact: true })).toBeVisible();
   await developmentStep(page, "Run");
   await page.getByText('Estimate categories', { exact: true }).click();
-  await expect(page.getByText('proposer: 1–unknown calls · unknown · Dynamic prompts', { exact: true })).toBeVisible();
+  await expect(page.locator('summary').filter({ hasText: /^Estimate categories$/ }).locator('..').getByText('proposer: 1–unknown calls · unknown · Dynamic prompts', { exact: true })).toBeVisible();
   await developmentStep(page, "Run");
   await expect(page.getByText('Fetched preview has unknown pricing.', { exact: true })).toBeVisible();
   await developmentStep(page, "Results");
@@ -83,6 +83,7 @@ test('rejects invalid reported spend and appends corrections without allocating 
   const { actions } = await arrange(page);
   await developmentStep(page, "Results");
   const costs = page.getByRole('region', { name: 'Execution spending' });
+  await developmentDetails(page, 'Report provider total');
   await costs.getByLabel('Reported total amount').fill('-1');
   await costs.getByRole('button', { name: 'Save reported total' }).click();
   await expect(costs.getByRole('alert')).toContainText('finite nonnegative');

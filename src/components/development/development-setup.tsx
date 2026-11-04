@@ -56,6 +56,15 @@ export function DevelopmentSetup() {
   const [draft, setDraft] = useState<Experiment | null>(null);
   const [sources, setSources] = useState<Source[]>([]);
   const [name, setName] = useState("");
+  const [newOpen, setNewOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const newNameInput = useRef<HTMLInputElement>(null);
+  const renameInput = useRef<HTMLInputElement>(null);
+  const newSummary = useRef<HTMLElement>(null);
+  const renameButton = useRef<HTMLButtonElement>(null);
+  const restoreRenameFocus = useRef(false);
+  useEffect(() => { if (newOpen) newNameInput.current?.focus(); }, [newOpen]);
+  useEffect(() => { if (renameOpen) renameInput.current?.focus(); }, [renameOpen]);
   const [newName, setNewName] = useState("");
   const [workspace, setWorkspace] = useState("");
   const [sourceId, setSourceId] = useState("");
@@ -72,6 +81,12 @@ export function DevelopmentSetup() {
   const lock = useRef(true);
   const controller = useRef<AbortController | null>(null);
   const dirty = !!draft && name !== draft.name;
+  useEffect(() => {
+    if (!busy && restoreRenameFocus.current) {
+      restoreRenameFocus.current = false;
+      renameButton.current?.focus();
+    }
+  }, [busy]);
 
   /** Serialize requests and abort all state updates when the page unmounts. */
   async function perform(
@@ -193,6 +208,7 @@ export function DevelopmentSetup() {
 
   /** Clear selections owned by the previous draft, including native-file backing state. */
   function resetDraftSelections() {
+    setRenameOpen(false);
     setOpenVersion(current => current + 1);
     setStep("documents");
     setWorkflow({ history: "loading", latestStatus: null, savedSettings: false, deliveryAvailable: false });
@@ -263,6 +279,13 @@ export function DevelopmentSetup() {
     });
   }
 
+  const createReason = busy ? "Wait for the current operation." : dirty ? "Save the edited name before creating another experiment." : !newName.trim() ? "Enter a name to create an experiment." : "";
+  const experimentLock = busy ? "Wait for the current operation." : dirty ? "Save the edited name before opening another experiment." : "";
+  const saveNameReason = busy ? "Wait for the current operation." : stale ? "Reload the saved draft before saving." : !name.trim() ? "Enter an experiment name." : "";
+  const documentLock = busy ? "Wait for the current operation." : stale ? "Reload the saved draft before changing documents." : "";
+  const sourceChoiceReason = sourceReadFailed ? "Refresh workspace documents before adding a copy." : busy ? "Wait for the current operation." : stale ? "Refresh the experiment before adding a copy." : !sourceId ? "Select a workspace document before adding a copy." : "";
+  const pdfReason = `${!pdf ? "Choose a reference PDF. " : ""}${!associations.length ? "Associate at least one experiment document." : ""}`;
+  const structuredReason = `${!structured ? "Choose a structured reference file. " : ""}${!associations.length ? "Associate at least one experiment document." : ""}`;
   const guidance = developmentWorkflow(!!draft?.documents.some(item => item.role === "source"), workflow);
   function navigate(next: WorkflowStep) {
     chooseInitialStep.current = false;
@@ -271,6 +294,13 @@ export function DevelopmentSetup() {
 
   return (
     <div className="min-w-0 space-y-8 text-sm leading-6 [overflow-wrap:anywhere]">
+      <details open={newOpen || !experiments.length}>
+        <summary ref={newSummary} className={`cursor-pointer ${styles.subsection}`} aria-disabled={busy || dirty} onClick={(event) => {
+          event.preventDefault();
+          if (busy || (dirty && !newOpen) || !experiments.length) return;
+          setNewOpen(current => !current);
+          if (newOpen) newSummary.current?.focus();
+        }}>New experiment</summary>
       <form
         className="grid min-w-0 items-end gap-4 border-b border-border pb-8 sm:grid-cols-2"
         onSubmit={(event) => {
@@ -285,6 +315,8 @@ export function DevelopmentSetup() {
             accept(result.experiment);
             setName(result.experiment.name);
             setNewName("");
+            setNewOpen(false);
+            newSummary.current?.focus();
             resetDraftSelections();
             await loadSources(result.experiment.id, signal);
             setMessage("Draft created.");
@@ -293,8 +325,8 @@ export function DevelopmentSetup() {
       >
         <label className={styles.label}>
           New experiment name
-          <Input className="text-sm font-normal"
-            aria-describedby="create-reason"
+          <Input ref={newNameInput} className="text-sm font-normal"
+            aria-describedby={createReason ? "create-reason" : undefined}
             value={newName}
             onChange={(event) => setNewName(event.target.value)}
             required
@@ -306,7 +338,7 @@ export function DevelopmentSetup() {
           Workspace for this experiment
           <select
             className={selectClass}
-            aria-describedby="workspace-help create-reason"
+            aria-describedby={`workspace-help${createReason ? " create-reason" : ""}`}
             value={workspace}
             onChange={(event) => setWorkspace(event.target.value)}
             disabled={busy || dirty}
@@ -320,8 +352,8 @@ export function DevelopmentSetup() {
           </select>
         </label>
         <div className="flex min-w-0 flex-wrap items-center gap-3 sm:col-span-2">
-        <p id="create-reason">{busy ? "Wait for the current operation." : dirty ? "Save the edited name before creating another experiment." : !newName.trim() ? "Enter a name to create an experiment." : "Ready to create an experiment."}</p>
-        <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1" type="submit" aria-describedby="create-reason" disabled={busy || dirty || !newName.trim()}>
+        {createReason && <p id="create-reason">{createReason}</p>}
+        <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1" type="submit" aria-describedby={createReason ? "create-reason" : undefined} disabled={busy || dirty || !newName.trim()}>
           Create experiment
         </Button>
         </div>
@@ -330,16 +362,11 @@ export function DevelopmentSetup() {
           Private uploads only exposes no existing workspace documents.
         </p>
       </form>
-      <p
-        role="status"
-        aria-live="polite"
-        className="min-h-5 text-muted-foreground"
-      >
-        {message ||
-          (dirty
-            ? "Unsaved name. Save it before opening another experiment."
-            : "Choose or create an experiment.")}
-      </p>
+      </details>
+      {(message || dirty || !draft) && <p role="status" aria-live="polite" className="text-muted-foreground">
+        {message || (dirty ? "Unsaved name. Save it before opening another experiment." : "Choose or create an experiment.")}
+      </p>}
+      {experimentLock && <p id="experiment-lock" className="sr-only">{experimentLock}</p>}
       {(error || (draft && sourceReadFailed)) && (
         <div
           role="alert"
@@ -392,7 +419,7 @@ export function DevelopmentSetup() {
                   className="w-full [overflow-wrap:anywhere] rounded-lg border border-border px-3 py-2 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
                   aria-label={`Open ${item.name}`}
                   aria-current={draft?.id === item.id ? "true" : undefined}
-                  aria-describedby="create-reason"
+                  aria-describedby={experimentLock ? "experiment-lock" : undefined}
                   disabled={busy || dirty}
                   onClick={() => void open(item)}
                 >
@@ -405,11 +432,15 @@ export function DevelopmentSetup() {
         {draft && (
           <div className="min-w-0 space-y-8" key={`${draft.id}:${openVersion}`}>
             <section className="min-w-0 space-y-4" aria-label="Draft details">
-              <h2 className={styles.title}>{draft.name}</h2>
+              <div className="flex min-w-0 flex-wrap items-center gap-3">
+                <h2 className={styles.title}>{draft.name}</h2>
+                <Button ref={renameButton} className="h-auto min-h-8 max-w-full whitespace-normal py-1" variant="outline" aria-expanded={renameOpen} aria-controls="rename-experiment" disabled={busy} onClick={() => setRenameOpen(true)}>Rename</Button>
+              </div>
+              <div id="rename-experiment" hidden={!renameOpen} className="space-y-4">
               <label className={styles.label}>
                 Experiment name
-                <Input className="text-sm font-normal"
-                  aria-describedby="save-name-reason"
+                <Input ref={renameInput} className="text-sm font-normal"
+                  aria-describedby={saveNameReason ? "save-name-reason" : undefined}
                   value={name}
                   maxLength={120}
                   onChange={(event) => setName(event.target.value)}
@@ -417,9 +448,9 @@ export function DevelopmentSetup() {
                 />
               </label>
               <div className="flex flex-wrap items-center gap-2">
-                <p id="save-name-reason">{busy ? "Wait for the current operation." : stale ? "Reload the saved draft before saving." : !name.trim() ? "Enter an experiment name." : !dirty ? "No name changes to save." : "Ready to save the name."}</p>
+                {saveNameReason && <p id="save-name-reason">{saveNameReason}</p>}
                 <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1"
-                  aria-describedby="save-name-reason"
+                  aria-describedby={saveNameReason ? "save-name-reason" : undefined}
                   disabled={busy || stale || !name.trim() || !dirty}
                   onClick={() =>
                     void perform("Saving…", async (signal) => {
@@ -432,14 +463,24 @@ export function DevelopmentSetup() {
                       accept(result.experiment);
                       setName(result.experiment.name);
                       setMessage("Saved.");
+                      setRenameOpen(false);
+                      restoreRenameFocus.current = true;
                     })
                   }
                 >
                   Save name
                 </Button>
+                <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1" variant="outline" disabled={busy} onClick={() => {
+                  setName(draft.name);
+                  setRenameOpen(false);
+                  renameButton.current?.focus();
+                }}>Cancel rename</Button>
+              </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
                 <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1"
                   variant="outline"
-                  aria-describedby="save-name-reason"
+                  aria-describedby={saveNameReason ? "save-name-reason" : undefined}
                   disabled={busy}
                   onClick={() =>
                     void perform("Reloading…", async (signal) => {
@@ -488,15 +529,15 @@ export function DevelopmentSetup() {
             </div>
             <section hidden={step !== "documents"} aria-labelledby="documents-heading" className="min-w-0 space-y-6">
               <div className="space-y-3"><h3 id="documents-heading" className={styles.title}>Documents</h3>
-            <p id="document-lock">{busy ? "Wait for the current operation." : stale ? "Reload the saved draft before changing documents." : "Document actions are available."}</p></div>
+            {documentLock && <p id="document-lock">{documentLock}</p>}</div>
             <fieldset
-              aria-describedby="document-lock"
+              aria-describedby={documentLock ? "document-lock" : undefined}
               disabled={busy || stale}
               className="min-w-0 space-y-6 border-t border-border pt-3"
             >
               <legend className={styles.subsection}>Experiment documents</legend>
               <p className={styles.explanation}>
-                Each saved document is a fixed copy for reproducible tests. Changes to the original do not update this copy, and the original stays unchanged.
+                Documents are fixed copies: later edits to the original do not update them. The original stays unchanged.
               </p>
               {draft.source_workspace_id && (
                 <div className="min-w-0 space-y-3">
@@ -518,10 +559,10 @@ export function DevelopmentSetup() {
                     </select>
                   </label>
                   {!sourceReadFailed && !sources.length && <p className={styles.explanation}>No documents in this workspace. Use Upload files, or add a document in the workspace and refresh these choices.</p>}
-                  <p id="source-choice-reason">{sourceReadFailed ? "Refresh workspace documents before adding a copy." : busy ? "Wait for the current operation." : stale ? "Refresh the experiment before adding a copy." : sourceId ? "Workspace document selected." : "Select a workspace document before adding a copy."}</p>
+                  {sourceChoiceReason && <p id="source-choice-reason">{sourceChoiceReason}</p>}
                   <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1"
                     variant="outline"
-                    aria-describedby="source-choice-reason"
+                    aria-describedby={sourceChoiceReason ? "source-choice-reason" : undefined}
                     disabled={!sourceId || busy || stale || sourceReadFailed}
                     onClick={() =>
                       void perform("Preparing document: copying saved workspace content…", async (signal) => {
@@ -541,7 +582,7 @@ export function DevelopmentSetup() {
                   >
                     Add a copy to this experiment
                   </Button>
-                  {!sourceReadFailed && <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1" variant="outline" aria-describedby="document-lock" disabled={busy} onClick={() => void perform("Refreshing workspace documents…", async (signal) => {
+                  {!sourceReadFailed && <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1" variant="outline" aria-describedby={documentLock ? "document-lock" : undefined} disabled={busy} onClick={() => void perform("Refreshing workspace documents…", async (signal) => {
                     await loadSources(draft.id, signal);
                     setMessage("Workspace documents refreshed. Your edits have been kept.");
                   })}>Refresh workspace documents</Button>}
@@ -566,10 +607,10 @@ export function DevelopmentSetup() {
                 PDF, DOCX, PPTX, XLSX, TXT or Markdown; maximum 3 MiB. Uploads
                 are parsed before saving.
               </p>
-              <p id="source-file-reason">{sourceFile ? "Source file selected." : "Choose a source file to upload."}</p>
+              {!sourceFile && <p id="source-file-reason">Choose a source file to upload.</p>}
               <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1"
                 variant="outline"
-                aria-describedby="source-file-reason"
+                aria-describedby={sourceFile ? undefined : "source-file-reason"}
                 disabled={!sourceFile || busy || stale}
                 onClick={() => void upload(sourceFile)}
               >
@@ -579,7 +620,7 @@ export function DevelopmentSetup() {
             </fieldset>
             <details><summary className={`cursor-pointer ${styles.subsection}`}>Optional evaluation references</summary>
             <fieldset
-              aria-describedby="document-lock"
+              aria-describedby={documentLock ? "document-lock" : undefined}
               disabled={busy || stale}
               className="min-w-0 space-y-6 border-t border-border pt-3"
             >
@@ -587,9 +628,7 @@ export function DevelopmentSetup() {
                 Optional evaluation references
               </legend>
               <p className={styles.explanation}>
-                Optional gold standards for evaluation only; never used as generation documents. AI-parsed PDFs
-                are provisional, not human approval. Missing references do not
-                block generation.
+                References are expected answers for evaluation; generation never uses them. AI-parsed PDFs are provisional, not human approval. Missing references do not block generation.
               </p>
               <label className={styles.label}>
                 Reference section
@@ -649,10 +688,10 @@ export function DevelopmentSetup() {
                   onChange={(event) => setPdf(event.target.files?.[0] ?? null)}
                 />
               </label>
-              <p id="pdf-reason">{!pdf ? "Choose a reference PDF. " : ""}{!associations.length ? "Associate at least one experiment document." : ""}</p>
+              {pdfReason && <p id="pdf-reason">{pdfReason}</p>}
               <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1"
                 variant="outline"
-                aria-describedby="pdf-reason"
+                aria-describedby={pdfReason ? "pdf-reason" : undefined}
                 disabled={!pdf || !associations.length || busy || stale}
                 onClick={() => void upload(pdf, "pdf")}
               >
@@ -673,10 +712,10 @@ export function DevelopmentSetup() {
                 Maximum 3 MiB each. JSON version 1 must match the selected
                 section and experiment document IDs.
               </p>
-              <p id="structured-reason">{!structured ? "Choose a structured reference file. " : ""}{!associations.length ? "Associate at least one experiment document." : ""}</p>
+              {structuredReason && <p id="structured-reason">{structuredReason}</p>}
               <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1"
                 variant="outline"
-                aria-describedby="structured-reason"
+                aria-describedby={structuredReason ? "structured-reason" : undefined}
                 disabled={!structured || !associations.length || busy || stale}
                 onClick={() => void upload(structured, "structured")}
               >
@@ -698,7 +737,7 @@ export function DevelopmentSetup() {
                     <p className="font-medium">{item.filename}</p>
                     <p className={styles.explanation}>
                       {item.role === "source"
-                        ? "Ready for generation"
+                        ? "Generation source"
                         : `Evaluator-only · ${item.section ? sections[item.section] : "No section"} · ${item.review_status} · ${item.compatibility}`}
                     </p>
                     <details>

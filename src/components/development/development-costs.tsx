@@ -32,7 +32,7 @@ export function CostPreview({ root, evaluationOnly = false, mode = 'standard' }:
   }
   return <div className="space-y-2">
     <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1" variant="outline" aria-describedby={previewStatusId} disabled={pending} onClick={() => void preview()}>Preview {evaluationOnly ? 'evaluation' : 'generation'} cost</Button>
-    <p id={previewStatusId}>{pending ? "Loading cost preview…" : "Preview uses no provider calls."}</p>
+    <p id={previewStatusId} role={pending ? "status" : undefined}>{pending ? "Loading cost preview…" : "Preview uses no provider calls."}</p>
     {error && <p role="alert" className="text-destructive">{error}</p>}
     {estimate && previewKey === key && <div aria-live="polite" className="space-y-2"><p>Estimated total: {dollars(estimate.total_usd)}</p>{estimate.uncertainty.map(reason => <p key={reason}>{reason}</p>)}<p>One HTTP attempt per raw request. Unknown charges can exceed the allowance.</p><details><summary>Estimate categories</summary>{estimate.categories.map(item => <p key={item.category}>{item.category}: {item.calls_min}–{item.calls_max ?? 'unknown'} calls · {dollars(item.cost_usd)} · {item.reason}</p>)}</details></div>}
   </div>;
@@ -76,14 +76,18 @@ export function DevelopmentCosts({ root, account, onChange, disabled }: { root: 
     <h5 className={styles.subsection}>Execution spending</h5>
     <p aria-live="polite">{account.paused ? `Spending paused: ${account.pause_reason ?? 'Paused by owner.'}` : 'Spending authorized'}</p>
     <p>Allowance: {dollars(account.allowance_usd)}</p><p>Allowance override: {account.override_enabled ? 'enabled' : 'disabled'} · Unknown charges: {account.unknown_acknowledged ? 'acknowledged for this execution' : 'not acknowledged'}</p>
+    <details><summary className="cursor-pointer [overflow-wrap:anywhere]">Spending details</summary>
     <p>Saved estimated total: {dollars(account.estimate.total_usd)}</p>
     {account.estimate.uncertainty.map(reason => <p key={reason}>{reason}</p>)}
+    {account.estimate.categories.map(item => <p key={item.category}>{item.category}: {item.calls_min}–{item.calls_max ?? 'unknown'} calls · {dollars(item.cost_usd)} · {item.reason}</p>)}
+    <p>Unknown active reservations: {account.unknown_active_reservations} · Known reserved: {dollars(account.reserved_usd)}</p>
+    </details>
     <p>Generation known usage: {dollars(account.generation_usage_usd)}</p><p>Evaluation known usage: {dollars(account.evaluation_usage_usd)}</p>
-    <p>Unknown usage calls: {account.unknown_usage_calls} · Unknown active reservations: {account.unknown_active_reservations} · Known reserved: {dollars(account.reserved_usd)}</p>
+    <p>Unknown usage calls: {account.unknown_usage_calls}</p>
     <p className={styles.explanation}>Known usage is a subtotal; unknown charges can exceed the allowance.</p>
     {error && <p role="alert" className="text-destructive">{error}</p>}
-    <p id="spending-lock">{pending ? "Saving spending action…" : disabled ? "Save or refresh the experiment before changing spending." : "Spending actions are available."}</p>
-    <fieldset disabled={pending || disabled} aria-describedby="spending-lock" className="min-w-0 space-y-4"><legend className={styles.subsection}>Spending actions</legend>
+    {(pending || disabled) && <p id="spending-lock" role="status">{pending ? "Saving spending action…" : "Save or refresh the experiment before changing spending."}</p>}
+    <fieldset disabled={pending || disabled} aria-describedby={pending || disabled ? "spending-lock" : undefined} className="min-w-0 space-y-4"><legend className={styles.subsection}>Spending actions</legend>
       <label className={styles.label}>Increase allowance (USD)<Input className="text-sm font-normal" type="number" min="0" step="any" value={increase} onChange={event => setIncrease(event.target.value)} /></label>
       <div className="flex flex-wrap gap-2"><Button className="h-auto min-h-8 max-w-full whitespace-normal py-1" variant="outline" onClick={() => { if (!increase.trim() || !Number.isFinite(Number(increase)) || Number(increase) <= 0) { setError('Enter a finite positive allowance increase.'); return; } void act({ action: 'increase', amount_usd: Number(increase) }); }}>Increase allowance</Button>
       <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1" variant="outline" onClick={() => void act({ action: 'override', enabled: !account.override_enabled })}>{account.override_enabled ? 'Disable' : 'Enable'} allowance override</Button>
@@ -93,12 +97,14 @@ export function DevelopmentCosts({ root, account, onChange, disabled }: { root: 
     </fieldset>
     <p>Owner-reported total: {account.reported_total ? `${account.reported_total.currency} ${account.reported_total.amount}` : 'not reported'}</p>
     <p className={styles.explanation}>Owner reports are not verified provider billing. Execution totals are not allocated to sections.</p>
-    <fieldset disabled={pending || disabled} aria-describedby="spending-lock" className="min-w-0 space-y-4"><legend className={styles.subsection}>Report or correct total after generation and evaluation finish</legend>
+    <details><summary className="cursor-pointer [overflow-wrap:anywhere]" aria-disabled={pending} onClick={event => { if (pending) event.preventDefault(); }}>Report provider total</summary>
+    <fieldset disabled={pending || disabled} aria-describedby={pending || disabled ? "spending-lock" : undefined} className="min-w-0 space-y-4"><legend className={styles.subsection}>Report or correct total after generation and evaluation finish</legend>
       <label className={styles.label}>Reported total amount<Input className="text-sm font-normal" type="number" step="any" value={amount} onChange={event => setAmount(event.target.value)} /></label>
       <label className={styles.label}>Reported currency<Input className="text-sm font-normal" value={currency} onChange={event => setCurrency(event.target.value)} /></label>
       <label className={styles.label}>Correction note<Input className="text-sm font-normal" maxLength={2000} value={note} onChange={event => setNote(event.target.value)} /></label>
       <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1" variant="outline" onClick={report}>Save reported total</Button>
     </fieldset>
+    </details>
     <details><summary className="cursor-pointer [overflow-wrap:anywhere]">Spending action and correction history</summary>{account.events.length ? account.events.map(event => <p key={event.id} className="[overflow-wrap:anywhere]">{event.at} · {event.actor} · {event.action} · {JSON.stringify(event.detail)}</p>) : <p>No owner actions recorded.</p>}</details>
   </section>;
 }

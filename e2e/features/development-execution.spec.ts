@@ -23,6 +23,7 @@ test("owner configures and starts a frozen execution", async ({ page }) => {
     } else await route.fulfill({ json: { executions: [], delivery: { available: true, transport: "scripted", reason: null } } });
   });
   await page.goto("/admin/development");
+  await developmentDetails(page, "New experiment");
   await page.getByLabel("New experiment name").fill(name);
   await page.getByRole("button", { name: "Create experiment" }).click();
   await developmentStep(page, "Documents");
@@ -63,6 +64,7 @@ test("history shows frozen routes, unreviewed outputs and stale prerequisites", 
     } else await route.fulfill({ json: { executions: saved ? [saved] : [], delivery: { available: true, reason: null } } });
   });
   await page.goto("/admin/development");
+  await developmentDetails(page, "New experiment");
   await page.getByLabel("New experiment name").fill(name);
   await page.getByRole("button", { name: "Create experiment" }).click();
   await developmentStep(page, "Documents");
@@ -110,6 +112,7 @@ test("polls only the selected active execution and shows terminal errors", async
   await page.route("**/api/admin/development/*/executions*", async (request) => { lists++; await request.fulfill({ json: { executions: [running], delivery: { available: true, reason: null } } }); });
   await page.route("**/api/admin/development/*/executions/active*", async (request) => { details++; await request.fulfill({ json: { execution: finished } }); });
   await page.goto("/admin/development");
+  await developmentDetails(page, "New experiment");
   await page.getByLabel("New experiment name").fill(name);
   await page.getByRole("button", { name: "Create experiment" }).click();
   const execution = page.getByRole("region", { name: "Execution", exact: true });
@@ -149,6 +152,7 @@ test("conflict discovers and polls an execution started elsewhere", async ({ pag
   await page.route("**/api/admin/development/*/executions/external*", async (request) => { detailReads++; await request.fulfill({ json: { execution: finished } }); });
   try {
     await page.goto("/admin/development");
+    await developmentDetails(page, "New experiment");
     await page.getByLabel("New experiment name").fill(name);
     await page.getByRole("button", { name: "Create experiment" }).click();
     await developmentStep(page, "Documents");
@@ -188,14 +192,24 @@ test("shows unreviewed extraction candidates in single pass history", async ({ p
   const standard = { ...base, id: "standard", manifest: { revision: 1, config: { mode: "standard", evaluator: route }, routes: {} }, sections: [{ ...sections[0], result: { ...sections[0].result, output: { accepted: [{ statement: "Standard accepted stage output" }] }, candidates: [{ statement: "Standard unreviewed candidate" }] } }] };
   await page.route("**/api/admin/development/*/executions*", async (request) => { await request.fulfill({ json: { executions: [single, standard], delivery: { available: true, reason: null } } }); });
   await page.goto("/admin/development");
+  await developmentDetails(page, "New experiment");
   await page.getByLabel("New experiment name").fill(name);
   await page.getByRole("button", { name: "Create experiment" }).click();
   const execution = page.getByRole("region", { name: "Execution", exact: true });
+  // React can retain native disclosure state when the saved execution changes.
+  const revealRecord = async (label: string) => {
+    const summary = execution.locator("summary").filter({ hasText: label });
+    const details = summary.locator("..");
+    if (await details.getAttribute("open") === null) await summary.click();
+    await expect(details).toHaveAttribute("open", "");
+  };
   // Act and assert: definition fields expose proposals separately from retained raw output.
   await developmentStep(page, "Results");
   await execution.getByText("View generated output").nth(0).click();
   await developmentStep(page, "Results");
   await execution.getByText("View generated output").nth(1).click();
+  await revealRecord("Comparative evidence");
+  await revealRecord("Observational outcomes study");
   await expect(execution.getByRole("definition").filter({ hasText: /^Comparative effectiveness remains unknown\.$/ })).toBeVisible();
   await expect(execution.getByRole("definition").filter({ hasText: /^Comparative outcomes remain uncertain\.$/ })).toBeVisible();
   await expect(execution.getByRole("definition").filter({ hasText: /^What are patient outcomes\?$/ })).toBeVisible();
@@ -213,6 +227,8 @@ test("shows unreviewed extraction candidates in single pass history", async ({ p
     await developmentStep(page, "Results");
     await standardOutput.getByText("View generated output").click();
   }
+  await revealRecord("Standard unreviewed candidate");
+  await revealRecord("Standard accepted stage output");
   await expect(execution.getByRole("definition").filter({ hasText: /^Standard unreviewed candidate$/ })).toBeVisible();
   await expect(execution.getByRole("definition").filter({ hasText: /^Standard accepted stage output$/ })).toBeVisible();
   await page.reload();
@@ -221,6 +237,8 @@ test("shows unreviewed extraction candidates in single pass history", async ({ p
   await execution.getByText("View generated output").nth(0).click();
   await developmentStep(page, "Results");
   await execution.getByText("View generated output").nth(1).click();
+  await revealRecord("Comparative evidence");
+  await revealRecord("Observational outcomes study");
   await expect(execution.getByRole("definition").filter({ hasText: /^Comparative effectiveness remains unknown\.$/ })).toBeVisible();
   await expect(execution.getByRole("definition").filter({ hasText: /^What are patient outcomes\?$/ })).toBeVisible();
   await expect(execution.getByRole("definition").filter({ hasText: /^Comparative outcomes remain uncertain\.$/ })).toBeVisible();

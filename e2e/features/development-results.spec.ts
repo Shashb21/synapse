@@ -1,4 +1,4 @@
-import { developmentStep } from "../support/development-workflow";
+import { developmentDetails, developmentStep } from "../support/development-workflow";
 /** Saved results and comparison use scripted replies, never paid model calls. */
 import { expect, test, type Page } from '@playwright/test';
 const sectionIds = ['gap_extraction', 'tactic_extraction', 'matching_coverage', 'partial_splitting'];
@@ -37,10 +37,13 @@ test('all four sections preserve evidence, malformed history, explicit configura
     await intercepted.fulfill({ json: { evaluations: [], delivery: { available: true, reason: null } } });
   });
   const { region, posts } = await arrange(page);
+  await developmentStep(page, 'Results');
+  await region.locator('summary').filter({ hasText: /^<script>untrusted\(\)<\/script>$/ }).click();
+  await region.locator('summary').filter({ hasText: /^Evidence study$/ }).click();
   await expect(region.getByText('Missing comparative outcomes', { exact: true })).toBeVisible();
   await expect(region.getByText('Study protocol', { exact: true })).toBeVisible();
-  await expect(region.getByText(/Relevance: inspect/)).toBeVisible();
-  await expect(region.getByText(/Design fit: inspect/)).toBeVisible();
+  await expect(region.getByText(/Relevance: review relationships and rationales/)).toBeVisible();
+  await expect(region.getByText(/Design fit: review dimensions/)).toBeVisible();
   await expect(region.getByText(/Delivered evidence coverage: a relevant/)).toBeVisible();
   await expect(region.locator('summary').filter({ hasText: '<script>untrusted()</script>' })).toBeVisible();
   expect(await page.locator('script').filter({ hasText: 'untrusted()' }).count()).toBe(0);
@@ -138,7 +141,9 @@ for (const status of ['queued', 'running', 'failed']) {
     await expect(region.getByText('Generated output: unreviewed', { exact: true })).toHaveCount(0);
     if (status === 'failed') await expect(region.getByText('Generation provider unavailable')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Optional evaluation', exact: true })).toBeVisible();
-    await expect(page.getByText(/Gold standards are expected answers/)).toBeVisible();
+    await developmentStep(page, "Documents");
+    await developmentDetails(page, "Optional evaluation references");
+    await expect(page.getByText("References are expected answers for evaluation; generation never uses them. AI-parsed PDFs are provisional, not human approval. Missing references do not block generation.", { exact: true })).toBeVisible();
     expect(posts()).toBe(0);
   });
 }
