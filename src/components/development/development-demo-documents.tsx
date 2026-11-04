@@ -1,6 +1,7 @@
 /** Multi-select of bundled demo files; each file is prepared and saved by its own request. */
 "use client";
 
+import { developmentStyles as styles } from "./development-styles";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { Experiment } from "@/modules/development/schema";
@@ -103,25 +104,25 @@ export function DevelopmentDemoDocuments({ draft, perform, accept }: Props) {
   }
 
   return (
-    <div className="space-y-2" aria-labelledby="demo-heading" role="group">
-      <h4 id="demo-heading" className="font-medium">Demo files</h4>
-      <p className="text-muted-foreground">
+    <div className="min-w-0 space-y-3" aria-labelledby="demo-heading" role="group">
+      <h4 id="demo-heading" className={styles.subsection}>Demo files</h4>
+      <p className={styles.explanation}>
         Add the bundled Velmara demo documents as private, fixed copies. Each file is parsed with the configured AI ingestion route, which can incur AI charges. Ingestion must be enabled in /admin/control.
       </p>
       {loadFailed && (
         <div role="alert" className="space-y-1">
           <p>Demo files could not be loaded.</p>
-          <Button variant="outline" onClick={() => setDiscoveryAttempt(attempt => attempt + 1)}>
+          <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1" variant="outline" onClick={() => setDiscoveryAttempt(attempt => attempt + 1)}>
             Retry loading demo files
           </Button>
         </div>
       )}
-      <ul className="space-y-1">
+      <ul className="space-y-3">
         {files.map(file => {
           const added = saved.has(file.id), outcome = outcomes[file.id];
           return (
-            <li key={file.id} className="break-words">
-              <label className="flex items-start gap-2">
+            <li key={file.id} className="[overflow-wrap:anywhere]">
+              <label className="flex min-w-0 items-start gap-2 text-sm font-medium">
                 <input
                   type="checkbox"
                   className="mt-1"
@@ -129,9 +130,9 @@ export function DevelopmentDemoDocuments({ draft, perform, accept }: Props) {
                   disabled={added}
                   onChange={event => setSelected(current => event.target.checked ? [...current, file.id] : current.filter(id => id !== file.id))}
                 />
-                <span>
-                  {file.title} <span className="text-muted-foreground">({file.filename})</span>
-                  {added ? <span className="text-muted-foreground"> · Already added</span> : outcome?.status === "failed" ? <span> · Not added: {outcome.message}</span> : null}
+                <span className="min-w-0">
+                  {file.title} <span className={styles.explanation}>({file.filename})</span>
+                  {added ? <span className={styles.explanation}> · Already added</span> : outcome?.status === "failed" ? <span> · Not added: {outcome.message}</span> : null}
                 </span>
               </label>
             </li>
@@ -141,7 +142,7 @@ export function DevelopmentDemoDocuments({ draft, perform, accept }: Props) {
       <p id="demo-selection-reason" role="status">
         {progress || (pending.length ? `${pending.length} demo ${pending.length === 1 ? "file" : "files"} selected to add.` : "Select demo files to add.")}
       </p>
-      <Button variant="outline" aria-describedby="demo-selection-reason" disabled={!pending.length} onClick={() => void addSelected()}>
+      <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1" variant="outline" aria-describedby="demo-selection-reason" disabled={!pending.length} onClick={() => void addSelected()}>
         Add selected demo files
       </Button>
     </div>

@@ -1,6 +1,7 @@
 /** Execution spending controls are independent of immutable model settings and outputs. */
 "use client";
 
+import { developmentStyles as styles } from "./development-styles";
 import { useId, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,7 +31,7 @@ export function CostPreview({ root, evaluationOnly = false, mode = 'standard' }:
     finally { setPending(false); }
   }
   return <div className="space-y-2">
-    <Button variant="outline" aria-describedby={previewStatusId} disabled={pending} onClick={() => void preview()}>Preview {evaluationOnly ? 'evaluation' : 'generation'} cost</Button>
+    <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1" variant="outline" aria-describedby={previewStatusId} disabled={pending} onClick={() => void preview()}>Preview {evaluationOnly ? 'evaluation' : 'generation'} cost</Button>
     <p id={previewStatusId}>{pending ? "Loading cost preview…" : "Preview uses no provider calls."}</p>
     {error && <p role="alert" className="text-destructive">{error}</p>}
     {estimate && previewKey === key && <div aria-live="polite" className="space-y-2"><p>Estimated total: {dollars(estimate.total_usd)}</p>{estimate.uncertainty.map(reason => <p key={reason}>{reason}</p>)}<p>One HTTP attempt per raw request. Unknown charges can exceed the allowance.</p><details><summary>Estimate categories</summary>{estimate.categories.map(item => <p key={item.category}>{item.category}: {item.calls_min}–{item.calls_max ?? 'unknown'} calls · {dollars(item.cost_usd)} · {item.reason}</p>)}</details></div>}
@@ -39,11 +40,11 @@ export function CostPreview({ root, evaluationOnly = false, mode = 'standard' }:
 
 /** Edit explicit start authorization; unchecked unknown charges remain unauthorized. */
 export function CostStartFields({ value, onChange, evaluation = false }: { value: CostControls; onChange: (value: CostControls) => void; evaluation?: boolean }) {
-  return <fieldset className="space-y-3 border-t border-border pt-3"><legend className="font-medium">{evaluation ? 'Evaluation spending' : 'Generation spending'}</legend>
-    <label className="block space-y-1">{evaluation ? 'Additional evaluation allowance (USD)' : 'Generation allowance (USD)'}<Input type="number" min="0" step="any" value={Number.isNaN(value.allowance_usd) ? '' : value.allowance_usd} onChange={event => onChange({ ...value, allowance_usd: event.target.value === '' ? Number.NaN : Number(event.target.value) })} /></label>
-    {evaluation && <p>This adds to the selected execution’s shared generation and evaluation allowance. An existing pause requires Resume spending.</p>}
-    <label className="flex items-start gap-2"><input type="checkbox" checked={value.unknown_acknowledged} onChange={event => onChange({ ...value, unknown_acknowledged: event.target.checked })} />I acknowledge unknown provider charges for {evaluation ? 'the currently open' : 'this new'} execution, which may exceed its allowance.</label>
-    <p>{evaluation ? "Unknown-cost requests require acknowledgment on this execution’s account; an existing acknowledgment remains valid. Zero additional allowance leaves the current allowance unchanged." : "Without this acknowledgment, requests with unknown cost pause before spending. Zero allowance also pauses spending."}</p>
+  return <fieldset className="space-y-4 border-t border-border pt-3"><legend className={styles.subsection}>{evaluation ? 'Evaluation spending' : 'Generation spending'}</legend>
+    <label className={styles.label}>{evaluation ? 'Additional evaluation allowance (USD)' : 'Generation allowance (USD)'}<Input className="text-sm font-normal" type="number" min="0" step="any" value={Number.isNaN(value.allowance_usd) ? '' : value.allowance_usd} onChange={event => onChange({ ...value, allowance_usd: event.target.value === '' ? Number.NaN : Number(event.target.value) })} /></label>
+    {evaluation && <p className={styles.explanation}>This adds to the selected execution’s shared generation and evaluation allowance. An existing pause requires Resume spending.</p>}
+    <label className="flex min-w-0 items-start gap-2 text-sm font-medium"><input type="checkbox" checked={value.unknown_acknowledged} onChange={event => onChange({ ...value, unknown_acknowledged: event.target.checked })} />I acknowledge unknown provider charges for {evaluation ? 'the currently open' : 'this new'} execution, which may exceed its allowance.</label>
+    <p className={styles.explanation}>{evaluation ? "Unknown-cost requests require acknowledgment on this execution’s account; an existing acknowledgment remains valid. Zero additional allowance leaves the current allowance unchanged." : "Without this acknowledgment, requests with unknown cost pause before spending. Zero allowance also pauses spending."}</p>
   </fieldset>;
 }
 
@@ -71,33 +72,33 @@ export function DevelopmentCosts({ root, account, onChange, disabled }: { root: 
     void act({ action: 'report', amount: Number(amount), currency, note });
   }
   if (!account) return <p>Historical spending data unavailable. Saved outputs remain available.</p>;
-  return <section aria-label="Execution spending" className="space-y-3 border-t border-border pt-3">
-    <h4 className="font-semibold">Execution spending</h4>
+  return <section aria-label="Execution spending" className="space-y-4 border-t border-border pt-6">
+    <h5 className={styles.subsection}>Execution spending</h5>
     <p aria-live="polite">{account.paused ? `Spending paused: ${account.pause_reason ?? 'Paused by owner.'}` : 'Spending authorized'}</p>
     <p>Allowance: {dollars(account.allowance_usd)}</p><p>Allowance override: {account.override_enabled ? 'enabled' : 'disabled'} · Unknown charges: {account.unknown_acknowledged ? 'acknowledged for this execution' : 'not acknowledged'}</p>
     <p>Saved estimated total: {dollars(account.estimate.total_usd)}</p>
     {account.estimate.uncertainty.map(reason => <p key={reason}>{reason}</p>)}
     <p>Generation known usage: {dollars(account.generation_usage_usd)}</p><p>Evaluation known usage: {dollars(account.evaluation_usage_usd)}</p>
     <p>Unknown usage calls: {account.unknown_usage_calls} · Unknown active reservations: {account.unknown_active_reservations} · Known reserved: {dollars(account.reserved_usd)}</p>
-    <p>Known usage is a subtotal; unknown charges can exceed the allowance.</p>
+    <p className={styles.explanation}>Known usage is a subtotal; unknown charges can exceed the allowance.</p>
     {error && <p role="alert" className="text-destructive">{error}</p>}
     <p id="spending-lock">{pending ? "Saving spending action…" : disabled ? "Save or refresh the experiment before changing spending." : "Spending actions are available."}</p>
-    <fieldset disabled={pending || disabled} aria-describedby="spending-lock" className="space-y-3"><legend className="font-medium">Spending actions</legend>
-      <label className="block space-y-1">Increase allowance (USD)<Input type="number" min="0" step="any" value={increase} onChange={event => setIncrease(event.target.value)} /></label>
-      <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => { if (!increase.trim() || !Number.isFinite(Number(increase)) || Number(increase) <= 0) { setError('Enter a finite positive allowance increase.'); return; } void act({ action: 'increase', amount_usd: Number(increase) }); }}>Increase allowance</Button>
-      <Button variant="outline" onClick={() => void act({ action: 'override', enabled: !account.override_enabled })}>{account.override_enabled ? 'Disable' : 'Enable'} allowance override</Button>
-      {!account.unknown_acknowledged && <Button variant="outline" onClick={() => void act({ action: 'acknowledge_unknown' })}>Acknowledge unknown charges for this execution</Button>}
-      <Button onClick={() => void act({ action: account.paused ? 'resume' : 'pause' })}>{account.paused ? 'Resume spending' : 'Pause spending'}</Button></div>
-      <p>Increasing, overriding or acknowledging does not resume spending. Resume explicitly after reviewing the pause. Override removes the allowance check. Uncertain sends cannot be resumed.</p>
+    <fieldset disabled={pending || disabled} aria-describedby="spending-lock" className="min-w-0 space-y-4"><legend className={styles.subsection}>Spending actions</legend>
+      <label className={styles.label}>Increase allowance (USD)<Input className="text-sm font-normal" type="number" min="0" step="any" value={increase} onChange={event => setIncrease(event.target.value)} /></label>
+      <div className="flex flex-wrap gap-2"><Button className="h-auto min-h-8 max-w-full whitespace-normal py-1" variant="outline" onClick={() => { if (!increase.trim() || !Number.isFinite(Number(increase)) || Number(increase) <= 0) { setError('Enter a finite positive allowance increase.'); return; } void act({ action: 'increase', amount_usd: Number(increase) }); }}>Increase allowance</Button>
+      <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1" variant="outline" onClick={() => void act({ action: 'override', enabled: !account.override_enabled })}>{account.override_enabled ? 'Disable' : 'Enable'} allowance override</Button>
+      {!account.unknown_acknowledged && <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1" variant="outline" onClick={() => void act({ action: 'acknowledge_unknown' })}>Acknowledge unknown charges for this execution</Button>}
+      <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1" onClick={() => void act({ action: account.paused ? 'resume' : 'pause' })}>{account.paused ? 'Resume spending' : 'Pause spending'}</Button></div>
+      <p className={styles.explanation}>Increasing, overriding or acknowledging does not resume spending. Resume explicitly after reviewing the pause. Override removes the allowance check. Uncertain sends cannot be resumed.</p>
     </fieldset>
     <p>Owner-reported total: {account.reported_total ? `${account.reported_total.currency} ${account.reported_total.amount}` : 'not reported'}</p>
-    <p>Owner reports are not verified provider billing. Execution totals are not allocated to sections.</p>
-    <fieldset disabled={pending || disabled} aria-describedby="spending-lock" className="space-y-3"><legend className="font-medium">Report or correct total after generation and evaluation finish</legend>
-      <label className="block space-y-1">Reported total amount<Input type="number" step="any" value={amount} onChange={event => setAmount(event.target.value)} /></label>
-      <label className="block space-y-1">Reported currency<Input value={currency} onChange={event => setCurrency(event.target.value)} /></label>
-      <label className="block space-y-1">Correction note<Input maxLength={2000} value={note} onChange={event => setNote(event.target.value)} /></label>
-      <Button variant="outline" onClick={report}>Save reported total</Button>
+    <p className={styles.explanation}>Owner reports are not verified provider billing. Execution totals are not allocated to sections.</p>
+    <fieldset disabled={pending || disabled} aria-describedby="spending-lock" className="min-w-0 space-y-4"><legend className={styles.subsection}>Report or correct total after generation and evaluation finish</legend>
+      <label className={styles.label}>Reported total amount<Input className="text-sm font-normal" type="number" step="any" value={amount} onChange={event => setAmount(event.target.value)} /></label>
+      <label className={styles.label}>Reported currency<Input className="text-sm font-normal" value={currency} onChange={event => setCurrency(event.target.value)} /></label>
+      <label className={styles.label}>Correction note<Input className="text-sm font-normal" maxLength={2000} value={note} onChange={event => setNote(event.target.value)} /></label>
+      <Button className="h-auto min-h-8 max-w-full whitespace-normal py-1" variant="outline" onClick={report}>Save reported total</Button>
     </fieldset>
-    <details><summary className="cursor-pointer">Spending action and correction history</summary>{account.events.length ? account.events.map(event => <p key={event.id} className="break-words">{event.at} · {event.actor} · {event.action} · {JSON.stringify(event.detail)}</p>) : <p>No owner actions recorded.</p>}</details>
+    <details><summary className="cursor-pointer [overflow-wrap:anywhere]">Spending action and correction history</summary>{account.events.length ? account.events.map(event => <p key={event.id} className="[overflow-wrap:anywhere]">{event.at} · {event.actor} · {event.action} · {JSON.stringify(event.detail)}</p>) : <p>No owner actions recorded.</p>}</details>
   </section>;
 }
