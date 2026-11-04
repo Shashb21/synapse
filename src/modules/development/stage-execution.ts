@@ -64,7 +64,8 @@ const mappingReferenceReply = z.object({
     mappings: z.array(z.object({ references: z.array(judgementReferenceSchema).optional() }).passthrough()),
   }).passthrough()),
 });
-const blockSchema = z.object({ id: z.string().min(1), text: z.string().min(1), heading: z.string().optional().default(''), location: z.string().optional().default('') }).passthrough();
+// Saved parsed blocks carry a structured {kind, ref} location; stages need its readable reference.
+const blockSchema = z.object({ id: z.string().min(1), text: z.string().min(1), heading: z.string().optional().default(''), location: z.union([z.string(), z.object({ ref: z.string() }).passthrough().transform(location => location.ref)]).optional().default('') }).passthrough();
 
 /** Hash the complete immutable result payload; downstream prerequisites must retain this identity. */
 export function developmentOutputIdentity(result: Omit<DevelopmentSectionResult, 'output_id'> | DevelopmentSectionResult): string {
