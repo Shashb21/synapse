@@ -36,6 +36,8 @@ test('empty and selected experiments keep management optional, focused and guard
   const name = page.getByLabel('Experiment name', { exact: true });
   await expect(name).toBeHidden();
   const rename = page.getByRole('button', { name: 'Rename', exact: true });
+  // Keyboard focus does not wait for the draft/source request to enable Rename.
+  await expect(rename).toBeEnabled();
   await rename.focus();
   await page.keyboard.press('Enter');
   await expect(name).toBeFocused();

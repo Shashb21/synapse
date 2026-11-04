@@ -67,6 +67,8 @@ test("documents, settings, run and results preserve edits and derive the next ac
   await developmentDetails(page, "Optional evaluation references");
   await expect(page.getByLabel("Reference PDF", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Save name", exact: true }).click();
+  // Finish the save's focus restoration before starting another keyboard action.
+  await expect(page.getByRole("button", { name: "Rename", exact: true })).toBeFocused();
   const settingsShortcut = page.getByRole("button", { name: "Go to Test settings", exact: true });
   await settingsShortcut.focus();
   await page.keyboard.press("Enter");
@@ -91,6 +93,8 @@ test("documents, settings, run and results preserve edits and derive the next ac
   expect(reads).toBe(readsBeforeNavigation);
   expect(posts).toBe(0);
   const runButton = page.getByRole("button", { name: "Run all sections", exact: true });
+  // Unlike click(), focus() does not wait for asynchronous readiness checks.
+  await expect(runButton).toBeEnabled();
   await runButton.focus();
   await page.keyboard.press("Enter");
   await expect(page.getByLabel("Next action")).toContainText("Review saved outputs");
