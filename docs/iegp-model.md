@@ -68,7 +68,7 @@ Tactic status change or new ingest unlocks residuals so a human can reassess. No
 
 ## Evals
 
-Gold: the curated Velmara pack (`src/modules/eval-gold/velmara-curated.ts`) for the stage evals, and the reference packs under `reference/*/gold` scored by recall (`src/accuracy/eval/pack-recall.ts`) in the accuracy lab. The engine **computes** Open / Partially Addressed / Addressed; humans validate before Prioritize. See [`sdlc/13-testing.md`](sdlc/13-testing.md).
+Gold: the curated Velmara pack (`src/modules/eval-gold/velmara-curated.ts`) for the stage evals, and the reference packs under `reference/*/gold` scored by recall (`src/modules/development/evaluation/pack-recall.ts`) in Development evaluation. The engine **computes** Open / Partially Addressed / Addressed; humans validate before Prioritize. See [`sdlc/13-testing.md`](sdlc/13-testing.md).
 
 ## Surfaces
 

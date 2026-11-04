@@ -105,7 +105,13 @@ Owner console (owner only: `OWNER_EMAILS` or an admin/operator account). The old
 | `/admin/users` | Staff email and password accounts |
 | `/admin/pipeline`, `/admin/runs` | Run any stage or the chain; run traces and signals |
 | `/admin/evals`, `/admin/catalog`, `/admin/modules` | Gold evals, registered modules and prompt variants, module versions |
+| `/admin/development` | Experiment setup, execution, evaluation, comparison, history and costs |
+| `/admin/development/evaluation-tools` | Retained historical benchmark commands and reference tools |
 | `/admin/sdlc`, `/admin/docs` | Specs in `docs/sdlc` |
+
+Development owns experiments and model-selection evidence. **AI & routing** owns deployed customer routing and switches; experiments do not change those controls. Accuracy routes (`/accuracy`, `/api/accuracy`, `/admin/accuracy` and descendants) are retired and return 404; Admin paths first enforce owner access. Stored records remain untouched, with no automatic migration. See the [retirement, retention and rollback runbook](docs/operations/accuracy-retirement.md).
+
+Historical KAN-100 tools remain local: `npm run benchmark:kan100 -- prepare`, `run` and `review`, with explicit private inputs and the safeguards in the [benchmark runbook](docs/kan-100-benchmark-runbook.md). Historical stages and scores do not validate today's customer pipeline.
 
 ## Modular stack
 
@@ -159,6 +165,7 @@ npm run test:e2e    # Playwright against port 43217
 
 | Doc | What |
 | --- | --- |
+| [Accuracy retirement and retention](docs/operations/accuracy-retirement.md) | Ownership, protected storage, rollback and verification limits |
 | [Specifications and planning archive](specs/README.md) | Feature specs, design reviews, decisions, plans and Jira ticket breakdowns |
 | [problem-and-solution.md](docs/problem-and-solution.md) | Problem statement and proposed IEGP |
 | [iegp-model.md](docs/iegp-model.md) | Locked objects, gates, priority, refresh |

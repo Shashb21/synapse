@@ -8,14 +8,14 @@ The v1 architecture (flat insight records, a theme catalog, a keyword/ontology s
 
 - Next.js 16 App Router on the Node runtime (file text extraction uses zip/xml, mammoth and xlsx), deployed on Vercel.
 - Postgres is the only store (`DATABASE_URL`). There is no file store.
-- `src/proxy.ts` is the first gate: customer pages and APIs need a session cookie and a signed, unexpired workspace cookie; `/login` and `/api/auth` are public; `/admin`, `/api/admin`, `/api/accuracy` and `/api/control` gate themselves by owner role. Sessions, membership and roles are then verified server-side on every request (`src/modules/auth/api-guard.ts`).
+- `src/proxy.ts` is the first gate: customer pages and APIs need a session cookie and a signed, unexpired workspace cookie; `/login` and `/api/auth` are public; `/admin`, `/api/admin` and `/api/control` gate themselves by owner role. Sessions, membership and roles are then verified server-side on every request (`src/modules/auth/api-guard.ts`).
 
 ## Code layout
 
 | Area | Path | What it owns |
 | --- | --- | --- |
 | Customer pages | `src/app/*` (not `admin`) | Plan context → Upload → Evidence Inventory (Gaps) → Prioritization Matrix → Tactic Ideation → Gantt Timeline, plus Ideation, Mappings, Needs, Setup, Sources, Workspaces, Login, Account. Room, Breakouts and Presentation stay in the code but are switched off (`ROOM_ENABLED`, `BREAKOUTS_ENABLED` are `false`) and redirect to the plan |
-| Owner console | `src/app/admin/*` | AI master and section switches, provider key status and routing, AI harness, customers and seats, staff users, accuracy lab, pipeline, runs, evals, catalog, module versions, specs |
+| Owner console | `src/app/admin/*` | AI master and section switches, provider key status and routing, AI harness, customers and seats, staff users, Development experiments, pipeline, runs, evals, catalog, module versions, specs |
 | IEGP domain | `src/lib/iegp/` | Gaps, needs, tactics, coverages, residuals, audit (priority bands are S8 placements, KAN-17); engine status rules; blank and demo contents |
 | Kernel | `src/modules/kernel/` | Stage contracts, registry, `runStage`, routing, observability, edit records, evals, the AI switches |
 | Stages | `src/modules/stages/s0…s10/` | One module per stage, S0 upload to S10 timeline |
@@ -23,7 +23,7 @@ The v1 architecture (flat insight records, a theme catalog, a keyword/ontology s
 | Workspaces | `src/modules/workspaces/` | Workspaces, members, per-workspace schema scope, blank/demo contents |
 | LLM access | `src/modules/llm/` | Provider catalog (xAI, Anthropic, OpenAI, Gemini, OpenRouter), server-side API keys from the environment (`api-keys.ts`) |
 | Parsing | `src/lib/ingest/` | Mechanical text extraction (`local-parse.ts`) and LLM block structuring (`llm-structure.ts`), manual blocks |
-| Accuracy lab | `src/accuracy/` | The owner-only accuracy tool, separate tables and routes |
+| Development evaluation | `src/modules/development/evaluation/` | Current experiment evaluation and retained historical benchmark/reference helpers; Accuracy runtime/routes retired, stored tables retained |
 
 ## Data
 

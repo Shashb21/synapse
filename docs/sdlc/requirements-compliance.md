@@ -73,7 +73,7 @@ Since 26 Sep: the security items (KAN-10, KAN-11, KAN-12), workspace-scoped tabl
 | REQ-SRC-002 | Met | `structureWithLlm` (`src/lib/ingest/llm-structure.ts`); S1 `requireLlm`, local parse only under the test stub; LlamaParse removed. `tests/llm-parse.test.ts`. | — |
 | REQ-SRC-003 | Met | Verbatim-span check and mandatory `dropped_reason`; model stakeholder classification. `tests/llm-parse.test.ts`. | — |
 | REQ-SRC-004 | Met | Block editor actions in `src/app/api/sources/blocks/route.ts`; side tables per schema (KAN-13); re-parse keeps human blocks. `tests/manual-blocks-iegp.test.ts`, `tests/kan-13-workspace-tables.test.ts`. | — |
-| REQ-SRC-005 | **Partial** | Uploads are capped at 3 MB (`MAX_UPLOAD_BYTES`, enforced in `/api/iegp` and `add-source-form.tsx`; `tests/kan-68-upload-formats.test.ts`). Parse volume is not capped (pieces, units or model calls per file or workspace), and `POST /api/modules` may reach S0 without the 3 MB check (not verified). The accuracy lab allows 40 MB. | [KAN-20](https://synapse21.atlassian.net/browse/KAN-20) |
+| REQ-SRC-005 | **Partial** | Uploads are capped at 3 MB (`MAX_UPLOAD_BYTES`, enforced in `/api/iegp` and `add-source-form.tsx`; `tests/kan-68-upload-formats.test.ts`). Parse volume is not capped (pieces, units or model calls per file or workspace), and `POST /api/modules` may reach S0 without the 3 MB check (not verified). The historical Accuracy lab allowed 40 MB; its routes are retired (see [retirement runbook](../operations/accuracy-retirement.md)). | [KAN-20](https://synapse21.atlassian.net/browse/KAN-20) |
 
 ### 5. Needs and gaps
 

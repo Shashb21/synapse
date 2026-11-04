@@ -1,5 +1,7 @@
 # Accuracy run document retention
 
+> **Historical — Accuracy retired (KAN-212, 2026-11-03).** Retained for lineage; routes, runtime paths and maintenance SQL below are not current operating instructions. Do not run cleanup or disposal from this archive. Use the [retirement and retention runbook](accuracy-retirement.md) for current ownership, protected storage and rollback.
+
 Parse implementations need the original bytes while processing. Run diagnostics retain
 only `workspace_id`, `source_file_id`, `filename`, `mime`, SHA-256 `checksum` and decoded
 `byte_count` when available. The recorder derives missing fingerprints without changing

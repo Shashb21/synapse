@@ -23,7 +23,7 @@ How the code is tested today. This replaces the retired v1 pages [04-tdd.md](./0
 - **Test-only environment** (set by the config, never in production):
   - `SYNAPSE_TEST_STUB_LLM=1` — the agentic stages use local proposers instead of a model (`isTestStub()` in `src/modules/kernel/llm.ts`). A production build that sees it throws. Stub output is labelled as such (for example, S4 rows say "Test stub: no model was called").
   - `SYNAPSE_TEST_ANON_API=1` — a route handler called directly with no session cookie acts as the demo Medical Affairs user named in the body (`src/modules/auth/api-guard.ts`).
-- **What is covered:** kernel contracts and the S0→S10 pipeline (`modules-contracts`, `modules-pipeline`, `kernel-run-llm`); each LLM stage's parsing, retry and refusal rules (`llm-parse`, `s2-llm`, `s3-llm`, `s4-llm`, `s6-llm`, `prioritize-llm`, `s9-llm`, `s10-llm`); the IEGP engine and store (`iegp-*`); every manual path (`manual-*`, `place-by-hand`); AI off (`ai-off-*`, `ai-switch`, `kan-53-ai-sections`); auth, seats and the owner gate (`kan-10-*`, `kan-11-12-*`, `kan-22-*`, `kan-28-*`, `kan-59-*`, `owner-gate`); the accuracy lab (`accuracy-*`); and one file per Jira fix (`kan-<n>-*`).
+- **What is covered:** kernel contracts and the S0→S10 pipeline (`modules-contracts`, `modules-pipeline`, `kernel-run-llm`); each LLM stage's parsing, retry and refusal rules (`llm-parse`, `s2-llm`, `s3-llm`, `s4-llm`, `s6-llm`, `prioritize-llm`, `s9-llm`, `s10-llm`); the IEGP engine and store (`iegp-*`); every manual path (`manual-*`, `place-by-hand`); AI off (`ai-off-*`, `ai-switch`, `kan-53-ai-sections`); auth, seats and the owner gate (`kan-10-*`, `kan-11-12-*`, `kan-22-*`, `kan-28-*`, `kan-59-*`, `owner-gate`); retained reference/pack-recall helpers and retired-route boundaries (see [KAN-212 classification](../verification/kan-212-retirement.md)); and one file per Jira fix (`kan-<n>-*`).
 
 ## End to end: Playwright
 
@@ -34,9 +34,9 @@ How the code is tested today. This replaces the retired v1 pages [04-tdd.md](./0
   - The config refuses to run against the dev database (`synapse`) unless `E2E_ALLOW_DEV_DB=1`.
   - An existing server on the port is reused only with `E2E_REUSE=1`; otherwise Playwright starts its own and fails if the port is taken.
 - **Setup:** `e2e/global.setup.ts` signs in once with the demo sign-in (development builds only), turns AI and every section on, and saves the cookies every other spec starts from.
-- **Specs (45 files):**
+- **Specs:**
   - `e2e/features/` — one spec per stage, `s0-upload` to `s10-timeline`, each with its own gold case; feature specs (`ai-off`, `ai-toggle-settings`, `control-panel-provider-keys`, `observability-trace`, `hillclimb-rationale`, `login-workspaces`, `admin-customers`, `admin-users`, `setup-wizard`, …); and KAN specs (`kan-8-tactic-ideation`, `kan-16-manual-and-gates`, `kan-25-manual-timeline`, `kan-26-blank-and-demo`, `kan-49` to `kan-55`, …). `room.spec.ts`, `prep-room.spec.ts` and `kan-55-breakouts.spec.ts` cover Room and Breakouts, which are switched off in the app.
-  - `e2e/accuracy/` — the owner's accuracy lab: shell, happy path, LLM parse, ledger filters, Gantt save as final.
+  - Accuracy-only browser suites were retired with the runtime; retired-route, owner-console and AI-off checks protect the remaining boundaries (see [KAN-212 classification](../verification/kan-212-retirement.md)).
   - `e2e/admin/owner-console.spec.ts` — the owner console's sections and gate.
   - `e2e/user-flow.spec.ts`, `e2e/platform.spec.ts`, `e2e/briefing.spec.ts` — whole-app walks.
 - **Harness:** `e2e/support/synapse.ts` seeds each spec's state through the module API and asserts on the run ledger rather than page text, so a click before hydration cannot pass by accident.
@@ -54,5 +54,5 @@ How the code is tested today. This replaces the retired v1 pages [04-tdd.md](./0
 ## Gold
 
 - **Stage evals (Velmara):** `src/modules/eval-gold/velmara-curated.ts`, pack `velmara-curated-v1`. Per demo source it lists the stages it feeds (S1, S2, S3) and what must be found. The stage modules' evals and the hillclimb prompt sweep (`src/modules/kernel/hillclimb-loop.ts`) score against it; results show at `/admin/evals` and on each run's trace.
-- **Reference packs (accuracy lab):** `reference/<pack>/gold/gaps.json` and `tactics.json`, listed in `reference/manifest.json`, one gold per source pack and never mixed. `src/accuracy/eval/reference-gold.ts` loads them and `src/accuracy/eval/pack-recall.ts` scores recall of must-find gap ids, tactic numbers and tactic identifiers.
+- **Reference packs (Development evaluation):** `reference/<pack>/gold/gaps.json` and `tactics.json`, listed in `reference/manifest.json`, one gold per source pack and never mixed. `src/modules/development/evaluation/reference-gold.ts` loads them and `src/modules/development/evaluation/pack-recall.ts` scores recall of must-find gap ids, tactic numbers and tactic identifiers.
 - Gold measures extraction against known cases; it does not prove that a new customer deck will extract cleanly. Human edits and their rationales feed the hillclimb signals for the next run.

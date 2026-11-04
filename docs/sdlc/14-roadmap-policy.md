@@ -2,7 +2,7 @@
 
 The roadmap (the Gantt timeline, stage S10) is a projection of the approved plan. It holds no judgement of its own: every date and every dependency comes from somewhere a person can see, and anything a model supplied stays marked as an estimate or a proposal until a person accepts it.
 
-This page is the single policy for the customer timeline (`src/modules/stages/s10-timeline/`) and, where they overlap, the owner lab's Accuracy gantt (`src/accuracy/modules/gantt-project/`).
+This page is the policy for the customer timeline (`src/modules/stages/s10-timeline/`). Accuracy gantt notes below are historical: the Accuracy runtime/routes were retired by KAN-212. See the [retirement runbook](../operations/accuracy-retirement.md).
 
 ## What goes on the roadmap
 
@@ -72,7 +72,7 @@ Saving freezes a numbered snapshot of every activity, lane, dependency, unschedu
 
 Every change goes through `/api/plan` with a role check (`validate` to edit, accept estimates and review dependencies; `save_final` to save as final) and writes an edit record with a rationale: `schedule`, `lane`, `depends_on`, `proposed_dependency` (accept or reject), `schedule_basis` (estimate accepted), and the plan's `status`.
 
-## Where the Accuracy gantt differs, and why
+## Historical Accuracy gantt differences (retired)
 
 The Accuracy gantt is the owner lab's projection of the claim ledger (`/admin/accuracy/timeline`), not the customer roadmap.
 

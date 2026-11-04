@@ -1,5 +1,7 @@
 # Reference deck analysis — BeOne IEGP → digital Synapse
 
+> **Historical — Accuracy retired (KAN-212, 2026-11-03).** Retained for lineage; routes, runtime paths and maintenance SQL below are not current operating instructions. Do not run cleanup or disposal from this archive. Use the [retirement and retention runbook](operations/accuracy-retirement.md) for current ownership, protected storage and rollback.
+
 **Sources (in repo):** see [`reference/manifest.json`](../reference/manifest.json).
 
 | Pack | File | Slides | Gap ID style | Tactic ID style |
