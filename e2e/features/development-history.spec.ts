@@ -26,6 +26,7 @@ test('reopens historical attempts with independent freshness and call details', 
     await request.fulfill({ json: { executions: [old], history: metadata, next_cursor: null, delivery: { available: true, reason: null } } });
   });
   await page.goto('/admin/development');
+  await developmentDetails(page, "New experiment");
   await page.getByLabel('New experiment name').fill(name);
   await page.getByRole('button', { name: 'Create experiment' }).click();
   await page.reload();
@@ -81,6 +82,7 @@ test('loads older history while retaining the newest prerequisites and selected 
     await request.fulfill({ json: { executions: cursor ? [older] : [latest], next_cursor: cursor ? null : 'new', history: {}, delivery: { available: true, reason: null } } });
   });
   await page.goto('/admin/development');
+  await developmentDetails(page, "New experiment");
   await page.getByLabel('New experiment name').fill(name);
   await page.getByRole('button', { name: 'Create experiment' }).click();
   await expect.poll(() => listReads).toBeGreaterThan(0);
@@ -132,6 +134,7 @@ for (const outcome of ['succeeded', 'failed'] as const) {
       }
     });
     await page.goto('/admin/development');
+    await developmentDetails(page, "New experiment");
     await page.getByLabel('New experiment name').fill(name);
     await page.getByRole('button', { name: 'Create experiment' }).click();
     const execution = page.getByRole('region', { name: 'Execution', exact: true });
@@ -183,6 +186,7 @@ for (const change of ['controls', 'source'] as const) {
         }
       });
       await page.goto('/admin/development');
+      await developmentDetails(page, "New experiment");
       await page.getByLabel('New experiment name').fill(name);
       await page.getByRole('button', { name: 'Create experiment' }).click();
       const execution = page.getByRole('region', { name: 'Execution', exact: true });
@@ -255,6 +259,7 @@ test('a delayed refresh from previous controls cannot replace current comparison
     } else await request.fulfill({ json: body });
   });
   await page.goto('/admin/development');
+  await developmentDetails(page, "New experiment");
   await page.getByLabel('New experiment name').fill(name);
   await page.getByRole('button', { name: 'Create experiment' }).click();
   const execution = page.getByRole('region', { name: 'Execution', exact: true });

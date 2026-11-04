@@ -13,8 +13,7 @@ export default async function DevelopmentPage() {
     <AdminMain>
       <h1 className={styles.pageTitle}>Development</h1>
       <p className={`${styles.explanation} mt-3 mb-8`}>
-        Prepare private experiments, add documents, configure and run generation,
-        then review, evaluate and compare saved results here.
+        Test generation with private documents, then review and compare saved results.
       </p>
       <DevelopmentSetup />
     </AdminMain>

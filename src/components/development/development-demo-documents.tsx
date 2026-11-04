@@ -107,7 +107,7 @@ export function DevelopmentDemoDocuments({ draft, perform, accept }: Props) {
     <div className="min-w-0 space-y-3" aria-labelledby="demo-heading" role="group">
       <h4 id="demo-heading" className={styles.subsection}>Demo files</h4>
       <p className={styles.explanation}>
-        Add the bundled Velmara demo documents as private, fixed copies. Each file is parsed with the configured AI ingestion route, which can incur AI charges. Ingestion must be enabled in /admin/control.
+        Add private, fixed copies of the Velmara demo files. AI parsing may incur charges. Enable ingestion in <a href="/admin/control" className="underline underline-offset-4">Admin controls</a> before adding files.
       </p>
       {loadFailed && (
         <div role="alert" className="space-y-1">

@@ -1,4 +1,4 @@
-import { developmentStep, developmentDetails } from "../support/development-workflow";
+import { developmentStep, developmentDetails, developmentRename } from "../support/development-workflow";
 /** Browser proof for private Development drafts, using the isolated test server. */
 import { expect, test } from "@playwright/test";
 
@@ -21,14 +21,17 @@ test("owner creates, uploads, saves and reopens a private experiment", async ({
       .getByRole("link", { name: "Development", exact: true }),
   ).toHaveAttribute("href", "/admin/development");
   // Act: create a private-only draft with the keyboard, then keep an unsaved name during upload.
+  await developmentDetails(page, "New experiment");
   await page.getByLabel("New experiment name").fill(name);
   await page
     .getByRole("button", { name: "Create experiment", exact: true })
     .focus();
   await page.keyboard.press("Enter");
+  await developmentRename(page);
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(
     name,
   );
+  await developmentRename(page);
   await page
     .getByLabel("Experiment name", { exact: true })
     .fill(`${name} saved`);
@@ -44,6 +47,7 @@ test("owner creates, uploads, saves and reopens a private experiment", async ({
     .getByRole("button", { name: "Upload experiment document", exact: true })
     .click();
   await expect(page.getByText("source.txt", { exact: true })).toBeVisible();
+  await developmentRename(page);
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(
     `${name} saved`,
   );
@@ -109,6 +113,7 @@ test("owner creates, uploads, saves and reopens a private experiment", async ({
     .click();
   await developmentStep(page, "Documents");
   // Assert: source and evaluator-only reference survive a fresh read.
+  await developmentRename(page);
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(
     `${name} saved`,
   );
@@ -138,10 +143,12 @@ test("invalid upload and stale revision give recovery without losing edits", asy
 }) => {
   await page.goto("/admin/development");
   const name = `Recovery ${Date.now()}`;
+  await developmentDetails(page, "New experiment");
   await page.getByLabel("New experiment name").fill(name);
   await page
     .getByRole("button", { name: "Create experiment", exact: true })
     .click();
+  await developmentRename(page);
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(
     name,
   );
@@ -168,6 +175,7 @@ test("invalid upload and stale revision give recovery without losing edits", asy
       })
     ).ok(),
   ).toBe(true);
+  await developmentRename(page);
   await page
     .getByLabel("Experiment name", { exact: true })
     .fill(`${name} edited`);
@@ -175,6 +183,7 @@ test("invalid upload and stale revision give recovery without losing edits", asy
   await expect(page.getByRole("main").getByRole("alert")).toContainText(
     /reload/i,
   );
+  await developmentRename(page);
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(
     `${name} edited`,
   );
@@ -182,6 +191,7 @@ test("invalid upload and stale revision give recovery without losing edits", asy
     .getByRole("button", { name: "Reload saved draft", exact: true })
     .click();
   await expect(page.getByRole("status").filter({ hasText: "Reloaded" })).toContainText("Reloaded");
+  await developmentRename(page);
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(
     `${name} edited`,
   );
@@ -232,6 +242,7 @@ test("read failure provides a labelled recovery action", async ({ page }) => {
   await page.unroute("**/api/admin/development");
   await page.getByRole("button", { name: "Retry page load" }).click();
   await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
+  await developmentDetails(page, "New experiment");
   await expect(page.getByLabel("New experiment name")).toBeEnabled();
 });
 
@@ -248,13 +259,16 @@ test("slow uploads disable competing writes and preserve the edited name", async
   });
   const name = `Serialized ${Date.now()}`;
   await page.goto("/admin/development");
+  await developmentDetails(page, "New experiment");
   await page.getByLabel("New experiment name").fill(name);
   await page
     .getByRole("button", { name: "Create experiment", exact: true })
     .click();
+  await developmentRename(page);
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(
     name,
   );
+  await developmentRename(page);
   await page
     .getByLabel("Experiment name", { exact: true })
     .fill(`${name} edited`);
@@ -297,6 +311,7 @@ test("slow uploads disable competing writes and preserve the edited name", async
   }
   await expect(page.getByText("Loading profiles and evaluation history…", { exact: true })).toHaveCount(0);
   await expect(page.getByText("source.txt", { exact: true })).toBeVisible();
+  await developmentRename(page);
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(
     `${name} edited`,
   );
@@ -312,10 +327,12 @@ test("creating another draft clears every pending file selection", async ({
     if (/\/(source-upload|reference-upload)$/.test(request.url())) uploads += 1;
   });
   await page.goto("/admin/development");
+  await developmentDetails(page, "New experiment");
   await page.getByLabel("New experiment name").fill(name);
   await page
     .getByRole("button", { name: "Create experiment", exact: true })
     .click();
+  await developmentRename(page);
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(
     name,
   );
@@ -339,10 +356,12 @@ test("creating another draft clears every pending file selection", async ({
     mimeType: "application/json",
     buffer: Buffer.from("{}"),
   });
+  await developmentDetails(page, "New experiment");
   await page.getByLabel("New experiment name").fill(`${name} second`);
   await page
     .getByRole("button", { name: "Create experiment", exact: true })
     .click();
+  await developmentRename(page);
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(
     `${name} second`,
   );
@@ -406,6 +425,7 @@ test("created draft remains visible when source choices fail and retry only read
     else await route.continue();
   });
   await page.goto("/admin/development");
+  await developmentDetails(page, "New experiment");
   await page.getByLabel("New experiment name").fill(name);
   await page
     .getByRole("button", { name: "Create experiment", exact: true })
@@ -413,18 +433,22 @@ test("created draft remains visible when source choices fail and retry only read
   await expect(page.getByRole("main").getByRole("alert")).toContainText(
     "Source choices unavailable",
   );
+  await developmentRename(page);
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(
     name,
   );
+  await developmentDetails(page, "New experiment");
   await expect(page.getByLabel("New experiment name")).toHaveValue("");
   await expect(page.getByRole("button", { name: "Refresh workspace documents", exact: true })).toHaveAttribute("aria-describedby", "retry-status");
   await expect(page.locator("#retry-status")).toHaveText("Refresh workspace documents.");
+  await developmentRename(page);
   await page.getByLabel("Experiment name", { exact: true }).fill(`${name} edited`);
   await page.getByLabel("File to add to this experiment").setInputFiles({ name: "pending.txt", mimeType: "text/plain", buffer: Buffer.from("Unsaved selection") });
   await page
     .getByRole("button", { name: "Refresh workspace documents", exact: true })
     .click();
   await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
+  await developmentRename(page);
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(`${name} edited`);
   await expect(page.getByLabel("File to add to this experiment")).toHaveValue(/pending.txt/);
   expect(reads).toBe(2);
@@ -489,6 +513,7 @@ test("reopened draft shows saved documents when source choices fail", async ({
   await expect(page.getByRole("main").getByRole("alert")).toContainText(
     "Source choices unavailable",
   );
+  await developmentRename(page);
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(
     name,
   );

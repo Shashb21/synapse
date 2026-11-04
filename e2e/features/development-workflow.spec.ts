@@ -10,7 +10,7 @@ test.beforeEach(async ({ page }) => {
     await route.fulfill({ response, json: body });
   });
 });
-import { developmentDetails, developmentStep } from "../support/development-workflow";
+import { developmentDetails, developmentStep, developmentRename } from "../support/development-workflow";
 
 const artifact = ".superpowers/sdd/2026-11-03-ui-2-development-workflow";
 test("documents, settings, run and results preserve edits and derive the next action from saved work", async ({ page }) => {
@@ -30,12 +30,14 @@ test("documents, settings, run and results preserve edits and derive the next ac
   });
   const name = `Workflow ${Date.now()}`;
   await page.goto("/admin/development");
+  await developmentDetails(page, "New experiment");
   await page.getByLabel("New experiment name").fill(name);
   await page.getByRole("button", { name: "Create experiment" }).click();
   const nav = page.getByRole("navigation", { name: "Experiment workflow" });
   await expect(nav.getByRole("button", { name: /^1\. Documents/ })).toHaveAttribute("aria-current", "step");
   await expect(page.getByLabel("Next action")).toContainText("Add and save an experiment document");
   await page.getByLabel("File to add to this experiment").setInputFiles({ name: "workflow.txt", mimeType: "text/plain", buffer: Buffer.from("Comparative evidence remains uncertain.") });
+  await developmentRename(page);
   await page.getByLabel("Experiment name", { exact: true }).fill(`${name} edited`);
   await nav.getByRole("button", { name: /^1\. Documents/ }).focus();
   await page.keyboard.press("Tab");
@@ -56,6 +58,7 @@ test("documents, settings, run and results preserve edits and derive the next ac
   await developmentDetails(page, "Legacy evaluator route");
   await developmentStep(page, "Documents");
   await expect(page.getByLabel("File to add to this experiment")).toHaveValue(/workflow.txt/);
+  await developmentRename(page);
   await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(`${name} edited`);
   await page.getByRole("button", { name: "Upload experiment document", exact: true }).click();
   await expect(page.getByText("workflow.txt", { exact: true })).toBeVisible();
@@ -64,6 +67,8 @@ test("documents, settings, run and results preserve edits and derive the next ac
   await developmentDetails(page, "Optional evaluation references");
   await expect(page.getByLabel("Reference PDF", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Save name", exact: true }).click();
+  // Finish the save's focus restoration before starting another keyboard action.
+  await expect(page.getByRole("button", { name: "Rename", exact: true })).toBeFocused();
   const settingsShortcut = page.getByRole("button", { name: "Go to Test settings", exact: true });
   await settingsShortcut.focus();
   await page.keyboard.press("Enter");
@@ -88,6 +93,8 @@ test("documents, settings, run and results preserve edits and derive the next ac
   expect(reads).toBe(readsBeforeNavigation);
   expect(posts).toBe(0);
   const runButton = page.getByRole("button", { name: "Run all sections", exact: true });
+  // Unlike click(), focus() does not wait for asynchronous readiness checks.
+  await expect(runButton).toBeEnabled();
   await runButton.focus();
   await page.keyboard.press("Enter");
   await expect(page.getByLabel("Next action")).toContainText("Review saved outputs");
@@ -145,6 +152,7 @@ test("reopened source-only draft chooses settings and failed history offers reco
   await page.getByRole("button", { name: `Open ${name}`, exact: true }).click();
   await expect(nav.getByRole("button", { name: /^2\. Test settings/ })).toHaveAttribute("aria-current", "step");
   const noSource = `Workflow empty ${Date.now()}`;
+  await developmentDetails(page, "New experiment");
   await page.getByLabel("New experiment name").fill(noSource);
   await page.getByRole("button", { name: "Create experiment" }).click();
   await expect(nav.getByRole("button", { name: /^1\. Documents/ })).toHaveAttribute("aria-current", "step");

@@ -42,7 +42,7 @@ async function arrange(page: Page, options: { missingProviders?: boolean; queued
   const config = evaluationConfigSchema.parse({});
   const output = { output_id: "a".repeat(64), output: { accepted: [], rejected: [{ reason: "Internal acceptance failed" }] }, candidates: [{ statement: "Comparative evidence is missing." }], reason: null };
   const generation = { revision: draft.revision, config: { mode: "standard", evaluator: config.sections.gap_extraction.route }, routes: {}, sources: [source] };
-  const cost = options.queuedSpendingPause ? { execution_id: "saved-run", currency: "USD", allowance_usd: 2, unknown_acknowledged: false, override_enabled: false, paused: false, pause_reason: "", estimate: { total_usd: null, uncertainty: [] }, reserved_usd: 0, generation_usage_usd: 0.12, evaluation_usage_usd: 0, unknown_usage_calls: 0, unknown_active_reservations: 0, reported_total: null, events: [], reservations: [] } : undefined;
+  const cost = options.queuedSpendingPause ? { execution_id: "saved-run", currency: "USD", allowance_usd: 2, unknown_acknowledged: false, override_enabled: false, paused: false, pause_reason: "", estimate: { currency: "USD", total_usd: null, uncertainty: [], http_max_attempts: 1, categories: [] }, reserved_usd: 0, generation_usage_usd: 0.12, evaluation_usage_usd: 0, unknown_usage_calls: 0, unknown_active_reservations: 0, reported_total: null, events: [], reservations: [] } : undefined;
   const execution = { cost, id: "saved-run", experiment_id: draft.id, created_at: "2026-10-30", updated_at: "2026-10-30", generation_status: "succeeded", evaluation_status: "not_requested", error: null, manifest: generation, sections: [{ id: "saved-attempt", section: "gap_extraction", status: "rejected", result: output, error: null, prerequisites: {} }], calls: [] };
   const evaluations: Record<string, unknown>[] = [];
   let releaseQueuedHistory!: () => void;
@@ -299,6 +299,7 @@ test("preserves unsaved profile and independent evaluator settings across execut
   // Act: inspect another saved execution and return.
   await developmentStep(page, "Results");
   await page.getByLabel("Selected execution").selectOption("other-run");
+  await developmentDetails(page, "Saved output details");
   await expect(panel.getByText(/Execution: other-run · Attempt: other-attempt/)).toBeVisible();
   await developmentStep(page, "Results");
   await page.getByLabel("Selected execution").selectOption("saved-run");

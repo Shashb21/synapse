@@ -1,6 +1,6 @@
 /** Bundled demo file selection: partial failure, retry, reopen and scripted generation start. */
 import { expect, test } from "@playwright/test";
-import { developmentStep } from "../support/development-workflow";
+import { developmentStep, developmentDetails } from "../support/development-workflow";
 import { CLIENT_DEMO_PACK } from "../../src/lib/demo/client-pack";
 
 // Expose configured credentials so readiness permits the scripted run; no provider is called.
@@ -37,11 +37,12 @@ test("demo files save once, retry only the failure, reopen and start scripted ge
     return route.fulfill({ json: { executions: [], delivery: { available: true, transport: "scripted", reason: null } } });
   });
   await page.goto("/admin/development");
+  await developmentDetails(page, "New experiment");
   await page.getByLabel("New experiment name").fill(name);
   await page.getByRole("button", { name: "Create experiment", exact: true }).click();
   await developmentStep(page, "Documents");
   const group = page.getByRole("group", { name: "Demo files" });
-  await expect(group).toContainText("can incur AI charges");
+  await expect(group).toContainText("AI parsing may incur charges.");
   const boxes = group.getByRole("checkbox");
   await expect(boxes).toHaveCount(7);
   await expect(page.getByRole("button", { name: "Add selected demo files" })).toBeDisabled();
@@ -70,7 +71,7 @@ test("demo files save once, retry only the failure, reopen and start scripted ge
   await page.getByRole("button", { name: `Open ${name}`, exact: true }).click();
   await developmentStep(page, "Documents");
   const saved = page.getByRole("region", { name: "Saved documents" });
-  await expect(saved.getByText("Ready for generation")).toHaveCount(3);
+  await expect(saved.getByText("Generation source", { exact: true })).toHaveCount(3);
   await saved.getByText("Document details", { exact: true }).first().click();
   await expect(saved).toContainText("Private demo file");
 
@@ -96,6 +97,7 @@ test("failed demo discovery is retried explicitly and the error clears", async (
     return route.continue();
   });
   await page.goto("/admin/development");
+  await developmentDetails(page, "New experiment");
   await page.getByLabel("New experiment name").fill(name);
   await page.getByRole("button", { name: "Create experiment", exact: true }).click();
   await developmentStep(page, "Documents");
@@ -123,13 +125,14 @@ test("a bundled file already uploaded without demo provenance is shown as added 
     return route.continue();
   });
   await page.goto("/admin/development");
+  await developmentDetails(page, "New experiment");
   await page.getByLabel("New experiment name").fill(name);
   await page.getByRole("button", { name: "Create experiment", exact: true }).click();
   await developmentStep(page, "Documents");
   await page.getByLabel("File to add to this experiment").setInputFiles({ name: old.filename, mimeType: "text/plain", buffer: Buffer.from(old.text, "utf8") });
   await developmentStep(page, "Documents");
   await page.getByRole("button", { name: "Upload experiment document", exact: true }).click();
-  await expect(page.getByRole("region", { name: "Saved documents" }).getByText("Ready for generation")).toHaveCount(1);
+  await expect(page.getByRole("region", { name: "Saved documents" }).getByText("Generation source", { exact: true })).toHaveCount(1);
 
   // Assert: the matching demo file is satisfied and disabled; the rest stay selectable.
   const group = page.getByRole("group", { name: "Demo files" });
@@ -143,5 +146,5 @@ test("a bundled file already uploaded without demo provenance is shown as added 
   await page.getByRole("button", { name: "Add selected demo files" }).click();
   await expect(group.getByText("Already added")).toHaveCount(2);
   expect(posted).toEqual([fresh.id]);
-  await expect(page.getByRole("region", { name: "Saved documents" }).getByText("Ready for generation")).toHaveCount(2);
+  await expect(page.getByRole("region", { name: "Saved documents" }).getByText("Generation source", { exact: true })).toHaveCount(2);
 });

@@ -42,6 +42,7 @@ test("all workflow steps retain heading order and wrap long saved evidence", asy
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${step} at ${width}px`).toBe(true);
       await page.screenshot({ path: test.info().outputPath(`${step.replaceAll(" ", "-")}-${width}.png`), fullPage: true });
     }
+    await developmentDetails(page, "New experiment");
     const labelGap = await page.getByRole("textbox", { name: "New experiment name", exact: true }).evaluate(control => {
       const label = control.closest("label")!;
       const text = Array.from(label.childNodes).find(node => node.nodeType === Node.TEXT_NODE)!;

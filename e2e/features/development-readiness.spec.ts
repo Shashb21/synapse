@@ -1,6 +1,6 @@
 /** Readiness flow uses scripted execution responses and never calls a model. */
 import { expect, test } from '@playwright/test';
-import { developmentStep } from '../support/development-workflow';
+import { developmentStep, developmentRename, developmentDetails } from "../support/development-workflow";
 
 test('explains readiness and an active execution', async ({ page, request }) => {
   let execution: Record<string, unknown> | null = null;
@@ -22,6 +22,7 @@ test('explains readiness and an active execution', async ({ page, request }) => 
   });
   await page.goto('/admin/development');
   const name = `Readiness ${Date.now()}`;
+  await developmentDetails(page, "New experiment");
   await page.getByLabel('New experiment name').fill(name);
   await page.getByRole('button', { name: 'Create experiment' }).click();
   await developmentStep(page, 'Run');
@@ -66,8 +67,10 @@ test('explains readiness and an active execution', async ({ page, request }) => 
   await run.click();
   await expect(page.getByRole('alert').filter({ hasText: /draft changed/i })).toBeVisible();
   await expect(run).toBeDisabled();
+  await developmentRename(page);
   await page.getByLabel('Experiment name', { exact: true }).fill('Unsaved local name');
   await page.getByRole('button', { name: 'Reload saved draft' }).click();
+  await developmentRename(page);
   await expect(page.getByLabel('Experiment name', { exact: true })).toHaveValue('Unsaved local name');
   await expect(run).toBeDisabled();
   await page.getByRole('button', { name: 'Save name', exact: true }).click();
