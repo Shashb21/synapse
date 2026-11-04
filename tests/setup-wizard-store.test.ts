@@ -9,6 +9,9 @@ import "@/modules";
 import { POST as iegpPost } from "@/app/api/iegp/route";
 import { GET as walkthroughGet, POST as walkthroughPost } from "@/app/api/walkthrough/route";
 import { loadState, resetDemo, saveProductSetup } from "@/lib/iegp/store";
+import { sql } from "drizzle-orm";
+import { db } from "@/lib/iegp/db";
+import { entityHistory } from "@/lib/iegp/entity-history";
 import { settingOptions } from "@/lib/iegp/engine";
 import {
   parsePlanningContext,
@@ -117,6 +120,61 @@ describe("setup context: parsing and validation", () => {
 });
 
 describe("setup context: saved per workspace", () => {
+  it.each([true, false])("preserves seeded objective metadata and history on a name-only save (saved context: %s)", async persistedContext => {
+    const ws = await createWorkspace({ name: `Metadata ${unique()}`, owner: `metadata-${unique()}@example.com` });
+    await withWorkspace(ws.id, resetDemo);
+    await withWorkspace(ws.id, async () => {
+      // Older plans can have no wizard context and different objective indications.
+      await db().execute(sql`UPDATE objectives SET indication = 'Objective-specific indication' WHERE id = 'OBJ-REIMB'`);
+      if (!persistedContext) await db().execute(sql`UPDATE assets SET planning_context = '{}'::jsonb`);
+      const before = await loadState();
+      const ids = before.objectives.map(objective => objective.id);
+      const history = await entityHistory(ids);
+      const displayed = setupContextFromState(before);
+      await saveProductSetup({ ...ACTOR, context: { ...displayed, asset_name: "Renamed demo asset" } });
+      const after = await loadState();
+      expect(after.asset.name).toBe("Renamed demo asset");
+      expect(after.objectives).toEqual(before.objectives);
+      expect(await entityHistory(ids)).toEqual(history);
+    });
+  }, 60_000);
+
+  it.each([
+    { field: "lifecycle_stage", change: { lifecycle_stage: "pre-launch" }, value: "pre-launch" },
+    { field: "indication", change: { indications: [{ name: "New indication", status: "current" as const }] }, value: "New indication" },
+    { field: "geography", change: { markets: ["Japan"] }, value: "Japan" },
+  ] as const)("requires a reason to change shared $field and preserves the other objective dimensions", async ({ field, change, value }) => {
+    const ws = await createWorkspace({ name: `Shared ${field} ${unique()}`, owner: `shared-${unique()}@example.com` });
+    await withWorkspace(ws.id, resetDemo);
+    await withWorkspace(ws.id, async () => {
+      await db().execute(sql`UPDATE objectives SET indication = 'Objective-specific indication' WHERE id = 'OBJ-REIMB'`);
+      const before = await loadState();
+      const ids = before.objectives.map(objective => objective.id);
+      const history = await entityHistory(ids);
+      const edited = parsePlanningContext({ ...setupContextFromState(before), ...change });
+      await expect(saveProductSetup({ ...ACTOR, context: edited })).rejects.toThrow(/rationale/);
+      expect((await loadState()).objectives).toEqual(before.objectives);
+      expect(await entityHistory(ids)).toEqual(history);
+      const reason = `Update shared ${field} after planning review`;
+      await saveProductSetup({ ...ACTOR, context: edited, reason });
+      const after = await loadState();
+      expect(after.objectives).toEqual(before.objectives.map(objective => ({ ...objective, [field]: value })));
+      const added = (await entityHistory(ids)).filter(entry => !history.some(old => old.id === entry.id));
+      expect(added).toHaveLength(before.objectives.filter(objective => objective[field] !== value).length);
+      expect(added.every(entry => entry.field === field && entry.rationale === reason)).toBe(true);
+    });
+  }, 60_000);
+
+  it("creates initial objectives without a supplied reason", async () => {
+    const ws = await createWorkspace({ name: `Initial ${unique()}`, owner: `initial-${unique()}@example.com` });
+    await withWorkspace(ws.id, async () => {
+      await saveProductSetup({ ...ACTOR, context: context() });
+      const state = await loadState();
+      expect(state.objectives).toHaveLength(2);
+      expect(state.objectives.every(objective => objective.lifecycle_stage === "pre-launch" && objective.geography === "US + EU5")).toBe(true);
+    });
+  }, 60_000);
+
   it("keeps each workspace's context separate and maps it onto the asset and objectives", async () => {
     const owner = `setup-${unique()}@example.com`;
     const a = await createWorkspace({ name: "Nova psoriasis", owner });
