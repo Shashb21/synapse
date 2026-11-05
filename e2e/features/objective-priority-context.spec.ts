@@ -44,17 +44,22 @@ test("edits a shared deadline without references, previews a hidden gap and reco
   await expect(impact).toContainText("2 linked Open gaps");
   await expect(impact).toContainText("2L comparative evidence");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await expect(page.getByTestId("setup-wizard").getByRole("alert")).toContainText("meaningful reason");
-  await expect(page.getByLabel(/^Evidence needed by/)).toHaveValue("2028-06-10");
-  await page.getByLabel("Reason for objective changes").fill("Committee papers are needed before the meeting");
+  const reasonDialog = page.getByRole("dialog", { name: "Reason for objective changes" });
+  await expect(reasonDialog).toBeVisible();
+  await reasonDialog.getByRole("button", { name: "Save and continue" }).click();
+  await expect(reasonDialog.getByRole("alert")).toContainText("meaningful reason");
+  await reasonDialog.getByLabel("Reason for objective changes").fill("Committee papers are needed before the meeting");
 
   // A failed save retains the entered context, reason and current selection.
   await page.route("**/api/iegp", route => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ safe_error: true, request_outcome: "rejected", error: "Save failed; please retry" }) }), { times: 1 });
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await expect(page.getByTestId("setup-wizard").getByRole("alert")).toContainText("Save failed");
-  await expect(page.getByLabel("Reason for objective changes")).toHaveValue("Committee papers are needed before the meeting");
+  await reasonDialog.getByRole("button", { name: "Save and continue" }).click();
+  await expect(reasonDialog.getByRole("alert")).toContainText("Save failed");
+  await expect(reasonDialog.getByLabel("Reason for objective changes")).toHaveValue("Committee papers are needed before the meeting");
+  await reasonDialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(page.getByLabel(/^Evidence needed by/)).toHaveValue("2028-06-10");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(reasonDialog.getByLabel("Reason for objective changes")).toHaveValue("Committee papers are needed before the meeting");
+  await reasonDialog.getByRole("button", { name: "Save and continue" }).click();
   await expect(page.getByTestId("setup-step-landscape")).toBeVisible();
   const after = (await planState(request)).placements;
   for (const id of [visibleGap, hiddenGap]) expect(after.find(p => p.gap_id === id)).toMatchObject({ validated: false, needs_review: true, band: "high", rationale: "Evidence blocks the committee decision" });
@@ -78,7 +83,7 @@ test("edits a shared deadline without references, previews a hidden gap and reco
   const dialog = page.getByRole("dialog", { name: "Validate High priority for 1L comparative evidence", exact: true });
   await dialog.getByLabel(/^Reason for change/).fill("Reviewed papers deadline; High remains appropriate");
   await dialog.getByRole("button", { name: "Validate priority", exact: true }).click();
-  await expect(dialog).not.toBeVisible();
+  await expect(dialog).toHaveCount(0);
   expect((await planState(request)).placements.find(p => p.gap_id === visibleGap)).toMatchObject({ validated: true, needs_review: false, band: "high" });
   await planAction(request, { action: "add_proposal", gap_id: visibleGap, name: "Reconfirmed idea", type: "rwe_study", evidence_question: "New comparative evidence?", rationale: "Reviewed context permits this idea" });
 
@@ -89,15 +94,25 @@ test("edits a shared deadline without references, previews a hidden gap and reco
   await page.getByLabel(/^Evidence needed by/).fill("2020-07-01");
   await expect(page.getByText("Evidence deadline passed", { exact: true })).toBeVisible();
   await expect(page.getByText(/Evidence deadline follows the decision date/)).toBeVisible();
-  await page.getByLabel("Reason for objective changes").fill("Retrospective decision context is intentional");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
+  const retrospectiveDialog = page.getByRole("dialog", { name: "Reason for objective changes" });
+  await expect(retrospectiveDialog).toBeVisible();
+  await retrospectiveDialog.getByLabel("Reason for objective changes").fill("Retrospective decision context is intentional");
+  await retrospectiveDialog.getByRole("button", { name: "Save and continue" }).click();
   await expect(page.getByTestId("setup-step-landscape")).toBeVisible();
   await page.reload();
   await expect(page.getByTestId("setup-summary-objectives")).toContainText("Evidence needed by: 2020-07-01");
   await expect(page.getByTestId("setup-summary-objectives")).toContainText("Decision date: 2020-06-30");
   await page.getByRole("button", { name: /Objectives & decisions$/ }).click();
   await page.getByLabel(/^Evidence needed by/).fill("2030-01-01");
-  await page.getByRole("button", { name: "Cancel changes", exact: true }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  const cancelDialog = page.getByRole("dialog", { name: "Reason for objective changes" });
+  await expect(cancelDialog).toBeVisible();
+  await cancelDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(cancelDialog).toHaveCount(0);
+  await expect(page.getByLabel(/^Evidence needed by/)).toHaveValue("2030-01-01");
+  await page.reload();
+  await page.getByRole("button", { name: /Objectives & decisions$/ }).click();
   await expect(page.getByLabel(/^Evidence needed by/)).toHaveValue("2020-07-01");
   await expect(impact).toHaveCount(0);
 });

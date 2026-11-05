@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Brain,
   ChartGantt,
@@ -17,6 +17,7 @@ import {
   Split,
 } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import {
   parsePlanningContext,
@@ -44,6 +45,7 @@ import { postJson } from "@/lib/post-json";
 
 type StepId = "welcome" | SetupSection | "models" | "review";
 type Step = { id: StepId; label: string };
+type SaveAction = { kind: "continue"; nextIndex: number } | { kind: "finish"; withTour: boolean; firstTime: boolean };
 
 const SECTION_VIEWS: Record<SetupSection, (props: StepProps) => ReactNode> = {
   asset: AssetStep,
@@ -129,6 +131,9 @@ export function SetupWizard({
   });
   const [attempted, setAttempted] = useState<Set<StepId>>(new Set());
   const [busy, setBusy] = useState(false);
+  // A ref also guards two events fired before React renders the disabled state.
+  const saving = useRef(false);
+  const [pendingAction, setPendingAction] = useState<SaveAction | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(initial.saved_at || null);
 
@@ -148,69 +153,86 @@ export function SetupWizard({
 
   const set: StepProps["set"] = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
 
-  async function save(markComplete: boolean): Promise<boolean> {
-    setError(null);
-    if (objectiveRevisions && reason.trim().length < 3) {
-      setError("Give a meaningful reason for the objective changes. Your answers are still here.");
-      return false;
+  async function save(action: SaveAction, confirmingReason = false) {
+    if (saving.current) return;
+    if (objectiveRevisions && !confirmingReason) {
+      setPendingAction(action);
+      return;
     }
+    if (confirmingReason && reason.trim().length < 3) {
+      setError("Give a meaningful reason for the objective changes. Your answers are still here.");
+      return;
+    }
+    saving.current = true;
     setBusy(true);
     try {
       const res = await postJson("/api/iegp", {
           action: "save_product_setup",
           actor_name: actorName,
           actor_function: actorFunction,
-          mark_complete: markComplete,
+          mark_complete: action.kind === "finish",
           context: form,
           reason,
         });
       const json = res.json as { error?: string; context?: PlanningContext };
       if (!res.ok) {
         setError(json.error ?? "Could not save setup");
-        return false;
+        // Existing save_product_setup contract from requireRationale; do not
+        // import that server module into this client component.
+        if (res.status === 400 && json.error === "A short rationale is required for every edit.") {
+          setPendingAction(action);
+        }
+        return;
       }
       // New objectives get their ids on save; keep them so the next save updates, not duplicates.
       if (json.context) {
         setForm(json.context);
         setBaseline(json.context);
-        setReason("");
         setSavedAt(json.context.saved_at || null);
       }
-      if (markComplete) setComplete(true);
-      return true;
+      setReason("");
+      setError(null);
+      setPendingAction(null);
+      if (action.kind === "continue") {
+        setIndex(action.nextIndex);
+      } else {
+        setComplete(true);
+        if (action.withTour) {
+          await updateWalkthrough("start", 0);
+          router.push(TOUR_STEPS[0]!.href);
+        } else if (action.firstTime) {
+          router.push(ai ? "/sources" : "/?place=gaps");
+        } else {
+          router.refresh();
+        }
+      }
     } catch {
       setError("Could not reach the server. Your answers are still here; try again.");
-      return false;
     } finally {
+      saving.current = false;
       setBusy(false);
     }
   }
 
   async function next() {
+    if (saving.current || pendingAction) return;
     if (isSection(step.id)) {
       setAttempted((prev) => new Set(prev).add(step.id));
       if (bySection[step.id]?.length) return;
-      if (!(await save(false))) return;
+      await save({ kind: "continue", nextIndex: Math.min(steps.length - 1, index + 1) });
+      return;
     }
     setIndex((i) => Math.min(steps.length - 1, i + 1));
   }
 
   async function finish(withTour: boolean) {
+    if (saving.current || pendingAction) return;
     setAttempted(new Set(steps.map((s) => s.id)));
     if (Object.keys(bySection).length > 0) {
       setError("Some required answers are missing. Fix the sections marked below.");
       return;
     }
-    const firstTime = !complete;
-    if (!(await save(true))) return;
-    if (withTour) {
-      await updateWalkthrough("start", 0);
-      router.push(TOUR_STEPS[0]!.href);
-    } else if (firstTime) {
-      router.push(ai ? "/sources" : "/?place=gaps");
-    } else {
-      router.refresh();
-    }
+    await save({ kind: "finish", withTour, firstTime: !complete });
   }
 
   const jump = (id: StepId) => {
@@ -245,6 +267,7 @@ export function SetupWizard({
               <li key={item.id}>
                 <button
                   type="button"
+                  disabled={busy}
                   onClick={() => setIndex(i)}
                   aria-current={i === index ? "step" : undefined}
                   className={cn(
@@ -267,7 +290,7 @@ export function SetupWizard({
         </ol>
       </header>
 
-      {error ? (
+      {error && !pendingAction ? (
         <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
@@ -419,10 +442,46 @@ export function SetupWizard({
               <p className="text-[12px] text-muted-foreground">Previous bands, scores, rationale and history are retained. The server checks all linked gaps again when you save.</p>
             </>
           ) : <p className="text-[12px] text-muted-foreground">These objective edits will be recorded with your reason. Name and note changes retain priority validation.</p>}
-          <TextField label="Reason for objective changes" required multiline value={reason} onChange={setReason} hint="Explain why this context is changing. A manual edit does not need a supporting reference." />
-          <Button type="button" variant="ghost" className="w-fit" disabled={busy} onClick={() => { setForm(baseline); setReason(""); setError(null); }}>Cancel changes</Button>
         </section>
       ) : null}
+
+      <Dialog open={pendingAction !== null} onOpenChange={(open, details) => {
+        if (open) return;
+        if (saving.current) { details.cancel(); return; }
+        setPendingAction(null);
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <form className="grid gap-4" onSubmit={(event) => {
+            event.preventDefault();
+            if (pendingAction) void save(pendingAction, true);
+          }}>
+            <DialogHeader>
+              <DialogTitle>Reason for objective changes</DialogTitle>
+              <DialogDescription>Explain why this context is changing. A manual edit does not need a supporting reference. Cancel keeps your unsaved answers and reason.</DialogDescription>
+            </DialogHeader>
+            {changedContextIds.size ? (
+              <div className="grid gap-2 text-[12px]" aria-label="Objective change impact">
+                <p>{affectedGaps.length} linked Open gap{affectedGaps.length === 1 ? "" : "s"} will need priority review across all settings.</p>
+                <ul className="list-inside list-disc">
+                  {affectedGaps.map(gap => <li key={gap.id}>{gap.name} · {gap.settings.join(", ") || "All settings"}</li>)}
+                </ul>
+                <p className="text-muted-foreground">Previous bands, scores, rationale and history are retained. The server checks all linked gaps again when you save.</p>
+              </div>
+            ) : <p className="text-[12px] text-muted-foreground">These objective edits will be recorded with your reason. Name and note changes retain priority validation.</p>}
+            <fieldset disabled={busy}>
+              <TextField label="Reason for objective changes" required multiline value={reason} onChange={setReason} error={error ?? undefined} />
+            </fieldset>
+            {busy ? <p role="status" className="text-sm text-muted-foreground">Saving your changes. Keep this dialog open until saving finishes.</p> : null}
+            <DialogFooter>
+              <Button type="button" variant="outline" disabled={busy} onClick={() => { if (!saving.current) setPendingAction(null); }}>Cancel</Button>
+              <Button type="submit" disabled={busy}>
+                {busy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+                {busy ? "Saving…" : "Save and continue"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
         <div className="flex items-center gap-2">

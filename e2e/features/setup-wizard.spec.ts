@@ -94,11 +94,44 @@ test.describe.serial("IEGP setup wizard", () => {
     // requires a reason even while this setup is still incomplete.
     await page.getByRole("button", { name: /Objectives & decisions$/ }).click();
     await page.getByLabel(/Key decision/).fill("EU5 HTA committee filing");
-    await expect(page.getByLabel("Reason for objective changes")).toBeVisible();
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await expect(page.getByTestId("setup-wizard").getByRole("alert")).toContainText("meaningful reason");
-    await page.getByLabel("Reason for objective changes").fill("The committee confirmed the filing scope");
-    await continueTo(page, "setup-step-landscape");
+    await expect(page.getByLabel("Reason for objective changes")).toHaveCount(0);
+    const saveButton = page.getByRole("button", { name: "Continue", exact: true });
+    let revisionRequests = 0;
+    const countRevision = (request: import("@playwright/test").Request) => {
+      if (request.url().endsWith("/api/iegp") && (request.postData() ?? "").includes("save_product_setup")) revisionRequests++;
+    };
+    page.on("request", countRevision);
+    await saveButton.click();
+    const reasonDialog = page.getByRole("dialog", { name: "Reason for objective changes" });
+    const reason = reasonDialog.getByLabel("Reason for objective changes");
+    await expect(reasonDialog).toBeVisible();
+    await expect(reason).toBeFocused();
+    await reasonDialog.getByRole("button", { name: "Save and continue" }).click();
+    await expect(reasonDialog.getByRole("alert")).toContainText("meaningful reason");
+    await reason.fill("The committee confirmed the filing scope");
+
+    // Shared Dialog traps keyboard focus and returns it to the save control.
+    for (let tab = 0; tab < 5; tab++) {
+      await page.keyboard.press("Tab");
+      await expect.poll(() => reasonDialog.evaluate(element => element.contains(document.activeElement))).toBe(true);
+    }
+    await page.keyboard.press("Escape");
+    await expect(reasonDialog).toHaveCount(0);
+    await expect(saveButton).toBeFocused();
+    for (const dismiss of ["Cancel", "Close"]) {
+      await saveButton.click();
+      await expect(reason).toHaveValue("The committee confirmed the filing scope");
+      await reasonDialog.getByRole("button", { name: dismiss, exact: true }).click();
+      await expect(reasonDialog).toHaveCount(0);
+      await expect(page.getByLabel(/Key decision/)).toHaveValue("EU5 HTA committee filing");
+      await expect(saveButton).toBeFocused();
+    }
+    expect(revisionRequests).toBe(0);
+    await saveButton.click();
+    await reasonDialog.getByRole("button", { name: "Save and continue" }).click();
+    await expect(page.getByTestId("setup-step-landscape")).toBeVisible();
+    expect(revisionRequests).toBe(1);
+    page.off("request", countRevision);
 
     // Evidence landscape
     await page.getByRole("radio", { name: "High" }).first().focus();

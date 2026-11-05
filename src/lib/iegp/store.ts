@@ -14,7 +14,7 @@ import { WORKSPACE_RESET_ACTION } from "./gap-history";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import { attributedActor, currentAttribution, recordAuditVia } from "@/modules/kernel/audit";
 import type { PlanningContext, SetupObjective } from "./planning-context";
-import { normalizeLifecycle, parsePlanningContext, setupIssues } from "./planning-context";
+import { normalizeLifecycle, parsePlanningContext, setupContextFromState, setupIssues } from "./planning-context";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type {
   GapConfirmer,
@@ -4179,6 +4179,12 @@ const PRIORITY_CONTEXT_FIELDS = new Set<string>(["key_decision", "decision_date"
 async function syncSetupObjectives(state: IegpState, ctx: PlanningContext, args: {
   reason?: string; actor_name: string; actor_function: ActorFunction;
 }): Promise<SetupObjective[]> {
+  // Compare with the shared values shown in Setup, including legacy/demo
+  // prefills. Unchanged shared answers must not flatten objective-specific data.
+  const baseline = setupContextFromState(state);
+  const lifecycleChanged = ctx.lifecycle_stage !== baseline.lifecycle_stage;
+  const indicationChanged = ctx.indication !== baseline.indication;
+  const geographyChanged = ctx.geography !== baseline.geography;
   const listed = ctx.objectives.filter(objective => objective.name);
   // An unfinished draft with no list must not remove an existing plan's objectives.
   if (listed.length === 0) return parsePlanningContext({ objectives: state.objectives }).objectives;
@@ -4199,10 +4205,11 @@ async function syncSetupObjectives(state: IegpState, ctx: PlanningContext, args:
     const old = existing.get(objective.id);
     const row = {
       name: objective.name, description: objective.description,
-      lifecycle_stage: ctx.lifecycle_stage && normalizeLifecycle(old?.lifecycle_stage) !== ctx.lifecycle_stage
-        ? ctx.lifecycle_stage : old?.lifecycle_stage || ctx.lifecycle_stage,
-      indication: ctx.indication || state.asset.indication,
-      geography: ctx.geography || state.asset.geography,
+      lifecycle_stage: old && !lifecycleChanged ? old.lifecycle_stage
+        : ctx.lifecycle_stage && normalizeLifecycle(old?.lifecycle_stage) !== ctx.lifecycle_stage
+          ? ctx.lifecycle_stage : old?.lifecycle_stage || ctx.lifecycle_stage,
+      indication: old && !indicationChanged ? old.indication : ctx.indication || state.asset.indication,
+      geography: old && !geographyChanged ? old.geography : ctx.geography || state.asset.geography,
       strategic_importance: objective.strategic_importance,
       key_decision: objective.key_decision, decision_date: objective.decision_date,
       evidence_needed_by: objective.evidence_needed_by || null, owner: objective.owner,
