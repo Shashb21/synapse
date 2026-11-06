@@ -1,12 +1,14 @@
 # KAN-100 isolated benchmark CLI
 
+Development owns these retained local tools after Accuracy retirement. Current customer experiments use Development; deployed routing and switches remain in AI & routing. Historical stages/scores are not current-pipeline validation. See the [retention and rollback runbook](operations/accuracy-retirement.md).
+
 KAN-106 supplies explicit `prepare`, `run` and `review` commands around the restart-safe batch. Account verification, vendor-specific BeOne processing permission and the actual resolved baseline snapshot remain pending. Passing synthetic tests does not establish readiness for live scoring.
 
-Use `benchmarkConfigSchema` and `BenchmarkConfig` from `src/accuracy/eval/benchmark/contracts.ts`; invoke `checkPreflight(config, envNames)` from `preflight.ts`. Pass environment names only. The returned `{ ready, blockers, estimatedTotalUsd }` contains no credentials. Validation failures return generic errors without echoing supplied values. No module loads `.env`, reads settings from a database, resolves a production route or calls a provider.
+Use `benchmarkConfigSchema` and `BenchmarkConfig` from `src/modules/development/evaluation/benchmark/contracts.ts`; invoke `checkPreflight(config, envNames)` from `preflight.ts`. Pass environment names only. The returned `{ ready, blockers, estimatedTotalUsd }` contains no credentials. Validation failures return generic errors without echoing supplied values. No module loads `.env`, reads settings from a database, resolves a production route or calls a provider.
 
 Prepare an isolated process without database credentials. Do not use normal Vitest setup for these checks: it attempts database writes. The tracked `vitest.kan100.config.ts` uses node, no setupFiles and only synthetic benchmark tests; it never supplies DATABASE_URL.
 
-Before execution, obtain a controller-supplied snapshot of actual persisted settings and resolved runtime routes, including parameters and fallback state. `BaselineRouteSnapshot` reuses the existing Accuracy route contract; `baselineSnapshot` identifies the privately saved snapshot. Set each route's requested and actual model from verified setup, freeze settings/prompts/schema hashes, and retain the full snapshot alongside later batch artifacts. A failed requested model remains a failure; any fallback result belongs to a separately labelled configuration.
+Before execution, obtain a controller-supplied snapshot of actual persisted settings and resolved runtime routes, including parameters and fallback state. `BaselineRouteSnapshot` is a benchmark-local structural snapshot preserving the original route contract; `baselineSnapshot` identifies the privately saved snapshot. Set each route's requested and actual model from verified setup, freeze settings/prompts/schema hashes, and retain the full snapshot alongside later batch artifacts. A failed requested model remains a failure; any fallback result belongs to a separately labelled configuration.
 
 Verify Extract 2.5 support in the actual account, fixed schema and citations through a synthetic text pilot. Verify the lowest-cost tier that passes setup, and record dated conservative prices from current vendor documentation. Do not silently use latest. Each of baseline and Extract needs exactly one route for need extraction, tactic inventory and completeness audit. Vendor authorization evidence is required per route before processing any BeOne original or derived text. An account check is not document-processing permission.
 
@@ -124,7 +126,7 @@ Private `data/runtime/benchmark/kan106-local-reference/prepare.json` records the
 
 ## Readable final analysis: what, why, verification
 
-`renderBenchmarkReport({result,packs,ceilingUsd,evidenceKind?,blockers?})` in `src/accuracy/eval/benchmark/report.ts` returns `{status,blockers,markdown}` without I/O or semantic inference. Batch and CLI save the readable analysis to the existing private `interim-report.md` after execution/review, including incomplete results. During interrupted execution the checkpoint report remains a short incomplete summary; `manifest.json` retains detailed attempts. No production endpoint, database or deployment is involved.
+`renderBenchmarkReport({result,packs,ceilingUsd,evidenceKind?,blockers?})` in `src/modules/development/evaluation/benchmark/report.ts` returns `{status,blockers,markdown}` without I/O or semantic inference. Batch and CLI save the readable analysis to the existing private `interim-report.md` after execution/review, including incomplete results. During interrupted execution the checkpoint report remains a short incomplete summary; `manifest.json` retains detailed attempts. No production endpoint, database or deployment is involved.
 
 The report shows each deck/stage/configuration/repetition with explicit recall numerators, denominators and percentages, citation validity and the content/citation intersection. It retains parsing losses in overall gold recall, source-linked omissions, additional/duplicate/unsupported/specificity examples, human rationale, recurring misses and repeat ranges. Each stage's advisory comparison gives observed mean recall, citation intersection and extraction/audit time; it does not impose an adoption threshold. Original block IDs, locations, text and quotes stay in private storage. Audit verdicts and human flag judgments remain separate from extraction credit. Attempt failures, requested/responding identities, costs, reservations and timings remain inspectable alongside JSON/CSV.
 
@@ -137,7 +139,7 @@ Verify with timeout-bounded synchronous commands, without `.env` loading or data
 /private/tmp/kan96-timeout 300s npm run test:kan100
 /private/tmp/kan96-timeout 120s npm run typecheck:kan100
 /private/tmp/kan96-timeout 120s npm run typecheck
-/private/tmp/kan96-timeout 120s node_modules/.bin/eslint src/accuracy/eval/benchmark/report.ts tests/kan100-report.test.ts
+/private/tmp/kan96-timeout 120s node_modules/.bin/eslint src/modules/development/evaluation/benchmark/report.ts tests/kan100-report.test.ts
 ```
 
 The timeout utility is a local harness path, not a repository dependency; use an available equivalent that terminates the process group on other hosts. Inspect private `interim-report.md` against `runs.csv`, `findings.csv`, `attempts.csv`, `jobs.csv`, `interim.json` and the authoritative manifest. Check all 24 run identities, three repeats per deck/stage/configuration, source/reference/settings hashes and actual responses, final authenticated extraction/audit judgments, and whole-experiment billing including setup/tuning/retry reservations. Run `git check-ignore --quiet -- <artifact-path>` before retaining source-derived artifacts. Never copy their contents into tracked documentation.

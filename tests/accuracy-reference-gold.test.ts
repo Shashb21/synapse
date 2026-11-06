@@ -5,7 +5,7 @@ import {
   loadReferenceGold,
   loadReferenceManifest,
   mustFindForPack,
-} from "@/accuracy/eval/reference-gold";
+} from "@/modules/development/evaluation/reference-gold";
 
 describe("reference gold packs", () => {
   it("loads manifest and per-pack gold/gaps.json + gold/tactics.json", () => {

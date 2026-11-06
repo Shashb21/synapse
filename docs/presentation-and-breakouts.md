@@ -5,6 +5,8 @@
 **Status:** Implemented (v1), currently switched off · builds on [`consultant-ux-spec.md`](../specs/consultant-ux-spec.md) Phase A
 **What this covers:** the spec's own Phase C ("Presentation view — read-only chaptered walkthrough") plus a new capability requested alongside it: **breakout groups** — group gaps by workshop theme, and open one browser window per group (one per screen) so two themes can run side by side, each independently facilitated.
 
+> **Historical Accuracy integration notes:** references below to the shipped Prep | Room stub and `/accuracy/workshop` describe an earlier design. Accuracy routes are now retired; they are not current navigation targets. Customer presentation and breakout feature flags remain as described above. See the [retirement runbook](operations/accuracy-retirement.md).
+
 ## Why this is a new surface, not an extension of `/accuracy/workshop`
 
 The consultant UX spec's §10 assumed "Room" mode would deep-link to the existing `/accuracy/workshop` stage. That stage is real and does have the keyboard-driven board pattern (← → between boards, Esc to clear) worth copying — but it is built on a **completely separate subsystem**: its own tenant/workspace model (`src/accuracy/store/tenant.ts`) and its own `accuracy_*` claims/snapshot schema. It has no concept of an IEGP `gap`, `tactic`, or `coverage` row. Building gap-native breakout rooms "on top of" it would mean either forking that subsystem's data model or bolting IEGP concepts onto it sideways.

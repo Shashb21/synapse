@@ -18,8 +18,6 @@ import { GET as controlGet, POST as controlPost } from "@/app/api/control/route"
 import { GET as modulesGet, POST as modulesPost } from "@/app/api/modules/route";
 import { POST as evalsPost } from "@/app/api/modules/evals/route";
 import { POST as hillclimbPost } from "@/app/api/modules/hillclimb/route";
-import { GET as orchestrationGet } from "@/app/api/accuracy/orchestration/route";
-import { GET as workspacesGet } from "@/app/api/accuracy/workspaces/route";
 import { GET as docGet } from "@/app/admin/docs/sdlc/[slug]/route";
 import nextConfig, { ADMIN_REDIRECTS } from "../next.config";
 
@@ -106,7 +104,6 @@ describe("who the owner is", () => {
 describe("admin APIs are owner only", () => {
   it("answers the owner", async () => {
     expect((await controlGet()).status).toBe(200);
-    expect((await orchestrationGet()).status).toBe(200);
     expect((await modulesGet()).status).toBe(200);
   });
 
@@ -115,8 +112,6 @@ describe("admin APIs are owner only", () => {
     const responses = await Promise.all([
       controlGet(),
       modulesGet(),
-      orchestrationGet(),
-      workspacesGet(new Request("http://localhost/api/accuracy/workspaces")),
       controlPost(post("/api/control", { action: "set_ai_enabled", enabled: false })),
       controlPost(post("/api/control", { action: "set_route", stage: "S2", provider_id: "xai-grok", model: "grok-4" })),
       controlPost(post("/api/control", { action: "set_default_provider", provider_id: "anthropic-claude" })),
@@ -147,17 +142,12 @@ describe("old lab URLs redirect into the owner console", () => {
   it("covers every moved surface", async () => {
     const rules = await nextConfig.redirects!();
     const destination = (source: string) => rules.find((rule) => rule.source === source)?.destination;
-    expect(destination("/accuracy")).toBe("/admin/accuracy");
-    expect(destination("/accuracy/:path*")).toBe("/admin/accuracy/:path*");
-    expect(destination("/accuracy/control")).toBe("/admin/accuracy/routing");
     expect(destination("/control")).toBe("/admin/control");
     expect(destination("/control-panel")).toBe("/admin/control");
     expect(destination("/pipeline")).toBe("/admin/pipeline");
     expect(destination("/runs/:path*")).toBe("/admin/runs/:path*");
     for (const path of ["/evals", "/catalog", "/sdlc", "/docs"]) expect(destination(path)).toBe(`/admin${path}`);
-    // The specific /accuracy/control rule must win over the /accuracy/:path* catch-all.
     const sources = ADMIN_REDIRECTS.map((rule) => rule.source);
-    expect(sources.indexOf("/accuracy/control")).toBeLessThan(sources.indexOf("/accuracy/:path*"));
     const moved = new Set(sources);
     expect(rules.filter((rule) => moved.has(rule.source)).every((rule) => rule.destination.startsWith("/admin"))).toBe(true);
   });

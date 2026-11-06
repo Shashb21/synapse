@@ -20,7 +20,7 @@
     "test:e2e:features": "playwright test e2e/features",
     "test:e2e:feature": "playwright test --grep",
     "test:evals": "playwright test e2e/features --grep \"gold case\"",
-    "benchmark:kan100": "tsx src/accuracy/eval/benchmark/scripts/kan100-benchmark.ts",
+    "benchmark:kan100": "tsx src/modules/development/evaluation/benchmark/scripts/kan100-benchmark.ts",
     "test:kan100": "vitest run --config vitest.kan100.config.ts",
     "typecheck:kan100": "tsc --noEmit -p tsconfig.kan100.json"
   },

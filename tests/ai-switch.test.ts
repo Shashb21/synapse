@@ -5,12 +5,10 @@ vi.mock("next/headers", () => ({
 }));
 
 import "@/modules";
-import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import { AiDisabledError, aiSwitch, setAiEnabled } from "@/modules/kernel/ai-switch";
 import { runStage } from "@/modules/kernel/run";
 import { listRuns } from "@/modules/kernel/observability";
 import { POST as controlPost } from "@/app/api/control/route";
-import { POST as uploadPost } from "@/app/api/accuracy/sources/upload/route";
 import { can } from "@/modules/auth/roles";
 
 const ACTOR = { name: "Switch Test", function: "medical_affairs" as const };
@@ -24,7 +22,6 @@ async function control(body: Record<string, unknown>) {
 
 describe("the admin AI switch", () => {
   beforeAll(async () => {
-    registerAccuracyStack();
     await setAiEnabled({ enabled: true, actor_name: ACTOR.name, rationale: "reset for the test" });
   });
   afterAll(async () => {
@@ -76,27 +73,6 @@ describe("the admin AI switch", () => {
     expect(Array.isArray(s10.output.pending)).toBe(true);
   });
 
-  it("with AI off, the accuracy app refuses agentic modules and uploads", async () => {
-    await setAiEnabled({ enabled: false, actor_name: ACTOR.name, rationale: "AI off for this test" });
-    await expect(
-      runAccuracyModule({
-        call_kind: "parse",
-        input: {},
-        actor: ACTOR,
-        org_id: "org",
-        workspace_id: "ws",
-      }),
-    ).rejects.toBeInstanceOf(AiDisabledError);
-
-    const form = new FormData();
-    form.set("workspace_id", "ws-any");
-    form.set("file", new File([Buffer.from("text")], "memo.txt", { type: "text/plain" }));
-    const res = await uploadPost(
-      new Request("http://localhost/api/accuracy/sources/upload", { method: "POST", body: form }),
-    );
-    expect(res.status).toBe(409);
-    expect(((await res.json()) as { code?: string }).code).toBe("ai_off");
-  });
 
   it("turning AI back on lets AI stages run again", async () => {
     await setAiEnabled({ enabled: true, actor_name: ACTOR.name, rationale: "AI back on" });

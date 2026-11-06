@@ -3,8 +3,6 @@ import "@/modules";
 import { NoRouteError } from "@/modules/llm/provider";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { parseWithLlm, structureWithLlm, type RawUnit } from "@/lib/ingest/llm-structure";
-import { resolveParsePolicy } from "@/accuracy/modules/parse/parse-policy";
-import { parseModule as accuracyParseModule } from "@/accuracy/modules/parse/module";
 import { parseModule as s1ParseModule } from "@/modules/stages/s1-parse/module";
 
 /**
@@ -153,35 +151,7 @@ describe("parse routing", () => {
     else process.env.SYNAPSE_TEST_STUB_LLM = savedStub;
   });
 
-  it("never selects LlamaParse: every file type is parsed by the LLM", () => {
-    for (const [filename, mime] of [
-      ["plan.pdf", "application/pdf"],
-      ["deck.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
-      ["notes.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
-      ["notes.txt", "text/plain"],
-    ] as const) {
-      expect(resolveParsePolicy({ filename, mime }).parser).toBe("llm");
-    }
-  });
 
-  it("the accuracy parse module throws without a connected LLM", async () => {
-    const ctx = {
-      route: { connected: false, auth: "none" },
-      run: { step: async (_name: string, fn: () => unknown) => fn(), note: () => {} },
-    } as unknown as Parameters<typeof accuracyParseModule.run>[1];
-    await expect(
-      accuracyParseModule.run(
-        {
-          workspace_id: "ws",
-          source_file_id: "src",
-          filename: "plan.pdf",
-          mime: "application/pdf",
-          content_base64: Buffer.from("%PDF").toString("base64"),
-        },
-        ctx,
-      ),
-    ).rejects.toBeInstanceOf(NoRouteError);
-  });
 
   it("S1 throws without a connected LLM", async () => {
     const route = { stage: "S1", auth: "none", connected: false, reason: null } as unknown as ResolvedRoute;

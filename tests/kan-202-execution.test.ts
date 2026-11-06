@@ -1,6 +1,7 @@
 /** Durable owner API tests: arrange a source draft, act through routes/workers, assert receipts. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { sql } from 'drizzle-orm';
+import { preservePersistedControls } from './support/persisted-controls';
 import { NextResponse } from 'next/server';
 import { sharedDb } from '@/lib/iegp/db';
 import { createExperiment, updateExperiment } from '@/modules/development/store';
@@ -19,6 +20,11 @@ import * as worker from '@/modules/development/worker';
 import * as executionStore from '@/modules/development/execution-store';
 import { POST as deliver } from '@/app/api/internal/development-worker/route';
 import { setAiEnabled } from '@/modules/kernel/ai-switch';
+import '@/modules';
+import { setRouteConfig } from '@/modules/kernel/routing';
+import { seedHistoricalRoute } from './support/persisted-controls';
+import { activeModule, activateModule } from '@/modules/kernel/registry';
+let restoreControls: (() => Promise<void>) | undefined;
 let sourceId = '';
 
 const quote = 'Comparative effectiveness remains unknown. An ongoing observational study measures outcomes.';
@@ -33,6 +39,7 @@ async function draft() {
 }
 const start = (id: string, revision = 2, target = 'all', config = { mode: 'single_pass' }, prerequisites = {}) => POST(request({ revision, target, config, prerequisites }), ctx(id));
 beforeEach(async () => {
+  restoreControls = await preservePersistedControls();
   vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unscripted network is forbidden in execution tests.'));
   vi.stubEnv('SYNAPSE_DEVELOPMENT_DELIVERY', 'github_actions');
   vi.stubEnv('CRON_SECRET', 'isolated-test-worker-secret-long-enough');
@@ -40,7 +47,10 @@ beforeEach(async () => {
   vi.spyOn(llm, 'isTestStub').mockReturnValue(false);
   for (const section of ['gap_extraction', 'tactic_extraction', 'mapping', 'partial_split'] as const) await setAiSection({ section, enabled: true, actor_name: 'test' });
 });
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+afterEach(async () => {
+  try { await restoreControls?.(); }
+  finally { restoreControls = undefined; vi.restoreAllMocks(); vi.unstubAllEnvs(); }
+});
 it('refuses unavailable delivery, stale revisions and concurrent conflicting starts; manifests contain sources only', async () => {
   const e = await draft();
   vi.stubEnv('SYNAPSE_DEVELOPMENT_DELIVERY', '');
@@ -302,8 +312,19 @@ it.each(['standard', 'single_pass'] as const)('uses explicit actual role routes 
   const route = (provider_id: string, model: string, temperature: number) => ({ provider_id, model, temperature, max_tokens: 4096, fallbacks: [] });
   const overrides = mode === 'standard' ? { critic: route('openai', 'gpt-5.1', 0.4), reviser: route('anthropic-claude', 'claude-sonnet-5-5', 0.5), internal_judge: route('google-gemini', 'gemini-3.8-flash', 0.6) } : { proposer: route('openai', 'gpt-5.1', 0.7) };
   const input = { revision: 2, target: 'gap_extraction', config: { mode, stages: { gap_extraction: { route: route('xai-grok', 'grok-4', 0.3), overrides } } }, prerequisites: {} };
-  await (await import('@/modules/kernel/routing')).routeConfig('S2');
-  const before = await sharedDb().execute(sql`select * from routing_config order by stage`);
+  // Seed real rows: empty-table comparisons could hide accidental writes to defaults.
+  await setRouteConfig({ stage: 'S2', provider_id: 'openai', model: 'gpt-5.1', temperature: 0.12, max_tokens: 2345, fallbacks: [], actor_name: 'KAN-211 live sentinel' });
+  await seedHistoricalRoute(1.1, 'KAN-211 legacy sentinel');
+  await activateModule({ stage: 'S2', module_id: (await activeModule('S2')).manifest.id, actor_name: 'KAN-211 module sentinel' });
+  await setAiEnabled({ enabled: true, actor_name: 'KAN-211 switch sentinel' });
+  const snapshot = async () => ({
+    routes: await sharedDb().execute(sql`select * from routing_config order by stage`),
+    accuracy: await sharedDb().execute(sql`select * from accuracy_routing_config order by call_kind, agent_role`),
+    settings: await sharedDb().execute(sql`select * from platform_settings order by key`),
+    modules: await sharedDb().execute(sql`select * from stage_modules order by stage`),
+  });
+  const before = await snapshot();
+  for (const rows of Object.values(before)) expect(rows.length).toBeGreaterThan(0);
   const response = await POST(request(input), ctx(e.id));
   expect(response.status).toBe(202);
   const execution = (await response.json()).execution;
@@ -313,7 +334,7 @@ it.each(['standard', 'single_pass'] as const)('uses explicit actual role routes 
   expect(completed.calls.map(c => [c.request.role, c.route.actual.provider_id, c.request.request.temperature])).toEqual(mode === 'standard' ? [['proposer', 'xai-grok', 0.3], ['critic', 'openai', 0.4], ['reviser', 'anthropic-claude', 0.5], ['critic', 'openai', 0.4], ['critic', 'openai', 0.4], ['internal_judge', 'google-gemini', 0.6]] : [['proposer', 'openai', 0.7]]);
   if (mode === 'standard') expect(completed.calls[2].route.actual_temperature).toBeNull();
   expect(sends.reduce((sum, mock) => sum + mock.mock.calls.length, 0)).toBe(completed.calls.length);
-  expect(await sharedDb().execute(sql`select * from routing_config order by stage`)).toEqual(before);
+  expect(await snapshot()).toEqual(before);
 });
 it('retains explicit fallback identity immutably and never re-resolves shared routing on continuation', async () => {
   const e = await draft();

@@ -75,6 +75,7 @@ describe("room slides", () => {
   });
 
   it("only shows same-origin app pages, never the room itself or the accuracy app", () => {
+    expect(isShowableHref("/accuracy-extra")).toBe(true);
     expect(isShowableHref("/gaps/G-001")).toBe(true);
     for (const bad of ["https://evil.example", "//evil.example", "/room", "/room/audience", "/api/room", "/accuracy/workshop", "", 3]) {
       expect(isShowableHref(bad)).toBe(false);

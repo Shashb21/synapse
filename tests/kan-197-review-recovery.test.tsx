@@ -14,12 +14,9 @@ vi.mock("@/components/ui/dialog", () => ({
   DialogDescription: ({ children }: { children: ReactNode }) => <p>{children}</p>,
   DialogClose: () => null,
 }));
-import { WorkshopSaveCta } from "@/components/accuracy/workshop-save-cta";
-import { PlanIdeateAllButton, PlanPriorityCard } from "@/components/accuracy/plan-priority-card";
 import { AdminWorkspacePicker } from "@/components/admin/admin-workspace-picker";
 import { DemoResetBar } from "@/components/workspaces/demo-reset-bar";
 import { CreateWorkspaceForm as CustomerCreate, WorkspacesView } from "@/components/workspaces/workspaces-view";
-import { CreateWorkspaceForm as AccuracyCreate } from "@/components/accuracy/create-workspace-form";
 import { GapSettingsEditor } from "@/components/gap-settings-editor";
 import { ActivitySheetEditor } from "@/components/timeline/timeline-dialogs";
 import { AiStatusProvider } from "@/components/platform/ai-status";
@@ -42,21 +39,10 @@ function change(input: HTMLInputElement | HTMLTextAreaElement, value: string) {
 }
 async function click(label: string) { await act(async () => button(label).click()); }
 async function submit() { await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))); }
-const priority = <PlanPriorityCard workspaceId="w" claimId="g" statement="Gap" priority="high" validated status="open" />;
 const owners = [
-  { name: "workshop snapshot", node: <WorkshopSaveCta workspaceId="w" ready blockers={[]} hasSnapshot={false} workshopHref="/workshop" />, prepare: async () => {}, run: () => click("Save state for workshop"), control: () => button("Save state for workshop"), check: "Check workshop state", draft: () => expect(container.textContent).toContain("Ready to save") },
-  { name: "all-gap ideation", node: <PlanIdeateAllButton workspaceId="w" eligibleCount={1} />, prepare: async () => {}, run: () => click("Run LLM ideate (1 high open gap)"), control: () => button("Run LLM ideate (1 high open gap)"), check: "Check plan ideas", draft: () => {} },
-  ...["LLM", "manual"].map(mode => ({
-    name: `${mode} gap ideation`, node: priority,
-    prepare: async () => { change(container.querySelector('input[placeholder*="title hint"]')!, "Retained proposed tactic"); change(container.querySelector('input[placeholder*="Optional rationale"]')!, "Retained proposal reason"); },
-    run: () => mode === "manual" ? submit() : click("Run LLM ideate"),
-    control: () => button(mode === "manual" ? "Save manual proposal" : "Run LLM ideate"), check: "Check plan ideas",
-    draft: () => expect((container.querySelector('input[placeholder*="title hint"]') as HTMLInputElement).value).toBe("Retained proposed tactic"),
-  })),
   { name: "client demo replacement", node: <AdminWorkspacePicker workspaces={[{ id: "w", name: "Demo client", created_by: "Owner", created_at: "today", demo: false, member_count: 1 }]} currentId="w" next="/admin" />, prepare: async () => {}, run: async () => { await act(async () => container.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click()); }, control: () => container.querySelector<HTMLInputElement>('input[type="checkbox"]')!, check: "Check workspace state", draft: () => expect(container.textContent).toContain("Demo client") },
   { name: "demo reset", node: <DemoResetBar workspace={{ id: "w", name: "Demo client", role: "owner", demo: true }} />, prepare: () => click("Reset demo"), run: async () => { await act(async () => [...container.querySelectorAll("button")].filter(b => b.textContent?.trim() === "Reset demo").at(-1)!.click()); }, control: () => [...container.querySelectorAll("button")].filter(b => b.textContent?.trim() === "Reset demo").at(-1)!, check: "Check workspace contents", draft: () => expect(container.textContent).toContain("Demo client") },
   { name: "customer workspace create", node: <CustomerCreate />, prepare: async () => change(container.querySelector("input")!, "Retained workspace"), run: submit, control: () => container.querySelector<HTMLButtonElement>('button[type="submit"]')!, check: "Check workspace list", draft: () => expect(container.querySelector("input")!.value).toBe("Retained workspace") },
-  { name: "Accuracy workspace create", node: <AccuracyCreate />, prepare: async () => change(container.querySelector("input")!, "Retained workspace"), run: submit, control: () => container.querySelector<HTMLButtonElement>('button[type="submit"]')!, check: "Check workspace list", draft: () => { expect(container.querySelector("input")!.value).toBe("Retained workspace"); expect(container.querySelectorAll("input")[1].value).toBe("retained-workspace"); } },
 ];
 
 describe.each(owners)("$name", owner => {

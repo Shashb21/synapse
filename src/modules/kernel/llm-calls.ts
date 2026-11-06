@@ -2,7 +2,7 @@ import { HISTORICAL_FAILURE_MESSAGE } from "./failure-presentation";
 import { sql } from "drizzle-orm";
 import { sharedDb } from "./db";
 import { newId } from "./ids";
-import { estimateCallCost, usageFromMessages } from "@/accuracy/kernel/cost";
+import { estimateCallCost, usageFromMessages } from "@/modules/llm/cost";
 import { redactSecrets } from "@/modules/llm/provider-error";
 import { PROVIDERS, type LlmProvider, type LlmRequest, type LlmUsage } from "@/modules/llm/provider";
 import type { RunHandle } from "./contracts";

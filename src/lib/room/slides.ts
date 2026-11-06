@@ -56,7 +56,7 @@ export function isShowableHref(href: unknown): href is string {
   if (!href.startsWith("/") || href.startsWith("//") || href.includes("\\")) return false;
   const path = href.split(/[?#]/)[0];
   if (path === "/room" || path.startsWith("/room/") || path.startsWith("/api/")) return false;
-  if (path === "/presentation" || path.startsWith("/accuracy")) return false;
+  if (path === "/presentation" || path === "/accuracy" || path.startsWith("/accuracy/")) return false;
   return true;
 }
 

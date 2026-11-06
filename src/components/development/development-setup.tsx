@@ -20,6 +20,8 @@ const sections: Record<DevelopmentSection, string> = {
   matching_coverage: "Matching and coverage",
   partial_splitting: "Partial splitting",
 };
+const fileInputClass =
+  "block w-full min-w-0 rounded-lg text-sm text-foreground file:mr-3 file:cursor-pointer file:rounded-lg file:border file:border-border file:bg-card file:px-3 file:py-2 file:text-sm file:font-medium file:text-foreground hover:file:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50 disabled:file:cursor-not-allowed";
 const selectClass =
   "w-full rounded-lg border border-input bg-background px-2 py-2 text-sm focus-visible:outline-2 focus-visible:outline-ring";
 
@@ -476,7 +478,7 @@ export function DevelopmentSetup() {
               <label className="block space-y-2">
                 Private source file
                 <input
-                  className="block w-full text-sm"
+                  className={fileInputClass}
                   type="file"
                   accept={UPLOAD_ACCEPT}
                   onChange={(event) =>
@@ -562,7 +564,7 @@ export function DevelopmentSetup() {
               <label className="block space-y-2">
                 Reference PDF
                 <input
-                  className="block w-full"
+                  className={fileInputClass}
                   type="file"
                   accept=".pdf"
                   onChange={(event) => setPdf(event.target.files?.[0] ?? null)}
@@ -578,7 +580,7 @@ export function DevelopmentSetup() {
               <label className="block space-y-2">
                 Structured reference JSON
                 <input
-                  className="block w-full"
+                  className={fileInputClass}
                   type="file"
                   accept=".json"
                   onChange={(event) =>

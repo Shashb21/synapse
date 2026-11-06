@@ -23,12 +23,18 @@ export const ADMIN_PATH_HEADER = "x-synapse-admin-path";
  */
 const PUBLIC_PREFIXES = ["/login", "/api/auth", "/_next", "/favicon.ico"];
 /** The owner tool gates itself by owner role (see the admin routes). */
-const ADMIN_PREFIXES = ["/admin", "/api/admin", "/api/accuracy", "/api/control"];
+const ADMIN_PREFIXES = ["/admin", "/api/admin", "/api/control"];
+const RETIRED_PREFIXES = ["/accuracy", "/api/accuracy"];
 /** Need a session but no workspace: where a workspace is chosen, and your own account. */
 const SESSION_ONLY_PREFIXES = ["/workspaces", "/api/workspaces", "/account", "/api/account"];
 
 function under(pathname: string, prefixes: string[]): boolean {
   return prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
+/** Retired paths must reach the normal not-found handler without a workspace. */
+export function isRetiredAccuracyPath(pathname: string): boolean {
+  return under(pathname, RETIRED_PREFIXES);
 }
 
 /** A file in public/ (or any other asset) is never gated. */
@@ -47,7 +53,7 @@ export function isAdminPage(pathname: string): boolean {
 export function gateFor(pathname: string): Gate {
   // This exact endpoint authenticates its scheduler bearer secret in its own handler.
   if (pathname === "/api/internal/development-worker") return "open";
-  if (under(pathname, PUBLIC_PREFIXES) || under(pathname, ADMIN_PREFIXES) || isAsset(pathname)) return "open";
+  if (isRetiredAccuracyPath(pathname) || under(pathname, PUBLIC_PREFIXES) || under(pathname, ADMIN_PREFIXES) || isAsset(pathname)) return "open";
   if (under(pathname, SESSION_ONLY_PREFIXES)) return "session";
   return "workspace";
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { scoreStage, scoringIdentity, type HumanJudgments } from '@/accuracy/eval/benchmark/scoring';
-import type { FrozenReferencePack } from '@/accuracy/eval/benchmark/inputs';
-import type { ExtractFinding } from '@/accuracy/eval/benchmark/extract';
+import { scoreStage, scoringIdentity, type HumanJudgments } from '@/modules/development/evaluation/benchmark/scoring';
+import type { FrozenReferencePack } from '@/modules/development/evaluation/benchmark/inputs';
+import type { ExtractFinding } from '@/modules/development/evaluation/benchmark/extract';
 const pack: FrozenReferencePack = { filename: 'synthetic.txt', sourceCodeVersion: 'code1', parserVersion: 'parser1', frozenAt: '2026-10-13T12:00:00Z', originalFileHash: 'original', packId: 'p', sourceHash: 's', referenceHash: 'r', packHash: 'p-hash', referenceVersion: 'v1', source: { blocks: [{ id: 'b', text: 'older patients renal impairment', kind: 'bullet', location: { kind: 'slide', ref: '1' } }] }, gold: { needs: { items: [{ id: 'older', statement: 'older patients', blockIds: ['b'] }, { id: 'renal', statement: 'renal impairment', blockIds: ['b'] }, { id: 'lost', statement: 'chart', blockIds: [], parsingLoss: { reason: 'chart', location: { kind: 'slide', ref: '2' } } }], parsingLossIds: ['lost'], review: { status: 'approved', reviewerId: 'gold-human', reviewedAt: '2026-10-13T12:00:00Z', referenceVersion: 'v1' } }, tactics: { items: [], parsingLossIds: [], review: { status: 'pending' } } } };
 const finding = (id: string): ExtractFinding => ({ id, statement: 'paraphrase', external_id: null, details: {}, provenance: [{ source_file_id: 'p', block_id: 'b', quote: 'older patients' }], citation: { valid: true, reasons: [], locations: [], metadata: null } });
 const signed = { reviewerId: 'human', reviewedAt: '2026-10-13T13:00:00Z', signature: 'attested', rationale: 'Reviewed meaning and evidence' };

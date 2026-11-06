@@ -16,6 +16,8 @@ Start here to browse feature specifications, their design decisions, and impleme
 | KAN-95: direct provider routing | [Design](kan-95-direct-provider-routing-design.md) | — |
 | Consultant experience | [UX specification](consultant-ux-spec.md) | — |
 
+Current operations: [Accuracy retirement and retention](../docs/operations/accuracy-retirement.md). Historical Accuracy designs and benchmark stage names preserve approval history; Development owns experiments, and AI & routing owns deployed behavior. Consult the [current benchmark runbook](../docs/kan-100-benchmark-runbook.md) for retained local commands.
+
 Shared references:
 
 - [Figma mapping](design/figma-make-mapping.md): design-to-application reference.
