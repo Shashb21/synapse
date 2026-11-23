@@ -117,7 +117,10 @@ function projectExtraction(state: IegpState, section: DevelopmentSection, candid
     const row = gapCandidate.parse(raw);
     const needId = `${row.id}:need`;
     state.gaps.push({ id: row.id, name: row.name, statement: row.statement, domain: row.domain, objective_id: '', status: 'candidate', exclusion_reason: null, exclusion_note: null, status_lock: unlocked(), parent_gap_id: null, computed_status: null, status_override: null, retired: false, human_validated: false, parked_at: null, parked_reason: null, settings: [], metadata: { stakeholders: [], geography: '', regional_nuances: '', notes: '' }, number: index + 1 });
-    state.needs.push({ id: needId, statement: row.statement, domain: row.domain, stakeholder: 'evidence_lead', objective_id: '', decision_supported: '', geography: '', population: '', intervention: '', comparator: '', outcome: '', timing: '', source_id: row.source_id, source_quote: row.source_quote, confidence: null, status: 'candidate', status_lock: unlocked(), run_id: traceId, candidate_row_id: row.id, block_id: state.blocks.find(block => block.source_id === row.source_id && block.text.includes(row.source_quote))?.id ?? null });
+    const sourceBlock = row.block_id === undefined
+      ? state.blocks.find(block => block.source_id === row.source_id && block.text.includes(row.source_quote))?.id ?? null
+      : typeof row.block_id === 'string' ? `${row.source_id}:${row.block_id}` : null;
+    state.needs.push({ id: needId, statement: row.statement, domain: row.domain, stakeholder: 'evidence_lead', objective_id: '', decision_supported: '', geography: '', population: '', intervention: '', comparator: '', outcome: '', timing: '', source_id: row.source_id, source_quote: row.source_quote, confidence: null, status: 'candidate', status_lock: unlocked(), run_id: traceId, candidate_row_id: row.id, block_id: sourceBlock });
     state.need_gap_links.push({ gap_id: row.id, need_id: needId, role: 'primary' });
   });
   else candidates.forEach(raw => {

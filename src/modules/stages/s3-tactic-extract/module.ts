@@ -1,3 +1,4 @@
+import { extractionSections, quotedBlock, reconcileSections, proposeSections, type ExtractionSection } from "../extraction-sections";
 import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
 import { desc } from "drizzle-orm";
 import { z } from "zod";
@@ -39,6 +40,7 @@ const inputSchema = z.object({
 const candidateSchema = z.object({
   id: z.string(),
   document_id: z.string(),
+  block_id: z.string().nullable().optional(),
   source_id: z.string(),
   name: z.string(),
   type: z.string(),
@@ -68,6 +70,8 @@ export type TacticExtractInput = z.infer<typeof inputSchema>;
 export type TacticExtractOutput = z.infer<typeof outputSchema>;
 
 type TacticCandidate = {
+  source_section?: number;
+  block_id?: string | null;
   id: string;
   document_id: string;
   source_id: string;
@@ -98,7 +102,8 @@ const TACTIC_FIELDS = `Each tactic has:
 - type: exactly one of ${TACTIC_TYPES.join(", ")}.
 - status: exactly one of ${TACTIC_STATUSES.join(", ")}, reflecting what the document says about it.
 - evidence_question: the question the tactic answers, in one sentence.
-- source_quote: a verbatim sentence or passage from the document that describes the tactic. Never paraphrase and never leave it empty.`;
+- source_quote: a verbatim sentence or passage from the document that describes the tactic. Never paraphrase and never leave it empty.
+- block_id: include the id shown beside the heading when you can identify the quoted block.`;
 
 const TACTIC_PROPOSER_SYSTEM = `You extract tactics already described in pharma evidence-planning source material.
 
@@ -152,10 +157,6 @@ Decide every candidate you are given. The full batch is listed under "batch" so 
 
 Return JSON only: {"decisions":[{"id":"","verdict":"accept","match":"new","target_tactic_id":null,"shared_scope":null,"new_scope":null,"expansion":null,"separate":null,"duplicate_of":null,"confidence":0,"reason":""}]}`;
 
-function documentText(document: ParsedDocumentRecord): string {
-  return document.blocks.map((block) => `## ${block.heading}\n${block.text}`).join("\n\n").slice(0, 40_000);
-}
-
 type RawTactic = {
   id?: unknown;
   withdraw?: unknown;
@@ -165,6 +166,7 @@ type RawTactic = {
   status?: unknown;
   evidence_question?: unknown;
   source_quote?: unknown;
+  block_id?: unknown;
 };
 
 const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
@@ -184,9 +186,12 @@ function tacticProblems(raw: RawTactic): string[] {
   return problems;
 }
 
-function toCandidate(document: ParsedDocumentRecord, id: string, raw: RawTactic): TacticCandidate {
+function toCandidate(section: ExtractionSection, id: string, raw: RawTactic): TacticCandidate {
+  const { document } = section;
   return {
     id,
+    source_section: section.number,
+    block_id: quotedBlock(section, text(raw.source_quote), raw.block_id),
     document_id: document.id,
     source_id: document.source_id,
     name: text(raw.name),
@@ -205,6 +210,7 @@ const tacticFields = (candidate: TacticCandidate) => ({
   status: candidate.status,
   evidence_question: candidate.evidence_question,
   source_quote: candidate.source_quote,
+  block_id: candidate.block_id,
 });
 
 type ProposerRow = {
@@ -221,13 +227,13 @@ type ProposerRow = {
  */
 async function answerRows(
   ctx: ModuleContext,
-  args: { document: ParsedDocumentRecord; hints: string; rows: ProposerRow[]; purpose: string; role?: "proposer" | "reviser" },
+  args: { section: ExtractionSection; hints: string; rows: ProposerRow[]; purpose: string; role?: "proposer" | "reviser" },
 ): Promise<Map<string, ProposerAnswer>> {
   const rowById = new Map(args.rows.map((row) => [row.id, { ...row }]));
   return completeAll({
     ids: args.rows.map((row) => row.id),
     what: "tactic",
-    describe: (id) => `${id} (${args.document.source_id})`,
+    describe: (id) => `${id} (${args.section.document.source_id})`,
     remedy: REMEDY,
     ask: async (missing, attempt) => {
       const payload = (await ctx.complete({
@@ -235,15 +241,15 @@ async function answerRows(
         system: augmentSystemPrompt(TACTIC_REVISER_SYSTEM),
         user: JSON.stringify({
           worked_examples: args.hints || undefined,
-          source: args.document.source_id,
+          source: args.section.document.source_id,
           note:
             attempt > 1
               ? "An earlier answer left these rows unanswered or invalid. Answer each, fixing the problem named."
               : undefined,
           rows: missing.map((id) => rowById.get(id)!),
-          document: documentText(args.document),
+          document: args.section.body,
         }),
-        purpose: `${args.purpose}:${args.document.id}`,
+        purpose: `${args.purpose}:${args.section.document.id}`,
       })) as { tactics?: RawTactic[] } | null;
       const answers = new Map<string, ProposerAnswer>();
       for (const raw of payload?.tactics ?? []) {
@@ -263,7 +269,7 @@ async function answerRows(
           row.problem = problems.join("; ");
           continue;
         }
-        answers.set(id, { kind: "tactic", tactic: toCandidate(args.document, id, raw) });
+        answers.set(id, { kind: "tactic", tactic: toCandidate(args.section, id, { ...raw, block_id: raw.block_id ?? row.previous?.block_id }) });
       }
       return answers;
     },
@@ -271,43 +277,43 @@ async function answerRows(
 }
 
 /** Round 1: the model lists the tactics in each document; any invalid row is sent back to it. */
-async function llmProposals(
+async function proposeSection(
   ctx: ModuleContext,
-  documents: ParsedDocumentRecord[],
+  section: ExtractionSection,
   hints: string,
 ): Promise<TacticCandidate[]> {
   const out: TacticCandidate[] = [];
-  for (const document of documents) {
-    const payload = (await ctx.complete({
-      role: "proposer",
-      system: augmentSystemPrompt(TACTIC_PROPOSER_SYSTEM),
-      user: [hints, `Source: ${document.source_id}`, documentText(document)].filter(Boolean).join("\n\n"),
-      purpose: `tactic-proposer:${document.id}`,
-    })) as { tactics?: RawTactic[] } | null;
-    const invalid: ProposerRow[] = [];
-    const proposed: { id: string; candidate?: TacticCandidate }[] = [];
-    for (const [index, raw] of (payload?.tactics ?? []).entries()) {
-      const id = `${document.id}-LT${String(index + 1).padStart(3, "0")}`;
-      const problems = tacticProblems(raw);
-      if (problems.length > 0) {
-        invalid.push({ id, previous: raw, problem: problems.join("; ") });
-        proposed.push({ id });
-      } else {
-        proposed.push({ id, candidate: toCandidate(document, id, raw) });
-      }
+  const { document } = section;
+  const payload = (await ctx.complete({
+    role: "proposer",
+    system: augmentSystemPrompt(TACTIC_PROPOSER_SYSTEM),
+    user: [hints, `Source: ${document.source_id}`, section.body].filter(Boolean).join("\n\n"),
+    purpose: `tactic-proposer:${document.id}`,
+  })) as { tactics?: RawTactic[] } | null;
+  const invalid: ProposerRow[] = [];
+  const proposed: { id: string; candidate?: TacticCandidate }[] = [];
+  if (!Array.isArray(payload?.tactics)) throw new Error(`Incomplete tactic extraction for ${document.id}, section ${section.number}: missing tactics array.`);
+  for (const [index, raw] of payload.tactics.entries()) {
+    const id = `${document.id}-LT${String(index + 1).padStart(3, "0")}${section.number > 1 ? `-W${section.number}` : ""}`;
+    const problems = tacticProblems(raw);
+    if (problems.length > 0) {
+      invalid.push({ id, previous: raw, problem: problems.join("; ") });
+      proposed.push({ id });
+    } else {
+      proposed.push({ id, candidate: toCandidate(section, id, raw) });
     }
-    const fixed =
-      invalid.length > 0
-        ? await answerRows(ctx, { document, hints, rows: invalid, purpose: "tactic-proposer-fix", role: "proposer" })
-        : new Map<string, ProposerAnswer>();
-    for (const row of proposed) {
-      if (row.candidate) {
-        out.push(row.candidate);
-        continue;
-      }
-      const answer = fixed.get(row.id);
-      if (answer?.kind === "tactic") out.push(answer.tactic);
+  }
+  const fixed =
+    invalid.length > 0
+      ? await answerRows(ctx, { section, hints, rows: invalid, purpose: "tactic-proposer-fix", role: "proposer" })
+      : new Map<string, ProposerAnswer>();
+  for (const row of proposed) {
+    if (row.candidate) {
+      out.push(row.candidate);
+      continue;
     }
+    const answer = fixed.get(row.id);
+    if (answer?.kind === "tactic") out.push(answer.tactic);
   }
   return out;
 }
@@ -316,7 +322,7 @@ async function llmProposals(
 async function llmRevisions(
   ctx: ModuleContext,
   args: {
-    documents: ParsedDocumentRecord[];
+    sections: ExtractionSection[];
     hints: string;
     round: number;
     previous: TacticCandidate[];
@@ -330,9 +336,9 @@ async function llmRevisions(
   );
   if (objections.size === 0) return args.previous;
   const answers = new Map<string, ProposerAnswer>();
-  for (const document of args.documents) {
+  for (const section of args.sections) {
     const rows = args.previous
-      .filter((candidate) => candidate.document_id === document.id && objections.has(candidate.id))
+      .filter((candidate) => candidate.document_id === section.document.id && candidate.source_section === section.number && objections.has(candidate.id))
       .map((candidate) => ({
         id: candidate.id,
         previous: tacticFields(candidate),
@@ -340,7 +346,7 @@ async function llmRevisions(
       }));
     if (rows.length === 0) continue;
     const answered = await answerRows(ctx, {
-      document,
+      section,
       hints: [
         args.hints,
         `Exchange ${args.round - 1} of ${PROPOSER_CRITIC_EXCHANGES}: answer the critic for each row, keeping its id.`,
@@ -519,7 +525,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
   manifest: {
     id: "s3-tactic-extract.pcj",
     stage: "S3",
-    version: "3.1.0",
+    version: "3.2.0",
     title: "Tactic extraction (proposer → critic → judge)",
     summary:
       "A model proposes the tactics the source material describes, a model critic challenges each over three exchanges, and a model judge classifies same, overlapping and new scope. Overlaps await human source review. Needs a connected LLM.",
@@ -550,6 +556,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
       };
     }
 
+    const sections = isTestStub() ? [] : documents.flatMap(extractionSections);
     const library: LibraryTactic[] = state.tactics;
     // The kernel hands similar past reviewer decisions (worked examples, KAN-79) to the proposer; the critic and judge see them too.
     let reviewerHints = "";
@@ -582,8 +589,10 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
         },
         llm: async ({ hints, round, critiques, previous }) => {
           reviewerHints = hints;
-          if (round === 1) return llmProposals(ctx, documents, hints);
-          return llmRevisions(ctx, { documents, hints, round, previous, critiques });
+          const candidates = round === 1
+            ? await proposeSections(ctx.run, sections, section => proposeSection(ctx, section, hints))
+            : await llmRevisions(ctx, { sections, hints, round, previous, critiques });
+          return reconcileSections(candidates, row => [row.name, row.evidence_question, row.type, row.status]);
         },
       },
       critic: async (candidates, round) => {
@@ -736,6 +745,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
 
     const toOut = (item: JudgedCandidate<TacticCandidate>) => ({
       id: item.candidate.id,
+      block_id: item.candidate.block_id,
       document_id: item.candidate.document_id,
       source_id: item.candidate.source_id,
       name: item.candidate.name,
