@@ -1,4 +1,6 @@
 /** End-to-end parse accounting using fictional text, scripted HTTP and in-memory telemetry. */
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { SQL } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseWithLlm } from "@/lib/ingest/llm-structure";
 import type { ResolvedRoute, RunHandle } from "@/modules/kernel/contracts";
@@ -10,7 +12,14 @@ import { completionFor } from "@/modules/kernel/routing";
 import { RETRY } from "@/modules/llm/provider";
 
 vi.mock("unpdf", () => ({ getDocumentProxy: vi.fn(), extractText: async () => ({ text: [source] }) }));
-vi.mock("@/modules/kernel/db", () => ({ sharedDb: () => ({ execute: vi.fn() }) }));
+const { execute } = vi.hoisted(() => ({ execute: vi.fn<(statement: SQL) => Promise<void>>() }));
+vi.mock("@/modules/kernel/db", () => ({ sharedDb: () => ({ execute }) }));
+
+function recordedCalls() {
+  const dialect = new PgDialect();
+  return execute.mock.calls.map(([statement]) => dialect.sqlToQuery(statement))
+    .filter(query => query.sql.includes("insert into llm_calls"));
+}
 const route: ResolvedRoute = {
   stage: "S1", provider_id: "openai", provider_label: "OpenAI", model: "gpt-5.1",
   auth: "api_key", connected: true, params: { temperature: 0, max_tokens: 300 },
@@ -30,6 +39,7 @@ function scriptedRequests(limit: number, replies: unknown[]) {
   const fetch = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(async () => {
     if (!replies.length) throw new Error("Unexpected outbound request");
     const reply = replies.shift();
+    if (reply instanceof Response) return reply;
     if (reply === 503) return new Response("Busy", { status: 503 });
     const content = typeof reply === "string" ? reply : JSON.stringify(reply);
     return Response.json({ choices: [{ message: { content } }] });
@@ -39,6 +49,7 @@ function scriptedRequests(limit: number, replies: unknown[]) {
 }
 
 beforeEach(() => {
+  execute.mockClear();
   vi.stubEnv("OPENAI_API_KEY", "fictional-test-key");
   vi.spyOn(RETRY, "sleep").mockResolvedValue();
 });
@@ -61,6 +72,37 @@ describe("S1 per-document request limit", () => {
     const fetch = scriptedRequests(2, replies);
     await expect(parse()).rejects.toMatchObject({ code: "parse_limit", message: expect.stringContaining("2") });
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([307, 308])("prevents automatic HTTP %i redirect sends for budgeted calls only", async status => {
+    const fetch = scriptedRequests(2, [Response.redirect("https://fictional.invalid/endpoint", status), {}]);
+    await expect(parse()).rejects.toMatchObject({ status });
+    expect(fetch.mock.calls[0]?.[1].redirect).toBe("manual");
+    await completionFor(route, run)({ system: "fixture", user: "fixture", purpose: "outside-parse" });
+    expect(fetch.mock.calls[1]?.[1].redirect).toBeUndefined();
+  });
+
+  it("records the final upstream failure safely and skips the blocked send", async () => {
+    const responseBody = "private fictional provider details fictional-test-key";
+    const fetch = scriptedRequests(2, [structure, new Response(responseBody, { status: 503 })]);
+    await expect(parse()).rejects.toMatchObject({ code: "parse_limit" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const records = recordedCalls();
+    expect(records).toHaveLength(2);
+    const last = JSON.stringify(records[1]?.params);
+    expect(last).toMatch(/limit of 2 model calls/);
+    expect(last).toMatch(/503/);
+    expect(last).toMatch(/unavailable/);
+    expect(last).not.toContain("private fictional");
+    expect(last).not.toContain("fictional-test-key");
+  });
+
+  it("only records dispatched requests when classification is blocked before sending", async () => {
+    const fetch = scriptedRequests(2, [{}, structure]);
+    await expect(parse()).rejects.toMatchObject({ code: "parse_limit" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(recordedCalls()).toHaveLength(2);
+    expect(recordedCalls().flatMap(query => query.params)).not.toContain("parse-stakeholder");
   });
 
   it("shares retry consumption across multiple structure groups and classification", async () => {

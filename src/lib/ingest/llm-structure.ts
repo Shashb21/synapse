@@ -58,9 +58,11 @@ export function createParseRequestBudget(): ProviderRequestBudget {
   const limit = parseLimits().calls;
   let sent = 0;
   return {
-    check() {
-      if (sent >= limit) throw new TrustedApplicationError(
-        `This document reached its limit of ${limit} model calls before parsing finished. Split it into smaller files, or paste only the part you need.`,
+    check(lastFailure) {
+      if (sent < limit) return;
+      const detail = lastFailure ? ` The last provider request returned HTTP ${lastFailure.status} (${lastFailure.kind}).` : "";
+      throw new TrustedApplicationError(
+        `This document reached its limit of ${limit} model calls before parsing finished.${detail} Split it into smaller files, or paste only the part you need.`,
         "parse_limit", 422,
       );
     },
