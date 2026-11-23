@@ -38,8 +38,15 @@ export type LlmUsage = {
   reasoning_tokens: number | null;
 };
 
+/** A shared allowance for outbound HTTP requests, including retries. */
+export type ProviderRequestBudget = {
+  check(): void;
+  consume(): void;
+};
+
 /** Optional observers of one call. The reply is still returned as plain text. */
 export type LlmCallHooks = {
+  requestBudget?: ProviderRequestBudget;
   onUsage?: (usage: LlmUsage) => void;
   /** Per-call HTTP bound; omitted preserves ordinary provider retry policy. */
   maxAttempts?: number;
@@ -106,9 +113,11 @@ function requestedWait(res: Response, text: string): number | null {
   return delay ? Number(delay[1]) * 1_000 : null;
 }
 
-async function postJson(url: string, headers: Record<string, string>, body: unknown, target: CallTarget, maxAttempts = RETRY.attempts) {
+async function postJson(url: string, headers: Record<string, string>, body: unknown, target: CallTarget, hooks?: LlmCallHooks) {
+  const maxAttempts = hooks?.maxAttempts ?? RETRY.attempts;
   for (let attempt = 1; ; attempt += 1) {
     // Time-limited (SYNAPSE_LLM_TIMEOUT_MS); a timeout is "unavailable" and not retried (KAN-20).
+    hooks?.requestBudget?.consume();
     const { res, text } = await fetchProvider(
       url,
       { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) },
@@ -133,6 +142,7 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
     const transient =
       (error.kind === "rate_limit" && !error.info.daily_quota) || res.status === 503 || (res.status === 404 && !text.trim());
     if (!transient || attempt >= maxAttempts) throw error;
+    hooks?.requestBudget?.check(); // Skip backoff if no retry can be sent.
     const wait = requestedWait(res, text) ?? RETRY.base_ms * 2 ** (attempt - 1);
     await RETRY.sleep(Math.min(wait, RETRY.max_wait_ms));
   }
@@ -253,7 +263,7 @@ async function chatCompletions(args: {
       ...(args.json ? { response_format: { type: "json_object" } } : {}),
     },
     { ...args.target, api_key: args.auth.api_key },
-    args.hooks?.maxAttempts,
+    args.hooks,
   );
   reportUsage(payload, args.hooks);
   return chatText(payload, { ...args.target, api_key: args.auth.api_key });
@@ -377,7 +387,7 @@ export const anthropicClaude: LlmProvider = {
         messages: [{ role: "user", content: request.user }],
       },
       { provider_id: "anthropic-claude", provider_name: "Anthropic", key_env: "ANTHROPIC_API_KEY", api_key: auth.api_key },
-      hooks?.maxAttempts,
+      hooks,
     );
     reportUsage(payload, hooks);
     return anthropicText(payload);
@@ -428,7 +438,7 @@ export const googleGemini: LlmProvider = {
         },
       },
       { provider_id: "google-gemini", provider_name: "Google Gemini", key_env: "GEMINI_API_KEY", api_key: auth.api_key },
-      hooks?.maxAttempts,
+      hooks,
     );
     reportUsage(payload, hooks);
     return geminiText(payload);
