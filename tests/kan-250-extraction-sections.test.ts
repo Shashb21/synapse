@@ -70,17 +70,18 @@ describe("complete gap and tactic extraction", () => {
     expect(windows.at(-1)?.body).toContain(late);
   });
 
-  it("preserves Development block resolution for existing stub rows without block IDs", async () => {
+  it.each(["gap_extraction", "tactic_extraction"] as const)("preserves Development block resolution for existing %s stub rows without block IDs", async section => {
     vi.mocked(llm.isTestStub).mockReturnValue(true);
     const snapshot = source();
-    snapshot.parsed = { blocks: [{ id: "legacy", heading: "Evidence gap", text: "There is no evidence of comparative effectiveness in the fictional population.", location: "1" }] };
+    snapshot.parsed = { blocks: [{ id: "legacy", heading: "Evidence gap", text: section === "gap_extraction" ? "There is no evidence of comparative effectiveness in the fictional population." : "A prospective patient registry measures comparative effectiveness in the fictional population.", location: "1" }] };
     snapshot.parsed_sha256 = sha256(canonicalParsedJson(snapshot.parsed));
     const complete = vi.fn<JsonCompletion>();
-    const result = await executeDevelopmentSection({ section: "gap_extraction", mode: "single_pass", sources: [snapshot], prerequisites: {}, recorder, complete });
+    const result = await executeDevelopmentSection({ section, mode: "single_pass", sources: [snapshot], prerequisites: {}, recorder, complete });
     expect(complete).not.toHaveBeenCalled();
     expect(result.candidates[0]).not.toHaveProperty("block_id");
-    expect(result.local_state.needs[0].block_id).toBe("fiction:legacy");
-    expect(result.local_state.needs[0].block_id).toBe(result.local_state.blocks[0].id);
+    const projected = section === "gap_extraction" ? result.local_state.needs : result.local_state.tactics;
+    expect(projected[0].block_id).toBe("fiction:legacy");
+    expect(projected[0].block_id).toBe(result.local_state.blocks[0].id);
   });
 
   for (const section of ["gap_extraction", "tactic_extraction"] as const) {
@@ -120,9 +121,25 @@ describe("complete gap and tactic extraction", () => {
       expect(new Set(ids).size).toBe(5);
       expect(result.review_status).toBe("unreviewed");
       expect(result.candidates.every(row => row.source_id === "fiction" && row.document_id === "fiction")).toBe(true);
-      if (isGap) expect(result.local_state.needs.filter(need => need.source_quote === early).at(-1)?.block_id).toBe("fiction:appendix");
+      const projected = isGap ? result.local_state.needs : result.local_state.tactics;
+      expect(projected.map(row => row.block_id)).toEqual(result.candidates.map(row => `fiction:${row.block_id}`));
+      expect(projected.every(row => result.local_state.blocks.some(block => block.id === row.block_id))).toBe(true);
       if (mode === "standard") expect(revisionBlocks).toEqual(new Set(ids));
       else expect(complete.mock.calls.every(([request]) => request.role === "proposer")).toBe(true);
+    });
+
+    it(`${section} leaves unresolved repeated quotations unattributed in Development`, async () => {
+      const snapshot = source();
+      snapshot.parsed = { blocks: ["one", "two"].map(id => ({ id, text: early, heading: id, location: id })) };
+      snapshot.parsed_sha256 = sha256(canonicalParsedJson(snapshot.parsed));
+      const complete: JsonCompletion = async () => ({ [list]: [
+        { ...finding(section, early), block_id: "two" },
+        { ...finding(section, early), block_id: "unsupported" },
+      ] });
+      const result = await executeDevelopmentSection({ section, mode: "single_pass", sources: [snapshot], prerequisites: {}, recorder, complete });
+      expect(result.candidates.map(row => row.block_id)).toEqual(["two", null]);
+      const projected = isGap ? result.local_state.needs : result.local_state.tactics;
+      expect(projected.map(row => row.block_id)).toEqual(["fiction:two", null]);
     });
 
     it(`${section} repairs an incomplete late proposal using its own section during single pass`, async () => {
