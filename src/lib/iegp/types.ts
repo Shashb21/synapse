@@ -106,6 +106,8 @@ export type EvidenceNeed = {
   run_id?: string | null;
   candidate_row_id?: string | null;
   block_id?: string | null;
+  /** Verified occurrences of an older quote whose original block is ambiguous. */
+  observed_block_ids?: string[] | null;
 };
 
 export type GapStatusOverride = {

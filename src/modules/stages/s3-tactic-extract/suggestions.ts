@@ -2,7 +2,8 @@ import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { withRelationshipChange } from "@/lib/iegp/relationship-change";
 /** S3 source review: immutable model baseline, source provenance and atomic human decisions. */
 import { createHash } from "node:crypto";
-import { desc, eq } from "drizzle-orm";
+import { reconcileHistoricalCitation } from "@/lib/iegp/engine";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensureCurrentSchemaTables } from "@/lib/iegp/db";
 import * as t from "@/lib/iegp/schema";
@@ -29,7 +30,28 @@ export async function attachTacticSource(args: {tactic_id: string; source_id: st
     const [parent] = await tx.select().from(t.tactics).where(eq(t.tactics.id, args.tactic_id)).for("update");
     const [source] = await tx.select().from(t.sources).where(eq(t.sources.id, args.source_id));
     if (!parent || !source) throw new TrustedApplicationError("Tactic or source not found in this workspace.", "not_found", 404);
-    await tx.insert(tacticSourceReferences).values({...args, id: newId("TSRC"), quote_key: args.block_id ? JSON.stringify([args.block_id, quoteKey(args.source_quote)]) : quoteKey(args.source_quote), created_at: nowIso()}).onConflictDoNothing();
+    const legacyKey = quoteKey(args.source_quote);
+    const key = args.block_id ? JSON.stringify([args.block_id, legacyKey]) : legacyKey;
+    const existing = await tx.select().from(tacticSourceReferences).where(and(
+      eq(tacticSourceReferences.tactic_id, args.tactic_id),
+      eq(tacticSourceReferences.source_id, args.source_id),
+      args.block_id ? inArray(tacticSourceReferences.quote_key, [key, legacyKey]) : undefined,
+    ));
+    if (existing.some(row => row.quote_key === key || (!args.block_id && quoteKey(row.source_quote) === legacyKey))) return;
+    if (args.block_id) {
+      const legacy = existing.find(row => row.quote_key === legacyKey && !row.block_id);
+      if (legacy) {
+        const blocks = await tx.select().from(t.sourceBlocks).where(eq(t.sourceBlocks.source_id, args.source_id));
+        const update = reconcileHistoricalCitation(blocks, legacy.source_quote, args.block_id, legacy.observed_block_ids);
+        if (update) {
+          await tx.update(tacticSourceReferences).set({
+            ...update, ...("block_id" in update ? { quote_key: key } : {}),
+          }).where(eq(tacticSourceReferences.id, legacy.id));
+        }
+        return;
+      }
+    }
+    await tx.insert(tacticSourceReferences).values({...args, id: newId("TSRC"), quote_key: key, created_at: nowIso()}).onConflictDoNothing();
   };
   if (transaction) return run(transaction);
   await ensureTacticSuggestionSchema(); return db().transaction(run);

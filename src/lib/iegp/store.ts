@@ -64,6 +64,7 @@ import {
   gapsReadyForPrioritize,
   isLiveGap,
   persistedResidualGaps,
+  reconcileHistoricalCitation,
   requireOverrideReason,
   splitSourceIntoBlocks,
   tacticEligibleForMapping,
@@ -975,7 +976,7 @@ export const editNeed = atomic(async function editNeed(args: {
     .set({
       ...(statement !== undefined ? { statement } : {}),
       ...(quote !== undefined ? { source_quote: quote } : {}),
-      ...(citationChanged ? { source_basis_text: null, block_id: citedBlock?.id ?? null } : {}),
+      ...(citationChanged ? { source_basis_text: null, observed_block_ids: null, block_id: citedBlock?.id ?? null } : {}),
       lock: makeLock(args.actor_name, args.actor_function, rationale),
     })
     .where(eq(t.needs.id, args.need_id));
@@ -3482,12 +3483,18 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
   // Older rows kept only the first 280 characters of a quote, so compare on those.
   const quoteKey = (gapId: string, quote: string, blockId?: string | null) =>
     JSON.stringify([gapId, sourceId, blockId ?? null, quote.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 280)]);
-  const attached = new Set(
-    state.need_gap_links.flatMap((link) => {
-      const need = state.needs.find((row) => row.id === link.need_id);
-      return need && need.source_id === sourceId ? [quoteKey(link.gap_id, need.source_quote ?? need.statement, need.block_id)] : [];
-    }),
-  );
+  const attached = new Set<string>();
+  const historical = new Map<string, IegpState["needs"][number]>();
+  const sourceBlocks = state.blocks.filter(block => block.source_id === sourceId);
+  const sourceNeeds = new Map(state.needs.filter(need => need.source_id === sourceId).map(need => [need.id, need]));
+  for (const link of state.need_gap_links) {
+    const need = sourceNeeds.get(link.need_id);
+    if (!need) continue;
+    const key = quoteKey(link.gap_id, need.source_quote ?? need.statement, need.block_id);
+    attached.add(key);
+    attached.add(quoteKey(link.gap_id, need.source_quote ?? need.statement));
+    if (!need.block_id) historical.set(key, need);
+  }
 
   const addNeed = async (args2: {
     gapId: string;
@@ -3496,9 +3503,24 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
     domain: EvidenceDomain;
     provenance?: NeedProvenance;
   }) => {
-    const key = quoteKey(args2.gapId, args2.quote || args2.statement, args2.provenance?.block_id);
+    const quote = args2.quote || args2.statement;
+    const blockId = args2.provenance?.block_id;
+    const key = quoteKey(args2.gapId, quote, blockId);
+    const legacyKey = quoteKey(args2.gapId, quote);
     if (attached.has(key)) return;
     attached.add(key);
+    attached.add(legacyKey);
+    const legacy = historical.get(legacyKey);
+    if (blockId && legacy && (!legacy.block_id || legacy.block_id === blockId)) {
+      if (!legacy.block_id) {
+        const update = reconcileHistoricalCitation(sourceBlocks, legacy.source_quote || legacy.statement, blockId, legacy.observed_block_ids);
+        if (update) {
+          await db().update(t.needs).set(update).where(eq(t.needs.id, legacy.id));
+          Object.assign(legacy, update);
+        }
+      }
+      return;
+    }
     const needId = await allocateId("NEED", needIds);
     needIds.push(needId);
     createdNeedIds.push(needId);

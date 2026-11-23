@@ -1,3 +1,4 @@
+import * as tables from "@/lib/iegp/schema";
 import { eq } from "drizzle-orm";
 import { db } from "@/modules/kernel/db";
 import { parsedDocuments } from "@/modules/stages/s1-parse/schema";
@@ -309,5 +310,46 @@ describe("S2 on the model path", () => {
     await acceptGapSplitSuggestion({ ...review, suggestion_id: suggestions.find(row => row.block_id === "second")!.id });
     const needs = (await loadState()).needs.filter(row => row.source_quote === quote);
     expect(needs.map(row => row.block_id).sort()).toEqual(["first", "second", "second"]);
+  });
+  it("reconciles historical quote-only need rows on repeated extraction", async () => {
+    const [document] = await db().select().from(parsedDocuments).where(eq(parsedDocuments.id, documentId));
+    const unique = "One fictional source sentence.";
+    const repeated = "Repeated fictional source sentence.";
+    const block = (id: string, text: string) => ({ id, text, source_id: document.source_id, heading: id, location: id });
+    const blocks = [block("unique", unique), block("first", repeated), block("second", repeated)];
+    await db().insert(tables.sourceBlocks).values(blocks);
+    await db().update(parsedDocuments).set({ blocks }).where(eq(parsedDocuments.id, documentId));
+    const { need_ids } = await commitExtractedRecords({
+      source_id: document.source_id, title: "Historical evidence", stakeholder_function: ACTOR.function,
+      actor_name: ACTOR.name, actor_function: ACTOR.function, gaps: [], tactics: [],
+      needs: [unique, repeated].map((quote, i) => ({ id: String(i), statement: "Human-reviewed wording", source_quote: quote, gap_id: planGapId })),
+    });
+    await db().update(tables.gaps).set({ human_validated: true, new_source_at: null, new_source_need_id: null }).where(eq(tables.gaps.id, planGapId));
+    let omitBlock = false;
+    const { ctx } = context(call => {
+      if (call.purpose.startsWith("gap-proposer:")) return { gaps: blocks.map(b => ({ ...gapA, source_quote: b.text, block_id: omitBlock ? undefined : b.id })) };
+      if (call.purpose === "gap-critic") return keepAll(call);
+      return { decisions: subjectsOf(call, "candidates").map(subject => ({ subject, verdict: "accept", match: "same", match_gap_id: planGapId, confidence: 90, reason: "Same gap" })) };
+    });
+    const run = () => gapExtractModule.run(input(false), ctx);
+    await run();
+    await run();
+    const state = await loadState();
+    const needs = state.needs.filter(n => n.source_quote === unique || n.source_quote === repeated);
+    expect(needs).toHaveLength(2);
+    expect(needs.find(n => n.id === need_ids[0])).toMatchObject({ statement: "Human-reviewed wording", block_id: "unique" });
+    expect(needs.find(n => n.id === need_ids[1])).toMatchObject({ statement: "Human-reviewed wording", block_id: null, observed_block_ids: ["first", "second"] });
+    expect(state.gaps.find(g => g.id === planGapId)?.new_source_at).toBeNull();
+    const later = block("later", unique);
+    blocks.push(later);
+    await db().insert(tables.sourceBlocks).values(later);
+    await db().update(parsedDocuments).set({ blocks }).where(eq(parsedDocuments.id, documentId));
+    await run();
+    await run();
+    omitBlock = true;
+    await run();
+    const after = await loadState();
+    expect(after.needs.filter(n => n.source_quote === unique).map(n => n.block_id).sort()).toEqual(["later", "unique"]);
+    expect(after.gaps.find(g => g.id === planGapId)?.new_source_need_id).toBe(after.needs.find(n => n.block_id === "later")?.id);
   });
 });

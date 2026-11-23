@@ -45,6 +45,7 @@ export const tacticSourceReferences = pgTable("tactic_source_references", {
   id: text("id").primaryKey(), tactic_id: text("tactic_id").notNull(),
   source_id: text("source_id").notNull(), source_quote: text("source_quote").notNull(),
   block_id: text("block_id"),
+  observed_block_ids: jsonb("observed_block_ids").$type<string[]>(),
   quote_key: text("quote_key").notNull(), created_at: text("created_at").notNull(),
 });
 export const tacticSuggestions = pgTable("tactic_suggestions", {
@@ -63,6 +64,7 @@ CREATE TABLE IF NOT EXISTS tactic_source_references (
  UNIQUE(tactic_id, source_id, quote_key)
 );
 ALTER TABLE tactic_source_references ADD COLUMN IF NOT EXISTS block_id text;
+ALTER TABLE tactic_source_references ADD COLUMN IF NOT EXISTS observed_block_ids jsonb;
 CREATE TABLE IF NOT EXISTS tactic_suggestions (
  id text PRIMARY KEY, source_key text NOT NULL UNIQUE, target_tactic_id text NOT NULL,
  source_id text NOT NULL, status text NOT NULL, payload jsonb NOT NULL,
