@@ -872,8 +872,9 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
         for (const candidate of repeats) {
           const suggestionId = suggestionByCandidate.get(representative.get(candidate.id)!.id);
           if (!suggestionId) continue;
+          const { block_id } = provenanceOf(candidate);
           await addSuggestionSources(suggestionId, [
-            { source_id: candidate.source_id, statement: candidate.statement, source_quote: candidate.source_quote, block_id: provenanceOf(candidate).block_id },
+            { source_id: candidate.source_id, statement: candidate.statement, source_quote: candidate.source_quote, ...(block_id ? { block_id } : {}) },
           ]);
         }
         if (onGap.length === 0) continue;
