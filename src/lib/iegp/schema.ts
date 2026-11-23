@@ -129,6 +129,7 @@ export const gaps = pgTable("gaps", {
 
 /** Overlap suggestions from the S2 judge, waiting on a person (KAN-74/75). */
 export const gapSuggestions = pgTable("gap_suggestions", {
+  block_id: text("block_id"),
   id: text("id").primaryKey(),
   gap_id: text("gap_id").notNull(),
   run_id: text("run_id").notNull(),
@@ -198,6 +199,7 @@ export const breakoutGroupGaps = pgTable(
 );
 
 export const tactics = pgTable("tactics", {
+  block_id: text("block_id"),
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   type: text("type").notNull(),

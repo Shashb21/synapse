@@ -354,7 +354,7 @@ describe("leftovers and rejected AI candidates", () => {
     await wipePlatform(["gap_candidates", "tactic_candidates"]);
     await ensurePlatformSchema([GAP_CANDIDATES_DDL, TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL]);
     const src = await source();
-    const common = { run_id: "run-1", document_id: "doc-1", source_id: src.source_id, score: 20, verdict: "reject", critic_note: "Too vague", proposer: "llm", created_at: new Date().toISOString() };
+    const common = { block_id: "source-block-2", run_id: "run-1", document_id: "doc-1", source_id: src.source_id, score: 20, verdict: "reject", critic_note: "Too vague", proposer: "llm", created_at: new Date().toISOString() };
     await db().insert(gapCandidates).values({
       ...common, id: "gc-1", name: "Rejected gap", statement: "Rejected statement.", domain: "safety",
       source_quote: "Evidence on elderly patients is missing.", committed_gap_id: null,
@@ -372,6 +372,7 @@ describe("leftovers and rejected AI candidates", () => {
     const needId = state.need_gap_links.find((l) => l.gap_id === gapId)!.need_id;
     const need = state.needs.find((n) => n.id === needId)!;
     expect(need.source_id).toBe(src.source_id);
+    expect(need.block_id).toBe(common.block_id);
     expect(need.source_quote).toBe("Evidence on elderly patients is missing.");
     await expect(promoteGapCandidate({ candidate_id: "gc-1", rationale: "Again", ...who })).rejects.toThrow(/already/i);
 
@@ -380,6 +381,11 @@ describe("leftovers and rejected AI candidates", () => {
     expect((await listEdits({ entity_id: `${gapId}::${tacticId}` })).find(row => row.rationale === "Real study")).toBeDefined();
     expect(tactic.source_quote).toBe("Evidence on elderly patients is missing.");
     expect(tactic.data_source).toBe("HTA briefing");
+    expect(tactic.block_id).toBe(common.block_id);
+    const { listTacticSourceReferences } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    expect(await listTacticSourceReferences(tacticId)).toEqual([
+      expect.objectContaining({ source_id: src.source_id, block_id: common.block_id, source_quote: tactic.source_quote }),
+    ]);
     expect((await listRejectedTacticCandidates())[0]!.promoted_tactic_id).toBe(tacticId);
     expect((await listEdits({ entity_id: "tc-1" }))[0]!.after).toBe(tacticId);
   });

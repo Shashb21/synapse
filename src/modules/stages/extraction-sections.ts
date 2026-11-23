@@ -100,3 +100,14 @@ export async function proposeSections<T>(
   }
   return proposals;
 }
+
+/** Identify which source a critic-requested revision could not finish. */
+export async function reviseSection<T>(run: RunHandle, section: ExtractionSection, round: number, revise: () => Promise<T>): Promise<T> {
+  const { document, number, total } = section;
+  try {
+    return await run.step(`revise:${document.id} section ${number}/${total} round ${round}`, revise);
+  } catch (error) {
+    run.note("extraction:incomplete", { document_id: document.id, section: number, document_sections: total, phase: "revision", round });
+    throw error;
+  }
+}

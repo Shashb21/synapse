@@ -147,6 +147,26 @@ describe("complete gap and tactic extraction", () => {
       expect(result.candidates[0]).toMatchObject({ source_quote: late, block_id: "long" });
     });
 
+    it(`${section} records the section and rethrows a failed critic-driven revision`, async () => {
+      const interrupted = new Error("fictional revision interruption");
+      const note = vi.fn<RunHandle["note"]>();
+      const steps: string[] = [];
+      const run: RunHandle = { ...recorder, note, step: async (name, fn) => { steps.push(name); return fn(); } };
+      const complete: JsonCompletion = async request => {
+        if (request.role === "proposer") return { [list]: request.user.includes(late) ? [finding(section, late)] : [] };
+        if (request.role === "critic") {
+          const body = JSON.parse(request.user);
+          return { [isGap ? "critiques" : "reviews"]: body.candidates.map((row: object) => ({ ...row, confidence: 80, note: "Verify source.", verdict: "revise" })) };
+        }
+        expect(request.role).toBe("reviser");
+        expect(JSON.parse(request.user).document).toContain(late);
+        throw interrupted;
+      };
+      await expect(executeDevelopmentSection({ section, mode: "standard", sources: [source()], prerequisites: {}, recorder: run, complete })).rejects.toBe(interrupted);
+      expect(steps).toContain("revise:fiction section 3/3 round 1");
+      expect(note).toHaveBeenCalledWith("extraction:incomplete", { document_id: "fiction", section: 3, document_sections: 3, phase: "revision", round: 1 });
+    });
+
     it(`${section} propagates a late coverage failure instead of returning the earlier findings`, async () => {
       const interrupted = new Error("fictional provider interruption");
       const steps: string[] = [];

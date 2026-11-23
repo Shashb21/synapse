@@ -2,9 +2,9 @@ import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { and, desc, eq } from "drizzle-orm";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
-import { GAP_CANDIDATES_DDL, gapCandidates } from "@/modules/stages/s2-gap-extract/schema";
+import { GAP_CANDIDATES_DDL, GAP_BLOCK_DDL, gapCandidates } from "@/modules/stages/s2-gap-extract/schema";
 import {
-  TACTIC_CANDIDATES_DDL,
+  TACTIC_CANDIDATES_DDL, TACTIC_BLOCK_DDL,
   TACTIC_CANDIDATES_DUPLICATE_DDL,
   tacticCandidates,
 } from "@/modules/stages/s3-tactic-extract/schema";
@@ -29,7 +29,7 @@ export type RejectedTacticCandidate = typeof tacticCandidates.$inferSelect & {
 };
 
 export async function listRejectedGapCandidates(limit = 200): Promise<RejectedGapCandidate[]> {
-  await ensurePlatformSchema([GAP_CANDIDATES_DDL]);
+  await ensurePlatformSchema([GAP_CANDIDATES_DDL, GAP_BLOCK_DDL]);
   return db()
     .select()
     .from(gapCandidates)
@@ -39,7 +39,7 @@ export async function listRejectedGapCandidates(limit = 200): Promise<RejectedGa
 }
 
 export async function listRejectedTacticCandidates(limit = 200): Promise<RejectedTacticCandidate[]> {
-  await ensurePlatformSchema([TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL]);
+  await ensurePlatformSchema([TACTIC_CANDIDATES_DDL, TACTIC_BLOCK_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL]);
   const [rows, state] = await Promise.all([
     db()
       .select()
@@ -53,7 +53,7 @@ export async function listRejectedTacticCandidates(limit = 200): Promise<Rejecte
     const promoted = state.tactics.find(
       (tactic) =>
         tactic.name.trim().toLowerCase() === row.name.trim().toLowerCase() &&
-        (tactic.source_quote ?? "") === row.source_quote.trim(),
+        (tactic.source_quote ?? "") === row.source_quote.trim() && (!row.block_id || tactic.block_id === row.block_id),
     );
     return { ...row, promoted_tactic_id: promoted?.id ?? null };
   });
@@ -69,7 +69,7 @@ export async function promoteGapCandidate(args: {
   actor_function: ActorFunction;
 }): Promise<string> {
   const rationale = requireRationale(args.rationale);
-  await ensurePlatformSchema([GAP_CANDIDATES_DDL]);
+  await ensurePlatformSchema([GAP_CANDIDATES_DDL, GAP_BLOCK_DDL]);
   const [row] = await db()
     .select()
     .from(gapCandidates)
@@ -83,6 +83,7 @@ export async function promoteGapCandidate(args: {
     domain: EVIDENCE_DOMAINS.includes(domain) ? domain : undefined,
     source_id: row.source_id,
     source_quote: row.source_quote,
+    need_provenance: { block_id: row.block_id, run_id: row.run_id, candidate_row_id: row.id },
     actor_name: args.actor_name,
     actor_function: args.actor_function,
     note: rationale,
@@ -120,7 +121,7 @@ export async function promoteTacticCandidate(args: {
   actor_function: ActorFunction;
 }): Promise<string> {
   const rationale = requireRationale(args.rationale);
-  await ensurePlatformSchema([TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL]);
+  await ensurePlatformSchema([TACTIC_CANDIDATES_DDL, TACTIC_BLOCK_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL]);
   const [row] = await db()
     .select()
     .from(tacticCandidates)
@@ -136,6 +137,8 @@ export async function promoteTacticCandidate(args: {
     description: `Promoted by hand from a rejected S3 candidate${source ? ` in ${source.title}` : ""}.`,
     status: args.status || row.status,
     data_source: source?.title ?? row.source_id,
+    source_id: source?.id,
+    block_id: row.block_id,
     source_quote: row.source_quote,
     rationale,
     gap_id: args.gap_id || undefined,

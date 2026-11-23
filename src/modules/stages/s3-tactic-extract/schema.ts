@@ -11,6 +11,7 @@ export const tacticCandidates = pgTable("tactic_candidates", {
   status: text("status").notNull(),
   evidence_question: text("evidence_question").notNull(),
   source_quote: text("source_quote").notNull(),
+  block_id: text("block_id"),
   score: integer("score").notNull(),
   verdict: text("verdict").notNull(),
   critic_note: text("critic_note").notNull(),
@@ -22,6 +23,8 @@ export const tacticCandidates = pgTable("tactic_candidates", {
   proposer: text("proposer").notNull(),
   created_at: text("created_at").notNull(),
 });
+
+export const TACTIC_BLOCK_DDL = "ALTER TABLE tactic_candidates ADD COLUMN IF NOT EXISTS block_id text";
 
 export const TACTIC_CANDIDATES_DDL = `
 CREATE TABLE IF NOT EXISTS tactic_candidates (
@@ -41,6 +44,7 @@ ALTER TABLE tactic_candidates ADD COLUMN IF NOT EXISTS duplicate_of text
 export const tacticSourceReferences = pgTable("tactic_source_references", {
   id: text("id").primaryKey(), tactic_id: text("tactic_id").notNull(),
   source_id: text("source_id").notNull(), source_quote: text("source_quote").notNull(),
+  block_id: text("block_id"),
   quote_key: text("quote_key").notNull(), created_at: text("created_at").notNull(),
 });
 export const tacticSuggestions = pgTable("tactic_suggestions", {
@@ -58,6 +62,7 @@ CREATE TABLE IF NOT EXISTS tactic_source_references (
  source_quote text NOT NULL, quote_key text NOT NULL, created_at text NOT NULL,
  UNIQUE(tactic_id, source_id, quote_key)
 );
+ALTER TABLE tactic_source_references ADD COLUMN IF NOT EXISTS block_id text;
 CREATE TABLE IF NOT EXISTS tactic_suggestions (
  id text PRIMARY KEY, source_key text NOT NULL UNIQUE, target_tactic_id text NOT NULL,
  source_id text NOT NULL, status text NOT NULL, payload jsonb NOT NULL,

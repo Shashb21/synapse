@@ -1,3 +1,8 @@
+import { eq } from "drizzle-orm";
+import { db } from "@/modules/kernel/db";
+import { parsedDocuments } from "@/modules/stages/s1-parse/schema";
+import { gapCandidates } from "@/modules/stages/s2-gap-extract/schema";
+import { acceptGapMergeSuggestion, acceptGapSplitSuggestion } from "@/modules/stages/s2-gap-extract/suggestions";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -280,5 +285,29 @@ describe("S2 on the model path", () => {
     for (const rule of ["similarRecord", "guessDomain", "gapNameFromStatement", "heuristicCritique", "TACTIC_SHAPED"]) {
       expect(source, rule).not.toContain(rule);
     }
+  });
+  it("keeps the cited block on stored gap candidates, suggestions and reviewed needs", async () => {
+    const quote = "Fictional study asks about comparative safety.";
+    const blocks = ["first", "second"].map(id => ({ id, text: quote, heading: id, location: id }));
+    await db().update(parsedDocuments).set({ blocks }).where(eq(parsedDocuments.id, documentId));
+    const { ctx } = context(call => {
+      if (call.purpose.startsWith("gap-proposer:")) return { gaps: blocks.map(block => ({ ...gapA, source_quote: quote, block_id: block.id })) };
+      if (call.purpose === "gap-critic") return keepAll(call);
+      return { decisions: subjectsOf(call, "candidates").map(subject => ({
+        subject, verdict: "accept", match: "overlaps", match_gap_id: planGapId, confidence: 85, reason: "Partial overlap",
+        shared_part: "Safety", new_part: "Comparison", merged_name: "Merged", merged_statement: "Merged comparison",
+        split_name: "Separate", split_statement: "Distinct comparison",
+      })) };
+    });
+    const { output } = await gapExtractModule.run(input(false), ctx);
+    const persisted = await db().select().from(gapCandidates).where(eq(gapCandidates.source_quote, quote));
+    expect(persisted.map(row => row.block_id).sort()).toEqual(["first", "second"]);
+    const suggestions = (await loadState()).gap_suggestions.filter(row => output.suggestion_ids.includes(row.id));
+    expect(suggestions.map(row => row.block_id).sort()).toEqual(["first", "second"]);
+    const review = { rationale: "Checked cited passage", actor_name: ACTOR.name, actor_function: ACTOR.function };
+    await acceptGapMergeSuggestion({ ...review, suggestion_id: suggestions.find(row => row.block_id === "first")!.id });
+    await acceptGapSplitSuggestion({ ...review, suggestion_id: suggestions.find(row => row.block_id === "second")!.id });
+    const needs = (await loadState()).needs.filter(row => row.source_quote === quote);
+    expect(needs.map(row => row.block_id).sort()).toEqual(["first", "second", "second"]);
   });
 });

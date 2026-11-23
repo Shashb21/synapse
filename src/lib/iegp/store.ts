@@ -1998,6 +1998,7 @@ function optionalCatchUpReason(value?: string | null): CatchUpReason | undefined
 }
 
 type LibraryTacticDraft = {
+  block_id?: string | null;
   name: string;
   type: IegpState["tactics"][0]["type"];
   description: string;
@@ -2101,6 +2102,7 @@ export async function insertLibraryTactic(args: LibraryTacticDraft, transaction?
     data_source: args.data_source?.trim() ?? "",
     study_design: args.study_design?.trim() ?? "",
     source_quote: args.source_quote?.trim() ?? "",
+    block_id: args.block_id,
     lifecycle_stage: args.lifecycle_stage,
     status: args.status,
     review_status: "accepted",
@@ -2195,6 +2197,8 @@ async function createProposedTacticChange(args: {
 
 /** Gaps catch-up create. Rejects `proposed` — ideation is Tactics after Prioritize. */
 async function recordMissedTacticChange(args: {
+  source_id?: string;
+  block_id?: string | null;
   name: string;
   type: IegpState["tactics"][0]["type"];
   description?: string;
@@ -2245,12 +2249,17 @@ async function recordMissedTacticChange(args: {
     data_source: args.data_source?.trim() ?? "",
     study_design: args.study_design,
     source_quote: args.source_quote,
+    block_id: args.block_id,
     custom_type: args.custom_type,
     actor_name: args.actor_name,
     actor_function: args.actor_function,
     audit_action: "record_missed",
     note: reasonLabel,
   });
+  if (args.source_id && args.source_quote?.trim()) {
+    const { attachTacticSource } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    await attachTacticSource({ tactic_id: id, source_id: args.source_id, source_quote: args.source_quote, block_id: args.block_id });
+  }
   if (args.gap_id) {
     await assignTacticToGap({
       gap_id: args.gap_id,
@@ -3332,6 +3341,7 @@ export type CandidateNeedRow = {
  * suggestion for a person, never a gap, until someone accepts a merge or a split.
  */
 export type OverlapRow = {
+  block_id?: string | null;
   /** The candidate's id in this run. */
   id: string;
   gap_id: string;
@@ -3470,12 +3480,12 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
   // A gap holds each source sentence once: re-running extraction on a document, or two
   // candidates quoting the same sentence, must not attach it again (KAN-74).
   // Older rows kept only the first 280 characters of a quote, so compare on those.
-  const quoteKey = (gapId: string, quote: string) =>
-    `${gapId}|${sourceId}|${quote.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 280)}`;
+  const quoteKey = (gapId: string, quote: string, blockId?: string | null) =>
+    JSON.stringify([gapId, sourceId, blockId ?? null, quote.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 280)]);
   const attached = new Set(
     state.need_gap_links.flatMap((link) => {
       const need = state.needs.find((row) => row.id === link.need_id);
-      return need && need.source_id === sourceId ? [quoteKey(link.gap_id, need.source_quote ?? need.statement)] : [];
+      return need && need.source_id === sourceId ? [quoteKey(link.gap_id, need.source_quote ?? need.statement, need.block_id)] : [];
     }),
   );
 
@@ -3486,7 +3496,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
     domain: EvidenceDomain;
     provenance?: NeedProvenance;
   }) => {
-    const key = quoteKey(args2.gapId, args2.quote || args2.statement);
+    const key = quoteKey(args2.gapId, args2.quote || args2.statement, args2.provenance?.block_id);
     if (attached.has(key)) return;
     attached.add(key);
     const needId = await allocateId("NEED", needIds);
@@ -3562,6 +3572,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
       statement: overlap.statement,
       domain: overlap.domain,
       source_quote: overlap.source_quote,
+      block_id: overlap.block_id,
       shared_part: overlap.shared_part,
       new_part: overlap.new_part,
       merged_name: overlap.merged_name,
@@ -3585,7 +3596,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
   for (const tac of args.tactics) {
     if (tac.duplicate_of) {
       const { attachTacticSource } = await import("@/modules/stages/s3-tactic-extract/suggestions");
-      if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tac.duplicate_of, source_id: sourceId, source_quote: tac.source_quote});
+      if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tac.duplicate_of, source_id: sourceId, source_quote: tac.source_quote, block_id: tac.block_id});
       skippedTacticIds.push(tac.id);
       continue;
     }
@@ -3616,9 +3627,10 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
       intended_use: `Extracted from ${sourceId}`,
       lock: unlocked(),
       source_quote: (tac.source_quote ?? "").trim(),
+      block_id: tac.block_id,
     });
     const { attachTacticSource } = await import("@/modules/stages/s3-tactic-extract/suggestions");
-    if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tacticId, source_id: sourceId, source_quote: tac.source_quote});
+    if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tacticId, source_id: sourceId, source_quote: tac.source_quote, block_id: tac.block_id});
   }
 
   await appendAudit(
@@ -3701,7 +3713,7 @@ async function closeSuggestion(
 /** Every source a suggestion carries: its own candidate first, then repeats. */
 function suggestionSources(suggestion: GapSuggestion): GapSuggestionSource[] {
   return [
-    { source_id: suggestion.source_id, statement: suggestion.statement, source_quote: suggestion.source_quote },
+    { source_id: suggestion.source_id, statement: suggestion.statement, source_quote: suggestion.source_quote, block_id: suggestion.block_id },
     ...suggestion.extra_sources,
   ];
 }
@@ -3773,7 +3785,7 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
       role: "supporting",
       actor_function: args.actor_function,
       // The suggestion's own candidate is the first source; repeats came from the same run.
-      provenance: { run_id: suggestion.run_id, candidate_row_id: index === 0 ? suggestion.candidate_row_id : null },
+      provenance: { run_id: suggestion.run_id, block_id: source.block_id, candidate_row_id: index === 0 ? suggestion.candidate_row_id : null },
     });
   }
   await closeSuggestion(suggestion.id, "merged", { ...args, rationale });
@@ -3827,7 +3839,7 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
     settings: gap.settings,
     metadata: gap.metadata,
     origin_gap_id: gap.id,
-    need_provenance: { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id },
+    need_provenance: { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id, block_id: suggestion.block_id },
   });
   for (const source of suggestion.extra_sources) {
     await insertNeedForGap({
@@ -3837,7 +3849,7 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
       sourceQuote: source.source_quote,
       role: "supporting",
       actor_function: args.actor_function,
-      provenance: { run_id: suggestion.run_id },
+      provenance: { run_id: suggestion.run_id, block_id: source.block_id },
     });
   }
   await insertNeedForGap({
@@ -3847,7 +3859,7 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
     sourceQuote: suggestion.source_quote,
     role: "supporting",
     actor_function: args.actor_function,
-    provenance: { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id },
+    provenance: { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id, block_id: suggestion.block_id },
   });
   await linkRelatedGaps(gap.id, newGapId);
   await closeSuggestion(suggestion.id, "split", { ...args, rationale, result_gap_id: newGapId });

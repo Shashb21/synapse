@@ -1,4 +1,4 @@
-import { extractionSections, quotedBlock, reconcileSections, proposeSections, type ExtractionSection } from "../extraction-sections";
+import { extractionSections, quotedBlock, reconcileSections, proposeSections, reviseSection, type ExtractionSection } from "../extraction-sections";
 import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
 import { desc } from "drizzle-orm";
 import { z } from "zod";
@@ -29,7 +29,7 @@ import type { ExpansionScope, SeparateTacticOption, Tactic } from "@/lib/iegp/ty
 import { commitExtractedRecords, loadState } from "@/lib/iegp/store";
 import { extractCandidateTactics } from "@/lib/iegp/engine";
 import { listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
-import { TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL, TACTIC_MATCHING_DDL, tacticCandidates } from "./schema";
+import { TACTIC_CANDIDATES_DDL, TACTIC_BLOCK_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL, TACTIC_MATCHING_DDL, tacticCandidates } from "./schema";
 import { plural } from "@/lib/plural";
 
 const inputSchema = z.object({
@@ -345,7 +345,7 @@ async function llmRevisions(
         objection: objections.get(candidate.id),
       }));
     if (rows.length === 0) continue;
-    const answered = await answerRows(ctx, {
+    const answered = await reviseSection(ctx.run, section, args.round - 1, () => answerRows(ctx, {
       section,
       hints: [
         args.hints,
@@ -355,7 +355,7 @@ async function llmRevisions(
         .join("\n\n"),
       rows,
       purpose: "tactic-proposer-revise",
-    });
+    }));
     for (const [id, answer] of answered) answers.set(id, answer);
   }
   return args.previous.flatMap((candidate) => {
@@ -535,7 +535,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
   },
   inputSchema,
   outputSchema,
-  migrations: [TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL, ...TACTIC_MATCHING_DDL.split(";").filter(s => s.trim())],
+  migrations: [TACTIC_CANDIDATES_DDL, TACTIC_BLOCK_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL, ...TACTIC_MATCHING_DDL.split(";").filter(s => s.trim())],
   freeze: freezeFacts,
   async run(input, ctx) {
     requireLlm(ctx, "Tactic extraction");
@@ -692,6 +692,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
       status: item.candidate.status,
       evidence_question: item.candidate.evidence_question,
       source_quote: item.candidate.source_quote,
+      block_id: item.candidate.block_id ?? null,
       score: item.score,
       verdict: item.verdict,
       critic_note: item.note,
@@ -726,6 +727,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
               evidence_question: candidate.evidence_question,
               source_id: candidate.source_id,
               source_quote: candidate.source_quote,
+              block_id: candidate.block_id,
               duplicate_of: candidate.duplicate_of,
             })),
             apply_mappings: false,
@@ -738,7 +740,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
     if (!ctx.replay?.evaluation && !input.dry_run) {
       for (const candidate of accepted.filter(c => c.match === "overlaps")) {
         const parent = state.tactics.find(t => t.id === candidate.target_tactic_id)!;
-        await createTacticSuggestion({run_id: ctx.run.id, document_id: candidate.document_id, source_id: candidate.source_id, source_quote: candidate.source_quote,
+        await createTacticSuggestion({block_id: candidate.block_id, run_id: ctx.run.id, document_id: candidate.document_id, source_id: candidate.source_id, source_quote: candidate.source_quote,
           target_tactic_id: parent.id, expected_tactic_version: tacticVersion(parent), shared_scope: candidate.shared_scope!, new_scope: candidate.new_scope!, expansion: candidate.expansion!, separate: candidate.separate!});
       }
     }

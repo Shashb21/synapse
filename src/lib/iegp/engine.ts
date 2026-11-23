@@ -787,6 +787,7 @@ export function extractCandidateGaps(
 }
 
 export type ExtractedTactic = {
+  block_id?: string | null;
   id: string;
   name: string;
   type: TacticType;

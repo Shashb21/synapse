@@ -1,3 +1,7 @@
+import { eq } from "drizzle-orm";
+import { db } from "@/modules/kernel/db";
+import { parsedDocuments } from "@/modules/stages/s1-parse/schema";
+import { tacticCandidates } from "@/modules/stages/s3-tactic-extract/schema";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/iegp/store", async (importOriginal) => {
@@ -87,6 +91,8 @@ const acceptAll = (call: Call) => ({
     reason: `model accepts ${id}`,
   })),
 });
+
+const subgroupScope = {name: "SLR subgroup", evidence_question: "What safety evidence exists in subgroup?", population: "Subgroup", outcomes: "", geography: "", data_cut: "", analysis: "Post-hoc subgroup", instrument: "", study_design: "Retrospective analysis", gap_coverage: "Subgroup evidence", cost_effort: "Source does not specify", timing: "Source does not specify", feasibility_risks: "Requires source review", post_hoc: true, prospective_enrolment: false, protocol_amendment: false, start_date: null, evidence_available: null};
 
 describe("S3 on the model path", () => {
   let documentId = "";
@@ -361,7 +367,7 @@ describe("S3 on the model path", () => {
 
   it("persists valid overlaps as source review only and retains edited review on rerun", async () => {
     const {listTacticSuggestions, editTacticSuggestion} = await import("@/modules/stages/s3-tactic-extract/suggestions");
-    const scope = {name: "SLR subgroup", evidence_question: "What safety evidence exists in subgroup?", population: "Subgroup", outcomes: "", geography: "", data_cut: "", analysis: "Post-hoc subgroup", instrument: "", study_design: "Retrospective analysis", gap_coverage: "Subgroup evidence", cost_effort: "Source does not specify", timing: "Source does not specify", feasibility_risks: "Requires source review", post_hoc: true, prospective_enrolment: false, protocol_amendment: false, start_date: null, evidence_available: null};
+    const scope = subgroupScope;
     const {ctx} = context(call => {
       if (call.purpose.startsWith("tactic-proposer:")) return {tactics: [good({type: "slr", status: "planned"})]};
       if (call.purpose === "tactic-critic") return keepAll(call);
@@ -377,4 +383,35 @@ describe("S3 on the model path", () => {
     expect((await listTacticSuggestions()).find(r => r.id === suggestion.id)).toEqual(edited);
   });
 
+  it("keeps repeated quotations distinct through tactic storage and human overlap review", async () => {
+    const { listTacticSuggestions, decideTacticSuggestion, listTacticSourceReferences } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    const quote = "Fictional registries measure survival.";
+    const ids = ["new", "same-a", "same-b", "overlap-a", "overlap-b"];
+    const blocks = ids.map(id => ({ id, text: quote, heading: id, location: id }));
+    await db().update(parsedDocuments).set({ blocks }).where(eq(parsedDocuments.id, documentId));
+    const { ctx } = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) return { tactics: blocks.map(block => good({ source_quote: quote, block_id: block.id })) };
+      if (call.purpose === "tactic-critic") return keepAll(call);
+      return { decisions: idsOf(call, "decide").map(id => {
+        const block = ids[Number(id.slice(-3)) - 1]!;
+        const decision = { id, verdict: "accept", confidence: 85, reason: "Checked source" };
+        if (block === "new") return { ...decision, match: "new", target_tactic_id: null };
+        if (block.startsWith("same")) return { ...decision, match: "same", target_tactic_id: libraryId };
+        return { ...decision, match: "overlaps", target_tactic_id: libraryId, shared_scope: "Registry", new_scope: "Subgroup",
+          expansion: subgroupScope, separate: { name: "Independent registry", type: "registry", status: "ongoing", evidence_question: subgroupScope.evidence_question } };
+      }) };
+    });
+    const { output } = await tacticExtractModule.run(input(false), ctx);
+    const candidates = await db().select().from(tacticCandidates).where(eq(tacticCandidates.source_quote, quote));
+    expect(candidates.map(row => row.block_id).sort()).toEqual([...ids].sort());
+    expect((await loadState()).tactics.find(row => row.id === output.committed_tactic_ids[0])?.block_id).toBe("new");
+    expect((await listTacticSourceReferences(libraryId)).filter(row => row.source_quote === quote).map(row => row.block_id).sort()).toEqual(["same-a", "same-b"]);
+    const suggestions = (await listTacticSuggestions()).filter(row => row.source_quote === quote);
+    expect(suggestions.map(row => row.block_id).sort()).toEqual(["overlap-a", "overlap-b"]);
+    for (const row of suggestions) {
+      const decided = await decideTacticSuggestion({ id: row.id, decision: "separate", actor: ACTOR, rationale: "Review confirms independent activity" });
+      expect((await loadState()).tactics.find(t => t.id === decided.result_tactic_id)?.block_id).toBe(row.block_id);
+      expect((await listTacticSourceReferences(decided.result_tactic_id!))[0]?.block_id).toBe(row.block_id);
+    }
+  });
 });

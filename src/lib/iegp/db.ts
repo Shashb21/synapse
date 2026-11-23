@@ -446,6 +446,8 @@ function iegpStatements(): string[] {
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS metadata jsonb NOT NULL DEFAULT '{}'::jsonb",
     "ALTER TABLE tactics ADD COLUMN IF NOT EXISTS custom_type jsonb",
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS number integer",
+    "ALTER TABLE tactics ADD COLUMN IF NOT EXISTS block_id text",
+    "ALTER TABLE gap_suggestions ADD COLUMN IF NOT EXISTS block_id text",
     "ALTER TABLE tactics ADD COLUMN IF NOT EXISTS source_quote text NOT NULL DEFAULT ''",
     "ALTER TABLE needs ALTER COLUMN confidence DROP NOT NULL",
     // KAN-74/75: a new source on a validated gap, and gaps split from a shared question.

@@ -1,4 +1,4 @@
-import { extractionSections, quotedBlock, reconcileSections, proposeSections, type ExtractionSection } from "../extraction-sections";
+import { extractionSections, quotedBlock, reconcileSections, proposeSections, reviseSection, type ExtractionSection } from "../extraction-sections";
 import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
@@ -19,7 +19,7 @@ import { addSuggestionSources, commitExtractedRecords, loadState } from "@/lib/i
 import { validatedPlacementGapIds } from "@/modules/stages/s8-prioritization/module";
 import { extractCandidateGaps, isLiveGap } from "@/lib/iegp/engine";
 import { listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
-import { GAP_CANDIDATES_DDL, gapCandidates } from "./schema";
+import { GAP_CANDIDATES_DDL, GAP_BLOCK_DDL, gapCandidates } from "./schema";
 import { augmentSystemPrompt } from "@/modules/kernel/prompt-variant";
 import { curatedS2Cases } from "@/modules/eval-gold";
 import { scoreMustMatch } from "@/modules/eval-gold/types";
@@ -581,7 +581,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
   },
   inputSchema,
   outputSchema,
-  migrations: [GAP_CANDIDATES_DDL],
+  migrations: [GAP_CANDIDATES_DDL, GAP_BLOCK_DDL],
   freeze: freezeFacts,
   async run(input, ctx) {
     requireLlm(ctx, "Gap extraction");
@@ -650,12 +650,12 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
                 .filter((candidate) => candidate.document_id === section.document.id && candidate.source_section === section.number && objections.has(candidate.id))
                 .map((candidate) => ({ candidate, objection: objections.get(candidate.id) }));
               if (items.length === 0) continue;
-              const answers = await reviseWithModel(ctx, {
+              const answers = await reviseSection(ctx.run, section, round - 1, () => reviseWithModel(ctx, {
                 section,
                 hints,
                 exchange: `revision after critique ${round - 1} of ${PROPOSER_CRITIC_EXCHANGES}`,
                 items,
-              });
+              }));
               for (const [id, answer] of answers) revised.set(id, answer);
             }
             candidates = previous.flatMap((candidate) => {
@@ -766,6 +766,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       statement: item.candidate.statement,
       domain: item.candidate.domain,
       source_quote: item.candidate.source_quote,
+      block_id: item.candidate.block_id ?? null,
       score: item.score,
       verdict: item.verdict,
       critic_note: item.note,
@@ -847,6 +848,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
               statement: candidate.statement,
               domain: candidate.domain,
               source_quote: candidate.source_quote,
+              block_id: provenanceOf(candidate).block_id,
               ...candidate.overlap!,
             })),
           }),
@@ -871,7 +873,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
           const suggestionId = suggestionByCandidate.get(representative.get(candidate.id)!.id);
           if (!suggestionId) continue;
           await addSuggestionSources(suggestionId, [
-            { source_id: candidate.source_id, statement: candidate.statement, source_quote: candidate.source_quote },
+            { source_id: candidate.source_id, statement: candidate.statement, source_quote: candidate.source_quote, block_id: provenanceOf(candidate).block_id },
           ]);
         }
         if (onGap.length === 0) continue;
@@ -991,12 +993,12 @@ function followSameAs(candidate: GapCandidate, accepted: Map<string, GapCandidat
 }
 
 export async function listGapCandidates(limit = 200) {
-  await ensurePlatformSchema([GAP_CANDIDATES_DDL]);
+  await ensurePlatformSchema([GAP_CANDIDATES_DDL, GAP_BLOCK_DDL]);
   return db().select().from(gapCandidates).orderBy(desc(gapCandidates.created_at)).limit(limit);
 }
 
 export async function gapCandidatesForRun(run_id: string) {
-  await ensurePlatformSchema([GAP_CANDIDATES_DDL]);
+  await ensurePlatformSchema([GAP_CANDIDATES_DDL, GAP_BLOCK_DDL]);
   return db().select().from(gapCandidates).where(eq(gapCandidates.run_id, run_id));
 }
 

@@ -10,6 +10,7 @@ export const gapCandidates = pgTable("gap_candidates", {
   statement: text("statement").notNull(),
   domain: text("domain").notNull(),
   source_quote: text("source_quote").notNull(),
+  block_id: text("block_id"),
   score: integer("score").notNull(),
   verdict: text("verdict").notNull(),
   critic_note: text("critic_note").notNull(),
@@ -17,6 +18,8 @@ export const gapCandidates = pgTable("gap_candidates", {
   committed_gap_id: text("committed_gap_id"),
   created_at: text("created_at").notNull(),
 });
+
+export const GAP_BLOCK_DDL = "ALTER TABLE gap_candidates ADD COLUMN IF NOT EXISTS block_id text";
 
 export const GAP_CANDIDATES_DDL = `
 CREATE TABLE IF NOT EXISTS gap_candidates (
