@@ -64,7 +64,7 @@ export function parseLimitError(filename: string, units: number, calls: number, 
 const STRUCTURE_SYSTEM = `You structure text extracted from a pharma evidence-planning document (slides, a report, interview notes, a spreadsheet) into blocks.
 
 You get numbered units of raw extracted text, each with its location (slide, page or sheet). For every unit, return the blocks it contains, in order:
-- text: a verbatim span of the unit's text. Copy it exactly; never paraphrase, summarize, translate or fix it. A unit may split into several blocks, or be one block.
+- text: a verbatim span of the unit's text. Copy it exactly; never paraphrase, summarize, translate or fix it. A unit may split into several blocks, or be one block. Together the blocks must cover the entire unit in source order without gaps, overlaps or repetition beyond what appears in the source. Only whitespace may be skipped between blocks.
 - kind: one of ${BLOCK_KINDS.join(", ")}.
 - heading: the section heading this block sits under, copied verbatim from the document, or null when there is none.
 
@@ -117,11 +117,15 @@ function readAnswer(unit: RawUnit, row: unknown): UnitAnswer | undefined {
   if (!Array.isArray(blocks)) return undefined;
   const source = squash(unit.text);
   const out: UnitAnswer["blocks"] = [];
+  let offset = 0;
   for (const block of blocks) {
     const { text, kind, heading } = (block ?? {}) as { text?: unknown; kind?: unknown; heading?: unknown };
-    if (typeof text !== "string" || !squash(text)) return undefined;
-    // Verbatim is checked, not trusted: a block must be a span of its unit.
-    if (!source.includes(squash(text))) return undefined;
+    if (typeof text !== "string") return undefined;
+    const span = squash(text);
+    if (!span || !source.startsWith(span, offset)) return undefined;
+    offset += span.length;
+    // Skip a normalized space between blocks. Adjacent spans can also meet within a word.
+    if (source[offset] === " ") offset += 1;
     if (typeof kind !== "string" || !(BLOCK_KINDS as readonly string[]).includes(kind)) return undefined;
     if (heading !== null && heading !== undefined && typeof heading !== "string") return undefined;
     out.push({
@@ -131,8 +135,8 @@ function readAnswer(unit: RawUnit, row: unknown): UnitAnswer | undefined {
     });
   }
   const reason = typeof dropped_reason === "string" ? dropped_reason.trim() : "";
-  // An empty unit must say why it was dropped.
-  if (out.length === 0 && !reason) return undefined;
+  // An omission reason is only sufficient when the entire unit is dropped.
+  if (out.length === 0 ? !reason : offset !== source.length) return undefined;
   return { blocks: out, dropped_reason: reason || null };
 }
 
@@ -183,7 +187,7 @@ export async function structureWithLlm(args: {
             filename: args.filename,
             note:
               attempt > 1
-                ? "An earlier answer left these units out, or returned text that is not a verbatim span of the unit, or an unknown kind. Answer each again."
+                ? "An earlier answer did not provide a valid parse for these units. For each unit, return verbatim blocks that cover its complete text in source order, using only the listed kinds. If the whole unit is noise, return no blocks and give a dropped_reason."
                 : undefined,
             units: missing.map((id) => ({ unit: id, location: byId.get(id)!.location.ref, text: byId.get(id)!.text })),
           }),
