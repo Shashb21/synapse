@@ -124,7 +124,49 @@ describe("LLM structuring", () => {
     expect(parts[1]!.startsWith("\uDE00")).toBe(false);
     expect(result.blocks).toEqual([{ text: first, kind: "paragraph", location: { kind: "page", ref: "p.7" } }]);
     expect(result.dropped).toEqual([{ location: "p.7", reason: "footer" }]);
-    expect(result.dropped_units).toEqual([{ location: "p.7", reason: "footer", text: "😀tail" }]);
+    expect(result.dropped_units).toEqual([{ location: "p.7", reason: "footer", text: "😀tail", occurrence_id: "u2" }]);
+  });
+
+  it("reconstructs accepted and dropped split pieces with boundary whitespace intact", async () => {
+    const accepted = `${"a".repeat(11_999)} `;
+    const dropped = " footer";
+    const { ask, calls } = scripted((call) => ({
+      units: idsOf(call).map((id) => {
+        const row = (call.body.units as { unit: string; text: string }[]).find((unit) => unit.unit === id)!;
+        return id === "u1"
+          ? { unit: id, blocks: [{ text: row.text, kind: "paragraph", heading: null }] }
+          : { unit: id, blocks: [], dropped_reason: "footer" };
+      }),
+    }));
+
+    const result = await structureWithLlm({
+      filename: "boundary-whitespace.txt",
+      units: [{ location: { kind: "page", ref: "p.9" }, text: accepted + dropped }],
+      ask,
+    });
+
+    expect(calls.map((call) => idsOf(call))).toEqual([["u1"], ["u2"]]);
+    expect(result.blocks).toEqual([{ text: accepted, kind: "paragraph", location: { kind: "page", ref: "p.9" } }]);
+    expect(result.dropped_units).toEqual([{ location: "p.9", reason: "footer", text: dropped, occurrence_id: "u2" }]);
+  });
+
+  it("keeps identical split pieces as separate accepted occurrences", async () => {
+    const piece = "same".repeat(3_000);
+    const { ask, calls } = scripted((call) => ({
+      units: idsOf(call).map((id) => {
+        const row = (call.body.units as { unit: string; text: string }[]).find((unit) => unit.unit === id)!;
+        return { unit: id, blocks: [{ text: row.text, kind: "paragraph", heading: null }] };
+      }),
+    }));
+
+    const result = await structureWithLlm({
+      filename: "repeated-pieces.txt",
+      units: [{ location: { kind: "page", ref: "p.10" }, text: `${piece}${piece}tail` }],
+      ask,
+    });
+
+    expect(calls.map((call) => idsOf(call))).toEqual([["u1"], ["u2"], ["u3"]]);
+    expect(result.blocks.map((block) => block.text)).toEqual([piece, piece, "tail"]);
   });
 
   it("keeps a whitespace-only continuation available for an explicit drop", async () => {
@@ -146,7 +188,7 @@ describe("LLM structuring", () => {
 
     expect(calls.map((call) => idsOf(call))).toEqual([["u1"], ["u2"]]);
     expect(result.blocks).toEqual([{ text: "a".repeat(12_000), kind: "paragraph", location: { kind: "page", ref: "p.8" } }]);
-    expect(result.dropped_units).toEqual([{ location: "p.8", reason: "trailing whitespace", text: "   " }]);
+    expect(result.dropped_units).toEqual([{ location: "p.8", reason: "trailing whitespace", text: "   ", occurrence_id: "u2" }]);
   });
 
   it("rejects split groups over the configured call budget before calling the model", async () => {

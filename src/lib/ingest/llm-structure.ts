@@ -11,7 +11,12 @@ import { mimeForFilename, parseLocalDocument } from "./local-parse";
  * and the chosen LLM makes it. LlamaParse is not used.
  */
 
-export type RawUnit = { location: ParsedBlock["location"]; text: string };
+export type RawUnit = {
+  location: ParsedBlock["location"];
+  text: string;
+  /** Internal marker for slices whose edge whitespace is part of source fidelity. */
+  preserveBoundaryWhitespace?: boolean;
+};
 
 type Ask = (args: { system: string; user: string; purpose: string }) => Promise<unknown>;
 
@@ -97,7 +102,11 @@ function splitOversizedUnits(units: RawUnit[]): RawUnit[] {
       ) {
         end -= 1;
       }
-      parts.push({ location: unit.location, text: unit.text.slice(start, end) });
+      parts.push({
+        location: unit.location,
+        text: unit.text.slice(start, end),
+        preserveBoundaryWhitespace: true,
+      });
       start = end;
     }
     return parts;
@@ -135,7 +144,7 @@ export async function extractRawUnits(args: {
 }
 
 /** A unit the model judged to be noise, kept verbatim so a human can restore it. */
-export type DroppedUnit = { location: string; reason: string; text: string };
+export type DroppedUnit = { location: string; reason: string; text: string; occurrence_id?: string };
 
 type UnitAnswer = { blocks: Omit<ParsedBlock, "id" | "location">[]; dropped_reason: string | null };
 
@@ -153,7 +162,9 @@ function readAnswer(unit: RawUnit, row: unknown): UnitAnswer | undefined {
     if (typeof kind !== "string" || !(BLOCK_KINDS as readonly string[]).includes(kind)) return undefined;
     if (heading !== null && heading !== undefined && typeof heading !== "string") return undefined;
     out.push({
-      text: text.trim(),
+      // Ordinary units retain their historical trimmed materialization. Split
+      // units need their source edge whitespace for exact reconstruction.
+      text: unit.preserveBoundaryWhitespace ? text : text.trim(),
       kind: kind as ParsedBlock["kind"],
       heading: typeof heading === "string" && heading.trim() ? heading.trim() : undefined,
     });
@@ -236,7 +247,12 @@ export async function structureWithLlm(args: {
     const answer = answers.get(entry.id)!;
     if (answer.dropped_reason && answer.blocks.length === 0) {
       dropped.push({ location: entry.unit.location.ref, reason: answer.dropped_reason });
-      dropped_units.push({ location: entry.unit.location.ref, reason: answer.dropped_reason, text: entry.unit.text });
+      dropped_units.push({
+        location: entry.unit.location.ref,
+        reason: answer.dropped_reason,
+        text: entry.unit.text,
+        ...(entry.unit.preserveBoundaryWhitespace ? { occurrence_id: entry.id } : {}),
+      });
     }
     for (const block of answer.blocks) blocks.push({ ...block, location: entry.unit.location });
   }

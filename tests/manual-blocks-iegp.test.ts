@@ -25,6 +25,7 @@ import {
   listSourceBlocks,
   mergeSourceBlocks,
   persistDroppedSourceUnits,
+  reparseSourceBlocks,
   readSourceStakeholder,
   recordLlmSourceStakeholder,
   restoreDroppedSourceUnit,
@@ -168,6 +169,38 @@ describe("S1 source blocks: human edit, add, split, merge, delete", () => {
     expect(state.sources.find((s) => s.id === source_id)!.stakeholder_function).toBe("hta");
   });
 
+  it("restores one of two identical dropped occurrences without suppressing its peer", async () => {
+    const { source_id } = await source("duplicate-drop");
+    const text = "Repeated footer text.";
+    await persistDroppedSourceUnits(source_id, [
+      { location: "p.9", reason: "Footer", text, occurrence_id: "u1" },
+      { location: "p.10", reason: "Footer", text, occurrence_id: "u2" },
+    ]);
+    const dropped = await listDroppedSourceUnits(source_id);
+    await restoreDroppedSourceUnit({ dropped_id: dropped.find((unit) => unit.occurrence_id === "u1")!.id, rationale: "Relevant result", actor: ACTOR });
+
+    await persistDroppedSourceUnits(source_id, [
+      { location: "p.9", reason: "Footer", text, occurrence_id: "u1" },
+      { location: "p.10", reason: "Footer", text, occurrence_id: "u2" },
+    ]);
+
+    const remaining = await listDroppedSourceUnits(source_id);
+    expect(remaining).toHaveLength(2);
+    expect(remaining.find((unit) => unit.restored_block_id)?.occurrence_id).toBe("u1");
+    expect(remaining.find((unit) => !unit.restored_block_id)).toMatchObject({ occurrence_id: "u2", text });
+  });
+
+  it("keeps whitespace-only dropped units verbatim but does not restore them as blank blocks", async () => {
+    const { source_id } = await source("whitespace-drop");
+    await persistDroppedSourceUnits(source_id, [{ location: "p.11", reason: "Formatting", text: "   ", occurrence_id: "u1" }]);
+    const [unit] = await listDroppedSourceUnits(source_id);
+
+    await expect(restoreDroppedSourceUnit({ dropped_id: unit!.id, rationale: "Inspect formatting", actor: ACTOR })).rejects.toThrow(
+      /Block text is required/,
+    );
+    expect(await listDroppedSourceUnits(source_id)).toEqual(expect.arrayContaining([expect.objectContaining({ text: "   ", restored_block_id: null })]));
+  });
+
   it("creates a typed source with human-entered blocks via the API, no AI", async () => {
     const res = await post({
       action: "manual_source",
@@ -186,6 +219,39 @@ describe("S1 source blocks: human edit, add, split, merge, delete", () => {
     const body = (await get.json()) as { stakeholder: { set_by: string }; edits: unknown[] };
     expect(body.stakeholder.set_by).toBe("human");
     expect(body.edits.length).toBeGreaterThan(0);
+  });
+});
+
+describe("S1 re-parse preserves duplicate occurrences", () => {
+  beforeAll(async () => {
+    await resetDemoSetup();
+  }, 60_000);
+
+  it("keeps one new peer when one identical block occurrence is human-retained", async () => {
+    const repeated = "Repeated evidence.";
+    const { source_id, blocks } = await persistSourceAndBlocks({
+      title: "Duplicate reparse",
+      source_type: "stakeholder_interview",
+      stakeholder_function: "medical_affairs",
+      text: `${repeated}\n\n${repeated}`,
+      sections: [
+        { heading: "Evidence", text: repeated, location: "p.1" },
+        { heading: "Evidence", text: repeated, location: "p.2" },
+      ],
+    });
+    await editSourceBlock({ block_id: blocks[0]!.id, text: `${repeated} (reviewed)`, rationale: "Review duplicate", actor: ACTOR });
+
+    const result = await reparseSourceBlocks({
+      source_id,
+      sections: [
+        { heading: "Evidence", text: `${repeated} (reviewed)`, location: "p.1" },
+        { heading: "Evidence", text: `${repeated} (reviewed)`, location: "p.2" },
+      ],
+    });
+
+    expect(result.skipped_duplicates).toBe(1);
+    expect(result.inserted).toBe(1);
+    expect((await listSourceBlocks(source_id)).filter((block) => block.text === `${repeated} (reviewed)`).length).toBe(2);
   });
 });
 
