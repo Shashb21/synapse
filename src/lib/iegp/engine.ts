@@ -1,3 +1,4 @@
+import type { SourceContext } from "@/lib/ingest/source-citation";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { assessmentDesignVersion, getRequirementBasisReview, hasSupportedFullConfirmation } from "./requirement-basis";
 import { gapResolutionVersion } from "./relationship-version";
@@ -755,6 +756,8 @@ export type ExtractedGap = {
   domain: EvidenceDomain;
   source_id: string;
   source_quote: string;
+  block_id?: string | null;
+  source_context?: SourceContext | null;
   /**
    * Set by the stage's LLM judge: the id of the existing live gap this one is
    * the same as. Commit merges only when this is set; it never decides
@@ -780,6 +783,7 @@ export function extractCandidateGaps(
         domain: guessDomain(`${block.heading} ${statement}`),
         source_id: block.source_id,
         source_quote: sentence.slice(0, 280),
+        block_id: block.id,
       });
     }
   }
@@ -794,6 +798,8 @@ export type ExtractedTactic = {
   evidence_question: string;
   source_id: string;
   source_quote: string;
+  block_id?: string | null;
+  source_context?: SourceContext | null;
   /**
    * Set by the stage's LLM judge: the id of the existing live tactic this one is
    * the same as. Commit merges only when this is set; it never decides
@@ -833,6 +839,7 @@ export function extractCandidateTactics(
         evidence_question: statement,
         source_id: block.source_id,
         source_quote: sentence.slice(0, 280),
+        block_id: block.id,
       });
     }
   }

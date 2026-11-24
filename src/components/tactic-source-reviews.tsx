@@ -21,7 +21,7 @@ export function TacticSourceReviews({suggestions, state, identity, canReview}: {
       const payload = {suggestion_id: row.id, expected_version: row.version};
       return <article key={row.id} className="rounded-lg border border-border bg-card p-4 text-sm space-y-3 break-words">
         <div className="flex flex-wrap justify-between gap-2"><h3 className="font-semibold">Expand: <Link href={`/tactics/${row.target_tactic_id}`}>{row.reviewed_parent.name}</Link></h3><span>{row.status}</span></div>
-        <p className="text-xs text-muted-foreground">Review {row.id} · Source: {source?.title ?? row.source_id}</p>
+        <p className="text-xs text-muted-foreground">Review {row.id} · Source: {source?.title ?? row.source_id}{row.source_context ? <> · {row.source_context.heading ? `${row.source_context.heading} · ` : ""}{row.source_context.location}</> : null}</p>
         <blockquote>“{row.source_quote}”</blockquote>
         <div className="grid gap-4 md:grid-cols-2">
           <div><h4 className="font-semibold">Current scope at review</h4><p>{row.reviewed_parent.evidence_question}</p><p>{row.reviewed_parent.study_design || "Design not recorded"}</p><p>Population: {row.reviewed_parent.population || "Not recorded"}</p><p>Endpoints: {row.reviewed_parent.outcomes || "Not recorded"}</p><p>Geography: {row.reviewed_parent.geography || "Not recorded"}</p><p>Data source: {row.reviewed_parent.data_source || "Not recorded"}</p><p>Parent status: {row.reviewed_parent.status} · {row.reviewed_parent.lock.locked ? "Human locked" : "Unlocked"}</p><p>Shared scope: {row.shared_scope}</p></div>

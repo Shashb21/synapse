@@ -51,7 +51,7 @@ export function TacticRecordContent({ record, identity = { signed_in: true, acto
         <Item k="Owner" v={`${tactic.owner} · ${tactic.function.replaceAll("_", " ")}`} />
         <Item k="Budget" v={tactic.budget ?? "—"} />
       </dl>
-      {record.source_references.length ? <section aria-label="Tactic source references" className="my-6 space-y-2"><h2 className="text-base font-semibold">Source references</h2>{record.source_references.map(ref => <blockquote key={ref.id} className="text-sm break-words">“{ref.quote}” · <Link href={`/sources/${encodeURIComponent(ref.source_id)}`}>{ref.title}</Link></blockquote>)}</section> : null}
+      {record.source_references.length ? <section aria-label="Tactic source references" className="my-6 space-y-2"><h2 className="text-base font-semibold">Source references</h2>{record.source_references.map(ref => <blockquote key={ref.id} className="text-sm break-words">“{ref.quote}” · <Link href={`/sources/${encodeURIComponent(ref.source_id)}`}>{ref.title}</Link>{ref.source_context ? <> · {ref.source_context.heading ? `${ref.source_context.heading} · ` : ""}{ref.source_context.location}</> : null}</blockquote>)}</section> : null}
       <SourceClaimReviewContent onRefresh={onRefresh} data={record.source_review} identity={identity} canReview={record.permissions.coverage} />
       <section aria-label="Gaps this tactic is mapped to"><h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Gaps this tactic is mapped to</h2>
       <div className="mb-6 grid gap-2">

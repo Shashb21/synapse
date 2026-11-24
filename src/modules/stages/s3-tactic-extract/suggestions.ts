@@ -1,5 +1,7 @@
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { withRelationshipChange } from "@/lib/iegp/relationship-change";
+import { lockSourceCitationOwner, requireRetainedSourceQuote } from "@/lib/iegp/source-citations";
+import type { SourceContext } from "@/lib/ingest/source-citation";
 /** S3 source review: immutable model baseline, source provenance and atomic human decisions. */
 import { createHash } from "node:crypto";
 import { desc, eq } from "drizzle-orm";
@@ -23,13 +25,24 @@ function requireActor(actor: Actor) {
 /** Bootstrap before reserving a transaction; never borrow a second reader from inside it. */
 export async function ensureTacticSuggestionSchema() { await ensureCurrentSchemaTables(); }
 /** Attach an exact source sentence once, leaving all parent fields and locks intact. */
-export async function attachTacticSource(args: {tactic_id: string; source_id: string; source_quote: string}, transaction?: ExpansionTransaction) {
+export async function attachTacticSource(args: {
+  tactic_id: string;
+  source_id: string;
+  source_quote: string;
+  block_id?: string | null;
+  source_context?: SourceContext | null;
+}, transaction?: ExpansionTransaction) {
   if (!args.source_quote.trim()) throw new TrustedApplicationError("Source quote is required.");
   const run = async (tx: ExpansionTransaction) => {
+    const source = await lockSourceCitationOwner(args.source_id, tx);
     const [parent] = await tx.select().from(t.tactics).where(eq(t.tactics.id, args.tactic_id)).for("update");
-    const [source] = await tx.select().from(t.sources).where(eq(t.sources.id, args.source_id));
     if (!parent || !source) throw new TrustedApplicationError("Tactic or source not found in this workspace.", "not_found", 404);
-    await tx.insert(tacticSourceReferences).values({...args, id: newId("TSRC"), quote_key: quoteKey(args.source_quote), created_at: nowIso()}).onConflictDoNothing();
+    const source_context = args.block_id || args.source_context
+      ? await requireRetainedSourceQuote(args.source_id, args.block_id, args.source_quote, tx)
+      : null;
+    await tx.insert(tacticSourceReferences).values({
+      ...args, source_context, id: newId("TSRC"), quote_key: quoteKey(args.source_quote), created_at: nowIso(),
+    }).onConflictDoNothing();
   };
   if (transaction) return run(transaction);
   await ensureTacticSuggestionSchema(); return db().transaction(run);
@@ -43,21 +56,31 @@ export async function listTacticSourceReferences(tacticId: string) {
 export async function createTacticSuggestion(args: {
   run_id: string; document_id: string; source_id: string; source_quote: string; target_tactic_id: string;
   expected_tactic_version: string; shared_scope: string; new_scope: string; expansion: ExpansionScope; separate: SeparateTacticOption;
+  require_grounded_source?: boolean;
+  block_id?: string | null;
+  source_context?: SourceContext | null;
 }): Promise<TacticSuggestion> {
+  const { require_grounded_source, ...draft } = args;
   const expansion = expansionScopeSchema.parse(args.expansion), separate = separateTacticOptionSchema.parse(args.separate);
   if (![args.run_id, args.document_id, args.source_quote, args.shared_scope, args.new_scope].every(s => s.trim())) throw new TrustedApplicationError("Overlap requires source lineage, quote, shared and added scope.");
-  const source_key = createHash("sha256").update(JSON.stringify([args.source_id, args.target_tactic_id, quoteKey(args.source_quote)])).digest("hex");
+  const citationKey = [args.source_id, args.target_tactic_id, quoteKey(args.source_quote)];
+  if (args.block_id) citationKey.push(args.block_id);
+  const source_key = createHash("sha256").update(JSON.stringify(citationKey)).digest("hex");
   await ensureTacticSuggestionSchema();
   return db().transaction(async tx => {
+    const source = await lockSourceCitationOwner(args.source_id, tx);
+    if (!source) throw new TrustedApplicationError("Source not found in this workspace.", "not_found", 404);
+    const source_context = require_grounded_source || args.block_id || args.source_context
+      ? await requireRetainedSourceQuote(args.source_id, args.block_id, args.source_quote, tx)
+      : null;
     const [parentRow] = await tx.select().from(t.tactics).where(eq(t.tactics.id, args.target_tactic_id)).for("update");
     if (!parentRow) throw new TrustedApplicationError("Target tactic not found in this workspace.", "not_found", 404);
     const state = await readState(tx), parent = state.tactics.find(p => p.id === args.target_tactic_id)!;
-    if (!state.sources.some(s => s.id === args.source_id)) throw new TrustedApplicationError("Source not found in this workspace.", "not_found", 404);
     const [existing] = await tx.select().from(tacticSuggestions).where(eq(tacticSuggestions.source_key, source_key));
     if (existing) return existing.payload as TacticSuggestion;
     if (tacticVersion(parent) !== args.expected_tactic_version) throw new TrustedApplicationError("Tactic changed during extraction; rerun to review its current scope.");
     const at = nowIso();
-    const row: TacticSuggestion = {...args, expansion, separate, id: newId("TSUG"), reviewed_parent: parent,
+    const row: TacticSuggestion = {...draft, source_context, expansion, separate, id: newId("TSUG"), reviewed_parent: parent,
       original_expansion: expansion, original_separate: separate, gap_id: null, status: "pending",
       result_expansion_id: null, result_tactic_id: null, history: [], created_at: at, updated_at: at, version: newId("TSV")};
     await tx.insert(tacticSuggestions).values({id: row.id, source_key, target_tactic_id: row.target_tactic_id, source_id: row.source_id, status: row.status, payload: row, created_at: at, updated_at: at});
@@ -111,6 +134,9 @@ export async function decideTacticSuggestion(args: {id: string; decision: "expan
     const [parent] = await tx.select().from(t.tactics).where(eq(t.tactics.id, row.target_tactic_id)).for("update");
     if (!parent) throw new TrustedApplicationError("Target tactic no longer exists in this workspace.");
     if (args.decision !== "reject") {
+      if (row.block_id || row.source_context) {
+        row.source_context = await requireRetainedSourceQuote(row.source_id, row.block_id, row.source_quote, tx);
+      }
       const current = (await readState(tx)).tactics.find(t => t.id === row.target_tactic_id)!;
       if (tacticVersion(current) !== row.expected_tactic_version) throw new TrustedApplicationError("Tactic changed; reject this obsolete suggestion or review a new source proposal before accepting.");
     }
@@ -121,9 +147,10 @@ export async function decideTacticSuggestion(args: {id: string; decision: "expan
       if (!gap || gap.retired || gap.status === "excluded" || gap.parked_at) throw new TrustedApplicationError("Choose a live gap in this workspace before accepting.");
       result_expansion_id = (await acceptTacticExpansion({proposal_id: `s3:${row.id}`, tactic_id: row.target_tactic_id, gap_id: row.gap_id, scope: row.expansion, expected_tactic_version: row.expected_tactic_version, rationale, actor: args.actor}, tx)).id;
     } else if (args.decision === "separate") {
-      result_tactic_id = await insertLibraryTactic({...row.separate, description: `Separate source activity linked to ${row.target_tactic_id}.`, source_quote: row.source_quote, data_source: source.title,
+      result_tactic_id = await insertLibraryTactic({...row.separate, description: `Separate source activity linked to ${row.target_tactic_id}.`, source_quote: row.source_quote, block_id: row.block_id, source_context: row.source_context, data_source: source.title,
         lifecycle_stage: "extracted", intended_use: `Source ${row.source_id}; related tactic ${row.target_tactic_id}`, actor_name: args.actor.name, actor_function: args.actor.function, audit_action: "accept_source_separate", note: rationale}, tx);
-      await attachTacticSource({tactic_id: result_tactic_id, source_id: row.source_id, source_quote: row.source_quote}, tx);
+      await attachTacticSource({ tactic_id: result_tactic_id, source_id: row.source_id, source_quote: row.source_quote,
+        block_id: row.block_id, source_context: row.source_context }, tx);
     }
     const at = nowIso(), result: TacticSuggestion = {...row, status: args.decision === "expand" ? "expanded" : args.decision === "separate" ? "separate" : "rejected", result_expansion_id, result_tactic_id, updated_at: at, version: newId("TSV"), history: [...row.history, {action: args.decision, actor: args.actor, rationale, at, expansion: row.expansion, separate: row.separate, gap_id: row.gap_id}]};
     await save(tx, result); await appendAudit(args.actor.name, args.actor.function, "tactic_suggestion", row.id, args.decision, rationale, tx);

@@ -1,3 +1,4 @@
+import { resolveSourceCitation, sourceContextSchema } from "@/lib/ingest/source-citation";
 import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
@@ -47,6 +48,9 @@ const candidateSchema = z.object({
   statement: z.string(),
   domain: z.string(),
   source_quote: z.string(),
+  block_id: z.string().nullable().optional(),
+  source_context: sourceContextSchema.nullable().optional(),
+  citation_error: z.string().nullable().optional(),
   /** The judge's confidence in its verdict, 0–100, as the model gave it. */
   score: z.number(),
   verdict: z.string(),
@@ -83,6 +87,10 @@ type GapCandidate = {
   statement: string;
   domain: EvidenceDomain;
   source_quote: string;
+  proposed_block_id: string | null;
+  block_id?: string | null;
+  source_context?: z.infer<typeof sourceContextSchema> | null;
+  citation_error?: string | null;
   /** Set only by the model judge. Null until then, and for a new gap. */
   duplicate_of: string | null;
 } & Partial<MatchFields>;
@@ -136,6 +144,7 @@ type RawGap = {
   statement?: unknown;
   domain?: unknown;
   source_quote?: unknown;
+  block_id?: unknown;
 };
 
 type JudgeDecision = {
@@ -189,18 +198,9 @@ function toCandidate(id: string, document: ParsedDocumentRecord, raw: RawGap): G
     statement: text(raw.statement),
     domain: text(raw.domain) as EvidenceDomain,
     source_quote: text(raw.source_quote),
+    proposed_block_id: text(raw.block_id) || null,
     duplicate_of: null,
   };
-}
-
-/** The block a candidate's quote comes from, when one block holds it (KAN-97). */
-export function blockIdFor(document: ParsedDocumentRecord | undefined, quote: string): string | null {
-  if (!document) return null;
-  const norm = (text: string) => text.toLowerCase().replace(/\s+/g, " ").trim();
-  const needle = norm(quote).slice(0, 120);
-  if (!needle) return null;
-  const block = document.blocks.find((row) => norm(row.text).includes(needle));
-  return block?.id ?? null;
 }
 
 const titleOf = (document: ParsedDocumentRecord) => document.blocks[0]?.heading ?? document.source_id;
@@ -221,6 +221,7 @@ function stubProposals(documents: ParsedDocumentRecord[]): GapCandidate[] {
       statement: gap.statement,
       domain: gap.domain,
       source_quote: gap.source_quote,
+      proposed_block_id: gap.block_id ?? null,
       duplicate_of: null,
     })),
   );
@@ -268,6 +269,7 @@ async function reviseWithModel(
               statement: item.candidate.statement,
               domain: item.candidate.domain,
               source_quote: item.candidate.source_quote,
+              block_id: item.candidate.proposed_block_id,
               objection: item.objection,
               problems: lastProblems.get(id) ?? item.problems,
             };
@@ -571,7 +573,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
   },
   inputSchema,
   outputSchema,
-  migrations: [GAP_CANDIDATES_DDL],
+  migrations: GAP_CANDIDATES_DDL.split(";").filter((statement) => statement.trim()),
   freeze: freezeFacts,
   async run(input, ctx) {
     requireLlm(ctx, "Gap extraction");
@@ -608,6 +610,18 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
           : { set_aside: gap.status === "excluded" ? ("excluded" as const) : ("parked" as const) }),
       }));
     const documentById = new Map(documents.map((document) => [document.id, document]));
+    const ground = (candidate: GapCandidate): GapCandidate => {
+      const displayed = documentById.get(candidate.document_id)?.blocks ?? [];
+      const citation = resolveSourceCitation({
+        source_id: candidate.source_id,
+        quote: candidate.source_quote,
+        proposed_block_id: candidate.proposed_block_id,
+        displayed,
+        // Development owns immutable source snapshots and uses different IDs in its projected state.
+        retained: ctx.execution_scope === "development" ? displayed : state.blocks,
+      });
+      return { ...candidate, ...citation };
+    };
     // The kernel hands similar past reviewer decisions (worked examples, KAN-79) to the proposer; the critic and judge see them too.
     let reviewerHints = "";
     // The model judge runs as soon as the proposer's last revision is in; the
@@ -619,7 +633,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       proposer: {
         local: ({ round, previous }) => {
           if (!isTestStub()) throw new NoRouteError("Gap extraction has no rule-based fallback.");
-          return round === 1 ? stubProposals(documents) : previous;
+          return round === 1 ? stubProposals(documents).map(ground) : previous;
         },
         llm: async ({ hints, round, critiques, previous }) => {
           reviewerHints = hints;
@@ -656,14 +670,16 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
               return answer ? [answer] : [];
             });
           }
+          candidates = candidates.map(ground);
           if (round === PROPOSER_CRITIC_EXCHANGES + 1) {
+            const grounded = candidates.filter((candidate) => !candidate.citation_error);
             decisions =
-              candidates.length === 0
+              grounded.length === 0
                 ? new Map()
                 : await ctx.run.step(
                     "judge:model",
-                    () => judgeWithModel(ctx, { candidates, critiques, planGaps, hints }),
-                    `${candidates.length} candidate(s) for the model judge`,
+                    () => judgeWithModel(ctx, { candidates: grounded, critiques, planGaps, hints }),
+                    `${grounded.length} candidate(s) for the model judge`,
                   );
           }
           return candidates;
@@ -702,14 +718,17 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
           return candidates.map((candidate) => ({
             candidate,
             subject: candidate.id,
-            verdict: "accept" as const,
+            verdict: candidate.citation_error ? "reject" : "accept",
             score: critiques.find((item) => item.subject === candidate.id)?.score ?? 50,
-            note: "Test stub: no model judge was called.",
+            note: candidate.citation_error ?? "Test stub: no model judge was called.",
           }));
         }
         const decided = decisions;
         if (!decided) throw new Error("The model judge did not run. Nothing was saved; " + REMEDY);
         return candidates.map((candidate) => {
+          if (candidate.citation_error) {
+            return { candidate, subject: candidate.id, verdict: "reject", score: 0, note: candidate.citation_error };
+          }
           const decision = decided.get(candidate.id);
           if (!decision) {
             throw new Error(`The model judge did not decide ${candidate.name || candidate.id}. Nothing was saved; ${REMEDY}`);
@@ -757,6 +776,9 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       statement: item.candidate.statement,
       domain: item.candidate.domain,
       source_quote: item.candidate.source_quote,
+      block_id: item.candidate.block_id ?? null,
+      source_context: item.candidate.source_context ?? null,
+      citation_error: item.candidate.citation_error ?? null,
       score: item.score,
       verdict: item.verdict,
       critic_note: item.note,
@@ -785,14 +807,16 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       const provenanceOf = (candidate: GapCandidate) => ({
         run_id: ctx.run.id,
         candidate_row_id: rowIdByCandidate.get(candidate.id) ?? null,
-        block_id: blockIdFor(documents.find((document) => document.id === candidate.document_id), candidate.source_quote),
+        block_id: candidate.block_id,
+        source_context: candidate.source_context,
       });
       const gapByCandidate = new Map<string, string>();
       const suggestionByCandidate = new Map<string, string>();
-      const commitFor = (document: ParsedDocumentRecord, rows: Omit<Parameters<typeof commitExtractedRecords>[0], "source_id" | "title" | "stakeholder_function" | "actor_name" | "actor_function" | "tactics" | "validated_gap_ids">) => {
+      const commitFor = (document: ParsedDocumentRecord, rows: Omit<Parameters<typeof commitExtractedRecords>[0], "source_id" | "title" | "stakeholder_function" | "actor_name" | "actor_function" | "tactics" | "validated_gap_ids" | "require_grounded_sources">) => {
         const source = state.sources.find((row) => row.id === document.source_id);
         return commitExtractedRecords({
           source_id: document.source_id,
+          require_grounded_sources: true,
           title: source?.title ?? document.source_id,
           stakeholder_function: source?.stakeholder_function ?? ctx.actor.function,
           actor_name: ctx.actor.name,
@@ -838,6 +862,8 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
               statement: candidate.statement,
               domain: candidate.domain,
               source_quote: candidate.source_quote,
+              block_id: candidate.block_id,
+              source_context: candidate.source_context,
               ...candidate.overlap!,
             })),
           }),
@@ -862,7 +888,8 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
           const suggestionId = suggestionByCandidate.get(representative.get(candidate.id)!.id);
           if (!suggestionId) continue;
           await addSuggestionSources(suggestionId, [
-            { source_id: candidate.source_id, statement: candidate.statement, source_quote: candidate.source_quote },
+            { source_id: candidate.source_id, statement: candidate.statement, source_quote: candidate.source_quote,
+              block_id: candidate.block_id, source_context: candidate.source_context },
           ]);
         }
         if (onGap.length === 0) continue;
@@ -897,6 +924,9 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       statement: item.candidate.statement,
       domain: item.candidate.domain,
       source_quote: item.candidate.source_quote,
+      block_id: item.candidate.block_id ?? null,
+      source_context: item.candidate.source_context ?? null,
+      citation_error: item.candidate.citation_error ?? null,
       score: item.score,
       verdict: item.verdict,
       critic_note: item.note,

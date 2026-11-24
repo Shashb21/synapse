@@ -97,7 +97,8 @@ describe("S3 on the model path", () => {
     await resetDemoSetup();
     await ensurePlatformSchema(tacticExtractModule.migrations ?? []);
     await wipePlatform(["source_files", "parsed_documents", "gap_candidates", "tactic_candidates"]);
-    await runStage({ stage: "S0", input: { demo_ids: ["heor-interview"] }, actor: ACTOR, role: "medical_affairs" });
+    await runStage({ stage: "S0", input: { files: [{ filename: "s3-llm.txt", title: "S3-LLM fictional source",
+      source_type: "stakeholder_interview", stakeholder_function: ACTOR.function, text: [QUOTE, "A claims analysis is planned.", "A systematic literature review was completed last year."].join("\n\n") }] }, actor: ACTOR, role: "medical_affairs" });
     await runStage({ stage: "S1", input: {}, actor: ACTOR, role: "medical_affairs" });
     const state = await loadState();
     const source = state.sources[0]!;
@@ -140,6 +141,26 @@ describe("S3 on the model path", () => {
   });
 
   const input = (dry_run = true) => tacticExtractModule.inputSchema.parse({ document_ids: [documentId], dry_run });
+
+  it("checks a revised quotation before it can become a tactic", async () => {
+    let firstReview = true;
+    const { ctx } = context((call) => {
+      if (call.purpose.startsWith("tactic-proposer-revise:")) {
+        return { tactics: idsOf(call, "rows").map((id) => ({ id, ...good({ source_quote: "The fictional pilot enrolled twelve volunteers." }) })) };
+      }
+      if (call.purpose.startsWith("tactic-proposer:")) return { tactics: [good()] };
+      if (call.purpose === "tactic-critic") {
+        if (!firstReview) return keepAll(call);
+        firstReview = false;
+        return { reviews: idsOf(call, "candidates").map((id) => ({ id, verdict: "revise", confidence: 70, note: "Clarify the documented activity" })) };
+      }
+      return acceptAll(call);
+    });
+    const { output } = await tacticExtractModule.run(input(false), ctx);
+    expect(output.accepted).toEqual([]);
+    expect(output.rejected[0]?.critic_note).toMatch(/quote.*source/i);
+    expect(commitExtractedRecords).not.toHaveBeenCalled();
+  });
 
   it("throws before doing anything when no LLM is connected", async () => {
     const { ctx, calls } = context(() => ({}), false);

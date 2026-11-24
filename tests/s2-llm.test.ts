@@ -12,6 +12,7 @@ import { runStage } from "@/modules/kernel/run";
 import { wipePlatform } from "@/modules/kernel/db";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { NoRouteError } from "@/modules/llm/provider";
+import { listRejectedGapCandidates, promoteGapCandidate } from "@/app/api/iegp/promote-candidates";
 import { isLiveGap } from "@/lib/iegp/engine";
 import { commitExtractedRecords, createGap, loadState, resetDemoSetup } from "@/lib/iegp/store";
 import { listParsedDocuments } from "@/modules/stages/s1-parse/module";
@@ -107,7 +108,8 @@ describe("S2 on the model path", () => {
     await resetDemoSetup();
     await wipePlatform(["source_files", "parsed_documents", "gap_candidates"]);
     const lead = { actor: ACTOR, role: "medical_affairs" as const };
-    await runStage({ stage: "S0", input: { demo_ids: ["heor-interview"] }, ...lead });
+    await runStage({ stage: "S0", input: { files: [{ filename: "s2-llm.txt", title: "S2-LLM fictional source",
+      source_type: "stakeholder_interview", stakeholder_function: ACTOR.function, text: [QUOTE_A, QUOTE_B].join("\n\n") }] }, ...lead });
     await runStage({ stage: "S1", input: {}, ...lead });
     documentId = (await listParsedDocuments())[0]!.id;
     await createGap({
@@ -131,6 +133,36 @@ describe("S2 on the model path", () => {
 
   const input = (dry_run = true) =>
     gapExtractModule.inputSchema.parse({ document_ids: [documentId], dry_run });
+
+  it("rejects a fabricated quotation even when the model would accept the candidate", async () => {
+    const { ctx } = context((call) => {
+      if (call.purpose.startsWith("gap-proposer:")) return { gaps: [{ ...gapA, source_quote: "The fictional committee asked for a blue binder." }] };
+      if (call.purpose === "gap-critic") return keepAll(call);
+      return { decisions: [{ subject: L1(), verdict: "accept", confidence: 99, reason: "Accept this gap", duplicate_of: null }] };
+    });
+    const { output } = await gapExtractModule.run(input(false), ctx);
+    expect(output.accepted).toEqual([]);
+    expect(output.rejected[0]?.critic_note).toMatch(/quote.*source/i);
+    expect(commitExtractedRecords).not.toHaveBeenCalled();
+  });
+
+  it("keeps an explicitly wrong block from rebinding to a matching block during promotion", async () => {
+    const name = "Gap with a wrong block";
+    const { ctx } = context((call) => {
+      if (call.purpose.startsWith("gap-proposer:")) return { gaps: [{ ...gapA, name, block_id: "different-block" }] };
+      if (call.purpose === "gap-critic") return keepAll(call);
+      return { decisions: [] };
+    });
+    const { output } = await gapExtractModule.run(input(false), ctx);
+    expect(output.rejected[0]?.critic_note).toMatch(/identified retained source block/);
+    const row = (await listRejectedGapCandidates()).find((candidate) => candidate.name === name)!;
+    await expect(promoteGapCandidate({
+      candidate_id: row.id,
+      rationale: "Reviewed by hand",
+      actor_name: ACTOR.name,
+      actor_function: ACTOR.function,
+    })).rejects.toThrow(/identified retained source block/);
+  });
 
   it("throws before doing anything when no LLM is connected", async () => {
     const { ctx, calls } = context(() => ({}), false);

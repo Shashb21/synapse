@@ -239,12 +239,19 @@ describe("KAN-74 S2 run across two documents", () => {
     await resetDemoSetup();
     await wipePlatform(["source_files", "parsed_documents", "gap_candidates"]);
     const lead = { actor: ACTOR, role: "medical_affairs" as const };
-    await runStage({ stage: "S0", input: { demo_ids: ["heor-interview", "medical-kol"] }, ...lead });
+    await runStage({ stage: "S0", input: { files: [
+      { filename: "matching-a.txt", title: "Fictional interview A", source_type: "stakeholder_interview",
+        stakeholder_function: ACTOR.function, text: "Persistence is unknown.\n\nPayers want SoC data." },
+      { filename: "matching-b.txt", title: "Fictional interview B", source_type: "stakeholder_interview",
+        stakeholder_function: ACTOR.function, text: "Persistence is unknown.\n\nOver-75s are a gap." },
+    ] }, ...lead });
     await runStage({ stage: "S1", input: {}, ...lead });
     const documents = await listParsedDocuments();
     expect(documents.length).toBeGreaterThanOrEqual(2);
-    [docA, docB] = [documents[0]!.id, documents[1]!.id];
-    [sourceA, sourceB] = [documents[0]!.source_id, documents[1]!.source_id];
+    const a = documents.find((doc) => doc.blocks.some((block) => block.text.includes("Payers want SoC data.")))!;
+    const b = documents.find((doc) => doc.blocks.some((block) => block.text.includes("Over-75s are a gap.")))!;
+    [docA, docB] = [a.id, b.id];
+    [sourceA, sourceB] = [a.source_id, b.source_id];
     planGapId = await createGap({
       statement: "No comparative effectiveness data versus standard of care.",
       domain: "comparative_effectiveness",
@@ -322,7 +329,10 @@ describe("KAN-74 S2 run across two documents", () => {
     expect(suggestion).toMatchObject({ gap_id: planGapId, status: "pending", source_id: sourceB, name: "Over-75s versus SoC" });
     expect(suggestion.candidate_row_id).toBeTruthy();
     expect(suggestion.extra_sources).toEqual([
-      { source_id: sourceB, statement: over75.statement, source_quote: over75.source_quote },
+      expect.objectContaining({
+        source_id: sourceB, statement: over75.statement, source_quote: over75.source_quote,
+        block_id: suggestion.block_id, source_context: suggestion.source_context,
+      }),
     ]);
     expect(state.gaps.some((row) => row.name === "Over-75s versus SoC")).toBe(false);
   });

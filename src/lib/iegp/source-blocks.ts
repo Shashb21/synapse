@@ -1,3 +1,4 @@
+/** Owns source-block edits and preserves the provenance of existing evidence records. */
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { boolean, doublePrecision, pgTable, text } from "drizzle-orm/pg-core";
@@ -5,7 +6,10 @@ import { db, ensureCurrentSchemaTables, withWorkspaceTransaction } from "./db";
 import * as t from "./schema";
 import { ACTOR_FUNCTIONS, SOURCE_TYPES, type ActorFunction, type SourceType } from "./enums";
 import { appendAudit, persistSourceAndBlocks, loadState, lockAssessmentOwners, invalidateRelationshipAssessments } from "./store";
-import type { IegpState } from "./types";
+import type { IegpState, TacticSuggestion } from "./types";
+import { lockSourceCitationOwner } from "./source-citations";
+import { tacticSourceReferences, tacticSuggestions } from "@/modules/stages/s3-tactic-extract/schema";
+import { validateQuoteAgainstBlock } from "@/lib/ingest/quote-validator";
 import { recordEdit } from "@/modules/kernel/edit-records";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { Actor } from "@/modules/kernel/contracts";
@@ -34,9 +38,8 @@ import {
  *   rationale, and the human override.
  * Every change writes an edit record (rationale required) and an audit row.
  *
- * Provenance policy: needs quote their source (`needs.source_quote`). A change
- * that would leave a quote with no block of that source containing it is
- * refused, naming the needs. Merges keep both texts, so they never orphan one.
+ * Extraction citations retain their exact block. Legacy quotes without an
+ * identified block remain protected wherever they occur in the same source.
  */
 
 export const sourceBlockMeta = pgTable("source_block_meta", {
@@ -149,12 +152,45 @@ async function metasFor(source_id: string): Promise<MetaRow[]> {
   return db().select().from(sourceBlockMeta).where(eq(sourceBlockMeta.source_id, source_id));
 }
 
-async function quotesFor(source_id: string): Promise<QuoteDependent[]> {
-  const rows = await db()
-    .select({ id: t.needs.id, quote: t.needs.source_quote })
-    .from(t.needs)
-    .where(eq(t.needs.source_id, source_id));
-  return rows.filter((row) => row.quote.trim());
+type SourceQuote = QuoteDependent & { block_id: string | null };
+
+/** Use exact identity for model records and quote-only matching for older records. */
+function citesBlock(citation: SourceQuote, block: BlockRow): boolean {
+  if (!citation.block_id) return containsQuote(block.text, citation.quote);
+  return citation.block_id === block.id && validateQuoteAgainstBlock({ block, quote: citation.quote }).ok;
+}
+
+async function quotesFor(source_id: string): Promise<SourceQuote[]> {
+  const d = db();
+  const [needs, references, gapSuggestions, tacticSuggestionsForSource, legacyTactics] = await Promise.all([
+    d.select({ id: t.needs.id, quote: t.needs.source_quote, block_id: t.needs.block_id,
+      run_id: t.needs.run_id, source_context: t.needs.source_context })
+      .from(t.needs).where(eq(t.needs.source_id, source_id)),
+    d.select({ id: tacticSourceReferences.tactic_id, quote: tacticSourceReferences.source_quote,
+      block_id: tacticSourceReferences.block_id })
+      .from(tacticSourceReferences).where(eq(tacticSourceReferences.source_id, source_id)),
+    d.select().from(t.gapSuggestions).where(eq(t.gapSuggestions.status, "pending")),
+    d.select({ payload: tacticSuggestions.payload, status: tacticSuggestions.status })
+      .from(tacticSuggestions).where(eq(tacticSuggestions.source_id, source_id)),
+    d.select({ id: t.tactics.id, quote: t.tactics.source_quote, block_id: t.tactics.block_id })
+      .from(t.tactics).innerJoin(t.sources, eq(t.tactics.data_source, t.sources.title))
+      .where(and(eq(t.sources.id, source_id), eq(t.tactics.lifecycle_stage, "extracted"))),
+  ]);
+  const pendingGapQuotes = gapSuggestions.flatMap((suggestion) =>
+    [suggestion, ...(Array.isArray(suggestion.extra_sources) ? suggestion.extra_sources : [])]
+      .filter((source) => source.source_id === source_id)
+      .map((source) => ({ id: suggestion.id, quote: source.source_quote, block_id: source.block_id ?? null })),
+  );
+  return [
+    ...needs.map((need) => ({ ...need, block_id: need.run_id || need.source_context ? need.block_id : null })),
+    ...references,
+    ...legacyTactics.filter((tactic) => !references.some((ref) => ref.id === tactic.id)),
+    ...pendingGapQuotes,
+    ...tacticSuggestionsForSource.filter(({ status }) => status !== "rejected").map(({ payload }) => {
+      const row = payload as TacticSuggestion;
+      return { id: row.id, quote: row.source_quote, block_id: row.block_id ?? null };
+    }),
+  ].filter((row) => row.quote?.trim());
 }
 
 /** Blocks of one source in reading order, with human/model provenance and citing needs. */
@@ -175,7 +211,7 @@ export async function listSourceBlocks(source_id: string): Promise<SourceBlockVi
         original_heading: human ? (meta?.original_heading ?? null) : null,
         edited_by: human ? (meta?.edited_by ?? null) : null,
         edited_at: human ? (meta?.edited_at ?? null) : null,
-        cited_by: quotes.filter((q) => containsQuote(block.text, q.quote)).map((q) => q.id),
+        cited_by: quotes.filter((quote) => citesBlock(quote, block)).map((quote) => quote.id),
       };
     })
     .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
@@ -254,7 +290,7 @@ export class SourceQuoteConflictError extends Error {
 
 /** Refuses when a need's quote that was in the source would be found in no block afterwards. */
 async function guardQuotes(source_id: string, before: SourceBlockView[], afterTexts: string[]) {
-  const quotes = (await quotesFor(source_id)).filter((q) => before.some((b) => containsQuote(b.text, q.quote)));
+  const quotes = (await quotesFor(source_id)).filter((quote) => !quote.block_id && before.some((block) => citesBlock(quote, block)));
   const orphans = orphanedQuotes(quotes, afterTexts);
   if (orphans.length) throw new SourceQuoteConflictError(orphans);
 }
@@ -294,16 +330,21 @@ function assessmentSourceEdit<A extends { source_id?: string; block_id?: string;
         ? (await db().select().from(t.sourceBlocks).where(eq(t.sourceBlocks.id, args.block_id)))[0]?.source_id
         : undefined);
       if (!sourceId) throw new TrustedApplicationError("Source block not found.", "not_found", 404);
-      await db().execute(sql`select id from sources where id = ${sourceId} for update`);
+      await lockSourceCitationOwner(sourceId);
       const assessmentGapIds = await lockAssessmentOwners({ source_ids: [sourceId] });
       const before = await loadState();
+      const quotes = await quotesFor(sourceId);
+      const exactCitations = quotes.filter((quote) => quote.block_id && before.blocks.some((block) => citesBlock(quote, block)));
       const result = await edit(args);
       // Resolve citations against the actual post-edit reading order. A retained
       // legacy passage may span newly split blocks, but must still occur verbatim
       // (apart from whitespace); changed or missing support drops the retention.
       const blocks = await listSourceBlocks(sourceId);
+      const lost = exactCitations.filter((quote) => !blocks.some((block) => citesBlock(quote, block)));
+      if (lost.length) throw new SourceQuoteConflictError(lost);
       const sourceText = squashText(blocks.map(block => block.text).join(" "));
       for (const need of before.needs.filter(need => need.source_id === sourceId)) {
+        if (need.block_id && (need.run_id || need.source_context)) continue;
         const quote = squashText(need.source_quote ?? "");
         const retained = need.source_basis_text ?? (preserveSupportingText && !quote
           ? before.blocks.find(block => block.id === need.block_id)?.text ?? null : null);
@@ -766,7 +807,7 @@ export const reparseSourceBlocks = assessmentSourceEdit(async function reparseSo
     if (block.human) {
       kept.push(block);
       kept_human += 1;
-    } else if (quotes.some((q) => containsQuote(block.text, q.quote)) || citedReviews.some(review => review.block_id === block.id)) {
+    } else if (quotes.some((quote) => citesBlock(quote, block)) || citedReviews.some(review => review.block_id === block.id)) {
       kept.push(block);
       kept_cited += 1;
     } else replaced.push(block.id);

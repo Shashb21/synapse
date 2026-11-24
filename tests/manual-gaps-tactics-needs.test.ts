@@ -384,6 +384,30 @@ describe("leftovers and rejected AI candidates", () => {
     expect((await listEdits({ entity_id: "tc-1" }))[0]!.after).toBe(tacticId);
   });
 
+  it.each(["gap", "tactic"] as const)("refuses to promote a rejected %s with an unsupported quote", async (kind) => {
+    await fresh();
+    await wipePlatform(["gap_candidates", "tactic_candidates"]);
+    await ensurePlatformSchema([GAP_CANDIDATES_DDL, TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL]);
+    const src = await source();
+    const common = {
+      id: "unsupported-candidate", run_id: "run-1", document_id: "doc-1", source_id: src.source_id,
+      name: "Rejected candidate", source_quote: "An unrelated sentence.", score: 0,
+      verdict: "reject", critic_note: "Unverified quote", proposer: "llm", created_at: new Date().toISOString(),
+    };
+    const before = await loadState();
+    const args = { candidate_id: common.id, rationale: "Review complete", ...who };
+    if (kind === "gap") {
+      await db().insert(gapCandidates).values({ ...common, statement: "A safety gap.", domain: "safety" });
+      await expect(promoteGapCandidate(args)).rejects.toThrow(/quote.*source block/i);
+    } else {
+      await db().insert(tacticCandidates).values({ ...common, type: "rwe_study", status: "ongoing", evidence_question: "What is known?" });
+      await expect(promoteTacticCandidate(args)).rejects.toThrow(/quote.*source block/i);
+    }
+    const after = await loadState();
+    expect(after.gaps).toEqual(before.gaps);
+    expect(after.tactics).toEqual(before.tactics);
+  });
+
   it("the UI mounts the manual controls", () => {
     const read = (p: string) => readFileSync(path.join(process.cwd(), p), "utf8");
     const gapPage = read("src/app/gaps/[id]/page.tsx");

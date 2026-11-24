@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 // Route handlers read the session cookie; outside a request scope, act as the demo typed actor.
@@ -13,7 +14,7 @@ import "@/modules";
 import { runStage } from "@/modules/kernel/run";
 import { wipePlatform, db } from "@/modules/kernel/db";
 import { listEdits } from "@/modules/kernel/edit-records";
-import { loadState, persistSourceAndBlocks, resetDemoSetup } from "@/lib/iegp/store";
+import { loadState, commitExtractedRecords, editNeed, persistSourceAndBlocks, resetDemoSetup } from "@/lib/iegp/store";
 import * as t from "@/lib/iegp/schema";
 import { GET as blocksGet, POST as blocksPost } from "@/app/api/sources/blocks/route";
 import {
@@ -26,6 +27,7 @@ import {
   mergeSourceBlocks,
   persistDroppedSourceUnits,
   readSourceStakeholder,
+  reparseSourceBlocks,
   recordLlmSourceStakeholder,
   restoreDroppedSourceUnit,
   setSourceStakeholder,
@@ -125,6 +127,35 @@ describe("S1 source blocks: human edit, add, split, merge, delete", () => {
     // Delete of an uncited block works and is ordered out.
     await deleteSourceBlock({ block_id: blocks[2]!.id, rationale: "Not a need", actor: ACTOR });
     expect((await listSourceBlocks(source_id)).map((b) => b.id)).toEqual([blocks[0]!.id, blocks[1]!.id]);
+  });
+
+  it("protects the identified model need block even when its quote is repeated", async () => {
+    const { source_id, blocks } = await source("repeated need quote");
+    const quote = blocks[0]!.text;
+    const duplicate = await addSourceBlock({ source_id, text: quote, after_block_id: null, rationale: "Record a repeat", actor: ACTOR });
+    const id = `NEED-S2-${source_id}`;
+    await citeNeed(id, source_id, quote);
+    await db().update(t.needs).set({ block_id: blocks[0]!.id, run_id: "fictional-s2-run" }).where(eq(t.needs.id, id));
+    const human = { actor_name: ACTOR.name, actor_function: ACTOR.function, rationale: "Review the quote" };
+    await expect(editNeed({ need_id: id, source_quote: "An unrelated sentence.", ...human })).rejects.toThrow(/quote.*source block/i);
+    await editNeed({ need_id: id, source_quote: "OS data versus docetaxel", ...human });
+    await expect(deleteSourceBlock({ block_id: blocks[0]!.id, rationale: "Remove duplicate", actor: ACTOR })).rejects.toBeInstanceOf(SourceQuoteConflictError);
+    await deleteSourceBlock({ block_id: duplicate.id, rationale: "Remove uncited duplicate", actor: ACTOR });
+    expect((await loadState()).needs.find((row) => row.id === id)?.block_id).toBe(blocks[0]!.id);
+  });
+
+  it("keeps existing tactic citations through source edits and reparse", async () => {
+    const { source_id, blocks } = await source("legacy tactic quote");
+    const quote = blocks[2]!.text;
+    await commitExtractedRecords({
+      source_id, title: "Notes legacy tactic quote", stakeholder_function: ACTOR.function,
+      actor_name: ACTOR.name, actor_function: ACTOR.function, needs: [], gaps: [],
+      tactics: [{ id: "study", name: "Chart review", type: "rwe_study", status: "planned",
+        evidence_question: "What does routine care show?", source_id, source_quote: quote }],
+    });
+    await expect(editSourceBlock({ block_id: blocks[2]!.id, text: "The interview ended.", rationale: "Shorter notes", actor: ACTOR })).rejects.toBeInstanceOf(SourceQuoteConflictError);
+    const reparsed = await reparseSourceBlocks({ source_id, sections: [{ heading: "Wrap-up", text: "The interview ended.", location: "p.3" }] });
+    expect(reparsed.blocks.find((row) => row.id === blocks[2]!.id)).toMatchObject({ text: quote });
   });
 
   it("splits, merges and adds in reading order, labelling human blocks", async () => {
