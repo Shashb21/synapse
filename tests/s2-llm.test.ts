@@ -199,11 +199,17 @@ describe("S2 on the model path", () => {
     const overlap = { match: "overlaps", match_gap_id: planGapId, shared_part: "Comparative data",
       new_part: "Hospitalization", merged_name: "Comparative outcomes", merged_statement: "Compare both outcomes",
       split_name: "Hospitalizations", split_statement: "How often do hospitalizations occur?" };
+    const doc = (await listParsedDocuments([documentId]))[0]!;
+    const { addSourceBlock, editSourceBlock } = await import("@/lib/iegp/source-blocks");
+    const block = await addSourceBlock({ source_id: doc.source_id, text: firstQuote + " " + reviewQuote,
+      actor: ACTOR, rationale: "Record both interview questions." });
     const execute = (rerun: boolean) => {
       const {ctx} = context(call => {
         if (call.purpose.startsWith("gap-proposer:")) return {gaps: [
-          {...gapA, name: rerun ? "Survival comparison" : "Survival", source_quote: firstQuote},
-          {...gapA, name: rerun ? "Admissions" : "Hospitalization", source_quote: reviewQuote},
+          {...gapA, statement: rerun ? "What data are available on comparative survival?" : "What is the comparative survival?",
+            domain: rerun ? "treatment_patterns" : gapA.domain, name: rerun ? "Survival comparison" : "Survival", source_quote: firstQuote},
+          {...gapA, statement: rerun ? "What evidence is available on comparative hospitalization?" : "What is comparative hospitalization?",
+            domain: rerun ? "treatment_patterns" : gapA.domain, name: rerun ? "Admissions" : "Hospitalization", source_quote: reviewQuote},
           ...(rerun ? [{...gapB, source_quote: newQuote}] : []),
         ]};
         if (call.purpose === "gap-critic") return keepAll(call);
@@ -220,6 +226,13 @@ describe("S2 on the model path", () => {
     expect(first.output.suggestion_ids).toHaveLength(1);
     await rejectGapSuggestion({suggestion_id: first.output.suggestion_ids[0]!, rationale: "Reviewed by panel",
       actor_name: ACTOR.name, actor_function: ACTOR.function});
+    process.env.SYNAPSE_TEST_STUB_LLM = "1";
+    try {
+      await runStage({ stage: "S1", input: { file_ids: [doc.file_id] }, actor: ACTOR, role: ACTOR.function });
+    } finally { delete process.env.SYNAPSE_TEST_STUB_LLM; }
+    const current = (await listParsedDocuments()).find(row => row.source_id === doc.source_id)!;
+    expect(current.id).not.toBe(documentId);
+    await editSourceBlock({ block_id: block.id, text: block.text + " " + newQuote, actor: ACTOR, rationale: "Add the panel's adherence question." });
     const before = await loadState();
     const repeats = await Promise.all([execute(true), execute(true)]);
     const after = await loadState();
@@ -227,7 +240,9 @@ describe("S2 on the model path", () => {
     expect(after.gaps.length).toBe(before.gaps.length + 1);
     expect(after.needs.length).toBe(before.needs.length + 1);
     expect(after.gap_suggestions).toEqual(before.gap_suggestions);
-    expect(after.needs).toContainEqual(expect.objectContaining({source_quote: newQuote}));
+    expect(after.needs).toContainEqual(expect.objectContaining({source_quote: newQuote, block_id: block.id, run_id: "repeat-gap-run"}));
+    expect(repeats[0]!.output.accepted.every(row => row.document_id === current.id)).toBe(true);
+    documentId = current.id;
   });
 
   it("claims repeated findings within a batch and keeps distinct questions citing the same sentence on rerun", async () => {
@@ -252,6 +267,28 @@ describe("S2 on the model path", () => {
       actor_name: ACTOR.name, actor_function: ACTOR.function, rationale: "Record the reviewed wording." });
     expect((await run(true)).output.committed_gap_ids).toHaveLength(1);
     expect((await run(true)).output.committed_gap_ids).toEqual([]);
+  });
+
+  it("follows sibling links through aliases and stops at recorded evidence", async () => {
+    const quote = (letter: string) => `Aster finding ${letter}.`;
+    const run = (letters: string[], targets: (number | null)[]) => {
+      const { ctx } = context(call => {
+        if (call.purpose.startsWith("gap-proposer:")) return { gaps: letters.map(letter => ({...gapA, source_quote: quote(letter)})) };
+        if (call.purpose === "gap-critic") return keepAll(call);
+        const ids = subjectsOf(call, "candidates");
+        return { decisions: ids.map((subject, i) => ({ subject, verdict: "accept", confidence: 90, reason: "Aster record",
+          ...(targets[i] == null ? { match: "new" } : { match: "same", same_as_candidate: ids[targets[i]!] }) })) };
+      });
+      return gapExtractModule.run(input(false), ctx);
+    };
+    const first = await run(["A", "B", "A", "D"], [3, 2, null, null]);
+    expect(first.output.committed_gap_ids).toHaveLength(1);
+    expect(first.output.committed_need_ids).toHaveLength(3);
+    const second = await run(["E", "D", "F"], [1, 2, null]);
+    expect(second.output.committed_gap_ids).toHaveLength(1);
+    const state = await loadState();
+    const corroboration = state.needs.find(row => row.source_quote === quote("E"))!;
+    expect(state.need_gap_links).toContainEqual(expect.objectContaining({need_id: corroboration.id, gap_id: first.output.committed_gap_ids[0]}));
   });
 
   it("discards a frozen run when a reviewer edits its source during the model call", async () => {

@@ -1,5 +1,7 @@
 /** Behavioral source-review tests: arrange stored source/parent, decide, assert durable plan/history. */
 import { beforeEach, describe, expect, it } from "vitest";
+import { sourceFindingKey } from "@/lib/ingest/source-findings";
+import { tacticCandidates } from "@/modules/stages/s3-tactic-extract/schema";
 import { eq, sql } from "drizzle-orm";
 import "@/modules";
 import { db } from "@/lib/iegp/db";
@@ -39,6 +41,36 @@ describe("S3 source matching", () => {
     await commitExtractedRecords({...args, tactics: [{...args.tactics[0]!, source_quote: "Another source sentence"}]});
     expect(await suggestions.listTacticSourceReferences(parentId)).toHaveLength(2);
   });
+  it("uses the original overlap alternatives to recover only the reviewed legacy candidate", async () => {
+    const row = await proposal();
+    const matching = { shared_scope: row.shared_scope, new_scope: row.new_scope, expansion: row.original_expansion, separate: row.original_separate };
+    const candidate = { run_id: row.run_id, document_id: row.document_id, source_id: sourceId, source_quote: row.source_quote,
+      match: "overlaps", target_tactic_id: parentId, type: "registry", status: "planned", verdict: "accept",
+      score: 90, critic_note: "Source supports it", proposer: "llm", created_at: row.created_at, name: "Registry" };
+    const original = "What is the safety outcome?", distinct = "What is the cost outcome?";
+    await db().insert(tacticCandidates).values([
+      { ...candidate, id: "legacy-review-original", evidence_question: original, matching },
+      { ...candidate, id: "legacy-review-distinct", evidence_question: distinct, matching: {...matching, new_scope: "Cost"} },
+    ]);
+    const keys = await suggestions.recordedTacticEvidence([sourceId], (await loadState()).tactics);
+    expect(keys.has(sourceFindingKey(sourceId, row.source_quote, candidate.type, original))).toBe(true);
+    expect(keys.has(sourceFindingKey(sourceId, row.source_quote, candidate.type, distinct))).toBe(false);
+  });
+
+  it("keeps the legacy parent question when attaching a different finding to the same source reference", async () => {
+    const state = await loadState(), parent = state.tactics.find(t => t.id === parentId)!;
+    const quote = "The Rowan registry addresses both questions.";
+    const reference = {tactic_id: parentId, source_id: sourceId, source_quote: quote};
+    await suggestions.attachTacticSource(reference);
+    await db().execute(sql`UPDATE tactic_source_references SET finding_keys = '[]'::jsonb WHERE tactic_id = ${parentId}`);
+    const original = sourceFindingKey(sourceId, quote, parent.type, parent.evidence_question);
+    const extra = sourceFindingKey(sourceId, quote, parent.type, "What is the separate economic outcome?");
+    await suggestions.attachTacticSource({...reference, finding_key: extra});
+    const keys = await suggestions.recordedTacticEvidence([sourceId], state.tactics);
+    expect(keys.has(original)).toBe(true);
+    expect(keys.has(extra)).toBe(true);
+  });
+
   it("keeps overlaps pending with no unreviewed plan mutation and retains rejected reruns", async () => {
     const before = await loadState(); const row = await proposal();
     expect(row.status).toBe("pending"); expect(await loadState()).toEqual(before);

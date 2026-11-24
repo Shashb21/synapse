@@ -13,7 +13,8 @@ import {
 import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import { NoRouteError } from "@/modules/llm/provider";
 import type { ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
-import { sourceFindingKey } from "@/lib/ingest/manual-blocks";
+import { reclassifiedFindings, sourceFindingKey } from "@/lib/ingest/source-findings";
+import { supportingBlockId } from "@/lib/ingest/manual-blocks";
 import type { IegpState } from "@/lib/iegp/types";
 import { EVIDENCE_DOMAINS, type EvidenceDomain } from "@/lib/iegp/enums";
 import { addSuggestionSources, commitExtractedRecords, loadState, withExtractionCommit } from "@/lib/iegp/store";
@@ -197,12 +198,7 @@ function toCandidate(id: string, document: ParsedDocumentRecord, raw: RawGap): G
 
 /** The block a candidate's quote comes from, when one block holds it (KAN-97). */
 export function blockIdFor(document: ParsedDocumentRecord | undefined, quote: string): string | null {
-  if (!document) return null;
-  const norm = (text: string) => text.toLowerCase().replace(/\s+/g, " ").trim();
-  const needle = norm(quote).slice(0, 120);
-  if (!needle) return null;
-  const block = document.blocks.find((row) => norm(row.text).includes(needle));
-  return block?.id ?? null;
+  return supportingBlockId(document?.blocks ?? [], quote);
 }
 
 /** Resolve previously extracted questions to their current owners, giving explicit review outcomes priority. */
@@ -830,6 +826,9 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       // chain cannot be followed (a cycle, or a candidate the judge rejected) stands on
       // its own as a new gap, so its source is never dropped.
       const recorded = await recordedGapEvidence(await loadState(), new Set(documents.map(document => document.source_id)));
+      for (const [key, previous] of reclassifiedFindings(outcome.accepted.map(gapFindingKey), recorded.keys())) {
+        recorded.set(key, recorded.get(previous)!);
+      }
       const gapByCandidate = new Map<string, string>();
       const suggestionByCandidate = new Map<string, string>();
       const representative = new Map<string, GapCandidate>();
@@ -849,8 +848,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
         return !previous;
       });
       for (const candidate of unrecorded) {
-        const terminal = followSameAs(candidate, accepted);
-        const target = terminal && (aliases.get(terminal.id) ?? terminal);
+        const target = followSameAs(candidate, accepted, aliases, recorded);
         if (!target || target.id === candidate.id) continue;
         const previous = recorded.get(gapFindingKey(target));
         // A closed destination (e.g. a rejected suggestion) cannot consume a new source.
@@ -1049,15 +1047,22 @@ registerModule(gapExtractModule);
  * The candidate a "same" candidate stands for: follows same_as_candidate links to
  * one that points nowhere. Null for a cycle or a link to a candidate not accepted.
  */
-function followSameAs(candidate: GapCandidate, accepted: Map<string, GapCandidate>): GapCandidate | null {
+function followSameAs(
+  candidate: GapCandidate,
+  accepted: Map<string, GapCandidate>,
+  aliases: Map<string, GapCandidate>,
+  recorded: ReadonlyMap<string, unknown>,
+): GapCandidate | null {
   const seen = new Set<string>();
-  let current: GapCandidate | undefined = candidate;
-  while (current?.same_as_candidate) {
+  let current = candidate;
+  while (current.same_as_candidate && !recorded.has(gapFindingKey(current))) {
     if (seen.has(current.id)) return null;
     seen.add(current.id);
-    current = accepted.get(current.same_as_candidate);
+    const next = aliases.get(current.same_as_candidate) ?? accepted.get(current.same_as_candidate);
+    if (!next) return null;
+    current = next;
   }
-  return current ?? null;
+  return current;
 }
 
 export async function listGapCandidates(limit = 200) {

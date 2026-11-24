@@ -1,11 +1,12 @@
-import { sourceFindingKey } from "@/lib/ingest/manual-blocks";
+import { sourceFindingKey } from "@/lib/ingest/source-findings";
+import { supportingBlockId } from "@/lib/ingest/manual-blocks";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { assessmentBasis, coverageReviewVersion, fullConfirmationIssues, getRequirementBasisReview, reviewedRequirementDimensions, type RequirementReviewInput } from "./requirement-basis";
 import type { RequirementBasis } from "./types";
 import { requireGapResolutionSnapshot, relationshipReason, withRelationshipChange } from "./relationship-change";
 import type { suppliedJudgementRecords, JudgementReference } from "./judgement-references";
 import { tacticEditVersion } from "./tactic-edit-version";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { currentSchemaName, db, ensureSchema, inWorkspaceTransaction, wipeIegp, withWorkspaceTransaction } from "./db";
 import * as t from "./schema";
 import { requireGapEditSnapshot } from "./gap-edit";
@@ -3730,12 +3731,23 @@ function suggestionProvenance(suggestion: GapSuggestion): NeedProvenance {
   return { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id, block_id: suggestion.block_id };
 }
 
-/** Every source a suggestion carries: its own candidate first, then repeats. */
-function suggestionSources(suggestion: GapSuggestion): GapSuggestionSource[] {
-  return [
+/** Keep historical run/candidate lineage, and resolve the quote against source edits before creating needs. */
+async function currentSuggestionSources(suggestion: GapSuggestion) {
+  const sources: GapSuggestionSource[] = [
     { source_id: suggestion.source_id, statement: suggestion.statement, source_quote: suggestion.source_quote, provenance: suggestionProvenance(suggestion) },
     ...suggestion.extra_sources,
   ];
+  const sourceIds = [...new Set(sources.map(source => source.source_id))];
+  await db().select({ id: t.sources.id }).from(t.sources).where(inArray(t.sources.id, sourceIds)).orderBy(t.sources.id).for("update");
+  const blocks = await db().select().from(t.sourceBlocks).where(inArray(t.sourceBlocks.source_id, sourceIds));
+  return sources.map(source => {
+    const provenance = source.provenance ?? { run_id: suggestion.run_id };
+    const block_id = supportingBlockId(blocks.filter(block => block.source_id === source.source_id), source.source_quote, provenance.block_id);
+    if (provenance.block_id && !block_id) {
+      throw new TrustedApplicationError("The cited passage no longer resolves to a single source block. Review the current source before accepting.");
+    }
+    return { ...source, provenance: { ...provenance, block_id } };
+  });
 }
 
 /**
@@ -3751,6 +3763,7 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
   const rationale = requireRationale(args.rationale);
   await lockExtractionStage("S2");
   const pending = await pendingSuggestion(args.suggestion_id);
+  const sources = await currentSuggestionSources(pending.suggestion);
   const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [pending.gap.id] });
   const { suggestion, gap } = await pendingSuggestion(args.suggestion_id);
   const before = await loadState();
@@ -3797,7 +3810,7 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
       actor_function: args.actor_function,
     });
   }
-  for (const source of suggestionSources(suggestion)) {
+  for (const source of sources) {
     await insertNeedForGap({
       gapId: gap.id,
       sourceId: source.source_id,
@@ -3805,7 +3818,7 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
       sourceQuote: source.source_quote,
       role: "supporting",
       actor_function: args.actor_function,
-      provenance: source.provenance ?? { run_id: suggestion.run_id },
+      provenance: source.provenance,
     });
   }
   await closeSuggestion(suggestion.id, "merged", { ...args, rationale });
@@ -3838,6 +3851,7 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
   const rationale = requireRationale(args.rationale);
   await lockExtractionStage("S2");
   const pending = await pendingSuggestion(args.suggestion_id);
+  const sources = await currentSuggestionSources(pending.suggestion);
   const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [pending.gap.id] });
   const { suggestion, gap } = await pendingSuggestion(args.suggestion_id);
   const before = await loadState();
@@ -3860,9 +3874,9 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
     settings: gap.settings,
     metadata: gap.metadata,
     origin_gap_id: gap.id,
-    need_provenance: suggestionProvenance(suggestion),
+    need_provenance: sources[0]!.provenance,
   });
-  for (const source of suggestion.extra_sources) {
+  for (const source of sources.slice(1)) {
     await insertNeedForGap({
       gapId: newGapId,
       sourceId: source.source_id,
@@ -3870,7 +3884,7 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
       sourceQuote: source.source_quote,
       role: "supporting",
       actor_function: args.actor_function,
-      provenance: source.provenance ?? { run_id: suggestion.run_id },
+      provenance: source.provenance,
     });
   }
   await insertNeedForGap({
@@ -3880,7 +3894,7 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
     sourceQuote: suggestion.source_quote,
     role: "supporting",
     actor_function: args.actor_function,
-    provenance: suggestionProvenance(suggestion),
+    provenance: sources[0]!.provenance,
   });
   await linkRelatedGaps(gap.id, newGapId);
   await closeSuggestion(suggestion.id, "split", { ...args, rationale, result_gap_id: newGapId });

@@ -400,6 +400,10 @@ describe("S3 on the model path", () => {
       if (call.purpose === "tactic-critic") return keepAll(call);
       return {decisions: idsOf(call, "decide").map(id => ({id, verdict: "accept", match: "overlaps", target_tactic_id: libraryId, shared_scope: "Existing SLR", new_scope: "Subgroup evidence", expansion: scope, separate: {name: "Independent subgroup SLR", type: "slr", status: "planned", evidence_question: scope.evidence_question}, confidence: 80, reason: "Shared SLR and added subgroup"}))};
     });
+    const { listParsedDocuments } = await import("@/modules/stages/s1-parse/module");
+    const { addSourceBlock, editSourceBlock } = await import("@/lib/iegp/source-blocks");
+    const doc = (await listParsedDocuments([documentId]))[0]!;
+    const block = await addSourceBlock({ source_id: doc.source_id, text: "The Vega review includes a new subgroup.", actor: ACTOR, rationale: "Record source review." });
     const before = await loadState();
     const {output} = await tacticExtractModule.run(input(false), ctx);
     expect(output.accepted[0]).toMatchObject({match: "overlaps", target_tactic_id: libraryId, expansion: scope});
@@ -410,9 +414,16 @@ describe("S3 on the model path", () => {
     expect((await listTacticSuggestions()).find(r => r.id === suggestion.id)).toEqual(edited);
     const {decideTacticSuggestion} = await import("@/modules/stages/s3-tactic-extract/suggestions");
     const decided = await decideTacticSuggestion({id: edited.id, decision: "reject", actor: ACTOR, rationale: "Subgroup review declined."});
+    process.env.SYNAPSE_TEST_STUB_LLM = "1";
+    try {
+      await runStage({ stage: "S1", input: { file_ids: [doc.file_id] }, actor: ACTOR, role: ACTOR.function });
+    } finally { delete process.env.SYNAPSE_TEST_STUB_LLM; }
+    const current = (await listParsedDocuments()).find(row => row.source_id === doc.source_id)!;
+    expect(current.id).not.toBe(documentId);
+    await editSourceBlock({ block_id: block.id, text: block.text + " A distinct Vega registry enrolls children.", actor: ACTOR, rationale: "Add the new registry." });
     const rerun = context(call => {
       if (call.purpose.startsWith("tactic-proposer:")) return {tactics: [
-        good({name: "Vega subgroup", type: "slr", source_quote: suggestion.source_quote}),
+        good({name: "Vega subgroup", type: "registry", evidence_question: "What evidence is available on long-term real-world safety in treated patients?", source_quote: suggestion.source_quote}),
         good({name: "New Vega registry", source_quote: "A distinct Vega registry enrolls children."}),
       ]};
       if (call.purpose === "tactic-critic") return keepAll(call);
@@ -421,6 +432,7 @@ describe("S3 on the model path", () => {
     rerun.ctx.run.id = "repeated-tactic-run";
     const repeats = await Promise.all([tacticExtractModule.run(input(false), rerun.ctx), tacticExtractModule.run(input(false), rerun.ctx)]);
     expect(repeats.flatMap(run => run.output.committed_tactic_ids)).toHaveLength(1);
+    expect(repeats[0]!.output.accepted.every(row => row.document_id === current.id)).toBe(true);
     expect((await tacticExtractModule.run(input(false), rerun.ctx)).output.committed_tactic_ids).toEqual([]);
     expect((await listTacticSuggestions()).find(r => r.id === suggestion.id)).toEqual(decided);
     expect((await loadState()).tactics.length).toBe(before.tactics.length + 1);

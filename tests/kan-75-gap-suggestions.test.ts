@@ -1,6 +1,7 @@
 import { modelMappingSupport } from "./support/model-mapping";
 import { priorityDecision } from "./support/priority-decision";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { addSourceBlock, deleteSourceBlock } from "@/lib/iegp/source-blocks";
 import { eq } from "drizzle-orm";
 import "@/modules";
 import { runStage } from "@/modules/kernel/run";
@@ -47,7 +48,7 @@ const OVERLAP = {
 
 let sourceId = "";
 
-async function overlapOn(gapId: string, candidateRowId: string | null = null): Promise<string> {
+async function overlapOn(gapId: string, candidateRowId: string | null = null, blockId: string | null = null, quote = "Nobody has looked at the over-75s."): Promise<string> {
   const result = await commitExtractedRecords({
     source_id: sourceId,
     title: "HEOR interview",
@@ -61,11 +62,11 @@ async function overlapOn(gapId: string, candidateRowId: string | null = null): P
         id: `O-${Math.random().toString(36).slice(2, 8)}`,
         gap_id: gapId,
         run_id: "kan75-run",
-        candidate_row_id: candidateRowId,
+        candidate_row_id: candidateRowId, block_id: blockId,
         name: "Over-75s versus SoC",
         statement: "How does it compare with SoC in patients over 75?",
         domain: "comparative_effectiveness",
-        source_quote: "Nobody has looked at the over-75s.",
+        source_quote: quote,
         ...OVERLAP,
       },
     ],
@@ -149,15 +150,19 @@ describe("KAN-75 split", () => {
     const suggestionId = await overlapOn(gapId);
     // A repeat from another source rides along and follows the outcome.
     const { addSuggestionSources } = await import("@/lib/iegp/store");
+    const quote = "We have nothing on over-75s.";
+    const oldBlock = await addSourceBlock({ source_id: sourceId, text: quote, actor: ACTOR, rationale: "Add supporting passage." });
     await addSuggestionSources(suggestionId, [
-      { source_id: sourceId, statement: "Over-75s are missing.", source_quote: "We have nothing on over-75s.", provenance: { run_id: "later-run", candidate_row_id: "later-candidate", block_id: "later-block" } },
+      { source_id: sourceId, statement: "Over-75s are missing.", source_quote: "We have nothing on over-75s.", provenance: { run_id: "later-run", candidate_row_id: "later-candidate", block_id: oldBlock.id } },
     ]);
 
+    await deleteSourceBlock({ block_id: oldBlock.id, actor: ACTOR, rationale: "Relocate supporting passage." });
+    const liveBlock = await addSourceBlock({ source_id: sourceId, text: quote, actor: ACTOR, rationale: "Restore the cited passage." });
     const { new_gap_id } = await acceptGapSplitSuggestion({ suggestion_id: suggestionId, rationale: "Separate question", ...who });
 
     const state = await loadState();
     expect(state.needs.find(need => need.source_quote === "We have nothing on over-75s.")).toMatchObject({
-      run_id: "later-run", candidate_row_id: "later-candidate", block_id: "later-block",
+      run_id: "later-run", candidate_row_id: "later-candidate", block_id: liveBlock.id,
     });
     const created = state.gaps.find((row) => row.id === new_gap_id)!;
     expect(created).toMatchObject({ name: OVERLAP.split_name, statement: OVERLAP.split_statement, domain: "comparative_effectiveness" });
@@ -178,6 +183,16 @@ describe("KAN-75 split", () => {
     expect(created.related_gap_ids).toEqual([gapId]);
     expect(state.gap_suggestions.find((row) => row.id === suggestionId)).toMatchObject({ status: "split", result_gap_id: new_gap_id });
   });
+});
+
+it.each([acceptGapMergeSuggestion, acceptGapSplitSuggestion])("leaves review pending when its cited passage was withdrawn", async decide => {
+  const quote = "Birch enrollment is missing older adults.";
+  const block = await addSourceBlock({source_id: sourceId, text: quote, actor: ACTOR, rationale: "Add the cited passage."});
+  const id = await overlapOn(await newGap(), null, block.id, quote);
+  await deleteSourceBlock({block_id: block.id, actor: ACTOR, rationale: "Withdraw this passage."});
+  const before = await loadState();
+  await expect(decide({suggestion_id: id, rationale: "Reviewed the proposal", ...who})).rejects.toThrow(/passage|quote/i);
+  expect(await loadState()).toEqual(before);
 });
 
 describe("KAN-75 reject", () => {

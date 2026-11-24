@@ -1,7 +1,8 @@
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { withRelationshipChange } from "@/lib/iegp/relationship-change";
 /** S3 source review: immutable model baseline, source provenance and atomic human decisions. */
-import { sourceFindingKey } from "@/lib/ingest/manual-blocks";
+import { currentSourceFindingKey, sourceFindingKey } from "@/lib/ingest/source-findings";
+import { isDeepStrictEqual } from "node:util";
 import { createHash } from "node:crypto";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
@@ -32,14 +33,18 @@ export async function attachTacticSource(args: {tactic_id: string; source_id: st
     if (!parent || !source) throw new TrustedApplicationError("Tactic or source not found in this workspace.", "not_found", 404);
     const { finding_key, ...reference } = args;
     const quote_key = quoteKey(args.source_quote);
-    const key = finding_key ?? sourceFindingKey(args.source_id, args.source_quote, parent.type, parent.evidence_question);
+    const parentKey = sourceFindingKey(args.source_id, args.source_quote, parent.type, parent.evidence_question);
+    const key = finding_key ? currentSourceFindingKey(finding_key) : parentKey;
     const [existing] = await tx.select().from(tacticSourceReferences).where(and(
       eq(tacticSourceReferences.tactic_id, args.tactic_id), eq(tacticSourceReferences.source_id, args.source_id), eq(tacticSourceReferences.quote_key, quote_key),
     ));
     if (!existing) {
       await tx.insert(tacticSourceReferences).values({ ...reference, id: newId("TSRC"), quote_key, finding_keys: [key], created_at: nowIso() });
-    } else if (!existing.finding_keys.includes(key)) {
-      await tx.update(tacticSourceReferences).set({ finding_keys: [...existing.finding_keys, key] }).where(eq(tacticSourceReferences.id, existing.id));
+    } else {
+      const prior = existing.finding_keys.length ? existing.finding_keys.map(currentSourceFindingKey) : [parentKey];
+      if (!prior.includes(key)) {
+        await tx.update(tacticSourceReferences).set({ finding_keys: [...prior, key] }).where(eq(tacticSourceReferences.id, existing.id));
+      }
     }
   };
   if (transaction) return run(transaction);
@@ -61,7 +66,7 @@ export async function recordedTacticEvidence(sourceIds: string[], tactics: Tacti
   for (const reference of references) {
     const parent = byId.get(reference.tactic_id);
     if (reference.finding_keys.length) {
-      for (const key of reference.finding_keys) keys.add(key);
+      for (const key of reference.finding_keys) keys.add(currentSourceFindingKey(key));
     } else if (parent) {
       keys.add(sourceFindingKey(reference.source_id, reference.source_quote, parent.type, parent.evidence_question));
     }
@@ -75,16 +80,20 @@ export async function recordedTacticEvidence(sourceIds: string[], tactics: Tacti
   )) : [];
   for (const row of suggestions) {
     if (row.finding_key) {
-      keys.add(row.finding_key);
+      keys.add(currentSourceFindingKey(row.finding_key));
       continue;
     }
     const matching = originals.filter(candidate => candidate.run_id === row.run_id && candidate.document_id === row.document_id
       && candidate.target_tactic_id === row.target_tactic_id && quoteKey(candidate.source_quote) === quoteKey(row.source_quote));
-    if (matching.length) {
-      for (const candidate of matching) keys.add(sourceFindingKey(candidate.source_id, candidate.source_quote, candidate.type, candidate.evidence_question));
-    } else {
+    const baseline = { shared_scope: row.shared_scope, new_scope: row.new_scope, expansion: row.original_expansion, separate: row.original_separate };
+    const matches = matching.length > 1 ? matching.filter(candidate => isDeepStrictEqual(candidate.matching, baseline)) : matching;
+    const originalKeys = new Set(matches.map(candidate => sourceFindingKey(candidate.source_id, candidate.source_quote, candidate.type, candidate.evidence_question)));
+    if (originalKeys.size === 1) {
+      for (const key of originalKeys) keys.add(key);
+    } else if (!matching.length) {
       keys.add(sourceFindingKey(row.source_id, row.source_quote, row.original_separate.type, row.original_separate.evidence_question));
     }
+    // Conflicting legacy candidates without a unique baseline match cannot inherit this decision.
   }
   // Older extracted tactics have no reference row. Only use their explicit source marker.
   const referenced = new Set(references.map(row => JSON.stringify([row.tactic_id, row.source_id, quoteKey(row.source_quote)])));

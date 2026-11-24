@@ -23,7 +23,7 @@ import {
   type TacticType,
 } from "@/lib/iegp/enums";
 import { tacticVersion, expansionScopeSchema, modelExpansionScope } from "@/lib/iegp/tactic-expansions";
-import { sourceFindingKey } from "@/lib/ingest/manual-blocks";
+import { reclassifiedFindings, sourceFindingKey } from "@/lib/ingest/source-findings";
 import { createTacticSuggestion, recordedTacticEvidence, separateTacticOptionSchema } from "./suggestions";
 import type { ExpansionScope, SeparateTacticOption, Tactic } from "@/lib/iegp/types";
 import { commitExtractedRecords, loadState, withExtractionCommit } from "@/lib/iegp/store";
@@ -700,9 +700,10 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
       await lockCurrentExtractionDocuments(documents);
       const recorded = await recordedTacticEvidence(documents.map(doc => doc.source_id), (await loadState()).tactics);
       const keyOf = (candidate: TacticCandidate) => sourceFindingKey(candidate.source_id, candidate.source_quote, candidate.type, candidate.evidence_question);
+      const reclassified = reclassifiedFindings(accepted.map(keyOf), recorded);
       const unrecorded = accepted.filter(candidate => {
         const key = keyOf(candidate);
-        if (recorded.has(key)) return false;
+        if (recorded.has(key) || reclassified.has(key)) return false;
         recorded.add(key);
         return true;
       });
