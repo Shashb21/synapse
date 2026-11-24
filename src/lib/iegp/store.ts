@@ -1459,6 +1459,7 @@ export async function lockGapStatus(args: {
   }
 }
 
+/** Apply a human override against the latest computation owned by the locked gap. */
 export async function overrideGapStatus(args: {
   gap_id: string;
   status: MappedGapStatus;
@@ -1466,7 +1467,12 @@ export async function overrideGapStatus(args: {
   note?: string;
   actor_name: string;
   actor_function: ActorFunction;
-}) {
+}): Promise<void> {
+  if (!inWorkspaceTransaction()) {
+    await loadState();
+    return withWorkspaceTransaction(() => overrideGapStatus(args));
+  }
+  await db().execute(sql`select id from gaps where id = ${args.gap_id ?? null} for update`);
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
   if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
@@ -2657,8 +2663,8 @@ export type MappingRowStatus = (typeof MAPPING_ROW_STATUSES)[number];
 
 /**
  * A /mappings row a person saved is stored as one mapping_suggestions record
- * per gap under this reserved tactic key (`__row__:<status>`); the row's tactic
- * set is the gap's coverages, each marked human-accepted.
+ * per gap under this reserved tactic key (`__row__:<status>`); the row's active
+ * tactic set is the gap's coverages for available parent tactics.
  */
 export const HUMAN_MAPPING_ROW_PREFIX = "__row__:";
 
@@ -2700,9 +2706,9 @@ export function requireMappingRowStatus(value: unknown): MappingRowStatus {
 }
 
 /**
- * Saves a /mappings row as the person's decision: the gap's tactic set becomes
- * exactly `tactic_ids` (removed tactics are unassigned and recorded as rejected,
- * new ones assigned), and the row status is stored so it wins over any S4 run.
+ * Saves a /mappings row as the person's decision about available parent tactics.
+ * Removed selections are recorded as rejected, and unavailable relationships
+ * retain their coverage and pair history. The saved status wins over any S4 run.
  */
 async function saveMappingTableRowChange(args: {
   gap_id: string;
@@ -2731,11 +2737,13 @@ async function saveMappingTableRowChange(args: {
   if (mapping_status !== "open" && uniqueIds.length === 0) {
     throw new TrustedApplicationError("Addressed or partially addressed rows need at least one tactic.");
   }
-  for (const tactic_id of uniqueIds) {
-    const tactic = state.tactics.find((x) => x.id === tactic_id);
-    if (!tactic) throw new Error(`Tactic ${tactic_id} not found`);
+  const availableIds = new Set(state.tactics.filter(tacticEligibleForMapping).map(tactic => tactic.id));
+  if (uniqueIds.some(id => !availableIds.has(id))) {
+    throw new TrustedApplicationError("One or more selected tactics are no longer available for mapping. Reopen the row and select available tactics.");
   }
-  const current = state.coverages.filter((c) => !c.expansion_id && c.gap_id === args.gap_id).map((c) => c.tactic_id);
+  const current = state.coverages
+    .filter(c => !c.expansion_id && c.gap_id === args.gap_id && availableIds.has(c.tactic_id))
+    .map(c => c.tactic_id);
   const removed = current.filter((id) => !uniqueIds.includes(id));
   const saved = humanMappingRow(state, args.gap_id);
   if (saved?.mapping_status === mapping_status && !removed.length && uniqueIds.length === current.length && uniqueIds.every(id => current.includes(id) && state.mapping_suggestions.some(row => row.gap_id === args.gap_id && row.tactic_id === id && row.status === "accepted"))) return { decision_event_id: "", parent_tactic_ids: state.tactics.map(tactic => tactic.id) };
@@ -4975,10 +4983,13 @@ async function createAddressedGapChange(args: {
 }) {
   let tacticId = args.tactic_id?.trim();
   if (tacticId) {
-    // The tactic must be a real one that counts toward coverage: an id that is
-    // not there, or a proposed or cancelled tactic, cannot close a gap.
+    // Own the tactic while validating review and committing its new coverage.
+    await db().execute(sql`select id from tactics where id = ${tacticId} for update`);
     const tactic = (await loadState()).tactics.find((x) => x.id === tacticId);
     if (!tactic) throw new Error(`Tactic ${tacticId} does not exist. Choose one from the library, or record the missed tactic.`);
+    if (tactic.review_status !== "accepted") {
+      throw new TrustedApplicationError("Only an accepted tactic can address a gap. Choose an accepted tactic or record the missed tactic.");
+    }
     if (tactic.status === "proposed" || tactic.status === "cancelled") {
       throw new Error(`${tactic.name} is ${tactic.status}, so it cannot address a gap. Choose a completed, ongoing or planned tactic.`);
     }

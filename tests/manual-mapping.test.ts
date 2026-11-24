@@ -457,7 +457,7 @@ describe("KAN-68 the mapping table's status is the gap's", () => {
     expect(view.gap_status).not.toBe(view.mapping_status);
     const workbench = readFileSync(path.join(process.cwd(), "src/components/mapping-table-workbench.tsx"), "utf8");
     expect(workbench).toContain("AI view");
-    expect(workbench).toContain("proposed tactics don't count until planned");
+    expect(workbench).toContain("coverage depends on eligible tactics and reviewed assessments");
   });
 });
 
