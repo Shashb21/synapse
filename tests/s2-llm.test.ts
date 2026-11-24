@@ -12,6 +12,8 @@ import { runStage } from "@/modules/kernel/run";
 import { wipePlatform } from "@/modules/kernel/db";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { NoRouteError } from "@/modules/llm/provider";
+import { promoteGapCandidate } from "@/app/api/iegp/promote-candidates";
+import { rejectGapSuggestionKeepingCandidate } from "@/modules/stages/s2-gap-extract/suggestions";
 import { isLiveGap } from "@/lib/iegp/engine";
 import { commitExtractedRecords, createGap, loadState, resetDemoSetup } from "@/lib/iegp/store";
 import { listParsedDocuments } from "@/modules/stages/s1-parse/module";
@@ -243,6 +245,52 @@ describe("S2 on the model path", () => {
     expect(after.needs).toContainEqual(expect.objectContaining({source_quote: newQuote, block_id: block.id, run_id: "repeat-gap-run"}));
     expect(repeats[0]!.output.accepted.every(row => row.document_id === current.id)).toBe(true);
     documentId = current.id;
+  });
+
+  it("joins repeat evidence to a promoted gap after its overlap was rejected", async () => {
+    const original = { ...gapA, source_quote: "The Finch panel requests comparative effectiveness data." };
+    const repeat = { ...gapA, source_quote: "The Finch committee confirmed the same evidence need." };
+    const run = (corroborate: boolean) => {
+      const { ctx } = context(call => {
+        if (call.purpose.startsWith("gap-proposer:")) return { gaps: corroborate ? [original, repeat] : [original] };
+        if (call.purpose === "gap-critic") return keepAll(call);
+        const subjects = subjectsOf(call, "candidates");
+        return { decisions: subjects.map((subject, index) => ({
+          subject, verdict: "accept", confidence: 90, reason: "Finch evidence",
+          ...(corroborate
+            ? index === 0 ? { match: "new" } : { match: "same", same_as_candidate: subjects[0] }
+            : {
+              match: "overlaps", match_gap_id: planGapId, shared_part: "Comparative data",
+              new_part: "Finch cohort", merged_name: "Comparative outcomes", merged_statement: "Compare both cohorts",
+              split_name: "Finch outcomes", split_statement: "What are the outcomes for the Finch cohort?",
+            }),
+        })) };
+      });
+      ctx.run.id = corroborate ? "finch-repeat" : "finch-overlap";
+      return gapExtractModule.run(input(false), ctx);
+    };
+
+    const who = { actor_name: ACTOR.name, actor_function: ACTOR.function };
+    const { output: initial } = await run(false);
+    const suggestionId = initial.suggestion_ids[0]!;
+    const candidateId = (await loadState()).gap_suggestions.find(row => row.id === suggestionId)!.candidate_row_id!;
+    await rejectGapSuggestionKeepingCandidate({
+      suggestion_id: suggestionId, rationale: "Keep the original plan gap as written.", ...who,
+    });
+    const promotedId = await promoteGapCandidate({
+      candidate_id: candidateId, rationale: "Track the question in a separate gap.", ...who,
+    });
+
+    const { output } = await run(true);
+    expect(output.committed_gap_ids).toEqual([]);
+    expect(output.joined_gap_ids).toEqual([promotedId]);
+    const state = await loadState();
+    const corroboration = state.needs.find(need => need.source_quote === repeat.source_quote);
+    expect(corroboration).toBeDefined();
+    expect(state.need_gap_links).toContainEqual(expect.objectContaining({
+      need_id: corroboration!.id, gap_id: promotedId,
+    }));
+    expect(state.gap_suggestions.find(row => row.id === suggestionId)?.status).toBe("rejected");
   });
 
   it("keeps a fresh overlap pending when all initially ambiguous supporting blocks disappear", async () => {

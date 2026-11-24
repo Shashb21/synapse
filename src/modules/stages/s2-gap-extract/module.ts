@@ -237,7 +237,10 @@ async function recordedGapEvidence(state: IegpState, sourceIds: Set<string>) {
       ? { suggestion_id: suggestion.id }
       : suggestion.status !== "rejected" && gapId && activeIds.has(gapId) ? { gap_id: gapId } : {};
     for (const row of [suggestion, ...suggestion.extra_sources]) {
-      evidence.set(sourceFindingKey(row.source_id, row.source_quote, row.domain ?? suggestion.domain, row.statement), destination);
+      const key = sourceFindingKey(row.source_id, row.source_quote, row.domain ?? suggestion.domain, row.statement);
+      // A human can reject an overlap and later promote the same finding to its own gap.
+      if (suggestion.status === "rejected" && evidence.get(key)?.gap_id) continue;
+      evidence.set(key, destination);
     }
   }
   return evidence;
