@@ -76,6 +76,34 @@ function squash(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+/** Split oversized extracted units without changing their source text or location. */
+function splitOversizedUnits(units: RawUnit[]): RawUnit[] {
+  return units.flatMap((unit) => {
+    if (unit.text.length <= CHUNK_CHARS) return [unit];
+
+    const parts: RawUnit[] = [];
+    let start = 0;
+    while (start < unit.text.length) {
+      let end = Math.min(start + CHUNK_CHARS, unit.text.length);
+      // String indexes are UTF-16 code-unit offsets. Move the boundary back
+      // when it would leave a surrogate pair split across two prompts.
+      if (
+        end < unit.text.length &&
+        end > start &&
+        unit.text.charCodeAt(end - 1) >= 0xd800 &&
+        unit.text.charCodeAt(end - 1) <= 0xdbff &&
+        unit.text.charCodeAt(end) >= 0xdc00 &&
+        unit.text.charCodeAt(end) <= 0xdfff
+      ) {
+        end -= 1;
+      }
+      parts.push({ location: unit.location, text: unit.text.slice(start, end) });
+      start = end;
+    }
+    return parts;
+  });
+}
+
 /** Mechanical extraction: raw text with its location, no structure decided. */
 export async function extractRawUnits(args: {
   filename: string;
@@ -164,7 +192,7 @@ export async function structureWithLlm(args: {
   /** The same dropped units with their raw text, so a human can restore one as a block. */
   dropped_units: DroppedUnit[];
 }> {
-  const entries = args.units.map((unit, index) => ({ id: `u${index + 1}`, unit }));
+  const entries = splitOversizedUnits(args.units).map((unit, index) => ({ id: `u${index + 1}`, unit }));
   const groups = chunk(entries);
   const tooLong = parseLimitError(args.filename, entries.length, groups.length);
   if (tooLong) throw new Error(tooLong);
