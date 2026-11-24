@@ -120,7 +120,7 @@ export async function recordedTacticEvidence(sourceIds: string[], tactics: Tacti
   return keys;
 }
 
-/** Persist one overlap per source sentence and parent; reruns never erase a human decision. */
+/** Persist each distinct overlap and retain earlier human decisions on reruns. */
 export async function createTacticSuggestion(args: {
   finding_key?: string; run_id: string; document_id: string; source_id: string; source_quote: string; target_tactic_id: string;
   expected_tactic_version: string; shared_scope: string; new_scope: string; expansion: ExpansionScope; separate: SeparateTacticOption;
@@ -143,7 +143,11 @@ export async function createTacticSuggestion(args: {
       ));
       const samePassage = prior.map(record => record.payload as TacticSuggestion).filter(row => quoteKey(row.source_quote) === quoteKey(args.source_quote));
       const reviewed = await reviewedFindings(tx, samePassage, [args]);
-      const matching = [...reviewed].filter(([, key]) => sameSourceQuestion(key, findingKey));
+      // The exact hash above handles same-run retries. Two current proposals may
+      // document different study types for the same question in a single sentence.
+      // Legacy reviews lack an exact hash for their finding, so keep reconciling them.
+      const matching = [...reviewed].filter(([row, key]) =>
+        (row.run_id !== args.run_id || !row.finding_key) && sameSourceQuestion(key, findingKey));
       if (matching.length === 1) return matching[0]![0];
       if (matching.length > 1) throw new TrustedApplicationError("Several prior reviews match this source question. Review the original passage before retrying.", "ambiguous_source_finding", 409);
     }

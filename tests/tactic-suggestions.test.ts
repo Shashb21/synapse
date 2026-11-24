@@ -41,6 +41,25 @@ describe("S3 source matching", () => {
     await commitExtractedRecords({...args, tactics: [{...args.tactics[0]!, source_quote: "Another source sentence"}]});
     expect(await suggestions.listTacticSourceReferences(parentId)).toHaveLength(2);
   });
+  it("keeps same-run overlap types separate and reuses each exact review on retry", async () => {
+    const parent = (await loadState()).tactics.find(tactic => tactic.id === parentId)!;
+    const quote = "A registry and a review will study subgroup safety.";
+    const write = (type: "registry" | "slr", run_id: string) => suggestions.createTacticSuggestion({
+      run_id, document_id: "document", source_id: sourceId, source_quote: quote, target_tactic_id: parentId,
+      finding_key: sourceFindingKey(sourceId, quote, type, scope.evidence_question),
+      expected_tactic_version: tacticVersion(parent), shared_scope: "Subgroup safety", new_scope: type, expansion: scope,
+      separate: { name: type, type, status: "planned", evidence_question: scope.evidence_question },
+    });
+    const registry = await write("registry", "initial");
+    const review = await write("slr", "initial");
+    expect(review.id).not.toBe(registry.id);
+    const decision = await suggestions.decideTacticSuggestion({ id: registry.id, decision: "reject", actor, rationale: "Registry declined." });
+    expect(await write("registry", "initial")).toEqual(decision);
+    expect(await write("registry", "repeat")).toEqual(decision);
+    expect(await write("slr", "repeat")).toEqual(review);
+    expect(await suggestions.listTacticSuggestions()).toHaveLength(2);
+  });
+
   it("uses the original overlap alternatives to recover only the reviewed legacy candidate", async () => {
     const row = await proposal();
     const matching = { shared_scope: row.shared_scope, new_scope: row.new_scope, expansion: row.original_expansion, separate: row.original_separate };

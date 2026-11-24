@@ -392,9 +392,10 @@ describe("S3 on the model path", () => {
     expect((await loadState()).tactics).toEqual(before.tactics);
   });
 
+  const scope = {name: "SLR subgroup", evidence_question: "What safety evidence exists in subgroup?", population: "Subgroup", outcomes: "", geography: "", data_cut: "", analysis: "Post-hoc subgroup", instrument: "", study_design: "Retrospective analysis", gap_coverage: "Subgroup evidence", cost_effort: "Source does not specify", timing: "Source does not specify", feasibility_risks: "Requires source review", post_hoc: true, prospective_enrolment: false, protocol_amendment: false, start_date: null, evidence_available: null};
+
   it("persists valid overlaps as source review only and retains edited review on rerun", async () => {
     const {listTacticSuggestions, editTacticSuggestion} = await import("@/modules/stages/s3-tactic-extract/suggestions");
-    const scope = {name: "SLR subgroup", evidence_question: "What safety evidence exists in subgroup?", population: "Subgroup", outcomes: "", geography: "", data_cut: "", analysis: "Post-hoc subgroup", instrument: "", study_design: "Retrospective analysis", gap_coverage: "Subgroup evidence", cost_effort: "Source does not specify", timing: "Source does not specify", feasibility_risks: "Requires source review", post_hoc: true, prospective_enrolment: false, protocol_amendment: false, start_date: null, evidence_available: null};
     const {ctx} = context(call => {
       if (call.purpose.startsWith("tactic-proposer:")) return {tactics: [good({type: "slr", status: "planned", source_quote: "The Vega review includes a new subgroup."})]};
       if (call.purpose === "tactic-critic") return keepAll(call);
@@ -444,6 +445,37 @@ describe("S3 on the model path", () => {
     await db().execute(sql`UPDATE tactic_suggestions SET payload = payload - 'finding_key' WHERE id = ${suggestion.id}`);
     expect((await tacticExtractModule.run(input(false), rerun.ctx)).output.committed_tactic_ids).toEqual([]);
 
+  });
+
+  it("queues distinct same-run overlap alternatives supported by one passage and question", async () => {
+    const { listTacticSuggestions } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    const { addSourceBlock } = await import("@/lib/iegp/source-blocks");
+    const { listParsedDocuments } = await import("@/modules/stages/s1-parse/module");
+    const doc = (await listParsedDocuments([documentId]))[0]!;
+    const quote = "A registry and a systematic review will both examine subgroup safety.";
+    const alternatives = [
+      { name: "Subgroup registry", type: "registry", status: "planned", evidence_question: scope.evidence_question },
+      { name: "Subgroup systematic review", type: "slr", status: "planned", evidence_question: scope.evidence_question },
+    ];
+    await addSourceBlock({ source_id: doc.source_id, text: quote, actor: ACTOR, rationale: "Document both studies." });
+    const { ctx } = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) {
+        return { tactics: alternatives.map(option => good({ ...option, source_quote: quote })) };
+      }
+      if (call.purpose === "tactic-critic") return keepAll(call);
+      return { decisions: idsOf(call, "decide").map((id, i) => ({
+        id, verdict: "accept", match: "overlaps", target_tactic_id: libraryId, shared_scope: "Subgroup safety",
+        new_scope: alternatives[i]!.name, expansion: { ...scope, name: alternatives[i]!.name }, separate: alternatives[i],
+        confidence: 90, reason: "The passage documents both studies.",
+      })) };
+    });
+    const { output } = await tacticExtractModule.run(input(false), ctx);
+    expect(output.accepted.map(candidate => candidate.type)).toEqual(["registry", "slr"]);
+    const rows = (await listTacticSuggestions()).filter(row => row.target_tactic_id === libraryId && row.source_quote === quote);
+    expect(rows).toHaveLength(2);
+    for (const option of alternatives) {
+      expect(rows).toContainEqual(expect.objectContaining({ new_scope: option.name, original_separate: option, status: "pending" }));
+    }
   });
 
 });
