@@ -363,7 +363,7 @@ describe("S3 on the model path", () => {
     const {listTacticSuggestions, editTacticSuggestion} = await import("@/modules/stages/s3-tactic-extract/suggestions");
     const scope = {name: "SLR subgroup", evidence_question: "What safety evidence exists in subgroup?", population: "Subgroup", outcomes: "", geography: "", data_cut: "", analysis: "Post-hoc subgroup", instrument: "", study_design: "Retrospective analysis", gap_coverage: "Subgroup evidence", cost_effort: "Source does not specify", timing: "Source does not specify", feasibility_risks: "Requires source review", post_hoc: true, prospective_enrolment: false, protocol_amendment: false, start_date: null, evidence_available: null};
     const {ctx} = context(call => {
-      if (call.purpose.startsWith("tactic-proposer:")) return {tactics: [good({type: "slr", status: "planned"})]};
+      if (call.purpose.startsWith("tactic-proposer:")) return {tactics: [good({type: "slr", status: "planned", source_quote: "The Vega review includes a new subgroup."})]};
       if (call.purpose === "tactic-critic") return keepAll(call);
       return {decisions: idsOf(call, "decide").map(id => ({id, verdict: "accept", match: "overlaps", target_tactic_id: libraryId, shared_scope: "Existing SLR", new_scope: "Subgroup evidence", expansion: scope, separate: {name: "Independent subgroup SLR", type: "slr", status: "planned", evidence_question: scope.evidence_question}, confidence: 80, reason: "Shared SLR and added subgroup"}))};
     });
@@ -375,6 +375,23 @@ describe("S3 on the model path", () => {
     const edited = await editTacticSuggestion({id: suggestion.id, expansion: {...scope, name: "Human subgroup review"}, rationale: "Source reviewed", actor: ACTOR});
     await tacticExtractModule.run(input(false), ctx);
     expect((await listTacticSuggestions()).find(r => r.id === suggestion.id)).toEqual(edited);
+    const {decideTacticSuggestion} = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    const decided = await decideTacticSuggestion({id: edited.id, decision: "reject", actor: ACTOR, rationale: "Subgroup review declined."});
+    const rerun = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) return {tactics: [
+        good({name: "Vega subgroup", type: "slr", source_quote: suggestion.source_quote}),
+        good({name: "New Vega registry", source_quote: "A distinct Vega registry enrolls children."}),
+      ]};
+      if (call.purpose === "tactic-critic") return keepAll(call);
+      return acceptAll(call);
+    });
+    rerun.ctx.run.id = "repeated-tactic-run";
+    const repeats = await Promise.all([tacticExtractModule.run(input(false), rerun.ctx), tacticExtractModule.run(input(false), rerun.ctx)]);
+    expect(repeats.flatMap(run => run.output.committed_tactic_ids)).toHaveLength(1);
+    expect((await tacticExtractModule.run(input(false), rerun.ctx)).output.committed_tactic_ids).toEqual([]);
+    expect((await listTacticSuggestions()).find(r => r.id === suggestion.id)).toEqual(decided);
+    expect((await loadState()).tactics.length).toBe(before.tactics.length + 1);
+
   });
 
 });

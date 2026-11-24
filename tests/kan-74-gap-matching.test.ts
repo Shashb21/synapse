@@ -275,6 +275,7 @@ describe("KAN-74 S2 run across two documents", () => {
     const persistence = gap("Real-world persistence", "How long do patients persist on therapy?", "Persistence is unknown.");
     const versusSoc = gap("Versus SoC", "How does it compare with SoC?", "Payers want SoC data.", "comparative_effectiveness");
     const over75 = gap("Over-75s versus SoC", "How does it compare with SoC in over-75s?", "Over-75s are a gap.", "comparative_effectiveness");
+    const corroboratingQuote = "Very few over-75s appear in the trials.";
     const A1 = `${docA}-L001`;
     const A2 = `${docA}-L002`;
     const B1 = `${docB}-L001`;
@@ -282,7 +283,7 @@ describe("KAN-74 S2 run across two documents", () => {
     const B3 = `${docB}-L003`;
     const ctx = context((call) => {
       if (call.purpose === `gap-proposer:${docA}`) return { gaps: [persistence, versusSoc] };
-      if (call.purpose === `gap-proposer:${docB}`) return { gaps: [{ ...persistence, name: "Persistence again" }, over75, { ...over75, name: "Over-75s again" }] };
+      if (call.purpose === `gap-proposer:${docB}`) return { gaps: [{ ...persistence, name: "Persistence again" }, over75, { ...over75, name: "Over-75s again", source_quote: corroboratingQuote }] };
       if (call.purpose === "gap-critic") {
         const subjects = ((call.body?.candidates as { subject: string }[]) ?? []).map((row) => row.subject);
         return { critiques: subjects.map((subject) => ({ subject, verdict: "keep", confidence: 80, note: "holds" })) };
@@ -322,7 +323,7 @@ describe("KAN-74 S2 run across two documents", () => {
     expect(suggestion).toMatchObject({ gap_id: planGapId, status: "pending", source_id: sourceB, name: "Over-75s versus SoC" });
     expect(suggestion.candidate_row_id).toBeTruthy();
     expect(suggestion.extra_sources).toEqual([
-      { source_id: sourceB, statement: over75.statement, source_quote: over75.source_quote },
+      { source_id: sourceB, statement: over75.statement, source_quote: corroboratingQuote },
     ]);
     expect(state.gaps.some((row) => row.name === "Over-75s versus SoC")).toBe(false);
   });

@@ -13,11 +13,13 @@ import {
 import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import { NoRouteError } from "@/modules/llm/provider";
 import type { ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
+import { sourceQuoteKey } from "@/lib/ingest/manual-blocks";
+import type { IegpState } from "@/lib/iegp/types";
 import { EVIDENCE_DOMAINS, type EvidenceDomain } from "@/lib/iegp/enums";
-import { addSuggestionSources, commitExtractedRecords, loadState } from "@/lib/iegp/store";
+import { addSuggestionSources, commitExtractedRecords, loadState, withExtractionCommit } from "@/lib/iegp/store";
 import { validatedPlacementGapIds } from "@/modules/stages/s8-prioritization/module";
 import { extractCandidateGaps, isLiveGap } from "@/lib/iegp/engine";
-import { listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
+import { currentExtractionDocuments, selectedExtractionDocuments, listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
 import { GAP_CANDIDATES_DDL, gapCandidates } from "./schema";
 import { augmentSystemPrompt } from "@/modules/kernel/prompt-variant";
 import { curatedS2Cases } from "@/modules/eval-gold";
@@ -201,6 +203,34 @@ export function blockIdFor(document: ParsedDocumentRecord | undefined, quote: st
   if (!needle) return null;
   const block = document.blocks.find((row) => norm(row.text).includes(needle));
   return block?.id ?? null;
+}
+
+/** Where a previously consumed sentence can send new corroboration, including after human review. */
+function recordedGapEvidence(state: IegpState) {
+  type Destination = { gap_id?: string; suggestion_id?: string };
+  const evidence = new Map<string, Destination>();
+  const activeIds = new Set(state.gaps.filter(g => !g.retired).map(g => g.id));
+  const needs = new Map(state.needs.map(n => [n.id, n]));
+  // Preserve unlinked historical evidence without guessing which gap now owns it.
+  for (const need of state.needs) {
+    if (need.source_quote) evidence.set(sourceQuoteKey(need.source_id, need.source_quote), {});
+  }
+  for (const link of state.need_gap_links) {
+    const need = needs.get(link.need_id);
+    if (need?.source_quote && activeIds.has(link.gap_id)) {
+      evidence.set(sourceQuoteKey(need.source_id, need.source_quote), { gap_id: link.gap_id });
+    }
+  }
+  for (const suggestion of state.gap_suggestions) {
+    const destination: Destination = suggestion.status === "pending" && activeIds.has(suggestion.gap_id)
+      ? { suggestion_id: suggestion.id }
+      : suggestion.result_gap_id && activeIds.has(suggestion.result_gap_id) ? { gap_id: suggestion.result_gap_id } : {};
+    for (const row of [suggestion, ...suggestion.extra_sources]) {
+      const key = sourceQuoteKey(row.source_id, row.source_quote);
+      if (!evidence.has(key)) evidence.set(key, destination);
+    }
+  }
+  return evidence;
 }
 
 const titleOf = (document: ParsedDocumentRecord) => document.blocks[0]?.heading ?? document.source_id;
@@ -578,7 +608,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
     const frozen = ctx.replay?.facts as Awaited<ReturnType<typeof freezeFacts>> | undefined;
     const sourceFacts = frozen ?? await freezeFacts(input);
     const state = sourceFacts.state;
-    const documents = input.document_ids?.length ? sourceFacts.documents.filter(document => input.document_ids!.includes(document.id)) : sourceFacts.documents;
+    const documents = selectedExtractionDocuments(sourceFacts, input.document_ids);
     if (documents.length === 0) {
       return {
         output: {
@@ -770,15 +800,27 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
     const committed_need_ids: string[] = [];
     const joined_gap_ids: string[] = [];
     const suggestion_ids: string[] = [];
-    if (!ctx.replay?.evaluation && !input.dry_run) {
+    if (!ctx.replay?.evaluation && !input.dry_run) await withExtractionCommit("S2", async () => {
       const accepted = new Map(outcome.accepted.map((candidate) => [candidate.id, candidate]));
       // A candidate that repeats another follows the one it repeats (KAN-74); one whose
       // chain cannot be followed (a cycle, or a candidate the judge rejected) stands on
       // its own as a new gap, so its source is never dropped.
+      const recorded = recordedGapEvidence(await loadState());
+      const gapByCandidate = new Map<string, string>();
+      const suggestionByCandidate = new Map<string, string>();
       const representative = new Map<string, GapCandidate>();
-      for (const candidate of outcome.accepted) {
+      const unrecorded = outcome.accepted.filter(candidate => {
+        const previous = recorded.get(sourceQuoteKey(candidate.source_id, candidate.source_quote));
+        if (previous?.gap_id) gapByCandidate.set(candidate.id, previous.gap_id);
+        if (previous?.suggestion_id) suggestionByCandidate.set(candidate.id, previous.suggestion_id);
+        return !previous;
+      });
+      for (const candidate of unrecorded) {
         const target = followSameAs(candidate, accepted);
-        if (target && target.id !== candidate.id) representative.set(candidate.id, target);
+        if (!target || target.id === candidate.id) continue;
+        const previous = recorded.get(sourceQuoteKey(target.source_id, target.source_quote));
+        // A closed destination (e.g. a rejected suggestion) cannot consume a new source.
+        if (!previous || previous.gap_id || previous.suggestion_id) representative.set(candidate.id, target);
       }
       const validatedGapIds = await validatedPlacementGapIds();
       // Each need records where it came from (KAN-97): this run, its candidate row and the block it quotes.
@@ -787,8 +829,6 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
         candidate_row_id: rowIdByCandidate.get(candidate.id) ?? null,
         block_id: blockIdFor(documents.find((document) => document.id === candidate.document_id), candidate.source_quote),
       });
-      const gapByCandidate = new Map<string, string>();
-      const suggestionByCandidate = new Map<string, string>();
       const commitFor = (document: ParsedDocumentRecord, rows: Omit<Parameters<typeof commitExtractedRecords>[0], "source_id" | "title" | "stakeholder_function" | "actor_name" | "actor_function" | "tactics" | "validated_gap_ids">) => {
         const source = state.sources.find((row) => row.id === document.source_id);
         return commitExtractedRecords({
@@ -805,7 +845,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       // First every candidate that stands for its own question: a new gap, a source
       // joining a plan gap, or an overlap suggestion.
       for (const document of documents) {
-        const own = outcome.accepted.filter(
+        const own = unrecorded.filter(
           (candidate) => candidate.document_id === document.id && !representative.has(candidate.id),
         );
         if (own.length === 0) continue;
@@ -853,7 +893,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       }
       // Then the repeats: each joins whatever the candidate it repeats became.
       for (const document of documents) {
-        const repeats = outcome.accepted.filter(
+        const repeats = unrecorded.filter(
           (candidate) => candidate.document_id === document.id && representative.has(candidate.id),
         );
         if (repeats.length === 0) continue;
@@ -887,7 +927,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
         const rowId = rowIdByCandidate.get(candidateId);
         if (rowId) await db().update(gapCandidates).set({ committed_gap_id: gapId }).where(eq(gapCandidates.id, rowId));
       }
-    }
+    });
 
     const toOut = (item: (typeof outcome.judged)[number]) => ({
       id: item.candidate.id,
@@ -992,5 +1032,5 @@ export async function gapCandidatesForRun(run_id: string) {
 
 /** Freeze the source facts this stage consumes, before any proposal or human decision. */
 async function freezeFacts(input: z.infer<typeof inputSchema>) {
-  return { documents: await listParsedDocuments(input.document_ids), state: await loadState() };
+  return { ...await currentExtractionDocuments(input.document_ids), state: await loadState() };
 }

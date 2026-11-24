@@ -191,6 +191,45 @@ describe("S2 on the model path", () => {
     expect(output.committed_gap_ids).toEqual(["G-NEW"]);
   });
 
+  it("keeps a reviewed overlap and a committed gap when the judge reverses their classifications", async () => {
+    const { rejectGapSuggestion } = await import("@/lib/iegp/store");
+    const firstQuote = "The fictional Oriole cohort needs comparative survival data.";
+    const reviewQuote = "The fictional Oriole cohort also needs comparative hospitalization data.";
+    const newQuote = "The fictional Oriole cohort needs adherence data.";
+    const overlap = { match: "overlaps", match_gap_id: planGapId, shared_part: "Comparative data",
+      new_part: "Hospitalization", merged_name: "Comparative outcomes", merged_statement: "Compare both outcomes",
+      split_name: "Hospitalizations", split_statement: "How often do hospitalizations occur?" };
+    const execute = (rerun: boolean) => {
+      const {ctx} = context(call => {
+        if (call.purpose.startsWith("gap-proposer:")) return {gaps: [
+          {...gapA, name: rerun ? "Survival comparison" : "Survival", source_quote: firstQuote},
+          {...gapA, name: rerun ? "Admissions" : "Hospitalization", source_quote: reviewQuote},
+          ...(rerun ? [{...gapB, source_quote: newQuote}] : []),
+        ]};
+        if (call.purpose === "gap-critic") return keepAll(call);
+        return {decisions: subjectsOf(call, "candidates").map((subject, index) => ({
+          subject, verdict: "accept", confidence: 90, reason: "Source evidence",
+          ...(index === (rerun ? 0 : 1) ? overlap : { match: "new" }),
+        }))};
+      });
+      ctx.run.id = rerun ? "repeat-gap-run" : "initial-gap-run";
+      return gapExtractModule.run(input(false), ctx);
+    };
+    const first = await execute(false);
+    expect(first.output.committed_gap_ids).toHaveLength(1);
+    expect(first.output.suggestion_ids).toHaveLength(1);
+    await rejectGapSuggestion({suggestion_id: first.output.suggestion_ids[0]!, rationale: "Reviewed by panel",
+      actor_name: ACTOR.name, actor_function: ACTOR.function});
+    const before = await loadState();
+    const repeats = await Promise.all([execute(true), execute(true)]);
+    const after = await loadState();
+    expect(repeats.flatMap(run => run.output.committed_gap_ids)).toHaveLength(1);
+    expect(after.gaps.length).toBe(before.gaps.length + 1);
+    expect(after.needs.length).toBe(before.needs.length + 1);
+    expect(after.gap_suggestions).toEqual(before.gap_suggestions);
+    expect(after.needs).toContainEqual(expect.objectContaining({source_quote: newQuote}));
+  });
+
   it("fails the run when the model never supplies a source quote", async () => {
     const { ctx } = context((call) => {
       if (call.purpose.startsWith("gap-proposer:")) return { gaps: [{ ...gapA, source_quote: "" }] };

@@ -1,3 +1,4 @@
+import { sourceQuoteKey } from "@/lib/ingest/manual-blocks";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { assessmentBasis, coverageReviewVersion, fullConfirmationIssues, getRequirementBasisReview, reviewedRequirementDimensions, type RequirementReviewInput } from "./requirement-basis";
 import type { RequirementBasis } from "./types";
@@ -3350,6 +3351,17 @@ export type OverlapRow = {
 };
 
 /**
+ * Serialize the short persistence phase of concurrent extraction runs in this workspace.
+ * Model calls finish before taking this lock. The next writer sees the previous run's evidence.
+ */
+export function withExtractionCommit<T>(stage: "S2" | "S3", persist: () => Promise<T>): Promise<T> {
+  return withWorkspaceTransaction(async () => {
+    await db().execute(sql`select pg_advisory_xact_lock(hashtext(current_schema()), hashtext(${`extraction:${stage}`}))`);
+    return persist();
+  });
+}
+
+/**
  * Commits a judged candidate set against an existing source. The S2/S3 LLM
  * stages decide what the set is and which rows repeat an existing record; this
  * function only persists those decisions:
@@ -3648,19 +3660,26 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
  * documents in the same run (KAN-74). They follow the suggestion's outcome, so
  * no source is dropped whichever way a person decides.
  */
-export async function addSuggestionSources(
+export const addSuggestionSources = atomic(async function addSuggestionSources(
   suggestionId: string,
   sources: GapSuggestionSource[],
 ): Promise<void> {
   if (sources.length === 0) return;
-  const state = await loadState();
-  const suggestion = state.gap_suggestions.find((row) => row.id === suggestionId);
-  if (!suggestion) throw new Error(`Suggestion ${suggestionId} not found. Nothing was saved.`);
-  await db()
-    .update(t.gapSuggestions)
-    .set({ extra_sources: [...suggestion.extra_sources, ...sources] })
-    .where(eq(t.gapSuggestions.id, suggestionId));
-}
+  const [stored] = await db().select().from(t.gapSuggestions).where(eq(t.gapSuggestions.id, suggestionId)).for("update");
+  if (!stored) throw new Error(`Suggestion ${suggestionId} not found. Nothing was saved.`);
+  if (stored.status !== "pending") throw new TrustedApplicationError("Suggestion already decided. Rerun extraction to use the current review.");
+  const extra = stored.extra_sources as GapSuggestionSource[];
+  const keys = new Set([stored, ...extra].map(row => sourceQuoteKey(row.source_id, row.source_quote)));
+  const additions = sources.filter(row => {
+    const key = sourceQuoteKey(row.source_id, row.source_quote);
+    if (keys.has(key)) return false;
+    keys.add(key);
+    return true;
+  });
+  if (additions.length) {
+    await db().update(t.gapSuggestions).set({ extra_sources: [...extra, ...additions] }).where(eq(t.gapSuggestions.id, suggestionId));
+  }
+});
 
 type SuggestionDecision = {
   suggestion_id: string;

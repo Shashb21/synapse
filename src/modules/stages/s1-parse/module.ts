@@ -1,6 +1,6 @@
 import { customerErrorMessage } from "@/modules/kernel/stage-errors";
 import { queueSourceComparison } from "@/lib/ingest/compare-source";
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, gte, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import { newId, nowIso } from "@/modules/kernel/ids";
@@ -9,6 +9,7 @@ import { registerModule } from "@/modules/kernel/registry";
 import type { SynapseModule } from "@/modules/kernel/contracts";
 import { persistSourceAndBlocks } from "@/lib/iegp/store";
 import {
+  listSourceBlocks,
   persistDroppedSourceUnits,
   recordLlmSourceStakeholder,
   reparseSourceBlocks,
@@ -30,6 +31,7 @@ import {
   sourceFileContent,
   unparsedFileIds,
 } from "@/modules/stages/s0-upload/module";
+import { SOURCE_FILES_DDL, sourceFiles } from "@/modules/stages/s0-upload/schema";
 import { ProviderError } from "@/modules/llm/provider-error";
 import {
   PARSED_DOCUMENTS_DDL,
@@ -376,4 +378,51 @@ export async function parsedDocument(id: string): Promise<ParsedDocumentRecord |
   await ensurePlatformSchema([PARSED_DOCUMENTS_DDL]);
   const rows = await db().select().from(parsedDocuments).where(eq(parsedDocuments.id, id)).limit(1);
   return rows[0] ? toRecord(rows[0]) : null;
+}
+
+/** Find the latest parse for each live source, resolving selected historical IDs to their current source. */
+export async function currentSourceParses(scope: { file_ids?: string[]; document_ids?: string[] } = {}) {
+  await ensurePlatformSchema([SOURCE_FILES_DDL, PARSED_DOCUMENTS_DDL]);
+  const { id, file_id, source_id, parsed_at, parser, parser_version, duration_ms } = parsedDocuments;
+  const currentFile = and(eq(sourceFiles.id, file_id), eq(sourceFiles.source_id, source_id));
+  // A reset or import can reuse a source ID. Ignore history from before this source was created.
+  const currentSource = and(eq(iegp.sources.id, source_id), gte(parsed_at, iegp.sources.ingested_at));
+  const selected = scope.document_ids
+    ? await db().select({ id, source_id }).from(parsedDocuments)
+        .innerJoin(sourceFiles, currentFile).innerJoin(iegp.sources, currentSource)
+        .where(inArray(id, scope.document_ids))
+    : undefined;
+  const headers = await db()
+    .selectDistinctOn([source_id], { id, file_id, source_id, parsed_at, parser, parser_version, duration_ms })
+    .from(parsedDocuments).innerJoin(sourceFiles, currentFile).innerJoin(iegp.sources, currentSource)
+    .where(and(
+      selected && inArray(source_id, selected.map(row => row.source_id)),
+      scope.file_ids && inArray(file_id, scope.file_ids),
+    ))
+    .orderBy(source_id, desc(parsed_at), desc(id));
+  const source_by_document: Record<string, string> = Object.fromEntries((selected ?? []).map(row => [row.id, row.source_id]));
+  return { headers, source_by_document };
+}
+
+/** Freeze current block text and provenance in the source editor's reading order. */
+export async function currentExtractionDocuments(document_ids?: string[]) {
+  const { headers, source_by_document } = await currentSourceParses({ document_ids });
+  const documents: ParsedDocumentRecord[] = [];
+  for (const header of headers) {
+    const blocks = (await listSourceBlocks(header.source_id)).map(({ id, source_id, heading, text, location }) =>
+      ({ id, source_id, heading, text, location }));
+    if (blocks.length) documents.push({ ...header, blocks, quality: qualityOf(blocks) });
+  }
+  return { documents, source_by_document };
+}
+
+/** Scope a frozen evaluation case using only its snapshot, including older snapshots with no aliases. */
+export function selectedExtractionDocuments(
+  facts: { documents: ParsedDocumentRecord[]; source_by_document?: Record<string, string> },
+  ids?: string[],
+) {
+  if (!ids) return facts.documents;
+  const documentIds = new Set(ids);
+  const sourceIds = new Set(ids.map(id => facts.source_by_document?.[id]));
+  return facts.documents.filter(doc => documentIds.has(doc.id) || sourceIds.has(doc.source_id));
 }

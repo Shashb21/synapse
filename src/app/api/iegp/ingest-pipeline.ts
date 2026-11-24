@@ -11,7 +11,7 @@ import { demoSourceById } from "@/lib/iegp/demo-pack";
 import { tagStageError } from "@/modules/kernel/stage-errors";
 import { ingestionJobs, INGESTION_JOBS_DDL } from "@/lib/ingest/schema";
 import { uploadModule } from "@/modules/stages/s0-upload/module";
-import { listParsedDocuments } from "@/modules/stages/s1-parse/module";
+import { currentSourceParses } from "@/modules/stages/s1-parse/module";
 import { ApiGuardError } from "@/modules/auth/api-guard";
 import { aiSections, assertAiEnabled } from "@/modules/kernel/ai-switch";
 import { sectionOfStage, type AiSections } from "@/modules/kernel/ai-sections";
@@ -159,7 +159,7 @@ export async function advanceIngest(args: IngestArgs): Promise<IngestProgress> {
         state.file_ids = [...new Set(upload.output.files.map((file) => file.id))];
         if (!state.file_ids.length) throw new TrustedApplicationError("Nothing was ingested. Choose a non-empty file.");
       } else if (stage === "S1") {
-        const existing = (await listParsedDocuments()).filter((doc) => state.file_ids.includes(doc.file_id));
+        const { headers: existing } = await currentSourceParses({ file_ids: state.file_ids });
         const missing = state.file_ids.filter((id) => !existing.some((doc) => doc.file_id === id));
         const parse = missing.length ? await run<{
           documents: { id: string; source_id: string }[];

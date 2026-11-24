@@ -1,15 +1,16 @@
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { withRelationshipChange } from "@/lib/iegp/relationship-change";
 /** S3 source review: immutable model baseline, source provenance and atomic human decisions. */
+import { sourceQuoteKey } from "@/lib/ingest/manual-blocks";
 import { createHash } from "node:crypto";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensureCurrentSchemaTables } from "@/lib/iegp/db";
 import * as t from "@/lib/iegp/schema";
 import { appendAudit, insertLibraryTactic, readState } from "@/lib/iegp/store";
 import { acceptTacticExpansion, expansionScopeSchema, tacticVersion, type ExpansionTransaction } from "@/lib/iegp/tactic-expansions";
 import { ACTOR_FUNCTIONS, TACTIC_STATUSES, TACTIC_TYPES } from "@/lib/iegp/enums";
-import type { Actor, ExpansionScope, SeparateTacticOption, TacticSuggestion } from "@/lib/iegp/types";
+import type { Actor, ExpansionScope, SeparateTacticOption, Tactic, TacticSuggestion } from "@/lib/iegp/types";
 import { requireRationale } from "@/modules/kernel/edit-records";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { captureTacticSuggestionDecision } from "@/lib/iegp/learning-capture";
@@ -39,6 +40,23 @@ export async function listTacticSourceReferences(tacticId: string) {
   await ensureTacticSuggestionSchema();
   return db().select().from(tacticSourceReferences).where(eq(tacticSourceReferences.tactic_id, tacticId));
 }
+/** Read every already-inventoried or reviewed sentence for the sources in a production rerun. */
+export async function recordedTacticEvidence(sourceIds: string[], tactics: Tactic[]) {
+  const references = await db().select({ source_id: tacticSourceReferences.source_id, source_quote: tacticSourceReferences.source_quote })
+    .from(tacticSourceReferences).where(inArray(tacticSourceReferences.source_id, sourceIds));
+  const reviews = await db().select({ payload: tacticSuggestions.payload })
+    .from(tacticSuggestions).where(inArray(tacticSuggestions.source_id, sourceIds));
+  const keys = new Set([...references, ...reviews.map(row => row.payload as TacticSuggestion)]
+    .map(row => sourceQuoteKey(row.source_id, row.source_quote)));
+  // Older extracted tactics have no reference row. Only use their explicit source marker.
+  const byMarker = new Map(sourceIds.map(id => [`Extracted from ${id}`, id]));
+  for (const tactic of tactics) {
+    const sourceId = byMarker.get(tactic.intended_use);
+    if (sourceId && tactic.source_quote?.trim()) keys.add(sourceQuoteKey(sourceId, tactic.source_quote));
+  }
+  return keys;
+}
+
 /** Persist one overlap per source sentence and parent; reruns never erase a human decision. */
 export async function createTacticSuggestion(args: {
   run_id: string; document_id: string; source_id: string; source_quote: string; target_tactic_id: string;

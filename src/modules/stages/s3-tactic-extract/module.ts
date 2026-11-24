@@ -23,11 +23,12 @@ import {
   type TacticType,
 } from "@/lib/iegp/enums";
 import { tacticVersion, expansionScopeSchema, modelExpansionScope } from "@/lib/iegp/tactic-expansions";
-import { createTacticSuggestion, separateTacticOptionSchema } from "./suggestions";
+import { sourceQuoteKey } from "@/lib/ingest/manual-blocks";
+import { createTacticSuggestion, recordedTacticEvidence, separateTacticOptionSchema } from "./suggestions";
 import type { ExpansionScope, SeparateTacticOption, Tactic } from "@/lib/iegp/types";
-import { commitExtractedRecords, loadState } from "@/lib/iegp/store";
+import { commitExtractedRecords, loadState, withExtractionCommit } from "@/lib/iegp/store";
 import { extractCandidateTactics } from "@/lib/iegp/engine";
-import { listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
+import { currentExtractionDocuments, selectedExtractionDocuments, listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
 import { TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL, TACTIC_MATCHING_DDL, tacticCandidates } from "./schema";
 import { plural } from "@/lib/plural";
 
@@ -536,7 +537,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
     const frozen = ctx.replay?.facts as Awaited<ReturnType<typeof freezeFacts>> | undefined;
     const sourceFacts = frozen ?? await freezeFacts(input);
     const state = sourceFacts.state;
-    const documents = input.document_ids?.length ? sourceFacts.documents.filter(document => input.document_ids!.includes(document.id)) : sourceFacts.documents;
+    const documents = selectedExtractionDocuments(sourceFacts, input.document_ids);
     if (documents.length === 0) {
       return {
         output: {
@@ -695,9 +696,11 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
     if (!ctx.replay?.evaluation && rows.length > 0) await db().insert(tacticCandidates).values(rows);
 
     const committed_tactic_ids: string[] = [];
-    if (!ctx.replay?.evaluation && !input.dry_run) {
+    if (!ctx.replay?.evaluation && !input.dry_run) await withExtractionCommit("S3", async () => {
+      const recorded = await recordedTacticEvidence(documents.map(doc => doc.source_id), state.tactics);
+      const unrecorded = accepted.filter(candidate => !recorded.has(sourceQuoteKey(candidate.source_id, candidate.source_quote)));
       for (const document of documents) {
-        const fromDocument = accepted.filter((candidate) => candidate.document_id === document.id && candidate.match !== "overlaps");
+        const fromDocument = unrecorded.filter((candidate) => candidate.document_id === document.id && candidate.match !== "overlaps");
         if (fromDocument.length === 0) continue;
         const source = state.sources.find((row) => row.id === document.source_id);
         const result = await ctx.run.step(`commit:${document.id}`, () =>
@@ -724,15 +727,13 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
         );
         committed_tactic_ids.push(...result.tactic_ids);
       }
-    }
 
-    if (!ctx.replay?.evaluation && !input.dry_run) {
-      for (const candidate of accepted.filter(c => c.match === "overlaps")) {
+      for (const candidate of unrecorded.filter(c => c.match === "overlaps")) {
         const parent = state.tactics.find(t => t.id === candidate.target_tactic_id)!;
         await createTacticSuggestion({run_id: ctx.run.id, document_id: candidate.document_id, source_id: candidate.source_id, source_quote: candidate.source_quote,
           target_tactic_id: parent.id, expected_tactic_version: tacticVersion(parent), shared_scope: candidate.shared_scope!, new_scope: candidate.new_scope!, expansion: candidate.expansion!, separate: candidate.separate!});
       }
-    }
+    });
 
     const toOut = (item: JudgedCandidate<TacticCandidate>) => ({
       id: item.candidate.id,
@@ -829,5 +830,5 @@ export async function listTacticCandidates(limit = 200) {
 
 /** Freeze the source facts this stage consumes, before any proposal or human decision. */
 async function freezeFacts(input: z.infer<typeof inputSchema>) {
-  return { documents: await listParsedDocuments(input.document_ids), state: await loadState() };
+  return { ...await currentExtractionDocuments(input.document_ids), state: await loadState() };
 }
