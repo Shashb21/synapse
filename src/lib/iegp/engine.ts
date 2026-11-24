@@ -82,7 +82,10 @@ export function uncoveredDimensions(
   );
 }
 
-export type AddressingTactic = Pick<Tactic, "id" | "status" | "type" | "evidence_available">;
+type TacticAddressingStatus = Pick<Tactic, "status" | "type" | "evidence_available"> &
+  Partial<Pick<Tactic, "review_status">>;
+
+export type AddressingTactic = Pick<Tactic, "id"> & TacticAddressingStatus;
 
 const PUBLICATION_TYPES: ReadonlySet<TacticType> = new Set([
   "publication",
@@ -103,11 +106,9 @@ export function isPublishedLiterature(
   return Boolean(tactic.evidence_available?.trim());
 }
 
-/** Completed + ongoing + planned count; proposed does not (unless published literature). */
-export function tacticCountsTowardAddressing(
-  tactic: Pick<Tactic, "status" | "type" | "evidence_available">,
-): boolean {
-  if (tactic.status === "cancelled") return false;
+/** Rejected tactics contribute no evidence. Otherwise use the delivery lifecycle and publication evidence. */
+export function tacticCountsTowardAddressing(tactic: TacticAddressingStatus): boolean {
+  if (tactic.review_status === "rejected" || tactic.status === "cancelled") return false;
   if (tactic.status === "completed" || tactic.status === "ongoing" || tactic.status === "planned") {
     return true;
   }
@@ -122,13 +123,12 @@ export function countingCoverages(
   const byId = new Map(tactics.map((t) => [t.id, t]));
   return coverages.filter((c) => {
     const tactic = byId.get(c.tactic_id);
-    if (c.expansion_id) {
-      const child = expansions.find((e) => e.id === c.expansion_id);
-      return Boolean(tactic && child && child.tactic_id === c.tactic_id &&
-        child.gap_ids.includes(c.gap_id) &&
-        ["planned", "ongoing", "completed"].includes(child.status));
-    }
-    return Boolean(tactic && tacticCountsTowardAddressing(tactic));
+    if (!tactic) return false;
+    if (!c.expansion_id) return tacticCountsTowardAddressing(tactic);
+    if (tactic.review_status === "rejected") return false;
+    const child = expansions.find((e) => e.id === c.expansion_id);
+    return Boolean(child && child.tactic_id === c.tactic_id && child.gap_ids.includes(c.gap_id) &&
+      ["planned", "ongoing", "completed"].includes(child.status));
   });
 }
 
