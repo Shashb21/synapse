@@ -3395,7 +3395,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
   actor_function: ActorFunction;
   needs: CandidateNeedRow[];
   gaps: ExtractedGap[];
-  tactics: ExtractedTactic[];
+  tactics: (ExtractedTactic & { finding_key?: string })[];
   overlaps?: OverlapRow[];
   /** Gaps whose priority a person validated (S8 keeps those), so a new source on them is flagged. */
   validated_gap_ids?: string[];
@@ -3607,7 +3607,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
   for (const tac of args.tactics) {
     if (tac.duplicate_of) {
       const { attachTacticSource } = await import("@/modules/stages/s3-tactic-extract/suggestions");
-      if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tac.duplicate_of, source_id: sourceId, source_quote: tac.source_quote, finding_key: sourceFindingKey(sourceId, tac.source_quote, tac.type, tac.evidence_question)});
+      if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tac.duplicate_of, source_id: sourceId, source_quote: tac.source_quote, finding_key: tac.finding_key ?? sourceFindingKey(sourceId, tac.source_quote, tac.type, tac.evidence_question)});
       skippedTacticIds.push(tac.id);
       continue;
     }
@@ -3640,7 +3640,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
       source_quote: (tac.source_quote ?? "").trim(),
     });
     const { attachTacticSource } = await import("@/modules/stages/s3-tactic-extract/suggestions");
-    if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tacticId, source_id: sourceId, source_quote: tac.source_quote, finding_key: sourceFindingKey(sourceId, tac.source_quote, tac.type, tac.evidence_question)});
+    if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tacticId, source_id: sourceId, source_quote: tac.source_quote, finding_key: tac.finding_key ?? sourceFindingKey(sourceId, tac.source_quote, tac.type, tac.evidence_question)});
   }
 
   await appendAudit(

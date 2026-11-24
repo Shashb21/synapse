@@ -3,15 +3,18 @@ import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { squashText } from "./manual-blocks";
 
 /** Keep negation, quantities and word order. Strip only introductory question wording. */
-export function sourceFindingKey(sourceId: string, quote: string, kind: string, question: string): string {
+export function sourceFindingKey(sourceId: string, quote: string, kind: string, question: string, activityName?: string): string {
   const text = squashText(question).toLowerCase().replace(/[?.!]+$/, "");
   const focus = text
     .replace(/^(?:what (?:evidence|data) (?:is|are) (?:available|there)|what (?:do we know|is known)) (?:on|about|regarding) /, "")
     .replace(/^what (?:is|are) (?:the )?/, "");
-  return JSON.stringify([sourceId, squashText(quote).toLowerCase(), kind, focus || text]);
+  const parts = [sourceId, squashText(quote).toLowerCase(), kind, focus || text];
+  const activity = activityName && squashText(activityName).toLowerCase();
+  if (activity) parts.push(activity);
+  return JSON.stringify(parts);
 }
 
-function findingParts(key: string): [string, string, string, string] | undefined {
+function findingParts(key: string): [string, string, string, string, string?] | undefined {
   let parts: unknown;
   try {
     parts = JSON.parse(key);
@@ -19,8 +22,8 @@ function findingParts(key: string): [string, string, string, string] | undefined
     if (!(error instanceof SyntaxError)) throw error;
     return;
   }
-  if (Array.isArray(parts) && parts.length === 4 && parts.every(part => typeof part === "string")) {
-    return [parts[0], parts[1], parts[2], parts[3]];
+  if (Array.isArray(parts) && (parts.length === 4 || parts.length === 5) && parts.every(part => typeof part === "string")) {
+    return [parts[0], parts[1], parts[2], parts[3], parts[4]];
   }
 }
 
@@ -30,10 +33,15 @@ export function currentSourceFindingKey(key: string): string {
   return parts ? sourceFindingKey(...parts) : key;
 }
 
-/** Compare the recorded source, passage and question independently of a model's classification. */
+/** Older keys omit activity identity, so keep their findings eligible for reconciliation. */
+function compatibleActivities(left?: string, right?: string): boolean {
+  return !left || !right || left === right;
+}
+
+/** Compare source evidence across classifications, using activity identity when both keys have it. */
 export function sameSourceQuestion(left: string, right: string): boolean {
   const a = findingParts(currentSourceFindingKey(left)), b = findingParts(currentSourceFindingKey(right));
-  return Boolean(a && b && a[0] === b[0] && a[1] === b[1] && a[3] === b[3]);
+  return Boolean(a && b && a[0] === b[0] && a[1] === b[1] && a[3] === b[3] && compatibleActivities(a[4], b[4]));
 }
 
 function groupFindings(keys: Iterable<string>, includeQuestion: boolean) {
@@ -62,13 +70,14 @@ export function reclassifiedFindings(current: Iterable<string>, prior: Iterable<
   const byQuestion = groupFindings(storedKeys, true);
   const matches = new Map<string, string>();
   for (const [scope, incoming] of groupFindings(incomingKeys, true)) {
-    const stored = byQuestion.get(scope);
-    if (stored?.length === 1) {
-      for (const key of incoming) {
-        if (key !== stored[0]) matches.set(key, stored[0]!);
+    const stored = byQuestion.get(scope) ?? [];
+    for (const key of incoming) {
+      if (storedKeys.has(key)) continue;
+      const matching = stored.filter(priorKey => sameSourceQuestion(priorKey, key));
+      if (matching.length === 1) matches.set(key, matching[0]!);
+      if (matching.length > 1) {
+        throw new TrustedApplicationError("This question has several recorded classifications. Review the source before retrying.", "ambiguous_source_finding", 409);
       }
-    } else if (stored && incoming.some(key => !storedKeys.has(key))) {
-      throw new TrustedApplicationError("This question has several recorded classifications. Review the source before retrying.", "ambiguous_source_finding", 409);
     }
   }
   const incomingByPassage = groupFindings(incomingKeys, false);
@@ -76,8 +85,10 @@ export function reclassifiedFindings(current: Iterable<string>, prior: Iterable<
     const incoming = incomingByPassage.get(passage);
     if (!incoming) continue;
     const represented = new Set(incoming.map(key => matches.get(key) ?? key));
-    const newQuestion = incoming.some(key => !storedKeys.has(key) && !matches.has(key));
-    if (newQuestion && stored.some(key => !represented.has(key))) {
+    const unresolved = stored.filter(key => !represented.has(key));
+    const ambiguous = incoming.some(key => !storedKeys.has(key) && !matches.has(key) &&
+      unresolved.some(priorKey => compatibleActivities(findingParts(key)?.[4], findingParts(priorKey)?.[4])));
+    if (ambiguous) {
       throw new TrustedApplicationError(
         "A previously recorded passage has a different extraction question. Review the source and use a more specific quotation before retrying.",
         "ambiguous_source_finding", 409,

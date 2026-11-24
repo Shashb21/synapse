@@ -376,6 +376,75 @@ describe("S3 on the model path", () => {
     expect((await run(true)).output.committed_tactic_ids).toEqual([]);
   });
 
+  it.each([
+    { batch: "one batch", activities: ["Alpha", "Beta"] },
+    { batch: "separate batches", activities: ["Gamma", "Delta"] },
+  ])("persists named registries from a shared quotation in $batch", async ({ batch, activities }) => {
+    const quote = `The ${activities.join(" and ")} registries will evaluate long-term safety.`;
+    const names = activities.map(activity => `${activity} registry`);
+    const run = (activityNames: string[]) => {
+      const { ctx } = context(call => {
+        if (call.purpose.startsWith("tactic-proposer:")) return { tactics:
+          activityNames.map(name => good({ name, status: "planned", source_quote: quote })),
+        };
+        return call.purpose === "tactic-critic" ? keepAll(call) : acceptAll(call);
+      });
+      return tacticExtractModule.run(input(false), ctx);
+    };
+    const batches = batch === "one batch" ? [names] : names.map(name => [name]);
+    const committed: string[] = [];
+    for (const activityNames of batches) {
+      const { output } = await run(activityNames);
+      expect(output.accepted.map(candidate => candidate.name)).toEqual(activityNames);
+      committed.push(...output.committed_tactic_ids);
+    }
+    const state = await loadState();
+    expect(state.tactics.filter(tactic => committed.includes(tactic.id)).map(tactic => tactic.name))
+      .toEqual(names);
+    expect((await run(names)).output.committed_tactic_ids).toEqual([]);
+  });
+
+  it("lets a mapping transaction lock the source while extraction waits for its tactic", async () => {
+    const postgres = (await import("postgres")).default;
+    const { currentSchemaName } = await import("@/lib/iegp/db");
+    const { listParsedDocuments } = await import("@/modules/stages/s1-parse/module");
+    const { listTacticSourceReferences } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    const { source_id: sourceId } = (await listParsedDocuments([documentId]))[0]!;
+    const schema = await currentSchemaName();
+    const quote = "Aster's payer review confirms the existing comparative analysis.";
+    const { ctx } = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) {
+        return { tactics: [good({ name: "Aster payer review", type: "slr", source_quote: quote })] };
+      }
+      if (call.purpose === "tactic-critic") return keepAll(call);
+      return { decisions: idsOf(call, "decide").map(id => ({
+        id, verdict: "accept", match: "same", target_tactic_id: libraryId, confidence: 90, reason: "Same review.",
+      })) };
+    });
+    const connection = postgres(process.env.DATABASE_URL!, { max: 1 });
+    let extraction: Promise<unknown> | undefined;
+    try {
+      await connection.begin(async tx => {
+        await tx`set local lock_timeout = '2s'`;
+        await tx`select id from ${tx(schema)}.tactics where id = ${libraryId} for update`;
+        extraction = tacticExtractModule.run(input(false), ctx);
+        void extraction.catch(() => {});
+        await vi.waitFor(async () => {
+          const [lock] = await tx`select exists (
+            select 1 from pg_stat_activity where pg_backend_pid() = any(pg_blocking_pids(pid))
+          ) as blocked`;
+          expect(lock?.blocked).toBe(true);
+        }, { timeout: 5_000, interval: 20 });
+        await tx`select id from ${tx(schema)}.sources where id = ${sourceId} for update`;
+      });
+      await extraction;
+      expect(await listTacticSourceReferences(libraryId)).toContainEqual(expect.objectContaining({ source_quote: quote }));
+    } finally {
+      await extraction?.catch(() => {});
+      await connection.end();
+    }
+  });
+
   it("rejects a tactic commit when a reviewer updates the source during judging", async () => {
     const { editSourceBlock, listSourceBlocks } = await import("@/lib/iegp/source-blocks");
     const { listParsedDocuments } = await import("@/modules/stages/s1-parse/module");

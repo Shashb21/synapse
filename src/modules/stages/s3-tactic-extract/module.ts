@@ -1,5 +1,6 @@
 import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
-import { desc } from "drizzle-orm";
+import { desc, inArray, sql } from "drizzle-orm";
+import { tactics } from "@/lib/iegp/schema";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import { newId, nowIso } from "@/modules/kernel/ids";
@@ -697,9 +698,20 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
 
     const committed_tactic_ids: string[] = [];
     if (!ctx.replay?.evaluation && !input.dry_run) await withExtractionCommit("S3", async () => {
+      // Match S4: own the existing tactics before locking any source rows.
+      await db().execute(sql`LOCK TABLE gaps IN ROW EXCLUSIVE MODE`);
+      const targetIds = [...new Set(accepted.flatMap(candidate => candidate.target_tactic_id ? [candidate.target_tactic_id] : []))];
+      if (targetIds.length) {
+        await db().select({ id: tactics.id }).from(tactics)
+          .where(inArray(tactics.id, targetIds)).orderBy(tactics.id).for("update");
+      }
       await lockCurrentExtractionDocuments(documents);
       const recorded = await recordedTacticEvidence(documents.map(doc => doc.source_id), (await loadState()).tactics, accepted);
-      const keyOf = (candidate: TacticCandidate) => sourceFindingKey(candidate.source_id, candidate.source_quote, candidate.type, candidate.evidence_question);
+      // New activities keep their own identities, even when they answer the same question.
+      const keyOf = (candidate: TacticCandidate) => sourceFindingKey(
+        candidate.source_id, candidate.source_quote, candidate.type, candidate.evidence_question,
+        candidate.match === "new" ? candidate.name : undefined,
+      );
       const reclassified = reclassifiedFindings(accepted.map(keyOf), recorded);
       const unrecorded = accepted.filter(candidate => {
         const key = keyOf(candidate);
@@ -729,6 +741,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
               source_id: candidate.source_id,
               source_quote: candidate.source_quote,
               duplicate_of: candidate.duplicate_of,
+              finding_key: keyOf(candidate),
             })),
             apply_mappings: false,
           }),

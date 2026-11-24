@@ -318,6 +318,49 @@ describe("S2 on the model path", () => {
     expect(state.need_gap_links).toContainEqual(expect.objectContaining({need_id: corroboration.id, gap_id: first.output.committed_gap_ids[0]}));
   });
 
+  it("corroborates the live rewrite successor when the original still has a historical link", async () => {
+    const { db } = await import("@/lib/iegp/db");
+    const { sql } = await import("drizzle-orm");
+    const { gapResolutionVersion } = await import("@/lib/iegp/relationship-version");
+    const { rewritePartialGap } = await import("@/lib/iegp/store");
+    const originalQuote = "The fictional Vale assessment requests comparative effectiveness.";
+    const newQuote = "The fictional Vale committee confirmed the same comparison is needed.";
+    const run = (corroborate: boolean) => {
+      const { ctx } = context(call => {
+        if (call.purpose.startsWith("gap-proposer:")) return { gaps: [
+          { ...gapA, source_quote: originalQuote },
+          ...(corroborate ? [{ ...gapA, source_quote: newQuote }] : []),
+        ] };
+        if (call.purpose === "gap-critic") return keepAll(call);
+        const ids = subjectsOf(call, "candidates");
+        return { decisions: ids.map((subject, index) => ({
+          subject, verdict: "accept", confidence: 90, reason: "Vale evidence",
+          ...(index ? { match: "same", same_as_candidate: ids[0] } : { match: "new" }),
+        })) };
+      });
+      return gapExtractModule.run(input(false), ctx);
+    };
+    const { output: initial } = await run(false);
+    const originalId = initial.committed_gap_ids[0]!;
+    await db().execute(sql`UPDATE gaps SET status = 'validated_partial', computed_status = 'validated_partial' WHERE id = ${originalId}`);
+    const successorId = await rewritePartialGap({
+      gap_id: originalId, expected_resolution: gapResolutionVersion(await loadState(), originalId),
+      name: "Remaining Vale comparison", status: "validated_open", note: "Keep the unanswered comparison.",
+      actor_name: ACTOR.name, actor_function: ACTOR.function,
+    });
+    const historicalNeedId = initial.committed_need_ids[0]!;
+    const rewritten = await loadState();
+    expect(rewritten.need_gap_links.filter(link => link.need_id === historicalNeedId).map(link => link.gap_id))
+      .toEqual(expect.arrayContaining([originalId, successorId]));
+
+    const { output } = await run(true);
+    expect(output.committed_gap_ids).toEqual([]);
+    expect(output.joined_gap_ids).toEqual([successorId]);
+    expect((await loadState()).need_gap_links).toContainEqual(expect.objectContaining({
+      need_id: output.committed_need_ids[0], gap_id: successorId,
+    }));
+  });
+
   it("discards a frozen run when a reviewer edits its source during the model call", async () => {
     const { editSourceBlock, listSourceBlocks } = await import("@/lib/iegp/source-blocks");
     const sourceId = (await listParsedDocuments([documentId]))[0]!.source_id;

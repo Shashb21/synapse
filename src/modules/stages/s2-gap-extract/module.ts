@@ -219,22 +219,17 @@ async function recordedGapEvidence(state: IegpState, sourceIds: Set<string>) {
     const row = (need.candidate_row_id && byCandidate.get(need.candidate_row_id)) || need;
     return sourceFindingKey(row.source_id, row.source_quote, row.domain, row.statement);
   };
-  const linked = new Set<string>();
   for (const link of state.need_gap_links) {
     const need = needs.get(link.need_id);
-    if (!need) continue;
-    linked.add(need.id);
+    if (!need || !activeIds.has(link.gap_id)) continue;
     const key = keyOf(need);
     const previous = evidence.get(key);
-    // If several gaps share this finding, never pick an arbitrary one for corroboration.
-    evidence.set(key, activeIds.has(link.gap_id) && (!previous || previous.gap_id === link.gap_id)
-      ? { gap_id: link.gap_id } : {});
+    // Historical links do not compete with the current owner after a rewrite.
+    evidence.set(key, !previous || previous.gap_id === link.gap_id ? { gap_id: link.gap_id } : {});
   }
   for (const need of selectedNeeds) {
-    if (!linked.has(need.id)) {
-      const key = keyOf(need);
-      if (!evidence.has(key)) evidence.set(key, {});
-    }
+    const key = keyOf(need);
+    if (!evidence.has(key)) evidence.set(key, {});
   }
   for (const suggestion of state.gap_suggestions) {
     const gapId = suggestion.status === "split" ? suggestion.result_gap_id : suggestion.gap_id;
