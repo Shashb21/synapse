@@ -14,6 +14,7 @@ const DEFAULT_URL =
 const globalForDb = globalThis as unknown as {
   pg?: ReturnType<typeof postgres>;
   platformPg?: ReturnType<typeof postgres>;
+  advisoryPg?: ReturnType<typeof postgres>;
   drizzle?: ReturnType<typeof drizzle<typeof schema>>;
   sharedDrizzle?: ReturnType<typeof drizzle<typeof schema>>;
   schemaLookup?: (workspaceId: string) => Promise<string | null>;
@@ -244,6 +245,19 @@ export async function withWorkspaceTransaction<T>(fn: () => Promise<T>): Promise
   // pool would wait on it while it waits on the DDL.
   if (!inWorkspaceTransaction()) await globalForDb.beforeWorkspaceTransaction?.();
   return (await router.begin(() => fn())) as T;
+}
+
+/** Hold an advisory lock without making the caller's workspace queries part of its transaction. */
+export async function withIndependentAdvisoryLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  // Comparison can overlap a newer attempt. Its lock must leave the workspace
+  // and platform pools free for both attempts to finish their short DB writes.
+  const options = connectOptions("workspace");
+  const pool = globalForDb.advisoryPg ??= postgres(DEFAULT_URL, { ...options, max: Math.max(2, options.max) });
+  return (await pool.begin(async (tx) => {
+    const [lock] = await tx`select pg_try_advisory_xact_lock(hashtextextended(${key}, 0)) as locked`;
+    if (!lock?.locked) throw new Error("The module run execution lock is unavailable.");
+    return fn();
+  })) as T;
 }
 
 /** Registered by the kernel: platform setup that must finish before a workspace transaction opens. */

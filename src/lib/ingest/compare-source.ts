@@ -13,7 +13,7 @@ import { requirementSourceVersion } from "@/lib/iegp/requirement-basis";
 import { createSourceDiscrepancy, linkSourceSupport, sourceReviewCitationCurrent } from "@/lib/iegp/source-review";
 import { aiSectionEnabled } from "@/modules/kernel/ai-switch";
 import { completionFor, resolveRoute } from "@/modules/kernel/routing";
-import { closeRun, openRun, RunRecorder } from "@/modules/kernel/observability";
+import { closeRun, openRun, RunRecorder, SOURCE_COMPARISON_MODULE, withRunningSourceComparison } from "@/modules/kernel/observability";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { scopedWorkspaceId } from "@/modules/workspaces/context";
 import type { Actor, ResolvedRoute } from "@/modules/kernel/contracts";
@@ -182,23 +182,25 @@ export async function compareSource(sourceId: string, actor: Actor): Promise<voi
     });
     if (!attempt || attempt.status === "ai_disabled") return;
     const { version, basis_version } = attempt;
-    if (attempt.outcomes === null) {
+    let pendingOutcomes = attempt.outcomes;
+    if (pendingOutcomes === null) {
       const state = await loadState();
-      const recorder = new RunRecorder({ workspace_id: await scopedWorkspaceId() ?? "default", stage: "S1", module_id: "incoming-source-comparison", module_version: "1", actor, input: { source_id: sourceId, basis_version } }, version);
+      const recorder = new RunRecorder({ workspace_id: await scopedWorkspaceId() ?? "default", stage: "S1", module_id: SOURCE_COMPARISON_MODULE, module_version: "1", actor, input: { source_id: sourceId, basis_version } }, version);
       await openRun(recorder);
       let route: ResolvedRoute | null = null;
       try {
-        route = await resolveRoute("S1");
-        const complete = completionFor(route, recorder);
-        const reply = replySchema.parse(await complete({ system: SYSTEM, user: JSON.stringify(await facts(state, sourceId)), purpose: "incoming-source-comparison" }));
-        attempt.outcomes = reply.outcomes;
-        await closeRun({ recorder, status: "ok", route, output: reply, summary: "Incoming comparison provider reply received." });
+        pendingOutcomes = await withRunningSourceComparison(recorder, async () => {
+          route = await resolveRoute("S1");
+          const complete = completionFor(route, recorder);
+          const reply = replySchema.parse(await complete({ system: SYSTEM, user: JSON.stringify(await facts(state, sourceId)), purpose: "incoming-source-comparison" }));
+          await closeRun({ recorder, status: "ok", route, output: reply, summary: "Incoming comparison provider reply received." });
+          return reply.outcomes;
+        });
       } catch (error) {
         await closeRun({ recorder, status: "error", route, error: error instanceof Error ? error.message : String(error) });
         throw error;
       }
     }
-    const pendingOutcomes = attempt.outcomes;
     // Normalize and validate the entire reply under current owner locks before saving or applying it.
     // This also upgrades pre-normalization saved outcomes without calling the model on durable retry.
     const outcomes = await withWorkspaceTransaction(async () => {

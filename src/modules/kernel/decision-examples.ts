@@ -8,7 +8,7 @@ import { newId, nowIso } from "./ids";
 import { isTestStub } from "./llm";
 import { canPrompt, completionFor, resolveRoute } from "./routing";
 import { originatingSnapshot } from "./decision-replay";
-import { closeRun, getRun, openRun, RunRecorder } from "./observability";
+import { closeRun, getRun, openRun, RunRecorder, withRunningRun } from "./observability";
 import { aiSectionEnabled } from "./ai-switch";
 import { sectionOfStage } from "./ai-sections";
 import { currentAttribution, recordAuditBestEffort } from "./audit";
@@ -426,10 +426,12 @@ async function computeRecordedLesson(example: DecisionExample, complete?: JsonCo
   });
   await openRun(recorder);
   try {
-    const lesson = await deidentifyLesson(example, completionFor(route, recorder), entityNames);
-    await setLesson(id, lesson, lesson ? "ok" : "failed");
-    await closeRun({ recorder, status: "ok", route, output: { lesson_status: lesson ? "ok" : "failed" } });
-    return lesson ? "ok" : "failed";
+    return await withRunningRun(recorder, async () => {
+      const lesson = await deidentifyLesson(example, completionFor(route, recorder), entityNames);
+      await setLesson(id, lesson, lesson ? "ok" : "failed");
+      await closeRun({ recorder, status: "ok", route, output: { lesson_status: lesson ? "ok" : "failed" } });
+      return lesson ? "ok" : "failed";
+    });
   } catch (error) {
     await setLesson(id, null, "failed");
     await closeRun({ recorder, status: "error", route, output: {}, error: error instanceof Error ? error.message : String(error) });
