@@ -388,7 +388,9 @@ describe("S3 on the model path", () => {
     const { listTacticSuggestions, decideTacticSuggestion, listTacticSourceReferences } = await import("@/modules/stages/s3-tactic-extract/suggestions");
     const quote = "Fictional registries measure survival.";
     const ids = ["new", "same-a", "same-b", "overlap-a", "overlap-b"];
-    const blocks = ids.map(id => ({ id, text: quote, heading: id, location: id }));
+    const [document] = await db().select().from(parsedDocuments).where(eq(parsedDocuments.id, documentId));
+    const blocks = ids.map(id => ({ id, source_id: document.source_id, text: quote, heading: id, location: id }));
+    await db().insert(tables.sourceBlocks).values(blocks);
     await db().update(parsedDocuments).set({ blocks }).where(eq(parsedDocuments.id, documentId));
     const { ctx } = context(call => {
       if (call.purpose.startsWith("tactic-proposer:")) return { tactics: blocks.map(block => good({ source_quote: quote, block_id: block.id })) };

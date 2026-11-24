@@ -68,21 +68,28 @@ export async function createTacticSuggestion(args: {
 }): Promise<TacticSuggestion> {
   const expansion = expansionScopeSchema.parse(args.expansion), separate = separateTacticOptionSchema.parse(args.separate);
   if (![args.run_id, args.document_id, args.source_quote, args.shared_scope, args.new_scope].every(s => s.trim())) throw new TrustedApplicationError("Overlap requires source lineage, quote, shared and added scope.");
-  const identity = [args.source_id, args.target_tactic_id, quoteKey(args.source_quote)];
+  const normalizedQuote = quoteKey(args.source_quote);
+  const identity = [args.source_id, args.target_tactic_id, normalizedQuote];
   const keyFor = (parts: string[]) => createHash("sha256").update(JSON.stringify(parts)).digest("hex");
   const legacyKey = keyFor(identity);
   const source_key = args.block_id ? keyFor([...identity, args.block_id]) : legacyKey;
   await ensureTacticSuggestionSchema();
   return db().transaction(async tx => {
+    // S1 reparsing locks the same source before replacing any blocks.
+    const [source] = await tx.select({ id: t.sources.id }).from(t.sources).where(eq(t.sources.id, args.source_id)).for("update");
+    if (!source) throw new TrustedApplicationError("Source not found in this workspace.", "not_found", 404);
     const [parentRow] = await tx.select().from(t.tactics).where(eq(t.tactics.id, args.target_tactic_id)).for("update");
     if (!parentRow) throw new TrustedApplicationError("Target tactic not found in this workspace.", "not_found", 404);
     const state = await readState(tx), parent = state.tactics.find(p => p.id === args.target_tactic_id)!;
-    if (!state.sources.some(s => s.id === args.source_id)) throw new TrustedApplicationError("Source not found in this workspace.", "not_found", 404);
     const [existing] = await tx.select().from(tacticSuggestions).where(eq(tacticSuggestions.source_key, source_key));
     if (existing) return existing.payload as TacticSuggestion;
     if (args.block_id) {
       const [legacy] = await tx.select().from(tacticSuggestions).where(eq(tacticSuggestions.source_key, legacyKey));
       if (legacy) return legacy.payload as TacticSuggestion;
+      const block = state.blocks.find(block => block.id === args.block_id && block.source_id === args.source_id);
+      if (!block || !quoteKey(block.text).includes(normalizedQuote)) {
+        throw new TrustedApplicationError("The source passage changed during extraction. Rerun tactic extraction.");
+      }
     }
     if (tacticVersion(parent) !== args.expected_tactic_version) throw new TrustedApplicationError("Tactic changed during extraction; rerun to review its current scope.");
     const at = nowIso();

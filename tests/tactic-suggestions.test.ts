@@ -5,7 +5,8 @@ import "@/modules";
 import { db } from "@/lib/iegp/db";
 import * as t from "@/lib/iegp/schema";
 import { buildSeed } from "@/lib/iegp/seed";
-import { commitExtractedRecords, createProposedTactic, loadState, persistState } from "@/lib/iegp/store";
+import { commitExtractedRecords, createProposedTactic, loadState, persistSourceAndBlocks, persistState } from "@/lib/iegp/store";
+import { reparseSourceBlocks } from "@/lib/iegp/source-blocks";
 import { tacticVersion } from "@/lib/iegp/tactic-expansions";
 import type { ExpansionScope } from "@/lib/iegp/types";
 import * as suggestions from "@/modules/stages/s3-tactic-extract/suggestions";
@@ -14,9 +15,11 @@ import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 const actor = {name: "Source reviewer", function: "medical_affairs" as const};
 const scope: ExpansionScope = {name: "Added subgroup analysis", evidence_question: "What is safety in the subgroup?", population: "Subgroup", outcomes: "", geography: "", data_cut: "", analysis: "Post-hoc subgroup analysis", instrument: "", study_design: "Retrospective analysis", gap_coverage: "Subgroup safety", cost_effort: "Two analyst weeks", timing: "Next quarter", feasibility_risks: "Small subgroup", post_hoc: true, prospective_enrolment: false, protocol_amendment: false, start_date: null, evidence_available: null};
 let sourceId: string, parentId: string, gapId: string;
-async function proposal() {
+const sourceQuote = "The registry supports a subgroup analysis.";
+
+async function proposal(blockId?: string) {
   const state = await loadState();
-  return suggestions.createTacticSuggestion({run_id: "source-run", document_id: "source-document", source_id: sourceId, source_quote: "The registry supports a subgroup analysis.", target_tactic_id: parentId, expected_tactic_version: tacticVersion(state.tactics.find(t => t.id === parentId)!), shared_scope: "Existing registry", new_scope: "Subgroup", expansion: scope, separate: {name: "Independent subgroup analysis", type: "rwe_study", status: "planned", evidence_question: scope.evidence_question}});
+  return suggestions.createTacticSuggestion({run_id: "source-run", document_id: "source-document", source_id: sourceId, source_quote: sourceQuote, block_id: blockId, target_tactic_id: parentId, expected_tactic_version: tacticVersion(state.tactics.find(t => t.id === parentId)!), shared_scope: "Existing registry", new_scope: "Subgroup", expansion: scope, separate: {name: "Independent subgroup analysis", type: "rwe_study", status: "planned", evidence_question: scope.evidence_question}});
 }
 beforeEach(async () => {
   const state = buildSeed();
@@ -44,6 +47,46 @@ describe("S3 source matching", () => {
     expect(row.status).toBe("pending"); expect(await loadState()).toEqual(before);
     await suggestions.decideTacticSuggestion({id: row.id, decision: "reject", rationale: "Unsupported subgroup", actor});
     const repeated = await proposal(); expect(repeated.id).toBe(row.id); expect(repeated.status).toBe("rejected");
+  });
+  it("retains a rejected block-scoped overlap when S1 reparses its passage", async () => {
+    const cited = { heading: "Registry", text: sourceQuote, location: "Section 1" };
+    const other = { heading: "Background", text: "Initial background.", location: "Section 2" };
+    const source = await persistSourceAndBlocks({
+      title: "Registry notes", source_type: "advisory_board", stakeholder_function: actor.function,
+      text: `${cited.text}\n\n${other.text}`, sections: [cited, other],
+    });
+    sourceId = source.source_id;
+    const row = await proposal(source.blocks[0]!.id);
+    const rejected = await suggestions.decideTacticSuggestion({
+      id: row.id, decision: "reject", rationale: "Unsupported subgroup", actor,
+    });
+
+    const reparsed = await reparseSourceBlocks({
+      source_id: sourceId,
+      sections: [{ ...other, text: "Updated background." }, cited],
+    });
+    const repeated = await proposal(reparsed.blocks.find(block => block.text === cited.text)!.id);
+
+    expect(repeated).toEqual(rejected);
+    expect(await suggestions.listTacticSuggestions()).toEqual([rejected]);
+    expect(reparsed).toMatchObject({ kept_cited: 1, inserted: 1, skipped_duplicates: 1 });
+    expect(reparsed.blocks.map(block => block.text)).toEqual([cited.text, "Updated background."]);
+  });
+  it("asks for a rerun if S1 has replaced the passage before S3 saves its overlap", async () => {
+    const source = await persistSourceAndBlocks({
+      title: "Registry notes", source_type: "advisory_board", stakeholder_function: actor.function,
+      text: sourceQuote, sections: [{ heading: "Registry", text: sourceQuote, location: "Section 1" }],
+    });
+    sourceId = source.source_id;
+    const originalBlockId = source.blocks[0]!.id;
+    const reparsed = await reparseSourceBlocks({
+      source_id: sourceId,
+      sections: [{ heading: "Registry", text: "A different registry activity.", location: "Section 1" }],
+    });
+    expect(reparsed.blocks[0]!.id).toBe(originalBlockId);
+
+    await expect(proposal(originalBlockId)).rejects.toThrow(/source passage changed.*rerun/i);
+    expect(await suggestions.listTacticSuggestions()).toEqual([]);
   });
   it("expands atomically into proposed noncounting child, preserving locked parent and coverage", async () => {
     const row = await proposal();
