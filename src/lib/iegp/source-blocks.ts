@@ -1,6 +1,6 @@
 /** Owns source-block edits and preserves the provenance of existing evidence records. */
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { boolean, doublePrecision, pgTable, text } from "drizzle-orm/pg-core";
 import { db, ensureCurrentSchemaTables, withWorkspaceTransaction } from "./db";
 import * as t from "./schema";
@@ -173,7 +173,7 @@ async function quotesFor(source_id: string): Promise<SourceQuote[]> {
     d.select({ payload: tacticSuggestions.payload, status: tacticSuggestions.status })
       .from(tacticSuggestions).where(eq(tacticSuggestions.source_id, source_id)),
     d.select({ id: t.tactics.id, quote: t.tactics.source_quote, block_id: t.tactics.block_id })
-      .from(t.tactics).innerJoin(t.sources, eq(t.tactics.data_source, t.sources.title))
+      .from(t.tactics).innerJoin(t.sources, or(eq(t.tactics.data_source, t.sources.id), eq(t.tactics.data_source, t.sources.title)))
       .where(and(eq(t.sources.id, source_id), eq(t.tactics.lifecycle_stage, "extracted"))),
   ]);
   const pendingGapQuotes = gapSuggestions.flatMap((suggestion) =>
@@ -181,16 +181,17 @@ async function quotesFor(source_id: string): Promise<SourceQuote[]> {
       .filter((source) => source.source_id === source_id)
       .map((source) => ({ id: suggestion.id, quote: source.source_quote, block_id: source.block_id ?? null })),
   );
-  return [
+  const citations = [
     ...needs.map((need) => ({ ...need, block_id: need.run_id || need.source_context ? need.block_id : null })),
     ...references,
-    ...legacyTactics.filter((tactic) => !references.some((ref) => ref.id === tactic.id)),
+    ...legacyTactics,
     ...pendingGapQuotes,
     ...tacticSuggestionsForSource.filter(({ status }) => status !== "rejected").map(({ payload }) => {
       const row = payload as TacticSuggestion;
       return { id: row.id, quote: row.source_quote, block_id: row.block_id ?? null };
     }),
   ].filter((row) => row.quote?.trim());
+  return [...new Map(citations.map((row) => [JSON.stringify([row.id, row.block_id, row.quote]), row])).values()];
 }
 
 /** Blocks of one source in reading order, with human/model provenance and citing needs. */
@@ -211,7 +212,7 @@ export async function listSourceBlocks(source_id: string): Promise<SourceBlockVi
         original_heading: human ? (meta?.original_heading ?? null) : null,
         edited_by: human ? (meta?.edited_by ?? null) : null,
         edited_at: human ? (meta?.edited_at ?? null) : null,
-        cited_by: quotes.filter((quote) => citesBlock(quote, block)).map((quote) => quote.id),
+        cited_by: [...new Set(quotes.filter((quote) => citesBlock(quote, block)).map((quote) => quote.id))],
       };
     })
     .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));

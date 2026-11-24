@@ -158,6 +158,28 @@ describe("S1 source blocks: human edit, add, split, merge, delete", () => {
     expect(reparsed.blocks.find((row) => row.id === blocks[2]!.id)).toMatchObject({ text: quote });
   });
 
+  it.each(["id", "title"] as const)("protects a historical tactic's primary passage identified by source %s alongside a later reference", async identity => {
+    const { source_id, blocks } = await source(`legacy primary ${identity}`);
+    const [primary, secondary] = blocks;
+    const state = await loadState();
+    const storedSource = state.sources.find(row => row.id === source_id)!;
+    const result = await commitExtractedRecords({
+      source_id, title: storedSource.title, stakeholder_function: ACTOR.function,
+      actor_name: ACTOR.name, actor_function: ACTOR.function, needs: [], gaps: [],
+      tactics: [{ id: "study", name: "Fictional primary activity", type: "rwe_study", status: "planned",
+        evidence_question: "What does routine care show?", source_id, source_quote: "" }],
+    });
+    const tacticId = result.tactic_ids[0]!;
+    await db().update(t.tactics).set({ source_quote: primary!.text, data_source: storedSource[identity] }).where(eq(t.tactics.id, tacticId));
+    const { attachTacticSource } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    await attachTacticSource({ tactic_id: tacticId, source_id, source_quote: secondary!.text, block_id: secondary!.id });
+
+    await expect(editSourceBlock({ block_id: primary!.id, text: "A different passage.", rationale: "Edit main source", actor: ACTOR }))
+      .rejects.toBeInstanceOf(SourceQuoteConflictError);
+    const reparsed = await reparseSourceBlocks({ source_id, sections: [{ heading: "Other", text: "A different passage.", location: "p.3" }] });
+    expect(reparsed.blocks.map(row => row.id)).toEqual(expect.arrayContaining([primary!.id, secondary!.id]));
+  });
+
   it("splits, merges and adds in reading order, labelling human blocks", async () => {
     const { source_id, blocks } = await source("split");
     const split = await splitSourceBlock({

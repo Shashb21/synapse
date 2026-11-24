@@ -157,6 +157,39 @@ describe("KAN-74 commit", () => {
     expect(sameQuote).toHaveLength(1);
   });
 
+  it("keeps distinct named blocks and full passages on the same gap across reruns", async () => {
+    const repeated = "The fictional registry omitted the rural cohort.";
+    const prefix = "The fictional minutes restate the evidence question. ".repeat(7);
+    const firstQuote = prefix + "The first request concerns adults.";
+    const secondQuote = prefix + "The second request concerns teenagers.";
+    const { persistSourceAndBlocks } = await import("@/lib/iegp/store");
+    const fixture = await persistSourceAndBlocks({
+      title: "Fictional registry minutes",
+      source_type: "stakeholder_interview",
+      stakeholder_function: "heor",
+      text: "",
+      sections: [
+        { heading: "Session A", location: "p.1", text: repeated },
+        { heading: "Session B", location: "p.2", text: repeated },
+        { heading: "Session C", location: "p.3", text: firstQuote + "\n" + secondQuote },
+      ],
+    });
+    const [first, second, long] = fixture.blocks;
+    const passages = [[first!, repeated], [second!, repeated], [long!, firstQuote], [long!, secondQuote]] as const;
+    const rows = passages.map(([block, quote], index) => ({
+      ...sameRow(`cit-${index}`), source_id: fixture.source_id, block_id: block.id, source_quote: quote,
+    }));
+    const save = () => commit({ source_id: fixture.source_id, require_grounded_sources: true, gaps: rows });
+
+    expect((await save()).need_ids).toHaveLength(4);
+    expect((await save()).need_ids).toEqual([]);
+    const state = await loadState();
+    const linked = new Set(state.need_gap_links.filter(link => link.gap_id === gapId).map(link => link.need_id));
+    expect(state.needs.filter(need => linked.has(need.id) && need.source_id === fixture.source_id)
+      .map(need => [need.block_id, need.source_quote]))
+      .toEqual(passages.map(([block, quote]) => [block.id, quote]));
+  });
+
   it("files an overlap as a pending suggestion and creates no gap", async () => {
     const before = (await loadState()).gaps.length;
     const result = await commit({

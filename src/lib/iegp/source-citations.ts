@@ -31,11 +31,16 @@ export async function requireRetainedSourceQuote(
 }
 
 /** Recover exact provenance for a legacy candidate with a uniquely retained quotation. */
-export async function resolveRetainedSourceQuote(sourceId: string, blockId: string | null, quote: string) {
+export async function resolveRetainedSourceQuote(
+  sourceId: string,
+  blockId: string | null | undefined,
+  quote: string,
+  reader: SourceReader = db(),
+) {
   if (blockId) {
-    return { block_id: blockId, source_context: await requireRetainedSourceQuote(sourceId, blockId, quote) };
+    return { block_id: blockId, source_context: await requireRetainedSourceQuote(sourceId, blockId, quote, reader) };
   }
-  const blocks = await db().select().from(sourceBlocks).where(eq(sourceBlocks.source_id, sourceId));
+  const blocks = await reader.select().from(sourceBlocks).where(eq(sourceBlocks.source_id, sourceId));
   const match = resolveSourceCitation({ source_id: sourceId, proposed_block_id: null, quote, displayed: blocks, retained: blocks });
   if (!match.block_id || !match.source_context) {
     throw new TrustedApplicationError(match.citation_error ?? "Quote could not be verified in a source block.", "conflict", 409);

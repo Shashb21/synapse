@@ -3498,15 +3498,19 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
     state.gaps.filter((g) => g.human_validated || validatedPriority.has(g.id)).map((g) => g.id),
   );
 
-  // A gap holds each source sentence once: re-running extraction on a document, or two
-  // candidates quoting the same sentence, must not attach it again (KAN-74).
-  // Older rows kept only the first 280 characters of a quote, so compare on those.
-  const quoteKey = (gapId: string, quote: string) =>
-    `${gapId}|${sourceId}|${quote.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 280)}`;
+  // Verified citations use the full quotation and its exact block. The historical
+  // prefix still deduplicates unverified writes without suppressing a verified one.
+  const quoteKey = (gapId: string, blockId: string | null, quote: string) => {
+    const normalized = quote.replace(/\s+/g, " ").trim();
+    return JSON.stringify([gapId, blockId, blockId ? normalized : normalized.toLowerCase().slice(0, 280)]);
+  };
+  const needsById = new Map(state.needs.map((need) => [need.id, need]));
   const attached = new Set(
     state.need_gap_links.flatMap((link) => {
-      const need = state.needs.find((row) => row.id === link.need_id);
-      return need && need.source_id === sourceId ? [quoteKey(link.gap_id, need.source_quote ?? need.statement)] : [];
+      const need = needsById.get(link.need_id);
+      if (!need || need.source_id !== sourceId) return [];
+      const blockId = args.require_grounded_sources && need.source_context ? need.block_id ?? null : null;
+      return [quoteKey(link.gap_id, blockId, need.source_quote ?? need.statement)];
     }),
   );
 
@@ -3518,7 +3522,8 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
     provenance?: NeedProvenance;
   }) => {
     const context = await groundedContext(args2.provenance?.block_id, args2.quote);
-    const key = quoteKey(args2.gapId, args2.quote || args2.statement);
+    const blockId = context ? args2.provenance?.block_id ?? null : null;
+    const key = quoteKey(args2.gapId, blockId, args2.quote || args2.statement);
     if (attached.has(key)) return;
     attached.add(key);
     const needId = await allocateId("NEED", needIds);
@@ -3693,25 +3698,32 @@ export const addSuggestionSources = atomic(async function addSuggestionSources(
   sources: GapSuggestionSource[],
 ): Promise<void> {
   if (sources.length === 0) return;
-  const checked = await verifySuggestionSourceQuotes(sources);
-  const [suggestion] = await db().select().from(t.gapSuggestions).where(eq(t.gapSuggestions.id, suggestionId)).for("update");
+  const suggestion = await lockGapSuggestion(suggestionId);
   if (!suggestion || suggestion.status !== "pending") {
     throw new TrustedApplicationError("Pending gap suggestion not found.", "conflict", 409);
   }
+  const checked = await verifySuggestionSourceQuotes(sources);
   await db()
     .update(t.gapSuggestions)
     .set({ extra_sources: [...(Array.isArray(suggestion.extra_sources) ? suggestion.extra_sources : []), ...checked] })
     .where(eq(t.gapSuggestions.id, suggestionId));
 });
 
-/** Verify known citations while holding source owners in a stable order. */
+/** Append and decision own the suggestion before taking source and gap locks. */
+async function lockGapSuggestion(id: string) {
+  const [suggestion] = await db().select().from(t.gapSuggestions).where(eq(t.gapSuggestions.id, id)).for("update");
+  return suggestion;
+}
+
+/** Verify each explicit citation or recover a unique historical quote under the source lock. */
 async function verifySuggestionSourceQuotes(sources: GapSuggestionSource[]): Promise<GapSuggestionSource[]> {
   for (const sourceId of [...new Set(sources.map((source) => source.source_id))].sort()) {
     await lockSourceCitationOwner(sourceId);
   }
-  return Promise.all(sources.map(async (source) => source.block_id || source.source_context
-    ? { ...source, source_context: await requireRetainedSourceQuote(source.source_id, source.block_id, source.source_quote) }
-    : source));
+  return Promise.all(sources.map(async (source) => ({
+    ...source,
+    ...await resolveRetainedSourceQuote(source.source_id, source.block_id, source.source_quote),
+  })));
 }
 
 type SuggestionDecision = {
@@ -3770,11 +3782,11 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
   args: SuggestionDecision & { name?: string; statement?: string },
 ): Promise<{ gap_id: string }> {
   const rationale = requireRationale(args.rationale);
+  await lockGapSuggestion(args.suggestion_id);
   const pending = await pendingSuggestion(args.suggestion_id);
   const sourced = await verifySuggestionSourceQuotes(suggestionSources(pending.suggestion));
   const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [pending.gap.id] });
-  const { suggestion, gap } = await pendingSuggestion(args.suggestion_id);
-  const before = await loadState();
+  const { state: before, suggestion, gap } = await pendingSuggestion(args.suggestion_id);
   const name = (args.name ?? suggestion.merged_name).trim();
   const statement = (args.statement ?? suggestion.merged_statement).trim();
   if (!name) throw new TrustedApplicationError("Give the merged gap a name.");
@@ -3859,11 +3871,11 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
   args: SuggestionDecision & { name?: string; statement?: string },
 ): Promise<{ gap_id: string; new_gap_id: string }> {
   const rationale = requireRationale(args.rationale);
+  await lockGapSuggestion(args.suggestion_id);
   const pending = await pendingSuggestion(args.suggestion_id);
   const sourced = await verifySuggestionSourceQuotes(suggestionSources(pending.suggestion));
   const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [pending.gap.id] });
-  const { suggestion, gap } = await pendingSuggestion(args.suggestion_id);
-  const before = await loadState();
+  const { state: before, suggestion, gap } = await pendingSuggestion(args.suggestion_id);
   const [primary, ...extraSources] = sourced;
   const name = (args.name ?? suggestion.split_name).trim();
   const statement = (args.statement ?? suggestion.split_statement).trim();
@@ -3943,8 +3955,9 @@ async function linkRelatedGaps(a: string, b: string) {
 }
 
 /** Rejects an overlap: nothing changes in the plan, and the suggestion stays on record. */
-export async function rejectGapSuggestion(args: SuggestionDecision): Promise<GapSuggestion> {
+export const rejectGapSuggestion = atomic(async function rejectGapSuggestion(args: SuggestionDecision): Promise<GapSuggestion> {
   const rationale = requireRationale(args.rationale);
+  await lockGapSuggestion(args.suggestion_id);
   const state = await loadState();
   const suggestion = state.gap_suggestions.find((row) => row.id === args.suggestion_id);
   if (!suggestion) throw new TrustedApplicationError("Suggestion not found.", "not_found", 404);
@@ -3964,7 +3977,7 @@ export async function rejectGapSuggestion(args: SuggestionDecision): Promise<Gap
     signal_kind: "user_rejected_proposal",
   });
   return suggestion;
-}
+});
 
 /** A person has looked at the source that joined a validated gap (KAN-74). */
 export async function clearNewSourceFlag(args: {

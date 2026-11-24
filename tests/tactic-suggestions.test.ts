@@ -7,16 +7,17 @@ import * as t from "@/lib/iegp/schema";
 import { buildSeed } from "@/lib/iegp/seed";
 import { commitExtractedRecords, createProposedTactic, loadState, persistState } from "@/lib/iegp/store";
 import { tacticVersion } from "@/lib/iegp/tactic-expansions";
-import type { ExpansionScope } from "@/lib/iegp/types";
+import type { ExpansionScope, TacticSuggestion } from "@/lib/iegp/types";
 import * as suggestions from "@/modules/stages/s3-tactic-extract/suggestions";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 
 const actor = {name: "Source reviewer", function: "medical_affairs" as const};
 const scope: ExpansionScope = {name: "Added subgroup analysis", evidence_question: "What is safety in the subgroup?", population: "Subgroup", outcomes: "", geography: "", data_cut: "", analysis: "Post-hoc subgroup analysis", instrument: "", study_design: "Retrospective analysis", gap_coverage: "Subgroup safety", cost_effort: "Two analyst weeks", timing: "Next quarter", feasibility_risks: "Small subgroup", post_hoc: true, prospective_enrolment: false, protocol_amendment: false, start_date: null, evidence_available: null};
 let sourceId: string, parentId: string, gapId: string;
-async function proposal() {
+const sourceQuote = "The registry supports a subgroup analysis.";
+async function proposal(citation: { source_quote?: string; block_id?: string } = {}) {
   const state = await loadState();
-  return suggestions.createTacticSuggestion({run_id: "source-run", document_id: "source-document", source_id: sourceId, source_quote: "The registry supports a subgroup analysis.", target_tactic_id: parentId, expected_tactic_version: tacticVersion(state.tactics.find(t => t.id === parentId)!), shared_scope: "Existing registry", new_scope: "Subgroup", expansion: scope, separate: {name: "Independent subgroup analysis", type: "rwe_study", status: "planned", evidence_question: scope.evidence_question}});
+  return suggestions.createTacticSuggestion({run_id: "source-run", document_id: "source-document", source_id: sourceId, source_quote: sourceQuote, target_tactic_id: parentId, expected_tactic_version: tacticVersion(state.tactics.find(t => t.id === parentId)!), shared_scope: "Existing registry", new_scope: "Subgroup", expansion: scope, separate: {name: "Independent subgroup analysis", type: "rwe_study", status: "planned", evidence_question: scope.evidence_question}, ...citation});
 }
 beforeEach(async () => {
   const state = buildSeed();
@@ -25,6 +26,7 @@ beforeEach(async () => {
   await persistState(state);
   sourceId = state.sources[0]!.id; parentId = state.tactics[0]!.id; gapId = state.gaps[0]!.id;
   await suggestions.ensureTacticSuggestionSchema();
+  await db().insert(t.sourceBlocks).values({ id: "fictional-subgroup", source_id: sourceId, heading: "Analysis", location: "p.1", text: sourceQuote });
   await db().execute(sql`DELETE FROM tactic_suggestions`);
   await db().execute(sql`DELETE FROM tactic_source_references`);
 });
@@ -45,6 +47,44 @@ describe("S3 source matching", () => {
     await suggestions.decideTacticSuggestion({id: row.id, decision: "reject", rationale: "Unsupported subgroup", actor});
     const repeated = await proposal(); expect(repeated.id).toBe(row.id); expect(repeated.status).toBe("rejected");
   });
+  it.each(["edited", "reject", "separate"] as const)("preserves a uniquely grounded historical %s decision on a block-aware rerun", async action => {
+    const original = await proposal();
+    const edit = { id: original.id, rationale: "Prior review of the original passage", actor };
+    const reviewed: TacticSuggestion = action === "edited"
+      ? await suggestions.editTacticSuggestion({ ...edit, expansion: { ...scope, name: "Reviewed subgroup" } })
+      : await suggestions.decideTacticSuggestion({ ...edit, decision: action });
+    const rerun = await proposal({ block_id: "fictional-subgroup" });
+    expect(rerun).toMatchObject({ id: original.id, history: reviewed.history, status: reviewed.status });
+    expect(await suggestions.listTacticSuggestions()).toHaveLength(1);
+  });
+
+  it("keeps named citations separate when a historical quotation has no unique block", async () => {
+    const old = await proposal();
+    await suggestions.decideTacticSuggestion({ id: old.id, decision: "reject", rationale: "Prior review", actor });
+    await db().insert(t.sourceBlocks).values({ id: "fictional-subgroup-copy", source_id: sourceId, heading: "Appendix", location: "p.2", text: sourceQuote });
+    const first = await proposal({ block_id: "fictional-subgroup" });
+    const second = await proposal({ block_id: "fictional-subgroup-copy" });
+    expect(new Set([old.id, first.id, second.id]).size).toBe(3);
+  });
+
+  it.each([
+    { quote: "Fabricated source activity.", error: /retained source block/ },
+    { quote: sourceQuote, error: /more than one source block/ },
+  ])("keeps an ungrounded historical option pending and rejectable", async ({ quote, error }) => {
+    if (quote === sourceQuote) {
+      await db().insert(t.sourceBlocks).values({ id: "fictional-subgroup-copy", source_id: sourceId, heading: "Appendix", location: "p.2", text: quote });
+    }
+    const row = await proposal({ source_quote: quote });
+    await suggestions.editTacticSuggestion({ id: row.id, gap_id: gapId, rationale: "Select a gap", actor });
+    const before = await loadState();
+    const review = { id: row.id, rationale: "Review the activity", actor };
+
+    await expect(suggestions.decideTacticSuggestion({ ...review, decision: "expand" })).rejects.toThrow(error);
+    await expect(suggestions.decideTacticSuggestion({ ...review, decision: "separate" })).rejects.toThrow(error);
+    expect(await loadState()).toEqual(before);
+    expect((await suggestions.decideTacticSuggestion({ ...review, decision: "reject" })).status).toBe("rejected");
+  });
+
   it("expands atomically into proposed noncounting child, preserving locked parent and coverage", async () => {
     const row = await proposal();
     await suggestions.editTacticSuggestion({id: row.id, gap_id: gapId, expansion: {...scope, name: "Reviewed subgroup"}, rationale: "Reviewed scope wording", actor});
@@ -54,6 +94,7 @@ describe("S3 source matching", () => {
     expect(after.tactics).toEqual(before.tactics); expect(after.coverages.filter(c => !c.expansion_id)).toEqual(before.coverages);
     expect(after.expansions).toHaveLength(1); expect(after.expansions[0]).toMatchObject({id: result.result_expansion_id, status: "proposed", scope: {name: "Reviewed subgroup"}});
     expect(after.expansions[0].scope.type).toBeUndefined(); // Separate-alternative type is not child evidence.
+    expect(result.block_id).toBe("fictional-subgroup");
     expect(result.original_expansion.name).toBe(scope.name); expect(result.history).toHaveLength(2);
     await expect(suggestions.decideTacticSuggestion({id: row.id, decision: "expand", rationale: "Retry", actor})).rejects.toThrow(/already decided/);
     expect((await loadState()).expansions).toHaveLength(1);
@@ -62,7 +103,7 @@ describe("S3 source matching", () => {
     const row = await proposal(); const before = await loadState();
     const result = await suggestions.decideTacticSuggestion({id: row.id, decision: "separate", rationale: "Different independent activity", actor});
     const after = await loadState(); expect(after.tactics).toHaveLength(before.tactics.length + 1);
-    expect(after.tactics.find(t => t.id === result.result_tactic_id)).toMatchObject({name: row.separate.name, status: "planned", source_quote: row.source_quote});
+    expect(after.tactics.find(t => t.id === result.result_tactic_id)).toMatchObject({name: row.separate.name, status: "planned", source_quote: row.source_quote, block_id: "fictional-subgroup", source_context: { heading: "Analysis", location: "p.1" }});
     expect(after.tactics.find(t => t.id === parentId)).toEqual(before.tactics.find(t => t.id === parentId));
   });
   it("keeps ordinary creation working after actual separate-source acceptance",async()=>{

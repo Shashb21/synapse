@@ -1,7 +1,7 @@
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { withRelationshipChange } from "@/lib/iegp/relationship-change";
-import { lockSourceCitationOwner, requireRetainedSourceQuote } from "@/lib/iegp/source-citations";
-import type { SourceContext } from "@/lib/ingest/source-citation";
+import { lockSourceCitationOwner, requireRetainedSourceQuote, resolveRetainedSourceQuote } from "@/lib/iegp/source-citations";
+import { resolveSourceCitation, type SourceContext } from "@/lib/ingest/source-citation";
 /** S3 source review: immutable model baseline, source provenance and atomic human decisions. */
 import { createHash } from "node:crypto";
 import { desc, eq } from "drizzle-orm";
@@ -18,7 +18,9 @@ import { captureTacticSuggestionDecision } from "@/lib/iegp/learning-capture";
 import { tacticSourceReferences, tacticSuggestions } from "./schema";
 
 export const separateTacticOptionSchema = z.object({name: z.string().trim().min(1), type: z.enum(TACTIC_TYPES), status: z.enum(TACTIC_STATUSES), evidence_question: z.string().trim().min(1)}).strict();
-const quoteKey = (quote: string) => quote.toLowerCase().replace(/\s+/g, " ").trim();
+const normalizeQuote = (quote: string) => quote.replace(/\s+/g, " ").trim();
+const quoteKey = (quote: string) => normalizeQuote(quote).toLowerCase();
+const suggestionKey = (parts: string[]) => createHash("sha256").update(JSON.stringify(parts)).digest("hex");
 function requireActor(actor: Actor) {
   if (!actor?.name?.trim() || !ACTOR_FUNCTIONS.includes(actor.function)) throw new TrustedApplicationError("A named actor with a known function is required.");
 }
@@ -64,8 +66,8 @@ export async function createTacticSuggestion(args: {
   const expansion = expansionScopeSchema.parse(args.expansion), separate = separateTacticOptionSchema.parse(args.separate);
   if (![args.run_id, args.document_id, args.source_quote, args.shared_scope, args.new_scope].every(s => s.trim())) throw new TrustedApplicationError("Overlap requires source lineage, quote, shared and added scope.");
   const citationKey = [args.source_id, args.target_tactic_id, quoteKey(args.source_quote)];
-  if (args.block_id) citationKey.push(args.block_id);
-  const source_key = createHash("sha256").update(JSON.stringify(citationKey)).digest("hex");
+  const legacyKey = suggestionKey(citationKey);
+  const source_key = args.block_id ? suggestionKey([...citationKey, args.block_id]) : legacyKey;
   await ensureTacticSuggestionSchema();
   return db().transaction(async tx => {
     const source = await lockSourceCitationOwner(args.source_id, tx);
@@ -78,6 +80,21 @@ export async function createTacticSuggestion(args: {
     const state = await readState(tx), parent = state.tactics.find(p => p.id === args.target_tactic_id)!;
     const [existing] = await tx.select().from(tacticSuggestions).where(eq(tacticSuggestions.source_key, source_key));
     if (existing) return existing.payload as TacticSuggestion;
+    if (args.block_id) {
+      const [legacy] = await tx.select().from(tacticSuggestions).where(eq(tacticSuggestions.source_key, legacyKey)).for("update");
+      const row = legacy?.payload as TacticSuggestion | undefined;
+      if (row && normalizeQuote(row.source_quote) === normalizeQuote(args.source_quote)) {
+        const match = resolveSourceCitation({ source_id: args.source_id, quote: row.source_quote,
+          proposed_block_id: row.block_id ?? null, displayed: state.blocks, retained: state.blocks });
+        if (match.block_id === args.block_id) {
+          // Keep the original key for older callers, and remember which exact block
+          // owns the decision even if another copy of its passage later appears.
+          const updated = { ...row, block_id: match.block_id, source_context: match.source_context };
+          await tx.update(tacticSuggestions).set({ payload: updated }).where(eq(tacticSuggestions.id, row.id));
+          return updated;
+        }
+      }
+    }
     if (tacticVersion(parent) !== args.expected_tactic_version) throw new TrustedApplicationError("Tactic changed during extraction; rerun to review its current scope.");
     const at = nowIso();
     const row: TacticSuggestion = {...draft, source_context, expansion, separate, id: newId("TSUG"), reviewed_parent: parent,
@@ -128,15 +145,18 @@ export async function decideTacticSuggestion(args: {id: string; decision: "expan
   if (!["expand", "separate", "reject"].includes(args.decision)) throw new TrustedApplicationError("Unknown tactic suggestion decision.");
   await ensureTacticSuggestionSchema();
   const updated = await withRelationshipChange({ actor_name: args.actor.name, actor_function: args.actor.function, rationale }, () => db().transaction(async tx => {
-    const row = await pending(tx, args.id, args.expected_version);
-    const [source] = await tx.select().from(t.sources).where(eq(t.sources.id, row.source_id)).for("update");
+    const [stored] = await tx.select({ source_id: tacticSuggestions.source_id }).from(tacticSuggestions).where(eq(tacticSuggestions.id, args.id));
+    if (!stored) throw new TrustedApplicationError("Tactic suggestion not found in this workspace.", "not_found", 404);
+    const [source] = await tx.select().from(t.sources).where(eq(t.sources.id, stored.source_id)).for("update");
     if (!source) throw new TrustedApplicationError("Documented source no longer exists in this workspace.");
+    const row = await pending(tx, args.id, args.expected_version);
+    if (row.source_id !== source.id) throw new TrustedApplicationError("Suggestion source lineage is invalid.");
     const [parent] = await tx.select().from(t.tactics).where(eq(t.tactics.id, row.target_tactic_id)).for("update");
     if (!parent) throw new TrustedApplicationError("Target tactic no longer exists in this workspace.");
     if (args.decision !== "reject") {
-      if (row.block_id || row.source_context) {
-        row.source_context = await requireRetainedSourceQuote(row.source_id, row.block_id, row.source_quote, tx);
-      }
+      const citation = await resolveRetainedSourceQuote(row.source_id, row.block_id, row.source_quote, tx);
+      row.block_id = citation.block_id;
+      row.source_context = citation.source_context;
       const current = (await readState(tx)).tactics.find(t => t.id === row.target_tactic_id)!;
       if (tacticVersion(current) !== row.expected_tactic_version) throw new TrustedApplicationError("Tactic changed; reject this obsolete suggestion or review a new source proposal before accepting.");
     }
