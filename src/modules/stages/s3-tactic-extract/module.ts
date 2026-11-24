@@ -725,7 +725,9 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
         represented.push(...matches);
         return !matches.length;
       });
-      const reclassified = reclassifiedFindings([...represented, ...pending.map(keyOf)], recorded.keys(), key => recorded.get(key)!.labels);
+      const batchKeys = [...represented, ...pending.map(keyOf)];
+      const reclassified = reclassifiedFindings(batchKeys, recorded.keys(), key => recorded.get(key)!.labels);
+      const representedPriorKeys = new Set(batchKeys.map(key => reclassified.get(key) ?? key).filter(key => recorded.has(key)));
       const claimed = new Set(recorded.keys());
       const unrecorded = pending.filter(candidate => {
         const key = keyOf(candidate);
@@ -766,7 +768,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
       for (const candidate of unrecorded.filter(c => c.match === "overlaps")) {
         const parent = state.tactics.find(t => t.id === candidate.target_tactic_id)!;
         await createTacticSuggestion({finding_key: keyOf(candidate), run_id: ctx.run.id, document_id: candidate.document_id, source_id: candidate.source_id, source_quote: candidate.source_quote,
-          target_tactic_id: parent.id, expected_tactic_version: tacticVersion(parent), shared_scope: candidate.shared_scope!, new_scope: candidate.new_scope!, expansion: candidate.expansion!, separate: candidate.separate!});
+          target_tactic_id: parent.id, expected_tactic_version: tacticVersion(parent), shared_scope: candidate.shared_scope!, new_scope: candidate.new_scope!, expansion: candidate.expansion!, separate: candidate.separate!}, representedPriorKeys);
       }
     });
 

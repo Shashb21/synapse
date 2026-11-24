@@ -448,6 +448,25 @@ describe("S3 on the model path", () => {
     expect((await run(names)).output.committed_tactic_ids).toEqual([]);
   });
 
+  it.each([
+    ["North Registry", "North Extension Registry", false],
+    ["Birch Registry", "Birch Registry 2", true],
+  ] as const)("records separately cited %s and %s across retries", async (first, second, repeatFirst) => {
+    const quote = `${first} and the ${second} are separate registries tracking survival.`;
+    const run = (names: string[]) => {
+      const { ctx } = context(call => call.purpose.startsWith("tactic-proposer:")
+        ? { tactics: names.map(name => good({ name, source_quote: quote, evidence_question: "What is survival?" })) }
+        : call.purpose === "tactic-critic" ? keepAll(call) : acceptAll(call));
+      return tacticExtractModule.run(input(false), ctx);
+    };
+    const original = (await run([first])).output.committed_tactic_ids;
+    expect(original).toHaveLength(1);
+    const added = (await run(repeatFirst ? [first, second] : [second])).output.committed_tactic_ids;
+    expect(added).toHaveLength(1);
+    expect((await loadState()).tactics.find(row => row.id === added[0])?.name).toBe(second);
+    expect((await run([first, second])).output.committed_tactic_ids).toEqual([]);
+  });
+
   it("lets a mapping transaction lock the source while extraction waits for its tactic", async () => {
     const postgres = (await import("postgres")).default;
     const { currentSchemaName } = await import("@/lib/iegp/db");
@@ -603,6 +622,40 @@ describe("S3 on the model path", () => {
     await db().execute(sql`UPDATE tactic_suggestions SET payload = payload - 'finding_key' WHERE id = ${suggestion.id}`);
     expect((await tacticExtractModule.run(input(false), rerun.ctx)).output.committed_tactic_ids).toEqual([]);
 
+  });
+
+  it("keeps a decided overlap and adds a newly recognised question for the same activity", async () => {
+    const { listTacticSuggestions, decideTacticSuggestion } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    const quote = "The Rowan registry assesses survival and quality of life.";
+    const { listParsedDocuments } = await import("@/modules/stages/s1-parse/module");
+    const { addSourceBlock } = await import("@/lib/iegp/source-blocks");
+    const [document] = await listParsedDocuments([documentId]);
+    await addSourceBlock({ source_id: document!.source_id, text: quote, actor: ACTOR, rationale: "Record both registry outcomes." });
+    const questions = ["What is survival?", "What is quality of life?"];
+    const run = (runId: string, selected: string[]) => {
+      const { ctx } = context(call => {
+        if (call.purpose.startsWith("tactic-proposer:")) return { tactics: selected.map(evidence_question =>
+          good({ name: "Rowan registry", status: "planned", evidence_question, source_quote: quote })) };
+        if (call.purpose === "tactic-critic") return keepAll(call);
+        return { decisions: idsOf(call, "decide").map((id, i) => ({
+          id, verdict: "accept", match: "overlaps", target_tactic_id: libraryId, shared_scope: "Registry outcomes",
+          new_scope: selected[i], expansion: { ...scope, evidence_question: selected[i] },
+          separate: { name: "Rowan registry", type: "registry", status: "planned", evidence_question: selected[i] },
+          confidence: 90, reason: "Source supports both outcomes.",
+        })) };
+      });
+      ctx.run.id = runId;
+      return tacticExtractModule.run(input(false), ctx);
+    };
+    await run("rowan-initial", questions.slice(0, 1));
+    const [first] = (await listTacticSuggestions()).filter(row => row.source_quote === quote);
+    const decided = await decideTacticSuggestion({id: first!.id, actor: ACTOR, decision: "reject", rationale: "Survival already covered."});
+    await run("rowan-more", questions);
+    await run("rowan-retry", questions);
+    const rows = (await listTacticSuggestions()).filter(row => row.source_quote === quote);
+    expect(rows).toHaveLength(2);
+    expect(rows).toContainEqual(decided);
+    expect(rows).toContainEqual(expect.objectContaining({ status: "pending", new_scope: questions[1] }));
   });
 
   it.each(["slr", "registry"])("queues distinct same-run overlap alternatives supported by one passage and question (%s)", async secondType => {

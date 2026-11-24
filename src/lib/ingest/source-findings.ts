@@ -52,6 +52,19 @@ function activityWords(label: string, quote: string): Set<string> {
 function compareActivities(quote: string, left?: string, right?: string): "same" | "different" | "unknown" {
   if (left === right) return "same";
   if (!left || !right) return "unknown";
+  // A complete label on each side of a list or contrast identifies two activities.
+  // Match whole words and remove the longer label before looking for the shorter
+  // one, so “North Registry 2” alone never counts as two separate mentions.
+  const words = (value: string) => ` ${(value.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).join(" ")} `;
+  const leftName = words(left).replace(/^ (?:the|an?) /, " ");
+  const rightName = words(right).replace(/^ (?:the|an?) /, " ");
+  if (leftName === rightName) return "same";
+  const [shorter, longer] = leftName.length <= rightName.length ? [leftName, rightName] : [rightName, leftName];
+  const clauses = quote.split(/\b(?:and|versus|whereas|while|as well as)\b|[;.!?]/iu).map(words);
+  const longIndex = clauses.findIndex(clause => clause.includes(longer));
+  if (longIndex >= 0 && clauses.some((clause, i) => i !== longIndex && clause.replaceAll(longer, " ").includes(shorter))) {
+    return "different";
+  }
   const a = activityWords(left, quote), b = activityWords(right, quote);
   if ([...a].some(word => !b.has(word)) && [...b].some(word => !a.has(word))) return "different";
   return [...a].some(word => b.has(word)) ? "same" : "unknown";

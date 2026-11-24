@@ -134,7 +134,7 @@ export async function recordedTacticEvidence(sourceIds: string[], tactics: Tacti
 export async function createTacticSuggestion(args: {
   finding_key?: string; run_id: string; document_id: string; source_id: string; source_quote: string; target_tactic_id: string;
   expected_tactic_version: string; shared_scope: string; new_scope: string; expansion: ExpansionScope; separate: SeparateTacticOption;
-}): Promise<TacticSuggestion> {
+}, representedPriorKeys?: ReadonlySet<string>): Promise<TacticSuggestion> {
   const expansion = expansionScopeSchema.parse(args.expansion), separate = separateTacticOptionSchema.parse(args.separate);
   if (![args.run_id, args.document_id, args.source_quote, args.shared_scope, args.new_scope].every(s => s.trim())) throw new TrustedApplicationError("Overlap requires source lineage, quote, shared and added scope.");
   const source_key = createHash("sha256").update(JSON.stringify([args.source_id, args.target_tactic_id, args.finding_key ?? quoteKey(args.source_quote)])).digest("hex");
@@ -160,7 +160,10 @@ export async function createTacticSuggestion(args: {
       const labels = (key: string) => previous.filter(([, previousKey]) => previousKey === key)
         .flatMap(([row]) => [row.original_separate.name, row.original_expansion.name]);
       const keys = previous.map(([, key]) => key);
-      const matches = reclassifiedFindings([findingKey], keys, labels);
+      // S3 holds the parent lock across its batch. Keep earlier questions that
+      // the batch already recognised when deciding if this one is additional.
+      const represented = keys.filter(key => representedPriorKeys?.has(key));
+      const matches = reclassifiedFindings([findingKey, ...represented], keys, labels);
       const matchingKeys = new Set(matches.has(findingKey) ? [matches.get(findingKey)] : matchingSourceQuestions(findingKey, keys, labels));
       const matching = previous.filter(([, key]) => matchingKeys.has(key));
       if (matching.length === 1) return matching[0]![0];
