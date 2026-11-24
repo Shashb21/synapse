@@ -220,18 +220,27 @@ describe("S8 on the model path", () => {
   });
 
   it("carries only supplied record references and the reasoning they support", async () => {
+    const [supportedGapId, unsupportedGapId] = ids;
     const { ctx, calls } = context((call) => {
       if (call.purpose === "priority-critic") return reviewed(reviewIdsOf(call));
-      return { gaps: gapIdsOf(call).map((gap_id, index) => ({ gap_id, scores: { [X]: 80, [Y]: 70 },
+      return { gaps: gapIdsOf(call).map((gap_id) => ({ gap_id, scores: { [X]: 80, [Y]: 70 },
         rationale: "The evidence need affects the dossier",
-        references: [{ entity_type: "gap", entity_id: index === 0 ? gap_id : "invented-gap", reason: "The supplied evidence statement identifies the missing comparison" }],
+        references: [{ entity_type: "gap", entity_id: gap_id === supportedGapId ? gap_id : "invented-gap", reason: "The supplied evidence statement identifies the missing comparison" }],
       })) };
     });
     const { output } = await prioritizationModule.run(input(), ctx);
-    const supplied = (calls.find(call => call.purpose === "priority-suggester")!.body.gaps as { references: unknown[] }[])[0]!;
-    expect(supplied.references).toEqual(expect.arrayContaining([expect.objectContaining({ entity_type: "gap", entity_id: ids[0] })]));
-    expect(output.placements[0]).toMatchObject({ references: [{ entity_type: "gap", entity_id: ids[0], reason: "The supplied evidence statement identifies the missing comparison" }], support_status: "supported" });
-    expect(output.placements[1]).toMatchObject({ references: [], support_status: "unsupported" });
+    const supplied = calls.find(call => call.purpose === "priority-suggester")!.body.gaps as { id: string; references: unknown[] }[];
+    expect(supplied.find(gap => gap.id === supportedGapId)?.references).toEqual(
+      expect.arrayContaining([expect.objectContaining({ entity_type: "gap", entity_id: supportedGapId })]),
+    );
+    expect(output.placements.find(row => row.gap_id === supportedGapId)).toMatchObject({
+      references: [{ entity_type: "gap", entity_id: supportedGapId, reason: "The supplied evidence statement identifies the missing comparison" }],
+      support_status: "supported",
+    });
+    expect(output.placements.find(row => row.gap_id === unsupportedGapId)).toMatchObject({
+      references: [],
+      support_status: "unsupported",
+    });
   });
 
   it("asks again for a gap the model left unscored instead of filling it in", async () => {
