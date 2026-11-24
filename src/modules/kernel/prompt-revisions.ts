@@ -4,15 +4,16 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Actor, StageId, EvalCase } from "./contracts";
 import { listDecisionExamples, scrubLesson, workspaceEntityNames, type DecisionExample } from "./decision-examples";
-import { ensurePlatformSchema, sharedDb } from "./db";
+import { db, ensurePlatformSchema, sharedDb } from "./db";
 import * as tables from "./schema";
 import { newId, nowIso } from "./ids";
-import { recordAudit } from "./audit";
+import { recordAudit, recordAuditVia } from "./audit";
 import { assertAiEnabled } from "./ai-switch";
 import { sectionOfStage } from "./ai-sections";
 import { isTestStub } from "./llm";
 import { resolveRoute, completionFor, routeConfig, type RouteConfig } from "./routing";
-import { RunRecorder, openRun, closeRun, withRunningRun } from "./observability";
+import { RunRecorder, openRun } from "./observability";
+import { recordLearningRun } from "./learning-run";
 import { activePromptVersion } from "./prompt-variant";
 import { DEFAULT_SCHEMA, DEFAULT_WORKSPACE_ID, runInWorkspace, scopedWorkspaceId } from "@/modules/workspaces/context";
 import { getWorkspace } from "@/modules/workspaces/store";
@@ -181,33 +182,32 @@ export async function proposePromptRevision(args: CohortArgs & { actor: Actor })
     const route = stub ? null : await resolveRoute(args.stage);
     const recorder = new RunRecorder({ workspace_id: args.workspace_id, stage: args.stage, module_id: "learning.prompt-revision", module_version: "1.0.0", actor: args.actor, input: { cohort_id: cohort.id, parent_revision: parent, lesson_count: lessons.length } });
     await openRun(recorder);
-    try {
-      return await withRunningRun(recorder, async () => {
-        // No raw answers, customer metadata, example IDs, or held-out lessons enter the completion.
-        const response = stub ? { instruction_text: "[Test stub] Keep distinct decision questions separate and require supporting evidence." } : await completionFor(route!, recorder)({
-          system: "Draft concise additional instructions for an evidence-planning stage using only general reviewer lessons. Preserve human decisions and require source-grounded evidence. Return JSON only: {\"instruction_text\":\"\"}.",
-          user: JSON.stringify({ stage: args.stage, lessons: lessons.map(item => item.lesson) }), purpose: "prompt-revision",
-        });
-        const parsed = z.object({ instruction_text: z.string().trim().min(1).max(8000) }).strict().parse(response);
-        const revision: PromptRevision = {
-          id: newId("prv"), workspace_id: args.workspace_id, stage: args.stage, parent_revision: parent,
-          instruction_text: parsed.instruction_text, creator: args.actor, created_at: nowIso(), state: "candidate",
-          cohort_id: cohort.id, training_ids: lessons.map(item => item.id), heldout_ids: cohort.heldout_ids, excluded_ids: cohort.excluded_ids,
-          generation_run_id: recorder.id, model: route?.model ?? null, provider_id: route?.provider_id ?? null,
-        };
-        await sharedDb().transaction(async tx => {
-          await tx.insert(tables.promptRevisions).values(revision);
-          await recordAudit({ category: "config", action: "prompt.generate", entity_type: "prompt_revision", entity_id: revision.id, workspace_id: args.workspace_id,
-            after: { stage: revision.stage, parent_revision: parent, state: revision.state, instruction_text: revision.instruction_text },
-            run_id: recorder.id, meta: { training_count: revision.training_ids.length, heldout_count: revision.heldout_ids.length } }, { tx });
-        });
-        await closeRun({ recorder, status: "ok", route: route ?? undefined, output: { revision_id: revision.id, state: revision.state } });
-        return revision;
+    return recordLearningRun(recorder, route, async assertLive => {
+      // No raw answers, customer metadata, example IDs, or held-out lessons enter the completion.
+      const response = stub ? { instruction_text: "[Test stub] Keep distinct decision questions separate and require supporting evidence." } : await completionFor(route!, recorder, { beforeSend: assertLive })({
+        system: "Draft concise additional instructions for an evidence-planning stage using only general reviewer lessons. Preserve human decisions and require source-grounded evidence. Return JSON only: {\"instruction_text\":\"\"}.",
+        user: JSON.stringify({ stage: args.stage, lessons: lessons.map(item => item.lesson) }), purpose: "prompt-revision",
       });
-    } catch (error) {
-      await closeRun({ recorder, status: "error", route: route ?? undefined, output: {}, error: error instanceof Error ? error.message : String(error) });
-      throw error;
-    }
+      const parsed = z.object({ instruction_text: z.string().trim().min(1).max(8000) }).strict().parse(response);
+      const revision: PromptRevision = {
+        id: newId("prv"), workspace_id: args.workspace_id, stage: args.stage, parent_revision: parent,
+        instruction_text: parsed.instruction_text, creator: args.actor, created_at: nowIso(), state: "candidate",
+        cohort_id: cohort.id, training_ids: lessons.map(item => item.id), heldout_ids: cohort.heldout_ids, excluded_ids: cohort.excluded_ids,
+        generation_run_id: recorder.id, model: route?.model ?? null, provider_id: route?.provider_id ?? null,
+      };
+      const writer = db();
+      await writer.execute(sql`insert into public.prompt_revisions
+        (id, workspace_id, stage, parent_revision, instruction_text, creator, created_at, state,
+         cohort_id, training_ids, heldout_ids, excluded_ids, generation_run_id, model, provider_id)
+        values (${revision.id}, ${revision.workspace_id}, ${revision.stage}, ${parent}, ${revision.instruction_text},
+         ${JSON.stringify(args.actor)}::jsonb, ${revision.created_at}, ${revision.state}, ${cohort.id},
+         ${JSON.stringify(revision.training_ids)}::jsonb, ${JSON.stringify(cohort.heldout_ids)}::jsonb,
+         ${JSON.stringify(cohort.excluded_ids)}::jsonb, ${recorder.id}, ${revision.model}, ${revision.provider_id})`);
+      await recordAuditVia(writer, { category: "config", action: "prompt.generate", entity_type: "prompt_revision", entity_id: revision.id, workspace_id: args.workspace_id,
+          after: { stage: revision.stage, parent_revision: parent, state: revision.state, instruction_text: revision.instruction_text },
+          run_id: recorder.id, meta: { training_count: revision.training_ids.length, heldout_count: revision.heldout_ids.length } });
+      return { value: revision, output: { revision_id: revision.id, state: revision.state } };
+    });
   });
 }
 

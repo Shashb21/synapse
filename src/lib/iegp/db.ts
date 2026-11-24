@@ -28,8 +28,42 @@ type AmbientTransaction = {
   tx: postgres.TransactionSql;
   schema: string;
   done: boolean;
-  assertActive?: () => void;
+  owner: TransactionOwner;
 };
+
+type TransactionOwner = {
+  assertActive: () => void;
+  run: <T>(fn: () => T | PromiseLike<T>) => Promise<T>;
+};
+
+/**
+ * postgres.js rejects begin on socket closure while its callback can still be
+ * awaiting external work. Guard queries and keep a detached callback from
+ * asking the driver to commit or roll back on a reused connection.
+ */
+async function withOwnedConnection<T>(
+  pool: ReturnType<typeof postgres>,
+  work: (tx: postgres.TransactionSql, owner: TransactionOwner) => Promise<T>,
+): Promise<T> {
+  let active = true;
+  const owner: TransactionOwner = {
+    assertActive() {
+      if (!active) throw new Error("The module run execution lock was lost.");
+    },
+    run: <R>(fn: () => R | PromiseLike<R>) => new Promise<R>((resolve, reject) => {
+      owner.assertActive();
+      Promise.resolve(fn()).then(
+        value => { if (active) resolve(value); },
+        error => { if (active) reject(error); },
+      );
+    }),
+  };
+  try {
+    return (await pool.begin(tx => owner.run(() => work(tx, owner)))) as T;
+  } finally {
+    active = false;
+  }
+}
 
 /** One store per process: Next bundles routes separately, like the workspace scope (context.ts). */
 const ambient: AsyncLocalStorage<AmbientTransaction> = (globalForDb.ambientTransaction ??=
@@ -192,7 +226,7 @@ const router = {
       const name = await resolveSchema();
       const open = transactionFor(name);
       if (open) {
-        open.assertActive?.();
+        open.owner.assertActive();
         const pending = open.tx.unsafe(query, params as never);
         return values ? pending.values() : pending;
       }
@@ -214,14 +248,18 @@ const router = {
     const name = await resolveSchema();
     const open = transactionFor(name);
     // Nested: a savepoint, so the inner block can fail alone and the outer one still commits.
-    if (open) return open.tx.savepoint((sp) => runAmbient({ tx: sp, schema: name, done: false }, () => fn(sp)));
+    if (open) {
+      open.owner.assertActive();
+      return open.tx.savepoint(sp => open.owner.run(() =>
+        runAmbient({ ...open, tx: sp, done: false }, () => fn(sp))));
+    }
     // Tables exist before the transaction opens: DDL rolled back with it would be
     // remembered as done, and the pool may have no second connection for it.
     if (name === DEFAULT_SCHEMA) await ensureCurrentSchemaTables();
-    return client().begin(async (tx) => {
+    return withOwnedConnection(client(), async (tx, owner) => {
       // SET LOCAL ends with the transaction, so the connection comes back clean.
       if (name !== DEFAULT_SCHEMA) await tx.unsafe(`set local search_path to ${quoteSchema(name)}`);
-      return runAmbient({ tx, schema: name, done: false }, () => fn(tx));
+      return runAmbient({ tx, schema: name, done: false, owner }, () => fn(tx));
     });
   },
 };
@@ -253,6 +291,18 @@ export async function withWorkspaceTransaction<T>(fn: () => Promise<T>): Promise
   return (await router.begin(() => fn())) as T;
 }
 
+/** Capture this transaction so a send can verify its original PostgreSQL connection. */
+export function transactionLivenessCheck(): () => Promise<void> {
+  const store = ambient.getStore();
+  if (!store || store.done) throw new Error("An open workspace transaction is required.");
+  return async () => {
+    store.owner.assertActive();
+    if (store.done) throw new Error("The module run transaction ended.");
+    await store.tx`select 1`;
+    store.owner.assertActive();
+  };
+}
+
 type AdvisoryLock = {
   assertLive: () => Promise<void>;
   withOwnership: <T>(fn: () => Promise<T>) => Promise<T>;
@@ -264,34 +314,14 @@ export async function withIndependentAdvisoryLock<T>(name: string, key: string, 
   // and platform pools free for both attempts to finish their short DB writes.
   const options = connectOptions("workspace");
   const pool = globalForDb.advisoryPg ??= postgres(DEFAULT_URL, { ...options, max: Math.max(2, options.max) });
-  let active = true;
-  const assertActive = () => {
-    if (!active) throw new Error("The module run execution lock was lost.");
-  };
-  try {
-    return (await pool.begin(async (tx) => {
-      const [lock] = await tx`select pg_try_advisory_xact_lock(hashtextextended(${key}, 0)) as locked`;
-      if (!lock?.locked) throw new Error("The module run execution lock is unavailable.");
-      await tx.unsafe(`set local search_path to ${name === DEFAULT_SCHEMA ? DEFAULT_SCHEMA : quoteSchema(name)}`);
-      const store = { tx, schema: name, done: false, assertActive };
-      const assertLive = async () => {
-        assertActive();
-        await tx`select 1`;
-        assertActive();
-      };
-      return new Promise<T>((resolve, reject) => {
-        // postgres.js rejects begin on disconnect while its callback is still
-        // running. Leave the callback unsettled in that case so the driver
-        // never tries to commit or roll back on the closed socket.
-        void fn({ assertLive, withOwnership: (work) => runAmbient({ ...store }, work) }).then(
-          (value) => { if (active) resolve(value); },
-          (error: unknown) => { if (active) reject(error); },
-        );
-      });
-    })) as T;
-  } finally {
-    active = false;
-  }
+  return withOwnedConnection(pool, async (tx, owner) => {
+    const [lock] = await tx`select pg_try_advisory_xact_lock(hashtextextended(${key}, 0)) as locked`;
+    if (!lock?.locked) throw new Error("The module run execution lock is unavailable.");
+    await tx.unsafe(`set local search_path to ${name === DEFAULT_SCHEMA ? DEFAULT_SCHEMA : quoteSchema(name)}`);
+    const store = { tx, schema: name, done: false, owner };
+    const assertLive = ambient.run(store, transactionLivenessCheck);
+    return fn({ assertLive, withOwnership: (work) => runAmbient({ ...store }, work) });
+  });
 }
 
 /** Registered by the kernel: platform setup that must finish before a workspace transaction opens. */

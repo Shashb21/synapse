@@ -4,7 +4,9 @@ import { describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/modules/route";
 import { GET as readRun } from "@/app/api/runs/[id]/route";
 import postgres from "postgres";
-import { db } from "@/modules/kernel/db";
+import { db, sharedDb } from "@/modules/kernel/db";
+import { activeModule } from "@/modules/kernel/registry";
+import { RETRY } from "@/modules/llm/provider";
 import { HISTORICAL_FAILURE_MESSAGE } from "@/modules/kernel/failure-presentation";
 import { closeRun, openRun, RunRecorder, SOURCE_COMPARISON_MODULE, withRunningSourceComparison } from "@/modules/kernel/observability";
 import * as observability from "@/modules/kernel/observability";
@@ -36,6 +38,48 @@ async function openOldRun(recorder: RunRecorder) {
 }
 
 describe("stage run lifecycle", () => {
+  it("stops HTTP retries when the standard stage loses its PostgreSQL owner during backoff", async () => {
+    const stage = await activeModule("S8");
+    const enteredBackoff = Promise.withResolvers<number>();
+    const release = Promise.withResolvers<void>();
+    const completed = Promise.withResolvers<void>();
+    const http = vi.fn(async () => new Response("unavailable", { status: 503 }));
+    vi.stubGlobal("fetch", http);
+    vi.stubEnv("XAI_API_KEY", "synthetic-test-key");
+    vi.spyOn(stage, "run").mockImplementation(async (_input, ctx) => {
+      try {
+        await ctx.complete({ purpose: "owner-test", system: "Synthetic", user: "Synthetic" });
+        throw new Error("Unexpected provider success");
+      } finally {
+        completed.resolve();
+      }
+    });
+    vi.spyOn(RETRY, "sleep").mockImplementation(async () => {
+      const [owner] = await db().execute(sql`select pg_backend_pid() as pid`);
+      enteredBackoff.resolve(Number(owner.pid));
+      await release.promise;
+    });
+    const actorFilter = eq(moduleRuns.actor_name, actor.name);
+    const running = runStage({ stage: "S8", input: {}, actor, role: "medical_affairs" }).catch(error => error);
+    try {
+      const owner = await Promise.race([enteredBackoff.promise, running.then(result => { throw result; })]);
+      const [disconnected] = await sharedDb().execute(sql`select pg_terminate_backend(${owner}::integer, 5000) as ok`);
+      expect(disconnected.ok).toBe(true);
+      expect(await running).toBeInstanceOf(Error);
+      const [failed] = await db().select().from(moduleRuns).where(actorFilter);
+      expect(failed.status).toBe("error");
+      release.resolve();
+      await completed.promise;
+      expect(http).toHaveBeenCalledTimes(1);
+      expect(await stored(failed.id)).toEqual(failed);
+    } finally {
+      release.resolve();
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+      vi.restoreAllMocks();
+      await db().delete(moduleRuns).where(actorFilter);
+    }
+  });
   it("records routing setup failure once and keeps private details out of the route response", async () => {
     const actorFilter = and(eq(moduleRuns.actor_name, actor.name), eq(moduleRuns.stage, "S8"));
     const failure = new Error("Private synthetic provider routing diagnostic");

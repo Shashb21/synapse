@@ -180,7 +180,7 @@ export async function runStage<O = unknown>(args: {
   const ingestStage = ["S0", "S1", "S2", "S3", "S4"].includes(args.stage);
   const ownsParseCommit = args.stage === "S1" && !inWorkspaceTransaction();
 
-  const execute = async (): Promise<StageRunResult<O>> => {
+  const execute = async (assertLive: () => Promise<void>): Promise<StageRunResult<O>> => {
     // A contract violation is itself observable, so the run is already open here.
     const parsedInput = implementation.inputSchema.safeParse(args.input);
     if (!parsedInput.success) {
@@ -205,7 +205,7 @@ export async function runStage<O = unknown>(args: {
       run: recorder,
       route,
       complete: ai
-        ? completionFor(route, recorder)
+        ? completionFor(route, recorder, { beforeSend: assertLive })
         : async () => {
             throw new AiDisabledError(stageLabel(args.stage));
           },
@@ -285,12 +285,12 @@ export async function runStage<O = unknown>(args: {
   let stageFailure: { error: unknown } | undefined;
   let outcome: { result: StageRunResult<O> } | { error: unknown };
   try {
-    outcome = await withRunningRun(recorder, async () => {
+    outcome = await withRunningRun(recorder, async assertLive => {
       // Ingestion owns the surrounding checkpoint and its failure write. For
       // standalone work, roll back only the stage savepoint before finalizing.
-      if (args.deferFailureRecord) return { result: await execute() };
+      if (args.deferFailureRecord) return { result: await execute(assertLive) };
       try {
-        return { result: await withWorkspaceTransaction(execute) };
+        return { result: await withWorkspaceTransaction(() => execute(assertLive)) };
       } catch (error) {
         stageFailure = { error };
         await closeFailedRun(error);

@@ -1,7 +1,7 @@
 /** Persist module runs and project their traces for workspace readers. */
 import { HISTORICAL_FAILURE_MESSAGE, projectFailureDiagnostics, projectRunSteps } from "./failure-presentation";
 import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
-import { currentSchemaName, withIndependentAdvisoryLock, withWorkspaceTransaction } from "@/lib/iegp/db";
+import { currentSchemaName, transactionLivenessCheck, withIndependentAdvisoryLock, withWorkspaceTransaction } from "@/lib/iegp/db";
 import { DEFAULT_WORKSPACE_ID, scopedWorkspaceId } from "@/modules/workspaces/context";
 import { db, ensurePlatformSchema } from "./db";
 import * as t from "./schema";
@@ -152,12 +152,12 @@ export async function openRun(recorder: RunRecorder) {
  * Keep ownership of this running row through execution and its workspace
  * commit. The operator skips the locked row even on self-hosted Next.js.
  */
-export async function withRunningRun<T>(recorder: RunRecorder, execute: () => Promise<T>): Promise<T> {
+export async function withRunningRun<T>(recorder: RunRecorder, execute: (assertLive: () => Promise<void>) => Promise<T>): Promise<T> {
   return withWorkspaceTransaction(async () => {
     const [row] = await db().select({ id: t.moduleRuns.id }).from(t.moduleRuns)
       .where(runningRun(recorder)).for("update");
     if (!row) throw new Error("The module run is already finalized.");
-    return execute();
+    return execute(transactionLivenessCheck());
   });
 }
 
