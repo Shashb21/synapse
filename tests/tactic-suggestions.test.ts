@@ -42,6 +42,39 @@ describe("S3 source matching", () => {
     await commitExtractedRecords({...args, tactics: [{...args.tactics[0]!, source_quote: "Another source sentence"}]});
     expect(await suggestions.listTacticSourceReferences(parentId)).toHaveLength(2);
   });
+  it("retains the cited block and a single reference for a same tactic after reparse", async () => {
+    const cited = { heading: "Registry", text: sourceQuote, location: "Section 1" };
+    const other = { heading: "Background", text: "Initial background.", location: "Section 2" };
+    const source = await persistSourceAndBlocks({
+      title: "Registry notes", source_type: "advisory_board", stakeholder_function: actor.function,
+      text: [cited.text, other.text].join("\n\n"), sections: [cited, other],
+    });
+    const originalBlockId = source.blocks[0]!.id;
+    const commitMatch = (blockId: string) => commitExtractedRecords({
+      source_id: source.source_id, title: "Registry notes", stakeholder_function: actor.function,
+      actor_name: actor.name, actor_function: actor.function, needs: [], gaps: [],
+      tactics: [{
+        id: "candidate", name: "Existing registry", type: "registry", status: "ongoing",
+        evidence_question: scope.evidence_question, source_id: source.source_id,
+        source_quote: cited.text, block_id: blockId, duplicate_of: parentId,
+      }],
+    });
+    await commitMatch(originalBlockId);
+    const original = await suggestions.listTacticSourceReferences(parentId);
+    expect(original).toEqual([expect.objectContaining({ block_id: originalBlockId, source_quote: cited.text })]);
+    expect(await suggestions.listTacticSuggestions()).toEqual([]);
+
+    const reparsed = await reparseSourceBlocks({
+      source_id: source.source_id,
+      sections: [{ ...other, text: "Updated background." }, cited],
+    });
+    const reparsedBlock = reparsed.blocks.find(block => block.text === cited.text)!;
+    await commitMatch(reparsedBlock.id);
+
+    expect(reparsedBlock.id).toBe(originalBlockId);
+    expect(reparsed).toMatchObject({ kept_cited: 1, inserted: 1, skipped_duplicates: 1 });
+    expect(await suggestions.listTacticSourceReferences(parentId)).toEqual(original);
+  });
   it("keeps overlaps pending with no unreviewed plan mutation and retains rejected reruns", async () => {
     const before = await loadState(); const row = await proposal();
     expect(row.status).toBe("pending"); expect(await loadState()).toEqual(before);

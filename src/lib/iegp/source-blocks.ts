@@ -7,7 +7,7 @@ import { ACTOR_FUNCTIONS, SOURCE_TYPES, type ActorFunction, type SourceType } fr
 import { appendAudit, persistSourceAndBlocks, loadState, lockAssessmentOwners, invalidateRelationshipAssessments } from "./store";
 import type { IegpState } from "./types";
 import { recordEdit } from "@/modules/kernel/edit-records";
-import { tacticSuggestions } from "@/modules/stages/s3-tactic-extract/schema";
+import { tacticSourceReferences, tacticSuggestions } from "@/modules/stages/s3-tactic-extract/schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { Actor } from "@/modules/kernel/contracts";
 import {
@@ -746,9 +746,10 @@ export type ReparseResult = {
 
 /**
  * Re-parse into an existing source. Human blocks (locked meta) stay exactly as
- * they are. Model blocks cited by needs, source reviews, or tactic suggestions
- * keep their IDs and text. New model blocks whose text a kept block, a
- * human edit's original, or a human deletion already covers are skipped.
+ * they are. Model blocks cited by needs, source reviews, tactic suggestions,
+ * or tactic source references keep their IDs and text. New model blocks whose
+ * text a kept block, a human edit's original, or a human deletion already covers
+ * are skipped.
  */
 export const reparseSourceBlocks = assessmentSourceEdit(async function reparseSourceBlocks(args: {
   source_id: string;
@@ -762,12 +763,16 @@ export const reparseSourceBlocks = assessmentSourceEdit(async function reparseSo
   const citedBlockIds = new Set(state.source_reviews
     ?.filter(review => review.source_id === args.source_id)
     .map(review => review.block_id));
-  const suggestionCitations = await db().select({
+  const tacticCitations = await db().select({
     blockId: sql<string | null>`${tacticSuggestions.payload}->>'block_id'`,
     quote: sql<string | null>`${tacticSuggestions.payload}->>'source_quote'`,
-  }).from(tacticSuggestions).where(eq(tacticSuggestions.source_id, args.source_id));
+  }).from(tacticSuggestions).where(eq(tacticSuggestions.source_id, args.source_id))
+    .unionAll(db().select({
+      blockId: tacticSourceReferences.block_id,
+      quote: tacticSourceReferences.source_quote,
+    }).from(tacticSourceReferences).where(eq(tacticSourceReferences.source_id, args.source_id)));
   const blocksById = new Map(current.map(block => [block.id, block]));
-  for (const { blockId, quote } of suggestionCitations) {
+  for (const { blockId, quote } of tacticCitations) {
     const block = blockId ? blocksById.get(blockId) : undefined;
     // Older reparses may have reused a block ID for an unrelated passage.
     if (block && quote?.trim() && containsQuote(block.text.toLowerCase(), quote.toLowerCase())) {
