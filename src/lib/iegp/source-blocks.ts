@@ -310,7 +310,8 @@ function assessmentSourceEdit<A extends { source_id?: string; block_id?: string;
           ? before.blocks.find(block => block.id === need.block_id)?.text ?? null : null);
         const support = quote || (retained && sourceText.includes(squashText(retained)) ? squashText(retained) : "");
         let blockId = need.block_id ?? null;
-        if (support) {
+        const currentBlock = blocks.find(block => block.id === blockId);
+        if (support && (!currentBlock || !containsQuote(currentBlock.text, support))) {
           const start = sourceText.indexOf(support);
           let offset = 0;
           blockId = blocks.find(block => {
@@ -319,7 +320,7 @@ function assessmentSourceEdit<A extends { source_id?: string; block_id?: string;
             offset = end + 1;
             return containsStart;
           })?.id ?? null;
-        } else if (!blocks.some(block => block.id === blockId)) blockId = null;
+        } else if (!currentBlock) blockId = null;
         await db().update(t.needs).set({ block_id: blockId,
           source_basis_text: !quote && support ? retained : null }).where(eq(t.needs.id, need.id));
       }
