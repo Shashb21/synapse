@@ -515,7 +515,7 @@ export async function persistDroppedSourceUnits(
   for (const unit of units) {
     const matchingRestored = restored.find((row) => {
       if (matchedRestored.has(row.id)) return false;
-      if (unit.occurrence_id && row.occurrence_id === unit.occurrence_id) return true;
+      if (unit.occurrence_id && row.occurrence_id) return row.occurrence_id === unit.occurrence_id;
       return squashText(row.text) === squashText(unit.text);
     });
     if (matchingRestored) {

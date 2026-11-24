@@ -81,6 +81,53 @@ function squash(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+type SourceRange = { start: number; end: number };
+
+/** Build normalized text while retaining the original range of each character. */
+function normalizedSourceRanges(text: string): { text: string; ranges: SourceRange[] } {
+  let normalized = "";
+  const ranges: SourceRange[] = [];
+  let index = 0;
+  while (index < text.length) {
+    if (/\s/.test(text[index]!)) {
+      const start = index;
+      while (index < text.length && /\s/.test(text[index]!)) index += 1;
+      if (normalized && index < text.length) {
+        normalized += " ";
+        ranges.push({ start, end: index });
+      }
+      continue;
+    }
+    normalized += text[index];
+    ranges.push({ start: index, end: index + 1 });
+    index += 1;
+  }
+  return { text: normalized, ranges };
+}
+
+/** Recover exact source slices for split-unit blocks after normalized validation. */
+function materializeSplitBlocks(unit: RawUnit, blocks: UnitAnswer["blocks"]): string[] | undefined {
+  const source = normalizedSourceRanges(unit.text);
+  let cursor = 0;
+  const matches: { start: number; end: number; normalizedStart: number; normalizedEnd: number }[] = [];
+  for (const block of blocks) {
+    const normalizedBlock = squash(block.text);
+    const normalizedStart = source.text.indexOf(normalizedBlock, cursor);
+    if (normalizedStart < 0) return undefined;
+    const normalizedEnd = normalizedStart + normalizedBlock.length;
+    const first = source.ranges[normalizedStart];
+    const last = source.ranges[normalizedEnd - 1];
+    if (!first || !last) return undefined;
+    matches.push({ start: first.start, end: last.end, normalizedStart, normalizedEnd });
+    cursor = normalizedEnd;
+  }
+  return matches.map((match, index) => {
+    const start = index === 0 && match.normalizedStart === 0 ? 0 : match.start;
+    const end = index === matches.length - 1 && match.normalizedEnd === source.text.length ? unit.text.length : match.end;
+    return unit.text.slice(start, end);
+  });
+}
+
 /** Split oversized extracted units without changing their source text or location. */
 function splitOversizedUnits(units: RawUnit[]): RawUnit[] {
   return units.flatMap((unit) => {
@@ -172,6 +219,14 @@ function readAnswer(unit: RawUnit, row: unknown): UnitAnswer | undefined {
   const reason = typeof dropped_reason === "string" ? dropped_reason.trim() : "";
   // An empty unit must say why it was dropped.
   if (out.length === 0 && !reason) return undefined;
+  if (unit.preserveBoundaryWhitespace) {
+    const materialized = materializeSplitBlocks(unit, out);
+    if (!materialized) return undefined;
+    return {
+      blocks: out.map((block, index) => ({ ...block, text: materialized[index]! })),
+      dropped_reason: reason || null,
+    };
+  }
   return { blocks: out, dropped_reason: reason || null };
 }
 

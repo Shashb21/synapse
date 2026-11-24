@@ -169,7 +169,7 @@ describe("S1 source blocks: human edit, add, split, merge, delete", () => {
     expect(state.sources.find((s) => s.id === source_id)!.stakeholder_function).toBe("hta");
   });
 
-  it("restores one of two identical dropped occurrences without suppressing its peer", async () => {
+  it("restores the second of two identical dropped occurrences without suppressing the first", async () => {
     const { source_id } = await source("duplicate-drop");
     const text = "Repeated footer text.";
     await persistDroppedSourceUnits(source_id, [
@@ -177,7 +177,7 @@ describe("S1 source blocks: human edit, add, split, merge, delete", () => {
       { location: "p.10", reason: "Footer", text, occurrence_id: "u2" },
     ]);
     const dropped = await listDroppedSourceUnits(source_id);
-    await restoreDroppedSourceUnit({ dropped_id: dropped.find((unit) => unit.occurrence_id === "u1")!.id, rationale: "Relevant result", actor: ACTOR });
+    await restoreDroppedSourceUnit({ dropped_id: dropped.find((unit) => unit.occurrence_id === "u2")!.id, rationale: "Relevant result", actor: ACTOR });
 
     await persistDroppedSourceUnits(source_id, [
       { location: "p.9", reason: "Footer", text, occurrence_id: "u1" },
@@ -186,8 +186,27 @@ describe("S1 source blocks: human edit, add, split, merge, delete", () => {
 
     const remaining = await listDroppedSourceUnits(source_id);
     expect(remaining).toHaveLength(2);
-    expect(remaining.find((unit) => unit.restored_block_id)?.occurrence_id).toBe("u1");
-    expect(remaining.find((unit) => !unit.restored_block_id)).toMatchObject({ occurrence_id: "u2", text });
+    expect(remaining.find((unit) => unit.restored_block_id)?.occurrence_id).toBe("u2");
+    expect(remaining.find((unit) => !unit.restored_block_id)).toMatchObject({ occurrence_id: "u1", text });
+  });
+
+  it("matches legacy dropped rows by normalized text one occurrence at a time", async () => {
+    const { source_id } = await source("legacy-duplicate-drop");
+    const text = "Legacy repeated footer text.";
+    await persistDroppedSourceUnits(source_id, [
+      { location: "p.9", reason: "Footer", text },
+      { location: "p.10", reason: "Footer", text },
+    ]);
+    const dropped = await listDroppedSourceUnits(source_id);
+    await restoreDroppedSourceUnit({ dropped_id: dropped[1]!.id, rationale: "Relevant result", actor: ACTOR });
+
+    await persistDroppedSourceUnits(source_id, [
+      { location: "p.9", reason: "Footer", text },
+      { location: "p.10", reason: "Footer", text },
+    ]);
+
+    const remaining = await listDroppedSourceUnits(source_id);
+    expect(remaining.filter((unit) => !unit.restored_block_id)).toHaveLength(1);
   });
 
   it("keeps whitespace-only dropped units verbatim but does not restore them as blank blocks", async () => {

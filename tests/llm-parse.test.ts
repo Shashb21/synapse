@@ -150,6 +150,27 @@ describe("LLM structuring", () => {
     expect(result.dropped_units).toEqual([{ location: "p.9", reason: "footer", text: dropped, occurrence_id: "u2" }]);
   });
 
+  it("materializes split blocks from source ranges when the model trims and collapses whitespace", async () => {
+    const first = `${"a".repeat(11_999)} `;
+    const second = " B  C";
+    const { ask, calls } = scripted((call) => ({
+      units: idsOf(call).map((id) => {
+        const row = (call.body.units as { unit: string; text: string }[]).find((unit) => unit.unit === id)!;
+        return { unit: id, blocks: [{ text: row.text.trim().replace(/\s+/g, " "), kind: "paragraph", heading: null }] };
+      }),
+    }));
+
+    const result = await structureWithLlm({
+      filename: "materialize-ranges.txt",
+      units: [{ location: { kind: "page", ref: "p.11" }, text: first + second }],
+      ask,
+    });
+
+    expect(calls.map((call) => idsOf(call))).toEqual([["u1"], ["u2"]]);
+    expect(result.blocks.map((block) => block.text)).toEqual([first, second]);
+    expect(result.blocks.map((block) => block.text).join("")).toBe(first + second);
+  });
+
   it("keeps identical split pieces as separate accepted occurrences", async () => {
     const piece = "same".repeat(3_000);
     const { ask, calls } = scripted((call) => ({
