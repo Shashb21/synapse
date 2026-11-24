@@ -17,6 +17,11 @@ export type PairedReleaseSummary = {
   trials_total: number;
   modes: Partial<Record<Mode, Partial<Record<DevelopmentSection, SectionSummary>>>>;
 };
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (value && typeof value === 'object') return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(',')}}`;
+  return JSON.stringify(value) ?? 'null';
+}
 
 function callCost(call: { receipt?: { cost_usd?: number | null } | null; failure_accounting?: { cost_usd?: number | null } | null }): number | null {
   return call.receipt?.cost_usd ?? call.failure_accounting?.cost_usd ?? null;
@@ -25,6 +30,25 @@ function elapsed(startedAt: string | null | undefined, finishedAt: string | null
   if (!startedAt || !finishedAt) return null;
   const start = Date.parse(startedAt), finish = Date.parse(finishedAt);
   return Number.isFinite(start) && Number.isFinite(finish) && finish >= start ? finish - start : null;
+}
+/** Stable study controls that must remain fixed across independently saved repeats. */
+function repeatControlIdentity(comparison: ComparisonResult): string {
+  const left = comparison.left;
+  return canonical({
+    sources: left.execution.manifest.sources,
+    target: left.execution.manifest.target,
+    generation_code: left.execution.manifest.code_identity,
+    proposer_routes: Object.fromEntries(comparison.sections.map(({ section }) => [section, left.execution.manifest.routes?.[section]?.proposer])),
+    evaluations: left.evaluations.map(evaluation => ({
+      section: evaluation.manifest?.section,
+      profile: evaluation.manifest?.profile,
+      configuration: evaluation.manifest?.config?.sections?.[evaluation.manifest?.section],
+      route: evaluation.manifest?.route,
+      references: evaluation.manifest?.references,
+      reference_items: evaluation.manifest?.reference_items,
+      code_identity: evaluation.manifest?.code_identity,
+    })).sort((a, b) => canonical(a).localeCompare(canonical(b))),
+  });
 }
 function reasons(trial: PairedReleaseEvidence): string[] {
   const { comparison } = trial;
@@ -54,6 +78,8 @@ function reasons(trial: PairedReleaseEvidence): string[] {
 export function summarizePairedReleaseEvidence(trials: PairedReleaseEvidence[]): PairedReleaseSummary {
   const refusalReasons: string[] = [];
   const seen = new Set<string>();
+  const usedExecutionIds = new Set<string>();
+  let expectedControls: string | undefined;
   let expectedSections: string | undefined;
   const grouped = new Map<string, { latencies: number[]; costs: (number | null)[]; matches: number; falsePositives: number; misses: number }>();
   for (const trial of trials) {
@@ -63,6 +89,12 @@ export function summarizePairedReleaseEvidence(trials: PairedReleaseEvidence[]):
     }
     seen.add(trial.trial_id);
     const comparison = trial.comparison;
+    const executionIds = [comparison.left.execution.id, comparison.right.execution.id];
+    if (executionIds.some(id => !id || usedExecutionIds.has(id))) {
+      refusalReasons.push(`${trial.trial_id}: execution evidence was already used by another trial`);
+      continue;
+    }
+    executionIds.forEach(id => usedExecutionIds.add(id));
     const leftMode = comparison.left.execution.manifest.config.mode;
     const rightMode = comparison.right.execution.manifest.config.mode;
     if (leftMode !== 'single_pass' || rightMode !== 'standard') {
@@ -79,6 +111,12 @@ export function summarizePairedReleaseEvidence(trials: PairedReleaseEvidence[]):
       continue;
     }
     expectedSections ??= sectionIdentity;
+    const controls = repeatControlIdentity(comparison);
+    if (expectedControls !== undefined && controls !== expectedControls) {
+      refusalReasons.push(`${trial.trial_id}: frozen cohort, reference, evaluator, or proposer route differs from the other controlled pairs`);
+      continue;
+    }
+    expectedControls ??= controls;
     for (const [mode, side] of [['single_pass', comparison.left], ['standard', comparison.right]] as const) {
       for (const section of comparison.sections) {
         const attempt = side.execution.sections.find(item => item.section === section.section);

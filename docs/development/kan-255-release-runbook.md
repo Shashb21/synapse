@@ -14,20 +14,22 @@ Do not use real customer or production state for this preparation. Before any re
 
 1. An approved, de-identified held-out source cohort, its immutable document IDs and content hashes, and the frozen prerequisite state for S2, S3, S4, and S6.
 2. Independent structured reference labels for each stage, with source provenance, label version/hash, expert reviewer identity or pseudonymous reviewer record, rubric version, conflicts, and adjudication outcome. These labels must not be supplied to generation.
-3. A named experiment owner, exact provider/model/route snapshots, an explicit total USD allowance, and acknowledgement that a provider can report an unknown charge.
+3. A named experiment owner, exact provider/model/route snapshots, an explicit total USD allowance covering generation **and external evaluation** for every planned repeat, and acknowledgement that a provider can report an unknown charge.
 4. A KAN-181-approved acceptance rubric, thresholds, adjudication rule, and sign-off owner. KAN-255 cannot create these governance decisions.
 
 ## Budgeted paired procedure
 
 Use an approved small number of repeats (for example, `R=3`; this is a planning placeholder, not an acceptance threshold). For each repeat `R1` through `R3`:
 
-1. Create fresh Development executions from the *same* immutable source and prerequisite snapshots. Record experiment, execution, source/reference hashes, code identity, modules, prompts, and frozen routes.
+1. Create fresh Development executions from the *same* immutable source snapshots. Record experiment, execution, source/reference hashes, code identity, modules, prompts, frozen proposer route, evaluator profile/route, and all execution/evaluation IDs. A saved execution or evaluator record may appear in one repeat only.
 2. Run one `single_pass` execution and one `standard` execution. The mode is the intended varying factor. Do not reuse an output from one mode in the other.
-3. Use a per-execution allowance whose combined maximum is within the written release-experiment budget. Include the additional `critic`, `reviser`, and `internal_judge` calls, plus structural-repair and JSON-retry tails, in the standard-mode allowance.
+3. Use existing estimate and cost-account reservations for each generation and evaluation request. Sum every planned repeat's single-pass, standard, external-evaluation, and allowed structural-repair/JSON-retry allowance before approval. If any saved generation or evaluation receipt has an unknown charge, stop budget-total reporting: do not state that the combined maximum is within budget until provider accounting supplies the missing amount or the owner records that the experiment is financially unresolved.
 4. Keep the existing one-send rule: never automatically rerun a `sending`, `needs_attention`, failed-settlement, or uncertain provider call. Record and investigate it. A fresh user-authorized attempt may charge again.
-5. Start independent evaluation only after generation completes. Bind it to the exact saved output and the frozen independent reference snapshots.
+5. Start independent evaluation only after generation completes. Bind it to the exact saved output and the frozen independent reference snapshots. For each expert review/adjudication, save a decision record containing the review ID, output ID, reference-item IDs, source/reference hashes, label/rubric version, reviewer records, both initial ratings, and final KAN-181 adjudication. The decision record is the handoff evidence; the current semantic evaluator remains explicitly provisional.
 
-Stop the planned comparison if a pair lacks a saved output, source/prerequisite lineage, compatible evaluator/profile/route snapshot, successful scored reference result, or known review provenance. Do not replace a failed pair to make the results look complete without recording the deviation and re-approving the protocol.
+S2 and S3 can be compared as mode-only observations when their saved comparison reports compatible frozen source, reference, evaluator, and proposer-route identities. **Current limitation:** S4 and S6 run through the all-stage workflow generate mode-bound upstream output identities; they cannot be represented as a shared-prerequisite, mode-only comparison without changing production execution contracts. Record S4/S6 as paired end-to-end observations with their full lineage instead, and do not label them frozen-prerequisite comparisons.
+
+Stop the planned comparison if a pair lacks saved output/source lineage, compatible evaluator/profile/route snapshot, or known review provenance. A valid empty-output observation is not a missing result: when the frozen reference has expected items and the generated output has none, retain it as an all-miss observation (zero recall, no precision denominator) alongside its expert adjudication. Do not replace a failed pair to make the results look complete without recording the deviation and re-approving the protocol.
 
 ## Stage-specific expert review instructions
 
@@ -44,9 +46,9 @@ For every disagreement, record the two ratings and the KAN-181 adjudication deci
 
 ## Aggregate and decide
 
-1. Run `buildComparison` for every saved pair, then pass those results to `summarizePairedReleaseEvidence`.
-2. The helper refuses aggregation if a pair is incomplete or incomparable. It reports, by mode and S2/S3/S4/S6, trial count, latency min/max/range, matches, false positives, misses, known cost, zero-cost calls, and unknown-cost calls.
-3. Treat `known_total: null` or any unknown-cost call as **unknown cost**, not `$0`. Obtain provider accounting or record the unresolved amount before asserting a budget total.
+1. Retrieve each pair through the owner-only saved-comparison endpoint, then save the returned `comparison` objects in a local JSON array (or `{ "trials": [...] }`) with unique, operator-assigned `trial_id` values. For example, after authenticated retrieval from `/api/admin/development/comparison?left_experiment_id=…&left_execution_id=…&right_experiment_id=…&right_execution_id=…`, create `saved-comparisons.json`; this endpoint reads saved records only and does not run a worker.
+2. Run the offline-only command `npx tsx scripts/summarize-kan-255-release.ts saved-comparisons.json`. It reads that local JSON file and prints a summary; it makes no provider, database, route, billing, or remote call. The helper refuses aggregation if a pair is incomplete or incomparable, reuses an execution, or differs in stage coverage. Current `buildComparison` represents an empty-output/all-miss reference assessment as unscored, so retain that valid observation and its expert decision record in the handoff package and report it separately; do not silently drop it or relabel it as missing evidence.
+3. The summary is generation-call accounting only; external-evaluation charges must be read from the linked saved evaluation receipts/cost account and included separately in the budget ledger. Treat `known_total: null` or any unknown generation/evaluation charge as **unknown cost**, not `$0`. Obtain provider accounting or record the unresolved amount before asserting a budget total.
 4. Do not calculate a significance claim from these few repeats. Report raw counts/ranges and all deviations.
 5. KAN-181's approved rubric and human sign-off determine whether the evidence is acceptable. This runbook only establishes evidence traceability and accounting.
 

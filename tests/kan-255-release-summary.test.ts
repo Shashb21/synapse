@@ -12,12 +12,12 @@ const pair = (id: string, controlled = true, standardFinishedAt = '2026-01-01T00
       evaluation_pairs: [{ left_evaluation_id: 'single-eval', right_evaluation_id: 'standard-eval', quality_available: controlled, compatibility: { controlled, blockers: [], missing_evidence: [], varying_factors: [] } }],
     }],
     left: { execution: {
-      id: 'single', experiment_id: 'experiment', manifest: { config: { mode: 'single_pass' } }, sections: [{ id: 'single-section', section: 'gap_extraction', started_at: '2026-01-01T00:00:00Z', finished_at: '2026-01-01T00:00:02Z' }],
-      calls: [{ section_id: 'single-section', receipt: { cost_usd: 0 } }],
+      id: `single-${id}`, experiment_id: 'experiment', manifest: { config: { mode: 'single_pass' } }, sections: [{ id: `single-section-${id}`, section: 'gap_extraction', started_at: '2026-01-01T00:00:00Z', finished_at: '2026-01-01T00:00:02Z' }],
+      calls: [{ section_id: `single-section-${id}`, receipt: { cost_usd: 0 } }],
     }, evaluations: [{ id: 'single-eval', result: { reference: { status: 'scored', matches: [{ output_id: 'o1', reference_id: 'r1' }], unmatched_output_ids: ['o2'], unmatched_reference_ids: ['r2'] } } }] },
     right: { execution: {
-      id: 'standard', experiment_id: 'experiment', manifest: { config: { mode: 'standard' } }, sections: [{ id: 'standard-section', section: 'gap_extraction', started_at: '2026-01-01T00:00:00Z', finished_at: standardFinishedAt }],
-      calls: [{ section_id: 'standard-section', receipt: { cost_usd: null } }],
+      id: `standard-${id}`, experiment_id: 'experiment', manifest: { config: { mode: 'standard' } }, sections: [{ id: `standard-section-${id}`, section: 'gap_extraction', started_at: '2026-01-01T00:00:00Z', finished_at: standardFinishedAt }],
+      calls: [{ section_id: `standard-section-${id}`, receipt: { cost_usd: null } }],
     }, evaluations: [{ id: 'standard-eval', result: { reference: { status: 'scored', matches: [{ output_id: 'o1', reference_id: 'r1' }, { output_id: 'o2', reference_id: 'r2' }], unmatched_output_ids: [], unmatched_reference_ids: [] } } }] },
     trial_note: 'One trial.',
   },
@@ -50,6 +50,29 @@ it('refuses pairs with different stage coverage rather than reporting a partial 
   expect(summarizePairedReleaseEvidence([pair('repeat-1'), incomplete])).toMatchObject({
     controlled: false,
     refusal_reasons: ['repeat-2: section set differs from the other controlled pairs'],
+    modes: {},
+  });
+});
+
+it('refuses a repeat that reuses immutable execution evidence under a new trial label', () => {
+  const reused = pair('repeat-2');
+  reused.comparison.left.execution.id = 'single-repeat-1';
+  reused.comparison.right.execution.id = 'standard-repeat-1';
+
+  expect(summarizePairedReleaseEvidence([pair('repeat-1'), reused])).toMatchObject({
+    controlled: false,
+    refusal_reasons: ['repeat-2: execution evidence was already used by another trial'],
+    modes: {},
+  });
+});
+
+it('refuses repeats whose frozen cohort identity drifts', () => {
+  const drifted = pair('repeat-2');
+  drifted.comparison.left.execution.manifest.sources = [{ id: 'other-source' }] as never;
+
+  expect(summarizePairedReleaseEvidence([pair('repeat-1'), drifted])).toMatchObject({
+    controlled: false,
+    refusal_reasons: ['repeat-2: frozen cohort, reference, evaluator, or proposer route differs from the other controlled pairs'],
     modes: {},
   });
 });
