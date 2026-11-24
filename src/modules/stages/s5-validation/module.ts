@@ -67,8 +67,7 @@ export const validationModule: SynapseModule<ValidationInput, ValidationOutput> 
   inputSchema,
   outputSchema,
   async run(input, ctx) {
-    // A direct edit includes the gate history as well as the gap's field history.
-    // Re-enter once inside the ambient transaction, matching the store's mutations.
+    // Keep the gap mutation and its gate history in one transaction.
     const relationship = ["map_tactic", "accept_mapping", "reject_mapping"].includes(input.action);
     if (relationship && !inRelationshipChange()) {
       const eventIds: string[] = [];
@@ -76,15 +75,17 @@ export const validationModule: SynapseModule<ValidationInput, ValidationOutput> 
         () => validationModule.run(input, ctx), id => eventIds.push(id));
       return { ...result, output: { ...result.output, edit_id: eventIds[0] ?? "" } };
     }
-    if ((input.action === "edit_gap" || relationship) && !inWorkspaceTransaction()) {
+    if ((input.action === "classify" || input.action === "edit_gap" || relationship) && !inWorkspaceTransaction()) {
+      // Preserve the store's legacy coverage repair before classifying.
+      if (input.action === "classify") await loadState();
       return withWorkspaceTransaction(() => validationModule.run(input, ctx));
     }
     if (relationship) await lockRelationships();
-    const before = await loadState();
-    if (relationship) requireRelationshipSnapshot(before, { action: input.action === "map_tactic" ? "assign_tactic" : input.action, gap_id: input.gap_id ?? "", tactic_id: input.tactic_id ?? "", ...(input.expected_relationship !== undefined ? { expected_relationship: input.expected_relationship } : {}) });
-    const gap = input.gap_id ? before.gaps.find((row) => row.id === input.gap_id) : undefined;
+    const before = input.action === "classify" ? null : await loadState();
+    if (relationship && before) requireRelationshipSnapshot(before, { action: input.action === "map_tactic" ? "assign_tactic" : input.action, gap_id: input.gap_id ?? "", tactic_id: input.tactic_id ?? "", ...(input.expected_relationship !== undefined ? { expected_relationship: input.expected_relationship } : {}) });
+    const gap = input.gap_id ? before?.gaps.find((row) => row.id === input.gap_id) : undefined;
     const tactic = input.tactic_id
-      ? before.tactics.find((row) => row.id === input.tactic_id)
+      ? before?.tactics.find((row) => row.id === input.tactic_id)
       : undefined;
 
     let entity_type = "gap";
@@ -97,7 +98,7 @@ export const validationModule: SynapseModule<ValidationInput, ValidationOutput> 
     switch (input.action) {
       case "classify": {
         if (!input.gap_id || !input.status) throw new TrustedApplicationError("gap_id and status are required.");
-        await overrideGapStatus({
+        beforeValue = await overrideGapStatus({
           gap_id: input.gap_id,
           status: input.status,
           reason: input.rationale,
@@ -105,7 +106,6 @@ export const validationModule: SynapseModule<ValidationInput, ValidationOutput> 
           actor_function: ctx.actor.function,
         });
         field = "computed_status";
-        beforeValue = gap ? displayedGapStatus(gap) : null;
         afterValue = input.status;
         editAction = "override";
         break;

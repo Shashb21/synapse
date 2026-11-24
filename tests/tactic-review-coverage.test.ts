@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { sql } from "drizzle-orm";
 import "@/modules";
 import { POST } from "@/app/api/iegp/route";
+import { POST as postModule } from "@/app/api/modules/route";
 import { db, poolSize, withWorkspaceTransaction } from "@/lib/iegp/db";
 import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
 import { buildMappingTableView } from "@/lib/iegp/mapping-table";
@@ -129,7 +130,28 @@ describe("gap actions after a tactic review", () => {
     expect(after.audit).toEqual(before.audit);
   });
 
-  it("uses the restored gap computation when an override waits for tactic restoration", async () => {
+  it.each([
+    {
+      route: "gap action",
+      after: "validated_addressed (override)",
+      override: (gapId: string, reason: string) => post({
+        action: "override_gap_status", gap_id: gapId, status: "validated_addressed", reason,
+      }),
+    },
+    {
+      route: "validation stage",
+      after: "validated_addressed",
+      override: (gapId: string, reason: string) => postModule(new Request("http://localhost/api/modules", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ...actor,
+          stage: "S5",
+          input: { action: "classify", gap_id: gapId, status: "validated_addressed", rationale: reason },
+        }),
+      })),
+    },
+  ])("uses the restored gap computation when a $route override waits for tactic restoration", async ({ after, override }) => {
     const gapId = await createGap({ ...actor, statement: "What are the outcomes for the community care population?" });
     const tacticId = await createTactic("Community care outcomes study");
     await reviewRequirementBasis({
@@ -161,7 +183,7 @@ describe("gap actions after a tactic review", () => {
     });
     const restorerPid = await Promise.race([ready.promise, restoring.then(() => { throw new Error("Restore released its locks before the override"); })]);
     const reason = "I confirm that the available evidence addresses the gap";
-    const overriding = post({ action: "override_gap_status", gap_id: gapId, status: "validated_addressed", reason });
+    const overriding = override(gapId, reason);
     try {
       await vi.waitFor(async () => {
         const waiting = await db().execute(sql`select pid from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and ${restorerPid} = any(pg_blocking_pids(pid))`);
@@ -178,7 +200,7 @@ describe("gap actions after a tactic review", () => {
       status: "validated_addressed", computed_status: "validated_addressed", status_override: { reason, stale: false },
     });
     expect((await listEdits({ entity_id: gapId })).find(row => row.action === "override")).toMatchObject({
-      before: "validated_addressed", after: "validated_addressed (override)", rationale: reason,
+      before: "validated_addressed", after, rationale: reason,
     });
   });
 });

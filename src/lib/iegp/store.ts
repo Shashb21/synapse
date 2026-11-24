@@ -37,6 +37,7 @@ import type {
   CoverageDimension,
   DimensionValue,
   EvidenceDomain,
+  GapStatus,
   MappedGapStatus,
   OverallCoverage,
 } from "./enums";
@@ -1459,7 +1460,7 @@ export async function lockGapStatus(args: {
   }
 }
 
-/** Apply a human override against the latest computation owned by the locked gap. */
+/** Apply a human override and return the gap status displayed immediately before it. */
 export async function overrideGapStatus(args: {
   gap_id: string;
   status: MappedGapStatus;
@@ -1467,7 +1468,7 @@ export async function overrideGapStatus(args: {
   note?: string;
   actor_name: string;
   actor_function: ActorFunction;
-}): Promise<void> {
+}): Promise<GapStatus> {
   if (!inWorkspaceTransaction()) {
     await loadState();
     return withWorkspaceTransaction(() => overrideGapStatus(args));
@@ -1476,7 +1477,8 @@ export async function overrideGapStatus(args: {
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
   if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
-  if (args.status === "validated_partial" || displayedGapStatus(gap) === "validated_partial") {
+  const previousDisplayedStatus = displayedGapStatus(gap);
+  if (args.status === "validated_partial" || previousDisplayedStatus === "validated_partial") {
     throw new TrustedApplicationError("Partially Addressed cannot stay. Split or rewrite the gap instead.");
   }
   if (gap.status === "candidate" || gap.status === "excluded" || gap.retired) {
@@ -1524,6 +1526,7 @@ export async function overrideGapStatus(args: {
     actor_name: args.actor_name,
     actor_function: args.actor_function,
   });
+  return previousDisplayedStatus;
 }
 
 export async function clearGapStatusOverride(args: {
