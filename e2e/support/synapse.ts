@@ -449,6 +449,20 @@ export async function firstOpenGap(request: APIRequestContext) {
   return lists.open[0]!;
 }
 
+/** Links a study to a live gap so S10 can propose dates for it. */
+export async function seedTimelineStudy(request: APIRequestContext, gap_id: string) {
+  await iegpAction(request, {
+    action: "record_missed_tactic",
+    gap_id,
+    name: "Planned real-world outcomes study",
+    type: "rwe_study",
+    status: "planned",
+    evidence_question: "What outcomes are observed in routine care for this population?",
+    rationale: "Include planned evidence work in the timeline fixture",
+  });
+  await iegpAction(request, { action: "validate_gap", gap_id, note: "Confirmed the Open assessment after linking the study" });
+}
+
 export async function firstPartialGap(request: APIRequestContext) {
   const lists = await consolidate(request);
   return lists.unresolved_partials[0] ?? null;

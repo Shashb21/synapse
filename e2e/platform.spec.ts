@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { fillNameIfAsked, freshWorkspace } from "./support/session";
-import { iegpAction, preparePrioritizationInventory, resolveFinalPlanGaps, selectedWorkspaceId } from "./support/synapse";
+import { firstOpenGap, iegpAction, preparePrioritizationInventory, resolveFinalPlanGaps, seedTimelineStudy, selectedWorkspaceId } from "./support/synapse";
 
 const ACTOR = { actor_name: "E2E Platform", actor_function: "medical_affairs" };
 
@@ -112,6 +112,8 @@ test.describe("platform surfaces", () => {
     await runStage(page, "S3");
     await runStage(page, "S4");
     await preparePrioritizationInventory(page.request);
+    const gap = await firstOpenGap(page.request);
+    await seedTimelineStudy(page.request, gap.gap_id);
     await runStage(page, "S8");
     await runStage(page, "S10", { persist: true });
 
