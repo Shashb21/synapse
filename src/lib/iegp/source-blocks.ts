@@ -746,10 +746,10 @@ export type ReparseResult = {
 
 /**
  * Re-parse into an existing source. Human blocks (locked meta) stay exactly as
- * they are. Model blocks cited by needs, source reviews, tactic suggestions,
- * or tactic source references keep their IDs and text. New model blocks whose
- * text a kept block, a human edit's original, or a human deletion already covers
- * are skipped.
+ * they are. Model blocks cited by needs, source reviews, gap and tactic
+ * suggestions, or tactic source references keep their IDs and text. New model
+ * blocks are skipped when their text is already covered by a kept block, the
+ * original text of a human edit, or a human deletion.
  */
 export const reparseSourceBlocks = assessmentSourceEdit(async function reparseSourceBlocks(args: {
   source_id: string;
@@ -771,8 +771,12 @@ export const reparseSourceBlocks = assessmentSourceEdit(async function reparseSo
       blockId: tacticSourceReferences.block_id,
       quote: tacticSourceReferences.source_quote,
     }).from(tacticSourceReferences).where(eq(tacticSourceReferences.source_id, args.source_id)));
+  const gapCitations = state.gap_suggestions
+    .flatMap(suggestion => [suggestion, ...suggestion.extra_sources])
+    .filter(citation => citation.source_id === args.source_id)
+    .map(citation => ({ blockId: citation.block_id, quote: citation.source_quote }));
   const blocksById = new Map(current.map(block => [block.id, block]));
-  for (const { blockId, quote } of tacticCitations) {
+  for (const { blockId, quote } of [...tacticCitations, ...gapCitations]) {
     const block = blockId ? blocksById.get(blockId) : undefined;
     // Older reparses may have reused a block ID for an unrelated passage.
     if (block && quote?.trim() && containsQuote(block.text.toLowerCase(), quote.toLowerCase())) {

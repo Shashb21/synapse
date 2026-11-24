@@ -7,14 +7,17 @@ import { runStage } from "@/modules/kernel/run";
 import { db, ensurePlatformSchema, wipePlatform } from "@/modules/kernel/db";
 import { listEdits } from "@/modules/kernel/edit-records";
 import {
+  addSuggestionSources,
   assignTacticToGap,
   clearNewSourceFlag,
   commitExtractedRecords,
   createGap,
   loadState,
+  persistSourceAndBlocks,
   recordMissedTactic,
   resetDemoSetup,
 } from "@/lib/iegp/store";
+import { reparseSourceBlocks } from "@/lib/iegp/source-blocks";
 import { iegpActionCapability } from "@/app/api/iegp/capabilities";
 import { can } from "@/modules/auth/roles";
 import { listParsedDocuments } from "@/modules/stages/s1-parse/module";
@@ -84,6 +87,56 @@ beforeAll(async () => {
   sourceId = (await listParsedDocuments())[0]!.source_id;
 }, 60_000);
 
+it.each([
+  ["merge", acceptGapMergeSuggestion],
+  ["split", acceptGapSplitSuggestion],
+] as const)("preserves both overlap citations through reparse and %s", async (_decision, acceptSuggestion) => {
+  const gapId = await newGap();
+  const citations = await Promise.all([
+    "The Finch panel has no data for patients over 75.",
+    "The Aster committee confirmed the lack of data for older patients.",
+  ].map(async (quote) => {
+    const section = { heading: "Evidence", text: quote, location: "Section 1" };
+    const source = await persistSourceAndBlocks({
+      title: quote, source_type: "advisory_board", stakeholder_function: ACTOR.function,
+      text: quote, sections: [section],
+    });
+    return {
+      source_id: source.source_id, block_id: source.blocks[0]!.id,
+      source_quote: quote, statement: OVERLAP.split_statement,
+    };
+  }));
+  const [primary, repeat] = citations;
+  const result = await commitExtractedRecords({
+    source_id: primary!.source_id, title: "Finch panel", stakeholder_function: ACTOR.function,
+    ...who, needs: [], gaps: [], tactics: [],
+    overlaps: [{
+      id: "reparse-overlap", gap_id: gapId, run_id: "reparse-overlap-run",
+      candidate_row_id: null, block_id: primary!.block_id, name: "Over-75s versus SoC",
+      statement: primary!.statement, domain: "comparative_effectiveness",
+      source_quote: primary!.source_quote, ...OVERLAP,
+    }],
+  });
+  const suggestionId = result.suggestion_id_by_row["reparse-overlap"]!;
+  await addSuggestionSources(suggestionId, [repeat!]);
+
+  for (const citation of citations) {
+    const reparsed = await reparseSourceBlocks({
+      source_id: citation.source_id,
+      sections: [{ heading: "Background", text: "Updated background.", location: "Section 1" }],
+    });
+    expect(reparsed.blocks).toContainEqual(expect.objectContaining({
+      id: citation.block_id, text: citation.source_quote,
+    }));
+  }
+
+  await acceptSuggestion({ suggestion_id: suggestionId, rationale: "Reviewed both sources", ...who });
+  const { needs } = await loadState();
+  for (const { source_id, block_id, source_quote } of citations) {
+    expect(needs).toContainEqual(expect.objectContaining({ source_id, block_id, source_quote }));
+  }
+});
+
 describe("KAN-75 merge", () => {
   let gapId = "";
   let suggestionId = "";
@@ -148,7 +201,6 @@ describe("KAN-75 split", () => {
     const gapId = await newGap();
     const suggestionId = await overlapOn(gapId);
     // A repeat from another source rides along and follows the outcome.
-    const { addSuggestionSources } = await import("@/lib/iegp/store");
     await addSuggestionSources(suggestionId, [
       { source_id: sourceId, statement: "Over-75s are missing.", source_quote: "We have nothing on over-75s." },
     ]);
