@@ -1,4 +1,4 @@
-import { sourceQuoteKey } from "@/lib/ingest/manual-blocks";
+import { sourceFindingKey } from "@/lib/ingest/manual-blocks";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { assessmentBasis, coverageReviewVersion, fullConfirmationIssues, getRequirementBasisReview, reviewedRequirementDimensions, type RequirementReviewInput } from "./requirement-basis";
 import type { RequirementBasis } from "./types";
@@ -24,6 +24,7 @@ import type {
   GapVersionSnapshot,
   GapSuggestion,
   GapSuggestionSource,
+  NeedProvenance,
   GapSuggestionStatus,
   IegpState,
   Lock,
@@ -663,7 +664,7 @@ async function insertLiveOpenGap(args: {
 }
 
 /** Where a need came from (KAN-97): the S2 run, its candidate row and the source block. */
-export type NeedProvenance = { run_id?: string | null; candidate_row_id?: string | null; block_id?: string | null };
+export type { NeedProvenance } from "./types";
 
 async function insertNeedForGap(args: {
   gapId: string;
@@ -3317,6 +3318,7 @@ export const persistSourceAndBlocks = atomic(async function persistSourceAndBloc
 
 export type CandidateNeedRow = {
   id: string;
+  domain?: EvidenceDomain;
   statement: string;
   source_quote: string;
   /**
@@ -3338,6 +3340,7 @@ export type OverlapRow = {
   gap_id: string;
   run_id: string;
   candidate_row_id?: string | null;
+  block_id?: string | null;
   name: string;
   statement: string;
   domain: EvidenceDomain;
@@ -3350,13 +3353,18 @@ export type OverlapRow = {
   split_statement: string;
 };
 
+/** Take the workspace stage lock inside the caller's transaction before consuming evidence or its review. */
+async function lockExtractionStage(stage: "S2" | "S3"): Promise<void> {
+  await db().execute(sql`select pg_advisory_xact_lock(hashtext(current_schema()), hashtext(${`extraction:${stage}`}))`);
+}
+
 /**
  * Serialize the short persistence phase of concurrent extraction runs in this workspace.
  * Model calls finish before taking this lock. The next writer sees the previous run's evidence.
  */
 export function withExtractionCommit<T>(stage: "S2" | "S3", persist: () => Promise<T>): Promise<T> {
   return withWorkspaceTransaction(async () => {
-    await db().execute(sql`select pg_advisory_xact_lock(hashtext(current_schema()), hashtext(${`extraction:${stage}`}))`);
+    await lockExtractionStage(stage);
     return persist();
   });
 }
@@ -3479,15 +3487,13 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
     state.gaps.filter((g) => g.human_validated || validatedPriority.has(g.id)).map((g) => g.id),
   );
 
-  // A gap holds each source sentence once: re-running extraction on a document, or two
-  // candidates quoting the same sentence, must not attach it again (KAN-74).
-  // Older rows kept only the first 280 characters of a quote, so compare on those.
-  const quoteKey = (gapId: string, quote: string) =>
-    `${gapId}|${sourceId}|${quote.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 280)}`;
+  // Match the full passage and question, since a single passage can support distinct findings.
+  const evidenceKey = (gapId: string, quote: string, domain: string, statement: string) =>
+    JSON.stringify([gapId, sourceFindingKey(sourceId, quote, domain, statement)]);
   const attached = new Set(
     state.need_gap_links.flatMap((link) => {
       const need = state.needs.find((row) => row.id === link.need_id);
-      return need && need.source_id === sourceId ? [quoteKey(link.gap_id, need.source_quote ?? need.statement)] : [];
+      return need && need.source_id === sourceId ? [evidenceKey(link.gap_id, need.source_quote ?? need.statement, need.domain, need.statement)] : [];
     }),
   );
 
@@ -3498,7 +3504,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
     domain: EvidenceDomain;
     provenance?: NeedProvenance;
   }) => {
-    const key = quoteKey(args2.gapId, args2.quote || args2.statement);
+    const key = evidenceKey(args2.gapId, args2.quote || args2.statement, args2.domain, args2.statement);
     if (attached.has(key)) return;
     attached.add(key);
     const needId = await allocateId("NEED", needIds);
@@ -3557,7 +3563,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
       gapId: gap.id,
       statement: need.statement,
       quote: need.source_quote,
-      domain: gap.domain,
+      domain: need.domain ?? gap.domain,
       provenance: need.provenance,
     });
     gapIdByRow[need.id] = gap.id;
@@ -3569,6 +3575,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
       gap_id: overlap.gap_id,
       run_id: overlap.run_id,
       candidate_row_id: overlap.candidate_row_id ?? null,
+      block_id: overlap.block_id ?? null,
       source_id: sourceId,
       name: overlap.name,
       statement: overlap.statement,
@@ -3597,7 +3604,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
   for (const tac of args.tactics) {
     if (tac.duplicate_of) {
       const { attachTacticSource } = await import("@/modules/stages/s3-tactic-extract/suggestions");
-      if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tac.duplicate_of, source_id: sourceId, source_quote: tac.source_quote});
+      if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tac.duplicate_of, source_id: sourceId, source_quote: tac.source_quote, finding_key: sourceFindingKey(sourceId, tac.source_quote, tac.type, tac.evidence_question)});
       skippedTacticIds.push(tac.id);
       continue;
     }
@@ -3630,7 +3637,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
       source_quote: (tac.source_quote ?? "").trim(),
     });
     const { attachTacticSource } = await import("@/modules/stages/s3-tactic-extract/suggestions");
-    if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tacticId, source_id: sourceId, source_quote: tac.source_quote});
+    if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tacticId, source_id: sourceId, source_quote: tac.source_quote, finding_key: sourceFindingKey(sourceId, tac.source_quote, tac.type, tac.evidence_question)});
   }
 
   await appendAudit(
@@ -3665,13 +3672,15 @@ export const addSuggestionSources = atomic(async function addSuggestionSources(
   sources: GapSuggestionSource[],
 ): Promise<void> {
   if (sources.length === 0) return;
+  await lockExtractionStage("S2");
   const [stored] = await db().select().from(t.gapSuggestions).where(eq(t.gapSuggestions.id, suggestionId)).for("update");
   if (!stored) throw new Error(`Suggestion ${suggestionId} not found. Nothing was saved.`);
   if (stored.status !== "pending") throw new TrustedApplicationError("Suggestion already decided. Rerun extraction to use the current review.");
   const extra = stored.extra_sources as GapSuggestionSource[];
-  const keys = new Set([stored, ...extra].map(row => sourceQuoteKey(row.source_id, row.source_quote)));
+  const keyOf = (row: GapSuggestionSource) => sourceFindingKey(row.source_id, row.source_quote, row.domain ?? stored.domain, row.statement);
+  const keys = new Set([sourceFindingKey(stored.source_id, stored.source_quote, stored.domain, stored.statement), ...extra.map(keyOf)]);
   const additions = sources.filter(row => {
-    const key = sourceQuoteKey(row.source_id, row.source_quote);
+    const key = keyOf(row);
     if (keys.has(key)) return false;
     keys.add(key);
     return true;
@@ -3717,10 +3726,14 @@ async function closeSuggestion(
     .where(eq(t.gapSuggestions.id, id));
 }
 
+function suggestionProvenance(suggestion: GapSuggestion): NeedProvenance {
+  return { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id, block_id: suggestion.block_id };
+}
+
 /** Every source a suggestion carries: its own candidate first, then repeats. */
 function suggestionSources(suggestion: GapSuggestion): GapSuggestionSource[] {
   return [
-    { source_id: suggestion.source_id, statement: suggestion.statement, source_quote: suggestion.source_quote },
+    { source_id: suggestion.source_id, statement: suggestion.statement, source_quote: suggestion.source_quote, provenance: suggestionProvenance(suggestion) },
     ...suggestion.extra_sources,
   ];
 }
@@ -3736,6 +3749,7 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
   args: SuggestionDecision & { name?: string; statement?: string },
 ): Promise<{ gap_id: string }> {
   const rationale = requireRationale(args.rationale);
+  await lockExtractionStage("S2");
   const pending = await pendingSuggestion(args.suggestion_id);
   const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [pending.gap.id] });
   const { suggestion, gap } = await pendingSuggestion(args.suggestion_id);
@@ -3783,7 +3797,7 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
       actor_function: args.actor_function,
     });
   }
-  for (const [index, source] of suggestionSources(suggestion).entries()) {
+  for (const source of suggestionSources(suggestion)) {
     await insertNeedForGap({
       gapId: gap.id,
       sourceId: source.source_id,
@@ -3791,8 +3805,7 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
       sourceQuote: source.source_quote,
       role: "supporting",
       actor_function: args.actor_function,
-      // The suggestion's own candidate is the first source; repeats came from the same run.
-      provenance: { run_id: suggestion.run_id, candidate_row_id: index === 0 ? suggestion.candidate_row_id : null },
+      provenance: source.provenance ?? { run_id: suggestion.run_id },
     });
   }
   await closeSuggestion(suggestion.id, "merged", { ...args, rationale });
@@ -3823,6 +3836,7 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
   args: SuggestionDecision & { name?: string; statement?: string },
 ): Promise<{ gap_id: string; new_gap_id: string }> {
   const rationale = requireRationale(args.rationale);
+  await lockExtractionStage("S2");
   const pending = await pendingSuggestion(args.suggestion_id);
   const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [pending.gap.id] });
   const { suggestion, gap } = await pendingSuggestion(args.suggestion_id);
@@ -3846,7 +3860,7 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
     settings: gap.settings,
     metadata: gap.metadata,
     origin_gap_id: gap.id,
-    need_provenance: { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id },
+    need_provenance: suggestionProvenance(suggestion),
   });
   for (const source of suggestion.extra_sources) {
     await insertNeedForGap({
@@ -3856,7 +3870,7 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
       sourceQuote: source.source_quote,
       role: "supporting",
       actor_function: args.actor_function,
-      provenance: { run_id: suggestion.run_id },
+      provenance: source.provenance ?? { run_id: suggestion.run_id },
     });
   }
   await insertNeedForGap({
@@ -3866,7 +3880,7 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
     sourceQuote: suggestion.source_quote,
     role: "supporting",
     actor_function: args.actor_function,
-    provenance: { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id },
+    provenance: suggestionProvenance(suggestion),
   });
   await linkRelatedGaps(gap.id, newGapId);
   await closeSuggestion(suggestion.id, "split", { ...args, rationale, result_gap_id: newGapId });
@@ -3903,8 +3917,9 @@ async function linkRelatedGaps(a: string, b: string) {
 }
 
 /** Rejects an overlap: nothing changes in the plan, and the suggestion stays on record. */
-export async function rejectGapSuggestion(args: SuggestionDecision): Promise<GapSuggestion> {
+export const rejectGapSuggestion = atomic(async function rejectGapSuggestion(args: SuggestionDecision): Promise<GapSuggestion> {
   const rationale = requireRationale(args.rationale);
+  await lockExtractionStage("S2");
   const state = await loadState();
   const suggestion = state.gap_suggestions.find((row) => row.id === args.suggestion_id);
   if (!suggestion) throw new TrustedApplicationError("Suggestion not found.", "not_found", 404);
@@ -3924,7 +3939,7 @@ export async function rejectGapSuggestion(args: SuggestionDecision): Promise<Gap
     signal_kind: "user_rejected_proposal",
   });
   return suggestion;
-}
+});
 
 /** A person has looked at the source that joined a validated gap (KAN-74). */
 export async function clearNewSourceFlag(args: {

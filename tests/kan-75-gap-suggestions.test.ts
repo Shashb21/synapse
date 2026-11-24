@@ -150,12 +150,15 @@ describe("KAN-75 split", () => {
     // A repeat from another source rides along and follows the outcome.
     const { addSuggestionSources } = await import("@/lib/iegp/store");
     await addSuggestionSources(suggestionId, [
-      { source_id: sourceId, statement: "Over-75s are missing.", source_quote: "We have nothing on over-75s." },
+      { source_id: sourceId, statement: "Over-75s are missing.", source_quote: "We have nothing on over-75s.", provenance: { run_id: "later-run", candidate_row_id: "later-candidate", block_id: "later-block" } },
     ]);
 
     const { new_gap_id } = await acceptGapSplitSuggestion({ suggestion_id: suggestionId, rationale: "Separate question", ...who });
 
     const state = await loadState();
+    expect(state.needs.find(need => need.source_quote === "We have nothing on over-75s.")).toMatchObject({
+      run_id: "later-run", candidate_row_id: "later-candidate", block_id: "later-block",
+    });
     const created = state.gaps.find((row) => row.id === new_gap_id)!;
     expect(created).toMatchObject({ name: OVERLAP.split_name, statement: OVERLAP.split_statement, domain: "comparative_effectiveness" });
     const linksOf = (id: string) =>
@@ -178,6 +181,17 @@ describe("KAN-75 split", () => {
 });
 
 describe("KAN-75 reject", () => {
+  it("records only one decision when two people reject the same pending suggestion", async () => {
+    const { rejectGapSuggestion } = await import("@/lib/iegp/store");
+    const suggestionId = await overlapOn(await newGap());
+    const outcomes = await Promise.allSettled(["First review", "Second review"].map(rationale =>
+      rejectGapSuggestion({ suggestion_id: suggestionId, rationale, ...who }),
+    ));
+    expect(outcomes.filter(result => result.status === "fulfilled")).toHaveLength(1);
+    const failure = outcomes.find(result => result.status === "rejected");
+    expect(failure?.reason.message).toMatch(/already decided/i);
+  });
+
   it("leaves the plan as it was and keeps the candidate promotable", async () => {
     const gapId = await newGap();
     await ensurePlatformSchema([GAP_CANDIDATES_DDL]);

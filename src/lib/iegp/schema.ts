@@ -133,6 +133,7 @@ export const gapSuggestions = pgTable("gap_suggestions", {
   gap_id: text("gap_id").notNull(),
   run_id: text("run_id").notNull(),
   candidate_row_id: text("candidate_row_id"),
+  block_id: text("block_id"),
   source_id: text("source_id").notNull(),
   name: text("name").notNull(),
   statement: text("statement").notNull(),

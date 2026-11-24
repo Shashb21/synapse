@@ -359,6 +359,39 @@ describe("S3 on the model path", () => {
     await expect(tacticExtractModule.run(input(), ctx)).rejects.toThrow(/complete judge decision/);
   });
 
+  it("claims each tactic once and preserves different studies supported by one sentence", async () => {
+    const quote = "Finch sponsors an outcomes registry and an economic review.";
+    const run = (withReview: boolean) => {
+      const { ctx } = context(call => {
+        if (call.purpose.startsWith("tactic-proposer:")) return { tactics: [
+          good({ source_quote: quote }), good({ source_quote: quote }),
+          ...(withReview ? [good({ name: "Economic review", type: "slr", evidence_question: "What are the costs?", source_quote: quote })] : []),
+        ] };
+        return call.purpose === "tactic-critic" ? keepAll(call) : acceptAll(call);
+      });
+      return tacticExtractModule.run(input(false), ctx);
+    };
+    expect((await run(false)).output.committed_tactic_ids).toHaveLength(1);
+    expect((await run(true)).output.committed_tactic_ids).toHaveLength(1);
+    expect((await run(true)).output.committed_tactic_ids).toEqual([]);
+  });
+
+  it("rejects a tactic commit when a reviewer updates the source during judging", async () => {
+    const { editSourceBlock, listSourceBlocks } = await import("@/lib/iegp/source-blocks");
+    const { listParsedDocuments } = await import("@/modules/stages/s1-parse/module");
+    const sourceId = (await listParsedDocuments([documentId]))[0]!.source_id;
+    const block = (await listSourceBlocks(sourceId))[0]!;
+    const { ctx } = context(async call => {
+      if (call.purpose.startsWith("tactic-proposer:")) return { tactics: [good({ source_quote: block.text })] };
+      if (call.purpose === "tactic-critic") return keepAll(call);
+      await editSourceBlock({ block_id: block.id, text: block.text + " Revised.", actor: ACTOR, rationale: "Correct the source." });
+      return acceptAll(call);
+    });
+    const before = await loadState();
+    await expect(tacticExtractModule.run(input(false), ctx)).rejects.toThrow(/source.*changed/i);
+    expect((await loadState()).tactics).toEqual(before.tactics);
+  });
+
   it("persists valid overlaps as source review only and retains edited review on rerun", async () => {
     const {listTacticSuggestions, editTacticSuggestion} = await import("@/modules/stages/s3-tactic-extract/suggestions");
     const scope = {name: "SLR subgroup", evidence_question: "What safety evidence exists in subgroup?", population: "Subgroup", outcomes: "", geography: "", data_cut: "", analysis: "Post-hoc subgroup", instrument: "", study_design: "Retrospective analysis", gap_coverage: "Subgroup evidence", cost_effort: "Source does not specify", timing: "Source does not specify", feasibility_risks: "Requires source review", post_hoc: true, prospective_enrolment: false, protocol_amendment: false, start_date: null, evidence_available: null};
@@ -391,6 +424,12 @@ describe("S3 on the model path", () => {
     expect((await tacticExtractModule.run(input(false), rerun.ctx)).output.committed_tactic_ids).toEqual([]);
     expect((await listTacticSuggestions()).find(r => r.id === suggestion.id)).toEqual(decided);
     expect((await loadState()).tactics.length).toBe(before.tactics.length + 1);
+
+    // Historical suggestions predate the immutable key. Their candidate still records the source question.
+    const { db } = await import("@/lib/iegp/db");
+    const { sql } = await import("drizzle-orm");
+    await db().execute(sql`UPDATE tactic_suggestions SET payload = payload - 'finding_key' WHERE id = ${suggestion.id}`);
+    expect((await tacticExtractModule.run(input(false), rerun.ctx)).output.committed_tactic_ids).toEqual([]);
 
   });
 

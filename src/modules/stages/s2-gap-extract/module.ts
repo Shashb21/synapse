@@ -1,5 +1,5 @@
 import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import { newId, nowIso } from "@/modules/kernel/ids";
@@ -13,13 +13,13 @@ import {
 import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import { NoRouteError } from "@/modules/llm/provider";
 import type { ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
-import { sourceQuoteKey } from "@/lib/ingest/manual-blocks";
+import { sourceFindingKey } from "@/lib/ingest/manual-blocks";
 import type { IegpState } from "@/lib/iegp/types";
 import { EVIDENCE_DOMAINS, type EvidenceDomain } from "@/lib/iegp/enums";
 import { addSuggestionSources, commitExtractedRecords, loadState, withExtractionCommit } from "@/lib/iegp/store";
 import { validatedPlacementGapIds } from "@/modules/stages/s8-prioritization/module";
 import { extractCandidateGaps, isLiveGap } from "@/lib/iegp/engine";
-import { currentExtractionDocuments, selectedExtractionDocuments, listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
+import { lockCurrentExtractionDocuments, currentExtractionDocuments, selectedExtractionDocuments, listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
 import { GAP_CANDIDATES_DDL, gapCandidates } from "./schema";
 import { augmentSystemPrompt } from "@/modules/kernel/prompt-variant";
 import { curatedS2Cases } from "@/modules/eval-gold";
@@ -205,32 +205,55 @@ export function blockIdFor(document: ParsedDocumentRecord | undefined, quote: st
   return block?.id ?? null;
 }
 
-/** Where a previously consumed sentence can send new corroboration, including after human review. */
-function recordedGapEvidence(state: IegpState) {
+/** Resolve previously extracted questions to their current owners, giving explicit review outcomes priority. */
+async function recordedGapEvidence(state: IegpState, sourceIds: Set<string>) {
   type Destination = { gap_id?: string; suggestion_id?: string };
   const evidence = new Map<string, Destination>();
   const activeIds = new Set(state.gaps.filter(g => !g.retired).map(g => g.id));
-  const needs = new Map(state.needs.map(n => [n.id, n]));
-  // Preserve unlinked historical evidence without guessing which gap now owns it.
-  for (const need of state.needs) {
-    if (need.source_quote) evidence.set(sourceQuoteKey(need.source_id, need.source_quote), {});
-  }
+  const selectedNeeds = state.needs.filter(need => sourceIds.has(need.source_id));
+  const needs = new Map(selectedNeeds.map(n => [n.id, n]));
+  // Human edits can replace the displayed statement or quote. The candidate row retains the original.
+  const candidateIds = selectedNeeds.flatMap(need => need.candidate_row_id ? [need.candidate_row_id] : []);
+  const originals = candidateIds.length ? await db().select({
+    id: gapCandidates.id, source_id: gapCandidates.source_id, source_quote: gapCandidates.source_quote,
+    domain: gapCandidates.domain, statement: gapCandidates.statement,
+  }).from(gapCandidates).where(inArray(gapCandidates.id, candidateIds)) : [];
+  const byCandidate = new Map(originals.map(row => [row.id, row]));
+  const keyOf = (need: IegpState["needs"][number]) => {
+    const row = (need.candidate_row_id && byCandidate.get(need.candidate_row_id)) || need;
+    return sourceFindingKey(row.source_id, row.source_quote, row.domain, row.statement);
+  };
+  const linked = new Set<string>();
   for (const link of state.need_gap_links) {
     const need = needs.get(link.need_id);
-    if (need?.source_quote && activeIds.has(link.gap_id)) {
-      evidence.set(sourceQuoteKey(need.source_id, need.source_quote), { gap_id: link.gap_id });
+    if (!need) continue;
+    linked.add(need.id);
+    const key = keyOf(need);
+    const previous = evidence.get(key);
+    // If several gaps share this finding, never pick an arbitrary one for corroboration.
+    evidence.set(key, activeIds.has(link.gap_id) && (!previous || previous.gap_id === link.gap_id)
+      ? { gap_id: link.gap_id } : {});
+  }
+  for (const need of selectedNeeds) {
+    if (!linked.has(need.id)) {
+      const key = keyOf(need);
+      if (!evidence.has(key)) evidence.set(key, {});
     }
   }
   for (const suggestion of state.gap_suggestions) {
+    const gapId = suggestion.status === "split" ? suggestion.result_gap_id : suggestion.gap_id;
     const destination: Destination = suggestion.status === "pending" && activeIds.has(suggestion.gap_id)
       ? { suggestion_id: suggestion.id }
-      : suggestion.result_gap_id && activeIds.has(suggestion.result_gap_id) ? { gap_id: suggestion.result_gap_id } : {};
+      : suggestion.status !== "rejected" && gapId && activeIds.has(gapId) ? { gap_id: gapId } : {};
     for (const row of [suggestion, ...suggestion.extra_sources]) {
-      const key = sourceQuoteKey(row.source_id, row.source_quote);
-      if (!evidence.has(key)) evidence.set(key, destination);
+      evidence.set(sourceFindingKey(row.source_id, row.source_quote, row.domain ?? suggestion.domain, row.statement), destination);
     }
   }
   return evidence;
+}
+
+function gapFindingKey(candidate: GapCandidate): string {
+  return sourceFindingKey(candidate.source_id, candidate.source_quote, candidate.domain, candidate.statement);
 }
 
 const titleOf = (document: ParsedDocumentRecord) => document.blocks[0]?.heading ?? document.source_id;
@@ -801,24 +824,35 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
     const joined_gap_ids: string[] = [];
     const suggestion_ids: string[] = [];
     if (!ctx.replay?.evaluation && !input.dry_run) await withExtractionCommit("S2", async () => {
+      await lockCurrentExtractionDocuments(documents);
       const accepted = new Map(outcome.accepted.map((candidate) => [candidate.id, candidate]));
       // A candidate that repeats another follows the one it repeats (KAN-74); one whose
       // chain cannot be followed (a cycle, or a candidate the judge rejected) stands on
       // its own as a new gap, so its source is never dropped.
-      const recorded = recordedGapEvidence(await loadState());
+      const recorded = await recordedGapEvidence(await loadState(), new Set(documents.map(document => document.source_id)));
       const gapByCandidate = new Map<string, string>();
       const suggestionByCandidate = new Map<string, string>();
       const representative = new Map<string, GapCandidate>();
+      const firstByFinding = new Map<string, GapCandidate>();
+      const aliases = new Map<string, GapCandidate>();
       const unrecorded = outcome.accepted.filter(candidate => {
-        const previous = recorded.get(sourceQuoteKey(candidate.source_id, candidate.source_quote));
+        const key = gapFindingKey(candidate);
+        const first = firstByFinding.get(key);
+        if (first) {
+          aliases.set(candidate.id, first);
+          return false;
+        }
+        firstByFinding.set(key, candidate);
+        const previous = recorded.get(key);
         if (previous?.gap_id) gapByCandidate.set(candidate.id, previous.gap_id);
         if (previous?.suggestion_id) suggestionByCandidate.set(candidate.id, previous.suggestion_id);
         return !previous;
       });
       for (const candidate of unrecorded) {
-        const target = followSameAs(candidate, accepted);
+        const terminal = followSameAs(candidate, accepted);
+        const target = terminal && (aliases.get(terminal.id) ?? terminal);
         if (!target || target.id === candidate.id) continue;
-        const previous = recorded.get(sourceQuoteKey(target.source_id, target.source_quote));
+        const previous = recorded.get(gapFindingKey(target));
         // A closed destination (e.g. a rejected suggestion) cannot consume a new source.
         if (!previous || previous.gap_id || previous.suggestion_id) representative.set(candidate.id, target);
       }
@@ -874,6 +908,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
               gap_id: candidate.match_gap_id!,
               run_id: ctx.run.id,
               candidate_row_id: rowIdByCandidate.get(candidate.id) ?? null,
+              block_id: provenanceOf(candidate).block_id,
               name: candidate.name,
               statement: candidate.statement,
               domain: candidate.domain,
@@ -902,7 +937,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
           const suggestionId = suggestionByCandidate.get(representative.get(candidate.id)!.id);
           if (!suggestionId) continue;
           await addSuggestionSources(suggestionId, [
-            { source_id: candidate.source_id, statement: candidate.statement, source_quote: candidate.source_quote },
+            { source_id: candidate.source_id, statement: candidate.statement, source_quote: candidate.source_quote, domain: candidate.domain, provenance: provenanceOf(candidate) },
           ]);
         }
         if (onGap.length === 0) continue;
@@ -913,6 +948,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
               statement: candidate.statement,
               source_quote: candidate.source_quote,
               gap_id: gapByCandidate.get(representative.get(candidate.id)!.id)!,
+              domain: candidate.domain,
               provenance: provenanceOf(candidate),
             })),
             gaps: [],
@@ -921,6 +957,10 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
         committed_need_ids.push(...result.need_ids);
         joined_gap_ids.push(...Object.values(result.gap_id_by_row));
         for (const [id, gapId] of Object.entries(result.gap_id_by_row)) gapByCandidate.set(id, gapId);
+      }
+      for (const [id, first] of aliases) {
+        const gapId = gapByCandidate.get(first.id);
+        if (gapId) gapByCandidate.set(id, gapId);
       }
       // Every candidate row says which gap it became or joined (KAN-97).
       for (const [candidateId, gapId] of gapByCandidate) {

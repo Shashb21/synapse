@@ -1,4 +1,4 @@
-import { customerErrorMessage } from "@/modules/kernel/stage-errors";
+import { customerErrorMessage, TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { queueSourceComparison } from "@/lib/ingest/compare-source";
 import { and, desc, eq, gte, inArray } from "drizzle-orm";
 import { z } from "zod";
@@ -414,6 +414,25 @@ export async function currentExtractionDocuments(document_ids?: string[]) {
     if (blocks.length) documents.push({ ...header, blocks, quality: qualityOf(blocks) });
   }
   return { documents, source_by_document };
+}
+
+/** Hold the same row locks as the source editor and recheck the exact documents supplied to the model. */
+export async function lockCurrentExtractionDocuments(documents: ParsedDocumentRecord[]): Promise<void> {
+  if (!documents.length) return;
+  await db().select({ id: iegp.sources.id }).from(iegp.sources)
+    .where(inArray(iegp.sources.id, documents.map(doc => doc.source_id)))
+    .orderBy(iegp.sources.id).for("update");
+  const current = await currentExtractionDocuments(documents.map(doc => doc.id));
+  const byId = new Map(current.documents.map(doc => [doc.id, doc]));
+  for (const frozen of documents) {
+    const live = byId.get(frozen.id);
+    if (!live || live.blocks.length !== frozen.blocks.length || live.blocks.some((block, index) => {
+      const before = frozen.blocks[index]!;
+      return block.id !== before.id || block.text !== before.text || block.heading !== before.heading || block.location !== before.location;
+    })) {
+      throw new TrustedApplicationError("The source changed during extraction. Rerun extraction using the current document.");
+    }
+  }
 }
 
 /** Scope a frozen evaluation case using only its snapshot, including older snapshots with no aliases. */

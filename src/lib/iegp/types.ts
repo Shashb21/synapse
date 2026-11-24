@@ -214,7 +214,14 @@ export type GapConfirmer = {
 export type GapSuggestionStatus = "pending" | "merged" | "split" | "rejected";
 
 /** A source sentence waiting on a suggestion: it follows the suggestion's outcome. */
-export type GapSuggestionSource = { source_id: string; statement: string; source_quote: string };
+export type NeedProvenance = { run_id?: string | null; candidate_row_id?: string | null; block_id?: string | null };
+export type GapSuggestionSource = {
+  source_id: string;
+  statement: string;
+  source_quote: string;
+  domain?: EvidenceDomain;
+  provenance?: NeedProvenance;
+};
 
 /**
  * A candidate gap the S2 judge found to overlap an existing gap (KAN-74): part of
@@ -227,6 +234,7 @@ export type GapSuggestion = {
   run_id: string;
   /** The S2 candidate row (gap_candidates), so a rejected one can be promoted later. */
   candidate_row_id: string | null;
+  block_id?: string | null;
   source_id: string;
   name: string;
   statement: string;
@@ -540,6 +548,7 @@ export type IegpState = {
 /** Source-owned overlap proposal; model baseline and human edits are retained separately. */
 export type TacticSuggestion = {
   id: string; version: string; run_id: string; document_id: string; source_id: string; source_quote: string;
+  finding_key?: string;
   target_tactic_id: string; expected_tactic_version: string; reviewed_parent: Tactic;
   shared_scope: string; new_scope: string; expansion: ExpansionScope; original_expansion: ExpansionScope;
   separate: SeparateTacticOption; original_separate: SeparateTacticOption; gap_id: string | null;

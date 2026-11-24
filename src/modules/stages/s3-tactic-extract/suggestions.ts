@@ -1,9 +1,9 @@
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { withRelationshipChange } from "@/lib/iegp/relationship-change";
 /** S3 source review: immutable model baseline, source provenance and atomic human decisions. */
-import { sourceQuoteKey } from "@/lib/ingest/manual-blocks";
+import { sourceFindingKey } from "@/lib/ingest/manual-blocks";
 import { createHash } from "node:crypto";
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensureCurrentSchemaTables } from "@/lib/iegp/db";
 import * as t from "@/lib/iegp/schema";
@@ -14,7 +14,7 @@ import type { Actor, ExpansionScope, SeparateTacticOption, Tactic, TacticSuggest
 import { requireRationale } from "@/modules/kernel/edit-records";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { captureTacticSuggestionDecision } from "@/lib/iegp/learning-capture";
-import { tacticSourceReferences, tacticSuggestions } from "./schema";
+import { tacticCandidates, tacticSourceReferences, tacticSuggestions } from "./schema";
 
 export const separateTacticOptionSchema = z.object({name: z.string().trim().min(1), type: z.enum(TACTIC_TYPES), status: z.enum(TACTIC_STATUSES), evidence_question: z.string().trim().min(1)}).strict();
 const quoteKey = (quote: string) => quote.toLowerCase().replace(/\s+/g, " ").trim();
@@ -24,13 +24,23 @@ function requireActor(actor: Actor) {
 /** Bootstrap before reserving a transaction; never borrow a second reader from inside it. */
 export async function ensureTacticSuggestionSchema() { await ensureCurrentSchemaTables(); }
 /** Attach an exact source sentence once, leaving all parent fields and locks intact. */
-export async function attachTacticSource(args: {tactic_id: string; source_id: string; source_quote: string}, transaction?: ExpansionTransaction) {
+export async function attachTacticSource(args: {tactic_id: string; source_id: string; source_quote: string; finding_key?: string}, transaction?: ExpansionTransaction) {
   if (!args.source_quote.trim()) throw new TrustedApplicationError("Source quote is required.");
   const run = async (tx: ExpansionTransaction) => {
     const [parent] = await tx.select().from(t.tactics).where(eq(t.tactics.id, args.tactic_id)).for("update");
     const [source] = await tx.select().from(t.sources).where(eq(t.sources.id, args.source_id));
     if (!parent || !source) throw new TrustedApplicationError("Tactic or source not found in this workspace.", "not_found", 404);
-    await tx.insert(tacticSourceReferences).values({...args, id: newId("TSRC"), quote_key: quoteKey(args.source_quote), created_at: nowIso()}).onConflictDoNothing();
+    const { finding_key, ...reference } = args;
+    const quote_key = quoteKey(args.source_quote);
+    const key = finding_key ?? sourceFindingKey(args.source_id, args.source_quote, parent.type, parent.evidence_question);
+    const [existing] = await tx.select().from(tacticSourceReferences).where(and(
+      eq(tacticSourceReferences.tactic_id, args.tactic_id), eq(tacticSourceReferences.source_id, args.source_id), eq(tacticSourceReferences.quote_key, quote_key),
+    ));
+    if (!existing) {
+      await tx.insert(tacticSourceReferences).values({ ...reference, id: newId("TSRC"), quote_key, finding_keys: [key], created_at: nowIso() });
+    } else if (!existing.finding_keys.includes(key)) {
+      await tx.update(tacticSourceReferences).set({ finding_keys: [...existing.finding_keys, key] }).where(eq(tacticSourceReferences.id, existing.id));
+    }
   };
   if (transaction) return run(transaction);
   await ensureTacticSuggestionSchema(); return db().transaction(run);
@@ -42,29 +52,60 @@ export async function listTacticSourceReferences(tacticId: string) {
 }
 /** Read every already-inventoried or reviewed sentence for the sources in a production rerun. */
 export async function recordedTacticEvidence(sourceIds: string[], tactics: Tactic[]) {
-  const references = await db().select({ source_id: tacticSourceReferences.source_id, source_quote: tacticSourceReferences.source_quote })
+  const references = await db().select()
     .from(tacticSourceReferences).where(inArray(tacticSourceReferences.source_id, sourceIds));
   const reviews = await db().select({ payload: tacticSuggestions.payload })
     .from(tacticSuggestions).where(inArray(tacticSuggestions.source_id, sourceIds));
-  const keys = new Set([...references, ...reviews.map(row => row.payload as TacticSuggestion)]
-    .map(row => sourceQuoteKey(row.source_id, row.source_quote)));
+  const keys = new Set<string>();
+  const byId = new Map(tactics.map(tactic => [tactic.id, tactic]));
+  for (const reference of references) {
+    const parent = byId.get(reference.tactic_id);
+    if (reference.finding_keys.length) {
+      for (const key of reference.finding_keys) keys.add(key);
+    } else if (parent) {
+      keys.add(sourceFindingKey(reference.source_id, reference.source_quote, parent.type, parent.evidence_question));
+    }
+  }
+  const suggestions = reviews.map(review => review.payload as TacticSuggestion);
+  const legacyRuns = suggestions.filter(suggestion => !suggestion.finding_key).map(suggestion => suggestion.run_id);
+  // Older reviews retained the proposed alternative, which can ask a different question from the candidate.
+  const originals = legacyRuns.length ? await db().select().from(tacticCandidates).where(and(
+    inArray(tacticCandidates.run_id, legacyRuns), inArray(tacticCandidates.source_id, sourceIds),
+    eq(tacticCandidates.match, "overlaps"), eq(tacticCandidates.verdict, "accept"),
+  )) : [];
+  for (const row of suggestions) {
+    if (row.finding_key) {
+      keys.add(row.finding_key);
+      continue;
+    }
+    const matching = originals.filter(candidate => candidate.run_id === row.run_id && candidate.document_id === row.document_id
+      && candidate.target_tactic_id === row.target_tactic_id && quoteKey(candidate.source_quote) === quoteKey(row.source_quote));
+    if (matching.length) {
+      for (const candidate of matching) keys.add(sourceFindingKey(candidate.source_id, candidate.source_quote, candidate.type, candidate.evidence_question));
+    } else {
+      keys.add(sourceFindingKey(row.source_id, row.source_quote, row.original_separate.type, row.original_separate.evidence_question));
+    }
+  }
   // Older extracted tactics have no reference row. Only use their explicit source marker.
+  const referenced = new Set(references.map(row => JSON.stringify([row.tactic_id, row.source_id, quoteKey(row.source_quote)])));
   const byMarker = new Map(sourceIds.map(id => [`Extracted from ${id}`, id]));
   for (const tactic of tactics) {
     const sourceId = byMarker.get(tactic.intended_use);
-    if (sourceId && tactic.source_quote?.trim()) keys.add(sourceQuoteKey(sourceId, tactic.source_quote));
+    if (sourceId && tactic.source_quote?.trim() && !referenced.has(JSON.stringify([tactic.id, sourceId, quoteKey(tactic.source_quote)]))) {
+      keys.add(sourceFindingKey(sourceId, tactic.source_quote, tactic.type, tactic.evidence_question));
+    }
   }
   return keys;
 }
 
 /** Persist one overlap per source sentence and parent; reruns never erase a human decision. */
 export async function createTacticSuggestion(args: {
-  run_id: string; document_id: string; source_id: string; source_quote: string; target_tactic_id: string;
+  finding_key?: string; run_id: string; document_id: string; source_id: string; source_quote: string; target_tactic_id: string;
   expected_tactic_version: string; shared_scope: string; new_scope: string; expansion: ExpansionScope; separate: SeparateTacticOption;
 }): Promise<TacticSuggestion> {
   const expansion = expansionScopeSchema.parse(args.expansion), separate = separateTacticOptionSchema.parse(args.separate);
   if (![args.run_id, args.document_id, args.source_quote, args.shared_scope, args.new_scope].every(s => s.trim())) throw new TrustedApplicationError("Overlap requires source lineage, quote, shared and added scope.");
-  const source_key = createHash("sha256").update(JSON.stringify([args.source_id, args.target_tactic_id, quoteKey(args.source_quote)])).digest("hex");
+  const source_key = createHash("sha256").update(JSON.stringify([args.source_id, args.target_tactic_id, args.finding_key ?? quoteKey(args.source_quote)])).digest("hex");
   await ensureTacticSuggestionSchema();
   return db().transaction(async tx => {
     const [parentRow] = await tx.select().from(t.tactics).where(eq(t.tactics.id, args.target_tactic_id)).for("update");

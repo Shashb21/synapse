@@ -19,9 +19,9 @@ export function squashText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-/** Stable identity of an extracted sentence, independent of the run and the model's wording. */
-export function sourceQuoteKey(sourceId: string, quote: string): string {
-  return JSON.stringify([sourceId, squashText(quote).toLowerCase()]);
+/** A source passage can support multiple questions. Display names and run IDs can change on rerun. */
+export function sourceFindingKey(sourceId: string, quote: string, kind: string, question: string): string {
+  return JSON.stringify([sourceId, squashText(quote).toLowerCase(), kind, squashText(question).toLowerCase()]);
 }
 
 /** True when `quote` is a (whitespace-insensitive) span of `text`. */

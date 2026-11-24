@@ -23,12 +23,12 @@ import {
   type TacticType,
 } from "@/lib/iegp/enums";
 import { tacticVersion, expansionScopeSchema, modelExpansionScope } from "@/lib/iegp/tactic-expansions";
-import { sourceQuoteKey } from "@/lib/ingest/manual-blocks";
+import { sourceFindingKey } from "@/lib/ingest/manual-blocks";
 import { createTacticSuggestion, recordedTacticEvidence, separateTacticOptionSchema } from "./suggestions";
 import type { ExpansionScope, SeparateTacticOption, Tactic } from "@/lib/iegp/types";
 import { commitExtractedRecords, loadState, withExtractionCommit } from "@/lib/iegp/store";
 import { extractCandidateTactics } from "@/lib/iegp/engine";
-import { currentExtractionDocuments, selectedExtractionDocuments, listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
+import { lockCurrentExtractionDocuments, currentExtractionDocuments, selectedExtractionDocuments, listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
 import { TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL, TACTIC_MATCHING_DDL, tacticCandidates } from "./schema";
 import { plural } from "@/lib/plural";
 
@@ -697,8 +697,15 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
 
     const committed_tactic_ids: string[] = [];
     if (!ctx.replay?.evaluation && !input.dry_run) await withExtractionCommit("S3", async () => {
-      const recorded = await recordedTacticEvidence(documents.map(doc => doc.source_id), state.tactics);
-      const unrecorded = accepted.filter(candidate => !recorded.has(sourceQuoteKey(candidate.source_id, candidate.source_quote)));
+      await lockCurrentExtractionDocuments(documents);
+      const recorded = await recordedTacticEvidence(documents.map(doc => doc.source_id), (await loadState()).tactics);
+      const keyOf = (candidate: TacticCandidate) => sourceFindingKey(candidate.source_id, candidate.source_quote, candidate.type, candidate.evidence_question);
+      const unrecorded = accepted.filter(candidate => {
+        const key = keyOf(candidate);
+        if (recorded.has(key)) return false;
+        recorded.add(key);
+        return true;
+      });
       for (const document of documents) {
         const fromDocument = unrecorded.filter((candidate) => candidate.document_id === document.id && candidate.match !== "overlaps");
         if (fromDocument.length === 0) continue;
@@ -730,7 +737,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
 
       for (const candidate of unrecorded.filter(c => c.match === "overlaps")) {
         const parent = state.tactics.find(t => t.id === candidate.target_tactic_id)!;
-        await createTacticSuggestion({run_id: ctx.run.id, document_id: candidate.document_id, source_id: candidate.source_id, source_quote: candidate.source_quote,
+        await createTacticSuggestion({finding_key: keyOf(candidate), run_id: ctx.run.id, document_id: candidate.document_id, source_id: candidate.source_id, source_quote: candidate.source_quote,
           target_tactic_id: parent.id, expected_tactic_version: tacticVersion(parent), shared_scope: candidate.shared_scope!, new_scope: candidate.new_scope!, expansion: candidate.expansion!, separate: candidate.separate!});
       }
     });

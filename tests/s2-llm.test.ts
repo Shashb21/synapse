@@ -230,6 +230,47 @@ describe("S2 on the model path", () => {
     expect(after.needs).toContainEqual(expect.objectContaining({source_quote: newQuote}));
   });
 
+  it("claims repeated findings within a batch and keeps distinct questions citing the same sentence on rerun", async () => {
+    const quote = "The fictional Finch review requests comparative effectiveness and persistence.";
+    const run = (includePersistence: boolean) => {
+      const { ctx } = context(call => {
+        if (call.purpose.startsWith("gap-proposer:")) return { gaps: [
+          { ...gapA, source_quote: quote }, { ...gapA, source_quote: quote },
+          ...(includePersistence ? [{ ...gapB, source_quote: quote }] : []),
+        ] };
+        if (call.purpose === "gap-critic") return keepAll(call);
+        return { decisions: subjectsOf(call, "candidates").map(subject => ({
+          subject, verdict: "accept", match: "new", confidence: 90, reason: "Finch source",
+        })) };
+      });
+      return gapExtractModule.run(input(false), ctx);
+    };
+    const first = await run(false);
+    expect(first.output.committed_gap_ids).toHaveLength(1);
+    const { editNeed } = await import("@/lib/iegp/store");
+    await editNeed({ need_id: first.output.committed_need_ids[0]!, statement: "The panel refined this question.",
+      actor_name: ACTOR.name, actor_function: ACTOR.function, rationale: "Record the reviewed wording." });
+    expect((await run(true)).output.committed_gap_ids).toHaveLength(1);
+    expect((await run(true)).output.committed_gap_ids).toEqual([]);
+  });
+
+  it("discards a frozen run when a reviewer edits its source during the model call", async () => {
+    const { editSourceBlock, listSourceBlocks } = await import("@/lib/iegp/source-blocks");
+    const sourceId = (await listParsedDocuments([documentId]))[0]!.source_id;
+    const block = (await listSourceBlocks(sourceId))[0]!;
+    const { ctx } = context(async call => {
+      if (call.purpose.startsWith("gap-proposer:")) return { gaps: [{ ...gapA, source_quote: block.text }] };
+      if (call.purpose === "gap-critic") return keepAll(call);
+      await editSourceBlock({ block_id: block.id, text: block.text + " Updated during extraction.", actor: ACTOR, rationale: "Correct source wording." });
+      return { decisions: subjectsOf(call, "candidates").map(subject => ({
+        subject, verdict: "accept", match: "new", confidence: 90, reason: "Source",
+      })) };
+    });
+    const before = await loadState();
+    await expect(gapExtractModule.run(input(false), ctx)).rejects.toThrow(/source.*changed/i);
+    expect((await loadState()).gaps).toEqual(before.gaps);
+  });
+
   it("fails the run when the model never supplies a source quote", async () => {
     const { ctx } = context((call) => {
       if (call.purpose.startsWith("gap-proposer:")) return { gaps: [{ ...gapA, source_quote: "" }] };
