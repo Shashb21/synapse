@@ -123,7 +123,13 @@ function materializeSplitBlocks(unit: RawUnit, blocks: UnitAnswer["blocks"]): st
   }
   return matches.map((match, index) => {
     const start = index === 0 && match.normalizedStart === 0 ? 0 : match.start;
-    const end = index === matches.length - 1 && match.normalizedEnd === source.text.length ? unit.text.length : match.end;
+    const next = matches[index + 1];
+    const gap = next ? unit.text.slice(match.end, next.start) : "";
+    const end = next && /^\s*$/.test(gap)
+      ? next.start
+      : index === matches.length - 1 && match.normalizedEnd === source.text.length
+        ? unit.text.length
+        : match.end;
     return unit.text.slice(start, end);
   });
 }

@@ -171,6 +171,39 @@ describe("LLM structuring", () => {
     expect(result.blocks.map((block) => block.text).join("")).toBe(first + second);
   });
 
+  it("preserves whitespace gaps between multiple accepted blocks in one split piece", async () => {
+    const left = `${"L".repeat(6_000)}Alpha`;
+    const gap = "  \n\n";
+    const right = `Beta${"R".repeat(5_987)}`;
+    const firstPiece = left + gap + right;
+    const secondPiece = "tail";
+    expect(firstPiece).toHaveLength(12_000);
+    const { ask, calls } = scripted((call) => ({
+      units: idsOf(call).map((id) => {
+        const row = (call.body.units as { unit: string; text: string }[]).find((unit) => unit.unit === id)!;
+        return id === "u1"
+          ? {
+              unit: id,
+              blocks: [
+                { text: left, kind: "paragraph", heading: null },
+                { text: right, kind: "paragraph", heading: null },
+              ],
+            }
+          : { unit: id, blocks: [{ text: row.text, kind: "paragraph", heading: null }] };
+      }),
+    }));
+
+    const result = await structureWithLlm({
+      filename: "multi-block-gap.txt",
+      units: [{ location: { kind: "page", ref: "p.12" }, text: firstPiece + secondPiece }],
+      ask,
+    });
+
+    expect(calls.map((call) => idsOf(call))).toEqual([["u1"], ["u2"]]);
+    expect(result.blocks.map((block) => block.text)).toEqual([left + gap, right, secondPiece]);
+    expect(result.blocks.map((block) => block.text).join("")).toBe(firstPiece + secondPiece);
+  });
+
   it("keeps identical split pieces as separate accepted occurrences", async () => {
     const piece = "same".repeat(3_000);
     const { ask, calls } = scripted((call) => ({
