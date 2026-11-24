@@ -49,24 +49,38 @@ function activityWords(label: string, quote: string): Set<string> {
   return new Set((label.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter(word => quoted.has(word) && !generic.test(word)));
 }
 
+/** Distinguish cited aliases, coordinated activities, and titles merely mentioned together. */
+function citedActivityRelation(quote: string, left: string, right: string): "same" | "different" | "unknown" | undefined {
+  const words = (value: string) => (value.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).join(" ");
+  const leftName = words(left).replace(/^(?:the|an?) /, "");
+  const rightName = words(right).replace(/^(?:the|an?) /, "");
+  if (!leftName || !rightName) return;
+  if (leftName === rightName) return "same";
+  // Replace the longer complete title first so a nested title cannot represent both.
+  const titles = [leftName, rightName].sort((a, b) => b.length - a.length);
+  const title = new RegExp(`(^| )(${titles.join("|")})(?= |$)`, "g");
+  const sentences = quote.split(/[;.!?]/u).map(sentence => words(sentence).replace(
+    title, (_match, space: string, name: string) => space + (name === leftName ? "<a>" : "<b>"),
+  ));
+  const evidence = sentences.join(" ");
+  if (!evidence.includes("<a>") || !evidence.includes("<b>")) return;
+  // Give alias evidence priority over a conjunction within the rename itself.
+  const alias = /(<[ab]>) (?:was |is |has been )?(?:renamed(?: to| as| and is now called)?|(?:now |formerly |also )?(?:called|known as)) (?:the )?(?!\1)<[ab]>/;
+  if (sentences.some(sentence => alias.test(sentence))) return "same";
+  const coordination = /(<[ab]>) and (?:the )?(?!\1)<[ab]> (?:both|each|(?:are|were) (?:two )?(?:separate|distinct|different))\b/;
+  const contrast = /(<[ab]>) (?:.*? )?(?:whereas|versus) (?:the )?(?!\1)<[ab]>/;
+  if (sentences.some(sentence => coordination.test(sentence) || contrast.test(sentence))) return "different";
+  return "unknown";
+}
+
 function compareActivities(quote: string, left?: string, right?: string): "same" | "different" | "unknown" {
   if (left === right) return "same";
   if (!left || !right) return "unknown";
-  // A complete label on each side of a list or contrast identifies two activities.
-  // Match whole words and remove the longer label before looking for the shorter
-  // one, so “North Registry 2” alone never counts as two separate mentions.
-  const words = (value: string) => ` ${(value.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).join(" ")} `;
-  const leftName = words(left).replace(/^ (?:the|an?) /, " ");
-  const rightName = words(right).replace(/^ (?:the|an?) /, " ");
-  if (leftName === rightName) return "same";
-  const [shorter, longer] = leftName.length <= rightName.length ? [leftName, rightName] : [rightName, leftName];
-  const clauses = quote.split(/\b(?:and|versus|whereas|while|as well as)\b|[;.!?]/iu).map(words);
-  const longIndex = clauses.findIndex(clause => clause.includes(longer));
-  if (longIndex >= 0 && clauses.some((clause, i) => i !== longIndex && clause.replaceAll(longer, " ").includes(shorter))) {
-    return "different";
-  }
+  const cited = citedActivityRelation(quote, left, right);
+  if (cited === "same" || cited === "different") return cited;
   const a = activityWords(left, quote), b = activityWords(right, quote);
   if ([...a].some(word => !b.has(word)) && [...b].some(word => !a.has(word))) return "different";
+  if (cited === "unknown") return "unknown";
   return [...a].some(word => b.has(word)) ? "same" : "unknown";
 }
 
@@ -133,7 +147,8 @@ export function reclassifiedFindings(current: Iterable<string>, prior: Iterable<
           const names = claimedNames.get(previous) ?? new Set<string>();
           names.add(name);
           claimedNames.set(previous, names);
-          if (names.size > 1) {
+          const quote = findingParts(key)![1];
+          if (names.size > 1 && [...names].some(other => other !== name && citedActivityRelation(quote, name, other) !== "same")) {
             throw new TrustedApplicationError("Several activities could refer to the same recorded finding. Review the original passage before retrying.", "ambiguous_source_finding", 409);
           }
         }

@@ -29,6 +29,18 @@ describe("extraction finding identity", () => {
     expect(() => reclassifiedFindings([original, ungrounded], [named()])).toThrow(/unresolved activity/);
   });
 
+  it.each([
+    ["The North Registry and the North Extension Registry both track safety.", "different"],
+    ["The North Registry tracks safety, whereas the North Extension Registry tracks mortality.", "different"],
+    ["The North Registry concluded. The North Extension Registry tracks safety.", "unresolved"],
+  ])("preserves separately cited names when the passage says %s", (quote, relationship) => {
+    const keyFor = (name: string) => sourceFindingKey("s", quote, "registry", "What is safety?", name);
+    const old = keyFor("North Registry"), incoming = keyFor("North Extension Registry");
+    const reconcile = () => reclassifiedFindings([incoming], [old]);
+    if (relationship === "unresolved") expect(reconcile).toThrow(/unresolved activity/);
+    else expect(reconcile().has(incoming)).toBe(false);
+  });
+
   it("requires resolution before a different question on an already recorded passage can overwrite or duplicate a decision", () => {
     expect(() => reclassifiedFindings([key("How long do people live?")], [key("What is survival?")]))
       .toThrow(/previously recorded passage/);

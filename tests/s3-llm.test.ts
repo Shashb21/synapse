@@ -449,10 +449,13 @@ describe("S3 on the model path", () => {
   });
 
   it.each([
-    ["North Registry", "North Extension Registry", false],
-    ["Birch Registry", "Birch Registry 2", true],
-  ] as const)("records separately cited %s and %s across retries", async (first, second, repeatFirst) => {
-    const quote = `${first} and the ${second} are separate registries tracking survival.`;
+    { first: "North Registry", second: "North Extension Registry", repeatFirst: false, renamed: false },
+    { first: "Birch Registry", second: "Birch Registry 2", repeatFirst: true, renamed: false },
+    { first: "North Registry", second: "North Extension Registry", repeatFirst: false, renamed: true },
+  ])("reconciles the cited $first and $second on retry (renamed $renamed)", async ({first, second, repeatFirst, renamed}) => {
+    const quote = renamed
+      ? `The ${first} was renamed and is now called the ${second}. It tracks survival.`
+      : `${first} and the ${second} are separate registries tracking survival.`;
     const run = (names: string[]) => {
       const { ctx } = context(call => call.purpose.startsWith("tactic-proposer:")
         ? { tactics: names.map(name => good({ name, source_quote: quote, evidence_question: "What is survival?" })) }
@@ -462,8 +465,8 @@ describe("S3 on the model path", () => {
     const original = (await run([first])).output.committed_tactic_ids;
     expect(original).toHaveLength(1);
     const added = (await run(repeatFirst ? [first, second] : [second])).output.committed_tactic_ids;
-    expect(added).toHaveLength(1);
-    expect((await loadState()).tactics.find(row => row.id === added[0])?.name).toBe(second);
+    expect(added).toHaveLength(renamed ? 0 : 1);
+    if (!renamed) expect((await loadState()).tactics.find(row => row.id === added[0])?.name).toBe(second);
     expect((await run([first, second])).output.committed_tactic_ids).toEqual([]);
   });
 
@@ -626,21 +629,21 @@ describe("S3 on the model path", () => {
 
   it("keeps a decided overlap and adds a newly recognised question for the same activity", async () => {
     const { listTacticSuggestions, decideTacticSuggestion } = await import("@/modules/stages/s3-tactic-extract/suggestions");
-    const quote = "The Rowan registry assesses survival and quality of life.";
+    const quote = "The Rowan registry is now called the Rowan Extension registry. It assesses survival and quality of life.";
     const { listParsedDocuments } = await import("@/modules/stages/s1-parse/module");
     const { addSourceBlock } = await import("@/lib/iegp/source-blocks");
     const [document] = await listParsedDocuments([documentId]);
     await addSourceBlock({ source_id: document!.source_id, text: quote, actor: ACTOR, rationale: "Record both registry outcomes." });
     const questions = ["What is survival?", "What is quality of life?"];
-    const run = (runId: string, selected: string[]) => {
+    const run = (runId: string, selected: string[], name = "Rowan registry") => {
       const { ctx } = context(call => {
         if (call.purpose.startsWith("tactic-proposer:")) return { tactics: selected.map(evidence_question =>
-          good({ name: "Rowan registry", status: "planned", evidence_question, source_quote: quote })) };
+          good({ name, status: "planned", evidence_question, source_quote: quote })) };
         if (call.purpose === "tactic-critic") return keepAll(call);
         return { decisions: idsOf(call, "decide").map((id, i) => ({
           id, verdict: "accept", match: "overlaps", target_tactic_id: libraryId, shared_scope: "Registry outcomes",
           new_scope: selected[i], expansion: { ...scope, evidence_question: selected[i] },
-          separate: { name: "Rowan registry", type: "registry", status: "planned", evidence_question: selected[i] },
+          separate: { name, type: "registry", status: "planned", evidence_question: selected[i] },
           confidence: 90, reason: "Source supports both outcomes.",
         })) };
       });
@@ -651,7 +654,7 @@ describe("S3 on the model path", () => {
     const [first] = (await listTacticSuggestions()).filter(row => row.source_quote === quote);
     const decided = await decideTacticSuggestion({id: first!.id, actor: ACTOR, decision: "reject", rationale: "Survival already covered."});
     await run("rowan-more", questions);
-    await run("rowan-retry", questions);
+    await run("rowan-retry", questions, "Rowan Extension registry");
     const rows = (await listTacticSuggestions()).filter(row => row.source_quote === quote);
     expect(rows).toHaveLength(2);
     expect(rows).toContainEqual(decided);
