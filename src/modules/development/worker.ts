@@ -1,4 +1,5 @@
 /** Bounded durable progression: replay real stages, dispatch one claimed raw request, checkpoint and return. */
+import { frozenRouteAllowed } from './routes';
 import { CostPause, CostSettlementPending, reserveCost, settleCost } from './cost-store';
 import { rawCallBound, developmentUsageCost } from './cost';
 import { progressEvaluation } from './evaluation-worker';
@@ -73,7 +74,7 @@ async function dispatch(execution: Execution, token: string, section: SectionAtt
   const route = call.route.actual;
   const provider = findProvider(route.provider_id);
   const api_key = providerApiKey(route.provider_id);
-  if (!provider || !providerServes(provider, route.model) || !api_key) throw new DevelopmentError(409, 'route_unavailable', 'The frozen provider/model credentials are no longer available. Start a fresh execution after correcting them.');
+  if (!frozenRouteAllowed(call.route) || !provider || !providerServes(provider, route.model) || !api_key) throw new DevelopmentError(409, 'route_unavailable', 'The frozen provider/model credentials are no longer available. Start a fresh execution after correcting them.');
   await requireSectionAi(section.section);
   await requireClaim(execution.id, token);
   await reserveCost(execution.id, call.id, 'generation', rawCallBound(route.provider_id, call.request.request));

@@ -228,6 +228,10 @@ export type JsonCompletion = (args: {
 }) => Promise<unknown>;
 
 export type ModuleContext = {
+  /** Kernel collects model-derived writes until the complete output has passed validation. */
+  deferWrite?: (write: () => Promise<void>) => void;
+  /** The stage has committed its customer edits on its own workspace transaction. */
+  onMutationCommitted?: () => void;
   execution_policy?: "standard" | "single_pass";
   /** Enables source-only candidate eligibility, never customer acceptance. Requires evaluation replay. */
   execution_scope?: "development";

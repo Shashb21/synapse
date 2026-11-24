@@ -17,7 +17,7 @@ export function exactDevelopmentPrice(providerId: string, model: string): PriceE
 export function developmentUsageCost(providerId: string, model: string, usage: LlmUsage | null): UsageCost {
   const price = exactDevelopmentPrice(providerId, model);
   if (!price) return { cost_usd: null, price, reason: 'No exact provider/model price is available.' };
-  if (!usage || usage.source !== 'provider' || usage.input_tokens_source === 'estimated' || usage.output_tokens_source === 'estimated' || ![usage.input_tokens, usage.output_tokens].every(n => typeof n === 'number' && Number.isFinite(n) && n >= 0)) return { cost_usd: null, price, reason: 'Complete provider-reported token counts are unavailable.' };
+  if (!usage || usage.prior_charge_unknown || usage.source !== 'provider' || usage.input_tokens_source === 'estimated' || usage.output_tokens_source === 'estimated' || ![usage.input_tokens, usage.output_tokens].every(n => typeof n === 'number' && Number.isFinite(n) && n >= 0)) return { cost_usd: null, price, reason: 'Complete provider-reported token counts are unavailable.' };
   const cost = (usage.input_tokens! * price.input_per_million + usage.output_tokens! * price.output_per_million) / 1_000_000;
   return Number.isFinite(cost) ? { cost_usd: cost, price, reason: null } : { cost_usd: null, price, reason: 'Usage exceeds the supported numeric range.' };
 }

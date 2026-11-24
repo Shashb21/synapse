@@ -1,5 +1,8 @@
 import { HISTORICAL_FAILURE_MESSAGE } from "./failure-presentation";
 import { sql } from "drizzle-orm";
+import { currentModelRun } from "./model-run";
+import { TrustedApplicationError } from "./stage-errors";
+import { RETRY } from "@/modules/llm/provider";
 import { sharedDb } from "./db";
 import { newId } from "./ids";
 import { estimateCallCost, usageFromMessages } from "@/modules/llm/cost";
@@ -232,6 +235,8 @@ export async function tracedCompletion(args: {
     args.step,
     async () => {
       let usage: LlmUsage | null = null;
+      let sends = 0;
+      const modelRun = currentModelRun();
       const began = Date.now();
       const record = async (reply: string | null, error: string | null) => {
         try {
@@ -264,17 +269,23 @@ export async function tracedCompletion(args: {
       };
       // A local refusal before the first send belongs in the run trace only.
       if (!isDemoReplayProvider(args.provider.id)) args.requestBudget?.check();
+      modelRun?.check();
       let text: string;
       try {
         if (isDemoReplayProvider(args.provider.id)) {
           // Client demo (KAN-138): the recorded run's answer, after a short "thinking" pause. No model is called.
-          await new Promise((resolve) => setTimeout(resolve, replayDelayMs()));
+          await RETRY.sleep(replayDelayMs(), modelRun?.signal);
           text = replayReply({ stage: args.stage, purpose: args.purpose, system: args.request.system, user: args.request.user });
         } else {
           await args.beforeSend?.();
-          text = await args.provider.complete(args.request, { api_key: args.api_key }, { requestBudget: args.requestBudget, maxAttempts: args.maxAttempts, onUsage: (reported) => (usage = reported) });
+          text = await args.provider.complete(args.request, { api_key: args.api_key }, {
+            run: modelRun, requestBudget: args.requestBudget, maxAttempts: args.maxAttempts,
+            onDispatch: () => { sends++; },
+            onUsage: reported => { usage = sends > 1 ? { ...reported, prior_charge_unknown: true } : reported; },
+          });
         }
       } catch (error) {
+        if (error instanceof TrustedApplicationError && sends === 0) throw error;
         usage = callUsage({ usage, status: "error", reply: null, system_prompt: args.request.system, user_prompt: args.request.user });
         const id = await record(null, error instanceof Error ? error.message : String(error));
         // The trace step names the failed call too (observability.ts reads this).

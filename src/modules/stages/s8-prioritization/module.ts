@@ -1,3 +1,4 @@
+import { commitStageMutation } from "@/modules/kernel/stage-publication";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { createHash } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
@@ -463,7 +464,8 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
 
     if (!ctx.replay?.evaluation && !input.dry_run) {
       await ensurePlacementSchema();
-      await db().transaction(async (tx) => {
+      await commitStageMutation(ctx, async (markWritten) => {
+        const tx = db();
         await lockObjectiveContext();
         for (const placement of [...outcome.accepted].sort((a, b) => a.gap_id.localeCompare(b.gap_id))) {
           await tx.execute(sql`SELECT id FROM gaps WHERE id = ${placement.gap_id} FOR UPDATE`);
@@ -540,6 +542,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
             .insert(placementsTable)
             .values(values)
             .onConflictDoUpdate({ target: placementsTable.gap_id, set: values });
+          markWritten();
         }
       });
     }

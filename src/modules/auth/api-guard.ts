@@ -8,7 +8,7 @@ import { NoWorkspaceError, selectedWorkspaceId } from "@/modules/workspaces/cont
 import { principalOf } from "@/modules/workspaces/session";
 import { getWorkspace, memberRole, type WorkspaceWithRole } from "@/modules/workspaces/store";
 import { currentSession, SESSION_COOKIE, type Session } from "./session";
-import { NoRouteError, ProviderError } from "@/modules/llm/provider";
+import { ModelAnswerError, NoRouteError, ProviderError } from "@/modules/llm/provider";
 import { customerErrorMessage, ownerErrorMessage, TrustedApplicationError, IncompleteAnswerError, stageOf } from "@/modules/kernel/stage-errors";
 import { noLlmBody } from "@/modules/kernel/no-llm";
 import { ownerAccess } from "./owner";
@@ -185,12 +185,13 @@ async function requestIsOwner(): Promise<boolean> {
 
 /** Safe failure body for either audience; fallback must be fixed application-owned copy. */
 export function stageFailureBody(error: unknown, owner: boolean, fallback = "We couldn't complete this action. Check the current state before trying again. If this continues, contact your Synapse administrator.") {
-  const trusted = error instanceof ProviderError || error instanceof TrustedApplicationError || error instanceof IncompleteAnswerError;
+  const trusted = error instanceof ModelAnswerError || error instanceof ProviderError || error instanceof TrustedApplicationError || error instanceof IncompleteAnswerError;
   const message = trusted ? (owner ? ownerErrorMessage(error) : customerErrorMessage(error)) : fallback;
   const stage = stageOf(error);
   return {
     error: message,
     safe_error: true,
+    ...(error instanceof ModelAnswerError ? { code: error.kind } : {}),
     ...(error instanceof ProviderError ? { code: "provider_error", provider_error: error.kind } : {}),
     ...(stage ? { stage } : {}),
   };
@@ -231,6 +232,9 @@ export async function apiErrorResponse(error: unknown, fallback = "We couldn't c
   if (error instanceof NoRouteError) return noLlmResponse(error.message);
   if (error instanceof ZodError) {
     return NextResponse.json({ safe_error: true, error: zodMessage(error), code: "invalid_request" }, { status: 400 });
+  }
+  if (error instanceof ModelAnswerError) {
+    return NextResponse.json(stageFailureBody(error, false), { status: 502 });
   }
   if (error instanceof TrustedApplicationError) {
     return NextResponse.json({ ...stageFailureBody(error, false), code: error.code }, { status: error.status });

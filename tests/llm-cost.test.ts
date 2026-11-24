@@ -39,7 +39,7 @@ describe("LLM cost estimates", () => {
   });
 
   it.each([
-    [null, null, null], [null, 1_000_000, 8], [1_000_000, null, 2], [0, 0, 0],
+    [null, null, null], [null, 1_000_000, null], [1_000_000, null, null], [0, 0, 0],
   ])("preserves missing and zero usage semantics (%s, %s)", (input_tokens, output_tokens, expected) => {
     const args = { provider_id: "openai", model: "gpt-4.1", usage: { input_tokens, output_tokens } };
     const result = estimateCallCost(args);

@@ -1,3 +1,4 @@
+import { currentModelRun, withModelRun } from "@/modules/kernel/model-run";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { customerErrorMessage } from "@/modules/kernel/stage-errors";
 /** Recoverable ingestion: each request commits at most one stage and its checkpoint. */
@@ -85,6 +86,7 @@ export type IngestProgress = {
 };
 
 type IngestArgs = {
+  signal?: AbortSignal;
   files?: IngestFile[];
   demo_ids?: string[];
   actor: Actor;
@@ -94,6 +96,10 @@ type IngestArgs = {
 
 /** Run or resume one ingestion stage, atomically saving its output and checkpoint. */
 export async function advanceIngest(args: IngestArgs): Promise<IngestProgress> {
+  return withModelRun(args.signal, () => advanceStage(args));
+}
+
+async function advanceStage(args: IngestArgs): Promise<IngestProgress> {
   const files = args.files ?? [];
   const demo_ids = args.demo_ids ?? [];
   uploadModule.inputSchema.parse({ files, demo_ids });
@@ -183,15 +189,17 @@ export async function advanceIngest(args: IngestArgs): Promise<IngestProgress> {
         const mapping = await run<{ committed: { gap_id: string }[] }>({});
         state.result.mapped_gap_ids = mapping.output.committed.map((row) => row.gap_id);
       }
+      currentModelRun()?.check();
+      if (stage) {
+        state.completed++;
+        await db().insert(ingestionJobs)
+          .values({ id: job_id, checkpoint: state })
+          .onConflictDoUpdate({ target: ingestionJobs.id, set: { checkpoint: state } });
+        currentModelRun()?.check();
+      }
     } catch (error) {
       if (stage) tagStageError(error, stage);
       throw error;
-    }
-    if (stage) {
-      state.completed++;
-      await db().insert(ingestionJobs)
-        .values({ id: job_id, checkpoint: state })
-        .onConflictDoUpdate({ target: ingestionJobs.id, set: { checkpoint: state } });
     }
     return {
       job_id,
@@ -208,6 +216,10 @@ export async function advanceIngest(args: IngestArgs): Promise<IngestProgress> {
 
 /** Compatibility entry point for callers that need the complete pipeline result. */
 export async function ingestThroughStages(args: IngestArgs): Promise<IngestResult> {
+  return withModelRun(args.signal, () => finishIngest(args));
+}
+
+async function finishIngest(args: IngestArgs): Promise<IngestResult> {
   let progress = await advanceIngest(args);
   while (!progress.done) progress = await advanceIngest({ ...args, job_id: progress.job_id });
   const [saved] = await db().select().from(ingestionJobs).where(eq(ingestionJobs.id, progress.job_id));

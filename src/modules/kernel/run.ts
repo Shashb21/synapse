@@ -1,3 +1,4 @@
+import { withModelRun, currentModelRun } from "./model-run";
 import { compareParsedSources } from "@/lib/ingest/compare-source";
 import { sql } from "drizzle-orm";
 import { currentSchemaName, inWorkspaceTransaction, withWorkspaceTransaction } from "@/lib/iegp/db";
@@ -128,7 +129,8 @@ const CAPABILITY_BY_STAGE: Record<StageId, Capability> = {
  * caller's role, resolves routing, records the run, validates both ends of the
  * contract, and files evals and hillclimb signals.
  */
-export async function runStage<O = unknown>(args: {
+type StageRunArgs = {
+  signal?: AbortSignal;
   stage: StageId;
   input: unknown;
   actor: Actor;
@@ -140,7 +142,14 @@ export async function runStage<O = unknown>(args: {
    * It never overrides the platform master switch: with AI off for the platform, no model runs.
    */
   force_ai?: boolean;
-}): Promise<StageRunResult<O>> {
+};
+
+/** Run a stage under one cancellable model budget, inherited from an enclosing request. */
+export function runStage<O = unknown>(args: StageRunArgs): Promise<StageRunResult<O>> {
+  return withModelRun(args.signal, () => executeStage<O>(args));
+}
+
+async function executeStage<O>(args: StageRunArgs): Promise<StageRunResult<O>> {
   assertCan(args.role, CAPABILITY_BY_STAGE[args.stage]);
   const scopedWorkspace = await scopedWorkspaceId() ?? DEFAULT_WORKSPACE;
   if (args.workspace_id && args.workspace_id !== scopedWorkspace) throw new Error("Stage workspace does not match the authorised database scope.");
@@ -186,24 +195,32 @@ export async function runStage<O = unknown>(args: {
   }
   recorder.note("input:accepted", implementation.traceInput ? implementation.traceInput(parsedInput.data) : parsedInput.data);
 
-  const route = ai ? await resolveRouteForRun(args.stage) : await aiOffRoute(args.stage);
-  recorder.note("route", route, route.degraded ? (route.reason ?? "degraded") : undefined);
+  const execute = async (route: ResolvedRoute): Promise<StageRunResult<O>> => {
+    let mutationCommitted = false;
+    const writes: (() => Promise<void>)[] = [];
+    const ctx: ModuleContext = {
+      onMutationCommitted: () => { mutationCommitted = true; },
+      workspace_id,
+      actor: args.actor,
+      role: args.role,
+      run: recorder,
+      route,
+      complete: ai
+        ? completionFor(route, recorder)
+        : async () => {
+            throw new AiDisabledError(stageLabel(args.stage));
+          },
+      ai,
+    };
 
-  const ctx: ModuleContext = {
-    workspace_id,
-    actor: args.actor,
-    role: args.role,
-    run: recorder,
-    route,
-    complete: ai
-      ? completionFor(route, recorder)
-      : async () => {
-          throw new AiDisabledError(stageLabel(args.stage));
-        },
-    ai,
-  };
+    if (args.stage === "S9") ctx.deferWrite = write => { writes.push(write); };
 
-  const execute = async (): Promise<StageRunResult<O>> => {
+    // Once a stage has committed a customer edit, finish its success records even
+    // if the requester disconnects. An enclosing transaction can still roll back.
+    const checkPublication = () => {
+      if (!mutationCommitted) currentModelRun()?.check();
+    };
+
     const pointer = await activeRevisionPointer(workspace_id, args.stage);
     const revision = pointer.revision_id ? await getPromptRevision(pointer.revision_id, workspace_id) : null;
     const selected = scopedPromptRevision() ?? { id: revision?.id ?? null, instruction: revision?.instruction_text ?? "" };
@@ -214,7 +231,9 @@ export async function runStage<O = unknown>(args: {
       evaluation: false, input: parsedInput.data, facts: await implementation.freeze(parsedInput.data),
       module_id: manifest.id, module_version: manifest.version, prompt_version: selected.id ?? activePromptVersion(),
     };
+    currentModelRun()?.check();
     const result = await implementation.run(parsedInput.data as never, ctx);
+    checkPublication();
     const parsedOutput = implementation.outputSchema.safeParse(result.output);
     if (!parsedOutput.success) {
       throw new Error(
@@ -223,44 +242,55 @@ export async function runStage<O = unknown>(args: {
           .join("; ")}`,
       );
     }
-    const evals = result.evals ?? [];
-    await closeRun({
-      recorder,
-      status: "ok",
-      summary: result.summary,
-      output: parsedOutput.data,
-      route,
-      evals,
-    });
-    if (evals.length > 0) {
-      await recordEvalRun({
+    const publish = async () => {
+      checkPublication();
+      for (const write of writes) await write();
+      const evals = result.evals ?? [];
+      await closeRun({
+        recorder,
+        status: "ok",
+        summary: result.summary,
+        output: parsedOutput.data,
+        route,
+        evals,
+      });
+      if (evals.length > 0) {
+        await recordEvalRun({
+          stage: args.stage,
+          module_id: implementation.manifest.id,
+          module_version: implementation.manifest.version,
+          run_id: recorder.id,
+          metrics: evals,
+          note: result.summary,
+        });
+      }
+      for (const signal of result.signals ?? []) {
+        // Provenance (KAN-90): the run that produced it, on behalf of whom.
+        await recordSignal({ actor_name: args.actor.name, ...signal, source_run_id: signal.source_run_id ?? recorder.id });
+      }
+      checkPublication();
+      return {
+        run_id: recorder.id,
         stage: args.stage,
         module_id: implementation.manifest.id,
         module_version: implementation.manifest.version,
-        run_id: recorder.id,
-        metrics: evals,
-        note: result.summary,
-      });
-    }
-    for (const signal of result.signals ?? []) {
-      // Provenance (KAN-90): the run that produced it, on behalf of whom.
-      await recordSignal({ actor_name: args.actor.name, ...signal, source_run_id: signal.source_run_id ?? recorder.id });
-    }
-    return {
-      run_id: recorder.id,
-      stage: args.stage,
-      module_id: implementation.manifest.id,
-      module_version: implementation.manifest.version,
-      mode: runMode(parsedOutput.data, recorder.steps()),
-      summary: result.summary,
-      output: parsedOutput.data as O,
-      evals,
+        mode: runMode(parsedOutput.data, recorder.steps()),
+        summary: result.summary,
+        output: parsedOutput.data as O,
+        evals,
+      };
     };
+    return inWorkspaceTransaction() ? publish() : withWorkspaceTransaction(publish);
   };
 
   const ownsParseCommit = args.stage === "S1" && !inWorkspaceTransaction();
   const isDryRun = Boolean(args.input && typeof args.input === "object" && "dry_run" in args.input && args.input.dry_run === true);
+  let route: ResolvedRoute | null = null;
   try {
+    const resolvedRoute = ai ? await resolveRouteForRun(args.stage) : await aiOffRoute(args.stage);
+    route = resolvedRoute;
+    recorder.note("route", route, route.degraded ? (route.reason ?? "degraded") : undefined);
+    const executeRouted = () => execute(resolvedRoute);
     if (["S0", "S1", "S2", "S3", "S4"].includes(args.stage)) {
       // Freeze facts and every live ingestion write share clear's lock. The
       // pipeline already owns this lock: transaction locks are reentrant on
@@ -269,7 +299,7 @@ export async function runStage<O = unknown>(args: {
       const result = await withWorkspaceTransaction(async () => {
         const locked = await db().execute(sql`select pg_try_advisory_xact_lock(hashtextextended(${`ingest:${schema}`}, 0)) as locked`);
         if (!locked[0]?.locked) throw new ApiGuardError(409, "ingest_busy", "An ingestion step or clear is still running. Wait for it to finish, then retry.");
-        return execute();
+        return executeRouted();
       });
       // S1 owns this commit only for direct runs; the pipeline owns its outer commit.
       if (ownsParseCommit && !isDryRun) {
@@ -278,8 +308,10 @@ export async function runStage<O = unknown>(args: {
       }
       return result;
     }
-    return await execute();
+    return args.stage === "S5" ? await withWorkspaceTransaction(executeRouted) : await executeRouted();
   } catch (error) {
+    // Stop sibling model calls immediately, including while the failed trace is saved.
+    currentModelRun()?.cancel();
     // Standalone failures roll back current state before persisting their run
     // error. An outer pipeline transaction still owns its checkpoint and trace.
     const message = error instanceof Error ? error.message : String(error);

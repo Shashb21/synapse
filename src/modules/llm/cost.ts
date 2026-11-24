@@ -114,15 +114,14 @@ export function priceKeyFor(provider_id: string, model: string): { provider_id: 
 
 /**
  * Estimated cost of one call from the provider's token counts (KAN-91). Null,
- * when the model's price is unknown or both counts are missing; one missing count
- * is treated as zero. Known zero usage and OpenRouter free models cost zero.
+ * when the price, either billed count or the cost of a previous attempt is unknown. Known zero usage and OpenRouter free models cost zero.
  */
 export function estimateCallCost(args: {
   provider_id: string;
   model: string;
-  usage: { input_tokens: number | null; output_tokens: number | null };
+  usage: { input_tokens: number | null; output_tokens: number | null; source?: string; prior_charge_unknown?: boolean };
 }): { cost_usd: number | null; price_source: string | null } {
-  if (args.usage.input_tokens === null && args.usage.output_tokens === null) return { cost_usd: null, price_source: null };
+  if (args.usage.prior_charge_unknown || args.usage.source === "estimated" || args.usage.source === "mixed" || args.usage.input_tokens === null || args.usage.output_tokens === null) return { cost_usd: null, price_source: null };
   return estimateCostUsd({
     provider_id: args.provider_id,
     model: args.model,

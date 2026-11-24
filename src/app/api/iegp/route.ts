@@ -1,3 +1,4 @@
+import { withModelRun } from "@/modules/kernel/model-run";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { compareSource } from "@/lib/ingest/compare-source";
 import { relationshipVersion } from "@/lib/iegp/relationship-version";
@@ -283,6 +284,10 @@ async function actionOf(request: Request): Promise<string> {
  * write, leaves nothing half-written.
  */
 export async function POST(request: Request) {
+  return withModelRun(request.signal, () => handlePost(request)).catch(apiErrorResponse);
+}
+
+async function handlePost(request: Request) {
   const action = await actionOf(request.clone());
   if (action === "reset" || action === "load_demo") {
     // Verify the confirmed target before schema initialization, denial audits or writes.

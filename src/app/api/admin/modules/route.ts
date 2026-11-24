@@ -25,6 +25,7 @@ export async function POST(request: Request) {
     const access = await ownerAccess();
     return await inAdminWorkspace(body, async (workspace) => {
       const result = await runStage({
+        signal: request.signal,
         stage,
         input: (body.input as unknown) ?? {},
         actor: access.actor,

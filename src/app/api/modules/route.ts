@@ -38,6 +38,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ safe_error: true, error: "Choose an available AI task and try again." }, { status: 400 });
     }
     const result = await runStage({
+      signal: request.signal,
       stage,
       input: (body.input as unknown) ?? {},
       actor: identity.actor,

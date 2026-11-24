@@ -1,3 +1,4 @@
+import { withModelRun } from "@/modules/kernel/model-run";
 import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { aiOffResponse, stageErrorResponse } from "@/app/api/modules/ai-off";
@@ -41,7 +42,7 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    const { metrics, cases } = await runStageEvals(implementation, async (input) => {
+    const { metrics, cases } = await withModelRun(request.signal, () => runStageEvals(implementation, async (input) => {
       const result = await runStage({
         stage,
         input: { ...(input as Record<string, unknown>), dry_run: true },
@@ -49,7 +50,7 @@ export async function POST(request: Request) {
         role: identity.role,
       });
       return result.output as never;
-    });
+    }));
     if (cases === 0) {
       return NextResponse.json(
         { safe_error: true, error: "No gold cases are available yet. Parse a source first." },

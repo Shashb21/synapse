@@ -74,12 +74,12 @@ describe("S1 per-document request limit", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
-  it.each([307, 308])("prevents automatic HTTP %i redirect sends for budgeted calls only", async status => {
+  it.each([307, 308])("prevents automatic HTTP %i redirect sends for all model calls", async status => {
     const fetch = scriptedRequests(2, [Response.redirect("https://fictional.invalid/endpoint", status), {}]);
     await expect(parse()).rejects.toMatchObject({ status });
     expect(fetch.mock.calls[0]?.[1].redirect).toBe("manual");
     await completionFor(route, run)({ system: "fixture", user: "fixture", purpose: "outside-parse" });
-    expect(fetch.mock.calls[1]?.[1].redirect).toBeUndefined();
+    expect(fetch.mock.calls[1]?.[1].redirect).toBe("manual");
   });
 
   it("records the final upstream failure safely and skips the blocked send", async () => {
