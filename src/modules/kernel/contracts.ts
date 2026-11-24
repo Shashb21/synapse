@@ -228,6 +228,8 @@ export type JsonCompletion = (args: {
 }) => Promise<unknown>;
 
 export type ModuleContext = {
+  /** Kernel collects model-derived writes until the complete output has passed validation. */
+  deferWrite?: (write: () => Promise<void>) => void;
   execution_policy?: "standard" | "single_pass";
   /** Enables source-only candidate eligibility, never customer acceptance. Requires evaluation replay. */
   execution_scope?: "development";
@@ -281,6 +283,8 @@ export interface SynapseModule<I, O> {
   manifest: ModuleManifest;
   inputSchema: ZodType<I>;
   outputSchema: ZodType<O>;
+  /** Transient capture for a run whose raw inputs must never become saved replay cases. */
+  captureForRun?(input: I): Promise<Record<string, unknown>>;
   /** Capture domain facts before computation; used unchanged by both evaluation arms. */
   freeze?(input: I): Promise<Record<string, unknown>>;
   /**

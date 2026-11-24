@@ -393,13 +393,16 @@ describe("audited direct gap edits", () => {
       await db().execute(sql.raw("CREATE FUNCTION fail_gap_gate() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'KAN131 gate history failure'; END $$"));
       await db().execute(sql.raw("CREATE TRIGGER fail_gap_gate BEFORE INSERT ON edit_records FOR EACH ROW WHEN (NEW.stage = 'S5') EXECUTE FUNCTION fail_gap_gate()"));
     });
+    const diagnostic = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const response = await scoped(() => modulePost(new Request("http://localhost/api/modules", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ stage: "S5", input: { action: "edit_gap", gap_id: gap.id, expected_gap: gap, statement: "Failed gate evidence edit", rationale: "Gate history must save with the change" } }) })));
       expect(response.ok).toBe(false);
       expect(await scoped(loadState)).toEqual(before);
       expect(await placements()).toEqual(prior);
       expect(await scoped(() => entityHistory([gap.id]))).toEqual(history);
+      expect(diagnostic.mock.calls).toEqual([["API action failed", { category: "unexpected", stage: "S5" }]]);
     } finally {
+      diagnostic.mockRestore();
       await scoped(async () => {
         await db().execute(sql.raw("DROP TRIGGER IF EXISTS fail_gap_gate ON edit_records"));
         await db().execute(sql.raw("DROP FUNCTION IF EXISTS fail_gap_gate()"));

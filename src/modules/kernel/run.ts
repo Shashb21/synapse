@@ -1,3 +1,5 @@
+import { stageInputVersion, staleStage, usesStagePublication } from "./stage-publication";
+import { lockRelationships } from "@/lib/iegp/relationship-change";
 import { compareParsedSources } from "@/lib/ingest/compare-source";
 import { sql } from "drizzle-orm";
 import { currentSchemaName, inWorkspaceTransaction, withWorkspaceTransaction } from "@/lib/iegp/db";
@@ -134,6 +136,10 @@ export async function runStage<O = unknown>(args: {
   actor: Actor;
   role: Role;
   workspace_id?: string;
+  /** Score a workspace evaluation without publishing candidates into the live plan. */
+  evaluation?: boolean;
+  /** Internal ingestion checkpoint, committed together with the verified stage output. */
+  onCommit?: (output: O) => Promise<void>;
   /**
    * Admin AI harness only (KAN-54): run the stage's AI whatever the customer-facing
    * switches say, so a section can be tried before it is turned on. Needs a routed model.
@@ -142,6 +148,10 @@ export async function runStage<O = unknown>(args: {
   force_ai?: boolean;
 }): Promise<StageRunResult<O>> {
   assertCan(args.role, CAPABILITY_BY_STAGE[args.stage]);
+  const phased = usesStagePublication(args.stage);
+  if (phased && inWorkspaceTransaction()) {
+    throw new Error("Start this model stage outside a workspace transaction so the database is released during computation.");
+  }
   const scopedWorkspace = await scopedWorkspaceId() ?? DEFAULT_WORKSPACE;
   if (args.workspace_id && args.workspace_id !== scopedWorkspace) throw new Error("Stage workspace does not match the authorised database scope.");
   const workspace_id = scopedWorkspace;
@@ -203,6 +213,8 @@ export async function runStage<O = unknown>(args: {
     ai,
   };
 
+  const writes: (() => Promise<void>)[] = [];
+  if (phased) ctx.deferWrite = write => { writes.push(write); };
   const execute = async (): Promise<StageRunResult<O>> => {
     const pointer = await activeRevisionPointer(workspace_id, args.stage);
     const revision = pointer.revision_id ? await getPromptRevision(pointer.revision_id, workspace_id) : null;
@@ -210,75 +222,99 @@ export async function runStage<O = unknown>(args: {
     ctx.complete = revisionCompletion(ctx.complete, selected.instruction);
     recorder.note("prompt:variant", { version: selected.id ?? activePromptVersion() });
     const isApply = !!(parsedInput.data as { apply?: unknown })?.apply;
-    if (implementation.freeze && !isApply) ctx.replay = {
-      evaluation: false, input: parsedInput.data, facts: await implementation.freeze(parsedInput.data),
-      module_id: manifest.id, module_version: manifest.version, prompt_version: selected.id ?? activePromptVersion(),
+    const capture = async () => {
+      const freeze = implementation.captureForRun ?? implementation.freeze;
+      if (freeze && !isApply) {
+        ctx.replay = {
+          evaluation: args.evaluation === true, input: parsedInput.data, facts: await freeze(parsedInput.data),
+          module_id: manifest.id, module_version: manifest.version, prompt_version: selected.id ?? activePromptVersion(),
+        };
+      }
+      return phased ? stageInputVersion(args.stage) : undefined;
     };
+    const version = phased ? await withWorkspaceTransaction(async () => {
+      await db().execute(sql`set transaction isolation level repeatable read, read only`);
+      if (args.stage !== "S9") await lockIngestion();
+      return capture();
+    }) : await capture();
     const result = await implementation.run(parsedInput.data as never, ctx);
-    const parsedOutput = implementation.outputSchema.safeParse(result.output);
-    if (!parsedOutput.success) {
-      throw new Error(
+    const validate = () => {
+      const parsedOutput = implementation.outputSchema.safeParse(result.output);
+      if (!parsedOutput.success) {
+        throw new Error(
         `${implementation.manifest.id} produced output outside its contract: ${parsedOutput.error.issues
           .map((issue) => `${issue.path.join(".") || "(root)"} ${issue.message}`)
           .join("; ")}`,
-      );
-    }
-    const evals = result.evals ?? [];
-    await closeRun({
-      recorder,
-      status: "ok",
-      summary: result.summary,
-      output: parsedOutput.data,
-      route,
-      evals,
-    });
-    if (evals.length > 0) {
-      await recordEvalRun({
+        );
+      }
+      return parsedOutput.data as O;
+    };
+    if (phased) validate();
+    const publish = async () => {
+      if (phased && !args.evaluation) {
+        if (args.stage !== "S9") await lockIngestion();
+        // Relationship editors acquire this lock before touching any plan table.
+        if (args.stage === "S4") await lockRelationships();
+        if (await stageInputVersion(args.stage, true) !== version) throw staleStage();
+        for (const write of writes) await write();
+      }
+      const output = validate();
+      const evals = result.evals ?? [];
+      await closeRun({
+        recorder,
+        status: "ok",
+        summary: result.summary,
+        output,
+        route,
+        evals,
+      });
+      if (evals.length > 0) {
+        await recordEvalRun({
+          stage: args.stage,
+          module_id: implementation.manifest.id,
+          module_version: implementation.manifest.version,
+          run_id: recorder.id,
+          metrics: evals,
+          note: result.summary,
+        });
+      }
+      for (const signal of result.signals ?? []) {
+        // Provenance (KAN-90): the run that produced it, on behalf of whom.
+        await recordSignal({ actor_name: args.actor.name, ...signal, source_run_id: signal.source_run_id ?? recorder.id });
+      }
+      await args.onCommit?.(output);
+      return {
+        run_id: recorder.id,
         stage: args.stage,
         module_id: implementation.manifest.id,
         module_version: implementation.manifest.version,
-        run_id: recorder.id,
-        metrics: evals,
-        note: result.summary,
-      });
-    }
-    for (const signal of result.signals ?? []) {
-      // Provenance (KAN-90): the run that produced it, on behalf of whom.
-      await recordSignal({ actor_name: args.actor.name, ...signal, source_run_id: signal.source_run_id ?? recorder.id });
-    }
-    return {
-      run_id: recorder.id,
-      stage: args.stage,
-      module_id: implementation.manifest.id,
-      module_version: implementation.manifest.version,
-      mode: runMode(parsedOutput.data, recorder.steps()),
-      summary: result.summary,
-      output: parsedOutput.data as O,
-      evals,
+        mode: runMode(output, recorder.steps()),
+        summary: result.summary,
+        output,
+        evals,
+      };
     };
+    return phased ? withWorkspaceTransaction(publish) : publish();
   };
 
-  const ownsParseCommit = args.stage === "S1" && !inWorkspaceTransaction();
+  const lockIngestion = async () => {
+    const schema = await currentSchemaName();
+    const locked = await db().execute(sql`select pg_try_advisory_xact_lock(hashtextextended(${`ingest:${schema}`}, 0)) as locked`);
+    if (!locked[0]?.locked) throw new ApiGuardError(409, "ingest_busy", "An ingestion step or clear is still running. Wait for it to finish, then retry.");
+  };
   const isDryRun = Boolean(args.input && typeof args.input === "object" && "dry_run" in args.input && args.input.dry_run === true);
   try {
-    if (["S0", "S1", "S2", "S3", "S4"].includes(args.stage)) {
-      // Freeze facts and every live ingestion write share clear's lock. The
-      // pipeline already owns this lock: transaction locks are reentrant on
-      // that connection, and nesting here creates a savepoint, not a new owner.
-      const schema = await currentSchemaName();
-      const result = await withWorkspaceTransaction(async () => {
-        const locked = await db().execute(sql`select pg_try_advisory_xact_lock(hashtextextended(${`ingest:${schema}`}, 0)) as locked`);
-        if (!locked[0]?.locked) throw new ApiGuardError(409, "ingest_busy", "An ingestion step or clear is still running. Wait for it to finish, then retry.");
-        return execute();
-      });
-      // S1 owns this commit only for direct runs; the pipeline owns its outer commit.
-      if (ownsParseCommit && !isDryRun) {
-        const output = result.output as { documents?: { source_id: string }[] };
-        await compareParsedSources((output.documents ?? []).map(doc => doc.source_id), args.actor);
-      }
-      return result;
+    const result = args.stage === "S0" || args.stage === "S5"
+      ? await withWorkspaceTransaction(async () => {
+          if (args.stage === "S0") await lockIngestion();
+          return execute();
+        })
+      : await execute();
+    if (args.stage === "S1" && !args.onCommit && !inWorkspaceTransaction() && !isDryRun) {
+      const output = result.output as { documents?: { source_id: string }[] };
+      await compareParsedSources((output.documents ?? []).map(doc => doc.source_id), args.actor);
     }
-    return await execute();
+    return result;
   } catch (error) {
     // Standalone failures roll back current state before persisting their run
     // error. An outer pipeline transaction still owns its checkpoint and trace.

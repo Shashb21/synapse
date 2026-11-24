@@ -1,3 +1,4 @@
+import { stageWrite } from "@/modules/kernel/stage-publication";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { buildIdeationGapBrief, ideationAcceptanceBasis, type IdeationGapBrief } from "./context";
 import { ideationRecommendationSchema, ideationGapOutcomeSchema, type IdeationGapOutcome, type IdeationRecommendation } from "./recommendation-contract";
@@ -27,10 +28,10 @@ import {
   type EvidenceDomain,
   type TacticType,
 } from "@/lib/iegp/enums";
-import { appendAudit, reuseTacticForGap, insertLibraryTactic, loadState, readState, syncComputedGapStatuses } from "@/lib/iegp/store";
+import { appendAudit, reuseTacticForGap, insertLibraryTactic, loadState, readStageState, readState, syncComputedGapStatuses } from "@/lib/iegp/store";
 import { prioritizationContextFromState } from "@/lib/iegp/planning-context";
 import { displayedGapStatus, isLiveGap, emptyDimensions, unlocked } from "@/lib/iegp/engine";
-import { listPlacements } from "@/modules/stages/s8-prioritization/module";
+import { listPlacements, readPlacements } from "@/modules/stages/s8-prioritization/module";
 import { plural } from "@/lib/plural";
 import { acceptTacticExpansion, expansionScopeSchema, modelExpansionScope, tacticVersion, type ExpansionTransaction } from "@/lib/iegp/tactic-expansions";
 import type { ExpansionScope, IegpState, Tactic } from "@/lib/iegp/types";
@@ -938,41 +939,43 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
       outcome.withdrawn.push({subject:p.id,score:p.score,note:"Human rejection memory: restore this expansion target/scope before reconsidering it."});
       return false;
     });
-    if (!ctx.replay?.evaluation && !input.dry_run && outcome.accepted.length > 0) {
-      await ensurePlatformSchema();
-      for (const proposal of outcome.accepted) {
-        const values = {
-          proposal_kind: proposal.proposal_kind, target_tactic_id: proposal.target_tactic_id, expansion_scope: proposal.expansion_scope, comparative_rationale: proposal.comparative_rationale,
-          reviewed_parent: proposal.target_tactic_id ? state.tactics.find(t => t.id === proposal.target_tactic_id) : null,
-          id: newId("idea"),
-          gap_id: proposal.gap_id,
-          name: proposal.name,
-          type: proposal.type,
-          rationale: proposal.rationale,
-          evidence_question: proposal.evidence_question,
-          design: { ...proposal.design, recommendation: proposal.recommendation, supporting_context_basis: proposal.supporting_context_basis, write_version: newId("IPV"), supporting_references: proposal.references, supplied_records: supportFor(proposal.gap_id), rank: proposal.rank, origin: "ai", run_id: ctx.run.id,
-            slot_id: proposal_slots?.[proposal.gap_id]?.includes(proposal.id) ? proposal.id : null,
-            original_ai: { recommendation: proposal.recommendation, supporting_context_basis: proposal.supporting_context_basis, proposal_kind: proposal.proposal_kind, comparative_rationale: proposal.comparative_rationale, ...(proposal.proposal_kind !== "new" ? {target_tactic_id: proposal.target_tactic_id, expansion_scope: proposal.expansion_scope} : {}), name: proposal.name, type: proposal.type, rationale: proposal.rationale, evidence_question: proposal.evidence_question, design: proposal.design },
-          },
-          status: "proposed",
-          critic_note: [proposal.critic_note, proposal.judge_note && `Judge: ${proposal.judge_note}`]
-            .filter(Boolean)
-            .join(" — "),
-          judge_score: Math.round(proposal.score),
-          created_at: nowIso(),
-        };
-        await db().transaction(async tx => {
-          const references = inspectSuppliedJudgementReferences(supportFor(proposal.gap_id), proposal.references);
-          if (!references.length || !inspectJudgementReferences(await readState(tx), [proposal.gap_id], proposal.references).length) throw new TrustedApplicationError("Supporting references are missing, inaccessible or unrelated to this option.");
-          await tx.insert(t.ideationProposals).values(values);
-          await recordEdit({ stage: "S9", entity_type: "ideation_proposal", entity_id: values.id,
-            field: "model_suggestion", action: "add", before: null, after: JSON.stringify(proposal),
-            rationale: proposal.judge_note || proposal.rationale, references: proposal.references, reference_gap_ids: [proposal.gap_id],
-            actor: { name: isTestStub() ? "S9 test fixture (no model called)" : "S9 model", function: ctx.actor.function },
-          }, tx);
-        });
+    await stageWrite(ctx, async () => {
+      if (!ctx.replay?.evaluation && !input.dry_run && outcome.accepted.length > 0) {
+        await ensurePlatformSchema();
+        for (const proposal of outcome.accepted) {
+          const values = {
+            proposal_kind: proposal.proposal_kind, target_tactic_id: proposal.target_tactic_id, expansion_scope: proposal.expansion_scope, comparative_rationale: proposal.comparative_rationale,
+            reviewed_parent: proposal.target_tactic_id ? state.tactics.find(t => t.id === proposal.target_tactic_id) : null,
+            id: newId("idea"),
+            gap_id: proposal.gap_id,
+            name: proposal.name,
+            type: proposal.type,
+            rationale: proposal.rationale,
+            evidence_question: proposal.evidence_question,
+            design: { ...proposal.design, recommendation: proposal.recommendation, supporting_context_basis: proposal.supporting_context_basis, write_version: newId("IPV"), supporting_references: proposal.references, supplied_records: supportFor(proposal.gap_id), rank: proposal.rank, origin: "ai", run_id: ctx.run.id,
+              slot_id: proposal_slots?.[proposal.gap_id]?.includes(proposal.id) ? proposal.id : null,
+              original_ai: { recommendation: proposal.recommendation, supporting_context_basis: proposal.supporting_context_basis, proposal_kind: proposal.proposal_kind, comparative_rationale: proposal.comparative_rationale, ...(proposal.proposal_kind !== "new" ? {target_tactic_id: proposal.target_tactic_id, expansion_scope: proposal.expansion_scope} : {}), name: proposal.name, type: proposal.type, rationale: proposal.rationale, evidence_question: proposal.evidence_question, design: proposal.design },
+            },
+            status: "proposed",
+            critic_note: [proposal.critic_note, proposal.judge_note && `Judge: ${proposal.judge_note}`]
+              .filter(Boolean)
+              .join(" — "),
+            judge_score: Math.round(proposal.score),
+            created_at: nowIso(),
+          };
+          await db().transaction(async tx => {
+            const references = inspectSuppliedJudgementReferences(supportFor(proposal.gap_id), proposal.references);
+            if (!references.length || !inspectJudgementReferences(await readState(tx), [proposal.gap_id], proposal.references).length) throw new TrustedApplicationError("Supporting references are missing, inaccessible or unrelated to this option.");
+            await tx.insert(t.ideationProposals).values(values);
+            await recordEdit({ stage: "S9", entity_type: "ideation_proposal", entity_id: values.id,
+              field: "model_suggestion", action: "add", before: null, after: JSON.stringify(proposal),
+              rationale: proposal.judge_note || proposal.rationale, references: proposal.references, reference_gap_ids: [proposal.gap_id],
+              actor: { name: isTestStub() ? "S9 test fixture (no model called)" : "S9 model", function: ctx.actor.function },
+            }, tx);
+          });
+        }
       }
-    }
+    });
 
     return {
       output: {
@@ -1757,7 +1760,8 @@ function expansionKey(gap_id: string, target: string | null, scope: unknown): st
 
 /** Freeze the source facts this stage consumes, before any proposal or human decision. */
 async function freezeFacts(input: z.infer<typeof inputSchema>) {
-  const [state, placements, proposals] = await Promise.all([loadState(), listPlacements(), db().select().from(t.ideationProposals)]);
+  const state = await readStageState();
+  const [placements, proposals] = await Promise.all([readPlacements(state), db().select().from(t.ideationProposals)]);
   // Capture the persisted acceptance linkage now, before generation. Library
   // provenance contains identities only, never another proposal's answer text.
   const proposal_lineage = proposals.map(proposal => {

@@ -44,6 +44,7 @@ export async function POST(request: Request) {
     const { metrics, cases } = await runStageEvals(implementation, async (input) => {
       const result = await runStage({
         stage,
+        evaluation: true,
         input: { ...(input as Record<string, unknown>), dry_run: true },
         actor: identity.actor,
         role: identity.role,
