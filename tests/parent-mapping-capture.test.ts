@@ -12,7 +12,7 @@ const actor={name:'Parent reviewer',function:'medical_affairs' as const};
 beforeEach(async()=>{await persistState(buildSeed());});
 afterEach(()=>vi.restoreAllMocks());
 it('captures unchanged and changed parent selections without claiming a child decision',async()=>{
- const before=await loadState(),parent=before.tactics[0],gap=before.gaps[0];
+ const before=await loadState(),parent=before.tactics[0],gap=before.gaps.find(candidate=>candidate.id==='GAP-ELDERLY-CE')!;
  const scope={name:'Child',evidence_question:'Additional Q',population:'Older adults',outcomes:'Safety',geography:'',data_cut:'',analysis:'Analysis',instrument:'',study_design:'Analysis',gap_coverage:'Safety',cost_effort:'Low',timing:'Soon',feasibility_risks:'Small sample',post_hoc:true,prospective_enrolment:false,protocol_amendment:false,start_date:null,evidence_available:null};
  const child=await acceptTacticExpansion({proposal_id:`mapping-${crypto.randomUUID()}`,tactic_id:parent.id,gap_id:gap.id,scope,actor,rationale:'Additional scope',expected_tactic_version:tacticVersion(parent)});
  const childCoverage=(await loadState()).coverages.filter(c=>c.expansion_id===child.id);
