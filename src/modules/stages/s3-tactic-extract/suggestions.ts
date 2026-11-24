@@ -1,7 +1,7 @@
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { withRelationshipChange } from "@/lib/iegp/relationship-change";
 /** S3 source review: immutable model baseline, source provenance and atomic human decisions. */
-import { currentSourceFindingKey, sameSourceQuestion, sourceFindingKey } from "@/lib/ingest/source-findings";
+import { currentSourceFindingKey, matchingSourceQuestions, reclassifiedFindings, sourceFindingActivity, sourceFindingKey } from "@/lib/ingest/source-findings";
 import { isDeepStrictEqual } from "node:util";
 import { createHash } from "node:crypto";
 import { and, desc, eq, inArray } from "drizzle-orm";
@@ -33,7 +33,7 @@ export async function attachTacticSource(args: {tactic_id: string; source_id: st
     if (!parent || !source) throw new TrustedApplicationError("Tactic or source not found in this workspace.", "not_found", 404);
     const { finding_key, ...reference } = args;
     const quote_key = quoteKey(args.source_quote);
-    const parentKey = sourceFindingKey(args.source_id, args.source_quote, parent.type, parent.evidence_question);
+    const parentKey = sourceFindingKey(args.source_id, args.source_quote, parent.type, parent.evidence_question, parent.name);
     const key = finding_key ? currentSourceFindingKey(finding_key) : parentKey;
     const [existing] = await tx.select().from(tacticSourceReferences).where(and(
       eq(tacticSourceReferences.tactic_id, args.tactic_id), eq(tacticSourceReferences.source_id, args.source_id), eq(tacticSourceReferences.quote_key, quote_key),
@@ -41,7 +41,7 @@ export async function attachTacticSource(args: {tactic_id: string; source_id: st
     if (!existing) {
       await tx.insert(tacticSourceReferences).values({ ...reference, id: newId("TSRC"), quote_key, finding_keys: [key], created_at: nowIso() });
     } else {
-      const prior = existing.finding_keys.length ? existing.finding_keys.map(currentSourceFindingKey) : [parentKey];
+      const prior = existing.finding_keys.length ? existing.finding_keys.map(key => currentSourceFindingKey(key, parent.name)) : [parentKey];
       if (!prior.includes(key)) {
         await tx.update(tacticSourceReferences).set({ finding_keys: [...prior, key] }).where(eq(tacticSourceReferences.id, existing.id));
       }
@@ -60,26 +60,29 @@ type ReviewReader = Pick<ExpansionTransaction, "select">;
 
 /** Recover original finding keys using immutable proposals saved alongside legacy reviews. */
 async function reviewedFindings(reader: ReviewReader, suggestions: TacticSuggestion[], incoming: SourcePassage[]) {
-  const legacy = suggestions.filter(row => !row.finding_key);
+  const legacy = suggestions.filter(row => !row.finding_key || !sourceFindingActivity(row.finding_key));
   const originals = legacy.length ? await reader.select().from(tacticCandidates).where(and(
     inArray(tacticCandidates.run_id, legacy.map(row => row.run_id)), inArray(tacticCandidates.source_id, legacy.map(row => row.source_id)),
     eq(tacticCandidates.match, "overlaps"), eq(tacticCandidates.verdict, "accept"),
   )) : [];
   const result = new Map<TacticSuggestion, string>();
   for (const row of suggestions) {
-    if (row.finding_key) {
+    if (row.finding_key && sourceFindingActivity(row.finding_key)) {
       result.set(row, currentSourceFindingKey(row.finding_key));
       continue;
     }
     const matching = originals.filter(candidate => candidate.run_id === row.run_id && candidate.document_id === row.document_id
       && candidate.source_id === row.source_id && candidate.target_tactic_id === row.target_tactic_id && quoteKey(candidate.source_quote) === quoteKey(row.source_quote));
     if (!matching.length) {
-      result.set(row, sourceFindingKey(row.source_id, row.source_quote, row.original_separate.type, row.original_separate.evidence_question));
+      const baseline = sourceFindingKey(row.source_id, row.source_quote, row.original_separate.type, row.original_separate.evidence_question, row.original_separate.name);
+      result.set(row, row.finding_key ? currentSourceFindingKey(row.finding_key, row.original_separate.name) : baseline);
       continue;
     }
     const baseline = { shared_scope: row.shared_scope, new_scope: row.new_scope, expansion: row.original_expansion, separate: row.original_separate };
     const matches = matching.length > 1 ? matching.filter(candidate => isDeepStrictEqual(candidate.matching, baseline)) : matching;
-    const keys = new Set(matches.map(candidate => sourceFindingKey(candidate.source_id, candidate.source_quote, candidate.type, candidate.evidence_question)));
+    const keys = new Set(matches.filter(candidate => !row.finding_key || currentSourceFindingKey(row.finding_key) ===
+      sourceFindingKey(candidate.source_id, candidate.source_quote, candidate.type, candidate.evidence_question))
+      .map(candidate => sourceFindingKey(candidate.source_id, candidate.source_quote, candidate.type, candidate.evidence_question, candidate.name)));
     if (keys.size === 1) {
       for (const key of keys) result.set(row, key);
     } else if (incoming.some(candidate => candidate.source_id === row.source_id && quoteKey(candidate.source_quote) === quoteKey(row.source_quote))) {
@@ -95,29 +98,36 @@ export async function recordedTacticEvidence(sourceIds: string[], tactics: Tacti
     .from(tacticSourceReferences).where(inArray(tacticSourceReferences.source_id, sourceIds));
   const reviews = await db().select({ payload: tacticSuggestions.payload })
     .from(tacticSuggestions).where(inArray(tacticSuggestions.source_id, sourceIds));
-  const keys = new Set<string>();
+  // A review's compared parent does not own the proposed separate activity.
+  const findings = new Map<string, { owners: Set<string>; labels: Set<string> }>();
+  const record = (key: string, owner?: string | null, labels: string[] = []) => {
+    const entry = findings.get(key) ?? { owners: new Set<string>(), labels: new Set<string>() };
+    if (owner) entry.owners.add(owner);
+    for (const label of labels) entry.labels.add(label);
+    findings.set(key, entry);
+  };
   const byId = new Map(tactics.map(tactic => [tactic.id, tactic]));
   for (const reference of references) {
     const parent = byId.get(reference.tactic_id);
     if (reference.finding_keys.length) {
-      for (const key of reference.finding_keys) keys.add(currentSourceFindingKey(key));
+      for (const key of reference.finding_keys) record(currentSourceFindingKey(key, parent?.name), reference.tactic_id);
     } else if (parent) {
-      keys.add(sourceFindingKey(reference.source_id, reference.source_quote, parent.type, parent.evidence_question));
+      record(sourceFindingKey(reference.source_id, reference.source_quote, parent.type, parent.evidence_question, parent.name), parent.id);
     }
   }
   const suggestions = reviews.map(review => review.payload as TacticSuggestion);
   const reviewed = await reviewedFindings(db(), suggestions, incoming);
-  for (const key of reviewed.values()) keys.add(key);
+  for (const [row, key] of reviewed) record(key, row.result_tactic_id, [row.original_separate.name, row.original_expansion.name]);
   // Older extracted tactics have no reference row. Only use their explicit source marker.
   const referenced = new Set(references.map(row => JSON.stringify([row.tactic_id, row.source_id, quoteKey(row.source_quote)])));
   const byMarker = new Map(sourceIds.map(id => [`Extracted from ${id}`, id]));
   for (const tactic of tactics) {
     const sourceId = byMarker.get(tactic.intended_use);
     if (sourceId && tactic.source_quote?.trim() && !referenced.has(JSON.stringify([tactic.id, sourceId, quoteKey(tactic.source_quote)]))) {
-      keys.add(sourceFindingKey(sourceId, tactic.source_quote, tactic.type, tactic.evidence_question));
+      record(sourceFindingKey(sourceId, tactic.source_quote, tactic.type, tactic.evidence_question, tactic.name), tactic.id);
     }
   }
-  return keys;
+  return findings;
 }
 
 /** Persist each distinct overlap and retain earlier human decisions on reruns. */
@@ -146,8 +156,13 @@ export async function createTacticSuggestion(args: {
       // The exact hash above handles same-run retries. Two current proposals may
       // document different study types for the same question in a single sentence.
       // Legacy reviews lack an exact hash for their finding, so keep reconciling them.
-      const matching = [...reviewed].filter(([row, key]) =>
-        (row.run_id !== args.run_id || !row.finding_key) && sameSourceQuestion(key, findingKey));
+      const previous = [...reviewed].filter(([row]) => row.run_id !== args.run_id || !row.finding_key);
+      const labels = (key: string) => previous.filter(([, previousKey]) => previousKey === key)
+        .flatMap(([row]) => [row.original_separate.name, row.original_expansion.name]);
+      const keys = previous.map(([, key]) => key);
+      const matches = reclassifiedFindings([findingKey], keys, labels);
+      const matchingKeys = new Set(matches.has(findingKey) ? [matches.get(findingKey)] : matchingSourceQuestions(findingKey, keys, labels));
+      const matching = previous.filter(([, key]) => matchingKeys.has(key));
       if (matching.length === 1) return matching[0]![0];
       if (matching.length > 1) throw new TrustedApplicationError("Several prior reviews match this source question. Review the original passage before retrying.", "ambiguous_source_finding", 409);
     }

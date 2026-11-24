@@ -1,6 +1,6 @@
 /** Behavioral source-review tests: arrange stored source/parent, decide, assert durable plan/history. */
 import { beforeEach, describe, expect, it } from "vitest";
-import { sourceFindingKey } from "@/lib/ingest/source-findings";
+import { currentSourceFindingKey, sourceFindingKey } from "@/lib/ingest/source-findings";
 import { tacticCandidates } from "@/modules/stages/s3-tactic-extract/schema";
 import { eq, sql } from "drizzle-orm";
 import "@/modules";
@@ -27,6 +27,7 @@ beforeEach(async () => {
   await persistState(state);
   sourceId = state.sources[0]!.id; parentId = state.tactics[0]!.id; gapId = state.gaps[0]!.id;
   await suggestions.ensureTacticSuggestionSchema();
+  await db().delete(tacticCandidates).where(eq(tacticCandidates.run_id, "source-run"));
   await db().execute(sql`DELETE FROM tactic_suggestions`);
   await db().execute(sql`DELETE FROM tactic_source_references`);
 });
@@ -60,7 +61,7 @@ describe("S3 source matching", () => {
     expect(await suggestions.listTacticSuggestions()).toHaveLength(2);
   });
 
-  it("uses the original overlap alternatives to recover only the reviewed legacy candidate", async () => {
+  it.each([true, false])("uses immutable alternatives to recover the reviewed legacy activity (old key %s)", async withOldKey => {
     const row = await proposal();
     const matching = { shared_scope: row.shared_scope, new_scope: row.new_scope, expansion: row.original_expansion, separate: row.original_separate };
     const candidate = { run_id: row.run_id, document_id: row.document_id, source_id: sourceId, source_quote: row.source_quote,
@@ -71,12 +72,17 @@ describe("S3 source matching", () => {
       { ...candidate, id: "legacy-review-original", evidence_question: original, matching },
       { ...candidate, id: "legacy-review-distinct", evidence_question: distinct, matching: {...matching, new_scope: "Cost"} },
     ]);
+    if (withOldKey) {
+      const key = sourceFindingKey(sourceId, row.source_quote, candidate.type, original);
+      await db().execute(sql`UPDATE tactic_suggestions SET payload = payload || jsonb_build_object('finding_key', ${key}::text) WHERE id = ${row.id}`);
+    }
+    const edited = await suggestions.editTacticSuggestion({ id: row.id, separate: {...row.separate, name: "Renamed alternative"}, rationale: "Clarify name.", actor });
     const keys = await suggestions.recordedTacticEvidence([sourceId], (await loadState()).tactics);
-    expect(keys.has(sourceFindingKey(sourceId, row.source_quote, candidate.type, original))).toBe(true);
-    expect(keys.has(sourceFindingKey(sourceId, row.source_quote, candidate.type, distinct))).toBe(false);
+    expect(keys.get(sourceFindingKey(sourceId, row.source_quote, candidate.type, original, candidate.name))?.owners).toEqual(new Set());
+    expect(keys.has(sourceFindingKey(sourceId, row.source_quote, candidate.type, distinct, candidate.name))).toBe(false);
     const repeated = await suggestions.createTacticSuggestion({...row, ...matching, run_id: "new-run",
       finding_key: sourceFindingKey(sourceId, row.source_quote, "slr", original)});
-    expect(repeated).toEqual(row);
+    expect(repeated).toEqual(edited);
   });
 
   it("protects a rejected legacy overlap whose original candidates have indistinguishable alternatives", async () => {
@@ -90,7 +96,7 @@ describe("S3 source matching", () => {
     await db().insert(tacticCandidates).values(originals);
     const current = {...originals[0]!, run_id: "repeat", type: "slr"};
     const state = await loadState();
-    await expect(suggestions.recordedTacticEvidence([sourceId], state.tactics, [{...current, source_quote: "Unrelated passage."}])).resolves.toBeInstanceOf(Set);
+    await expect(suggestions.recordedTacticEvidence([sourceId], state.tactics, [{...current, source_quote: "Unrelated passage."}])).resolves.toBeInstanceOf(Map);
     await expect(suggestions.recordedTacticEvidence([sourceId], state.tactics, [current])).rejects.toThrow(/legacy review/);
     const key = sourceFindingKey(sourceId, row.source_quote, current.type, current.evidence_question);
     await expect(suggestions.createTacticSuggestion({...row, ...baseline, run_id: "repeat", finding_key: key}))
@@ -104,12 +110,12 @@ describe("S3 source matching", () => {
     const reference = {tactic_id: parentId, source_id: sourceId, source_quote: quote};
     await suggestions.attachTacticSource(reference);
     await db().execute(sql`UPDATE tactic_source_references SET finding_keys = '[]'::jsonb WHERE tactic_id = ${parentId}`);
-    const original = sourceFindingKey(sourceId, quote, parent.type, parent.evidence_question);
+    const original = sourceFindingKey(sourceId, quote, parent.type, parent.evidence_question, parent.name);
     const extra = sourceFindingKey(sourceId, quote, parent.type, "What is the separate economic outcome?");
     await suggestions.attachTacticSource({...reference, finding_key: extra});
     const keys = await suggestions.recordedTacticEvidence([sourceId], state.tactics);
     expect(keys.has(original)).toBe(true);
-    expect(keys.has(extra)).toBe(true);
+    expect(keys.has(currentSourceFindingKey(extra, parent.name))).toBe(true);
   });
 
   it("keeps overlaps pending with no unreviewed plan mutation and retains rejected reruns", async () => {

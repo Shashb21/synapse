@@ -27,21 +27,56 @@ function findingParts(key: string): [string, string, string, string, string?] | 
   }
 }
 
+/** The original candidate's activity name, when captured on an S3 finding. */
+export function sourceFindingActivity(key: string): string | undefined {
+  return findingParts(key)?.[4];
+}
+
 /** Historical S3 keys retain the original question, so they can be read without rewriting decisions. */
-export function currentSourceFindingKey(key: string): string {
+export function currentSourceFindingKey(key: string, fallbackActivity?: string): string {
   const parts = findingParts(key);
-  return parts ? sourceFindingKey(...parts) : key;
+  if (!parts) return key;
+  const [source, quote, kind, question, activity] = parts;
+  return sourceFindingKey(source, quote, kind, question, activity ?? fallbackActivity);
 }
 
-/** Older keys omit activity identity, so keep their findings eligible for reconciliation. */
-function compatibleActivities(left?: string, right?: string): boolean {
-  return !left || !right || left === right;
+type ActivityLabels = (key: string) => Iterable<string>;
+
+/** Use words documented in the citation, excluding generic study labels and articles. */
+function activityWords(label: string, quote: string): Set<string> {
+  const generic = /^(?:a|an|and|for|in|of|on|the|with|study|studies|registry|registries|review|analysis|trial)$/;
+  const quoted = new Set(quote.match(/[\p{L}\p{N}]+/gu));
+  return new Set((label.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter(word => quoted.has(word) && !generic.test(word)));
 }
 
-/** Compare source evidence across classifications, using activity identity when both keys have it. */
-export function sameSourceQuestion(left: string, right: string): boolean {
-  const a = findingParts(currentSourceFindingKey(left)), b = findingParts(currentSourceFindingKey(right));
-  return Boolean(a && b && a[0] === b[0] && a[1] === b[1] && a[3] === b[3] && compatibleActivities(a[4], b[4]));
+function compareActivities(quote: string, left?: string, right?: string): "same" | "different" | "unknown" {
+  if (left === right) return "same";
+  if (!left || !right) return "unknown";
+  const a = activityWords(left, quote), b = activityWords(right, quote);
+  if ([...a].some(word => !b.has(word)) && [...b].some(word => !a.has(word))) return "different";
+  return [...a].some(word => b.has(word)) ? "same" : "unknown";
+}
+
+/** Match exact names first, then positive evidence in the source and immutable review alternatives. */
+export function matchingSourceQuestions(key: string, candidates: Iterable<string>, labels?: ActivityLabels): string[] {
+  const current = findingParts(currentSourceFindingKey(key));
+  if (!current) return [];
+  const exact: string[] = [], supported: string[] = [];
+  for (const candidate of candidates) {
+    const other = findingParts(currentSourceFindingKey(candidate));
+    if (!other || other[0] !== current[0] || other[1] !== current[1] || other[3] !== current[3]) continue;
+    if (current[4] === other[4]) {
+      exact.push(candidate);
+      continue;
+    }
+    const relation = compareActivities(current[1], current[4], other[4]);
+    if (relation === "different") continue;
+    if (!current[4] || relation === "same" ||
+        [...labels?.(candidate) ?? []].some(label => compareActivities(current[1], current[4], label.toLowerCase()) === "same")) {
+      supported.push(candidate);
+    }
+  }
+  return exact.length ? exact : supported;
 }
 
 function groupFindings(keys: Iterable<string>, includeQuestion: boolean) {
@@ -64,17 +99,32 @@ function groupFindings(keys: Iterable<string>, includeQuestion: boolean) {
  * passage, their text alone cannot distinguish a paraphrase from another need.
  * Keep the recorded decision intact for human review in that case.
  */
-export function reclassifiedFindings(current: Iterable<string>, prior: Iterable<string>): Map<string, string> {
+export function reclassifiedFindings(current: Iterable<string>, prior: Iterable<string>, labels?: ActivityLabels): Map<string, string> {
   const incomingKeys = new Set(current);
   const storedKeys = new Set(prior);
   const byQuestion = groupFindings(storedKeys, true);
   const matches = new Map<string, string>();
   for (const [scope, incoming] of groupFindings(incomingKeys, true)) {
     const stored = byQuestion.get(scope) ?? [];
+    const claimedNames = new Map<string, Set<string>>();
     for (const key of incoming) {
-      if (storedKeys.has(key)) continue;
-      const matching = stored.filter(priorKey => sameSourceQuestion(priorKey, key));
-      if (matching.length === 1) matches.set(key, matching[0]!);
+      const matching = storedKeys.has(key) ? [key] : matchingSourceQuestions(key, stored, labels);
+      if (matching.length === 1) {
+        const previous = matching[0]!;
+        if (previous !== key) matches.set(key, previous);
+        const name = sourceFindingActivity(key);
+        if (name && !sourceFindingActivity(previous)) {
+          throw new TrustedApplicationError("The recorded finding has no identifiable activity. Review the original passage before retrying.", "ambiguous_source_finding", 409);
+        }
+        if (name) {
+          const names = claimedNames.get(previous) ?? new Set<string>();
+          names.add(name);
+          claimedNames.set(previous, names);
+          if (names.size > 1) {
+            throw new TrustedApplicationError("Several activities could refer to the same recorded finding. Review the original passage before retrying.", "ambiguous_source_finding", 409);
+          }
+        }
+      }
       if (matching.length > 1) {
         throw new TrustedApplicationError("This question has several recorded classifications. Review the source before retrying.", "ambiguous_source_finding", 409);
       }
@@ -85,12 +135,18 @@ export function reclassifiedFindings(current: Iterable<string>, prior: Iterable<
     const incoming = incomingByPassage.get(passage);
     if (!incoming) continue;
     const represented = new Set(incoming.map(key => matches.get(key) ?? key));
-    const unresolved = stored.filter(key => !represented.has(key));
-    const ambiguous = incoming.some(key => !storedKeys.has(key) && !matches.has(key) &&
-      unresolved.some(priorKey => compatibleActivities(findingParts(key)?.[4], findingParts(priorKey)?.[4])));
+    const ambiguous = incoming.some(key => {
+      if (storedKeys.has(key) || matches.has(key)) return false;
+      const [, quote, , question, activity] = findingParts(key)!;
+      return stored.some(previous => {
+        const parts = findingParts(previous)!;
+        if (represented.has(previous) && question !== parts[3]) return false;
+        return compareActivities(quote, activity, parts[4]) !== "different";
+      });
+    });
     if (ambiguous) {
       throw new TrustedApplicationError(
-        "A previously recorded passage has a different extraction question. Review the source and use a more specific quotation before retrying.",
+        "A previously recorded passage has an unresolved activity or extraction question. Review the source and use a more specific quotation before retrying.",
         "ambiguous_source_finding", 409,
       );
     }

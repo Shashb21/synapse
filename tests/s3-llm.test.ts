@@ -1,4 +1,15 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+// The decision and extraction must be able to hold independent database transactions.
+const previousPoolMax = vi.hoisted(() => {
+  const previous = process.env.DATABASE_POOL_MAX;
+  process.env.DATABASE_POOL_MAX = "3";
+  return previous;
+});
+afterAll(() => {
+  if (previousPoolMax === undefined) delete process.env.DATABASE_POOL_MAX;
+  else process.env.DATABASE_POOL_MAX = previousPoolMax;
+});
 
 vi.mock("@/lib/iegp/store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/iegp/store")>();
@@ -382,12 +393,14 @@ describe("S3 on the model path", () => {
   ])("persists named registries from a shared quotation in $batch", async ({ batch, activities }) => {
     const quote = `The ${activities.join(" and ")} registries will evaluate long-term safety.`;
     const names = activities.map(activity => `${activity} registry`);
-    const run = (activityNames: string[]) => {
+    const run = (activityNames: string[], owners: string[] = []) => {
       const { ctx } = context(call => {
         if (call.purpose.startsWith("tactic-proposer:")) return { tactics:
           activityNames.map(name => good({ name, status: "planned", source_quote: quote })),
         };
-        return call.purpose === "tactic-critic" ? keepAll(call) : acceptAll(call);
+        if (call.purpose === "tactic-critic") return keepAll(call);
+        return { decisions: acceptAll(call).decisions.map((decision, i) => owners[i]
+          ? { ...decision, match: "same", target_tactic_id: owners[i] } : decision) };
       });
       return tacticExtractModule.run(input(false), ctx);
     };
@@ -401,6 +414,37 @@ describe("S3 on the model path", () => {
     const state = await loadState();
     expect(state.tactics.filter(tactic => committed.includes(tactic.id)).map(tactic => tactic.name))
       .toEqual(names);
+    expect((await run(names)).output.committed_tactic_ids).toEqual([]);
+    const recognised = await run(["First described activity", "Second described activity"], committed);
+    expect(recognised.output.accepted.map(candidate => candidate.target_tactic_id)).toEqual(committed);
+    expect(recognised.output.committed_tactic_ids).toEqual([]);
+    const { listTacticSourceReferences } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    for (const id of committed) {
+      const references = await listTacticSourceReferences(id);
+      expect(references).toHaveLength(1);
+      expect(references[0]!.finding_keys).toHaveLength(1);
+    }
+  });
+
+  it.each([true, false])("recovers a historical named registry while admitting a sibling (repeat original %s)", async repeatOriginal => {
+    const { db } = await import("@/lib/iegp/db");
+    const { sql } = await import("drizzle-orm");
+    const names = repeatOriginal ? ["Coral registry", "Opal registry"] : ["Pine registry", "Birch registry"];
+    const quote = `The ${names.join(" and ")} both follow treatment safety.`;
+    const run = (activities: string[]) => {
+      const { ctx } = context(call => call.purpose.startsWith("tactic-proposer:")
+        ? { tactics: activities.map(name => good({ name, source_quote: quote })) }
+        : call.purpose === "tactic-critic" ? keepAll(call) : acceptAll(call));
+      return tacticExtractModule.run(input(false), ctx);
+    };
+    const [original] = (await run(names.slice(0, 1))).output.committed_tactic_ids;
+    // Historical sources may have a four-part key, or only the owning tactic and its quote.
+    await db().execute(sql`UPDATE tactic_source_references SET finding_keys =
+      CASE WHEN ${repeatOriginal} THEN jsonb_build_array(((finding_keys->>0)::jsonb - 4)::text) ELSE '[]'::jsonb END
+      WHERE tactic_id = ${original}`);
+    const added = (await run(repeatOriginal ? names : names.slice(1))).output.committed_tactic_ids;
+    expect(added).toHaveLength(1);
+    expect((await loadState()).tactics.find(tactic => tactic.id === added[0])?.name).toBe(names[1]);
     expect((await run(names)).output.committed_tactic_ids).toEqual([]);
   });
 
@@ -441,6 +485,51 @@ describe("S3 on the model path", () => {
       expect(await listTacticSourceReferences(libraryId)).toContainEqual(expect.objectContaining({ source_quote: quote }));
     } finally {
       await extraction?.catch(() => {});
+      await connection.end();
+    }
+  });
+
+  it("serializes extraction with a human decision before either takes conflicting rows", async () => {
+    const { createTacticSuggestion, decideTacticSuggestion, listTacticSourceReferences } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    const { listParsedDocuments } = await import("@/modules/stages/s1-parse/module");
+    const { currentSchemaName } = await import("@/lib/iegp/db");
+    const { tacticVersion } = await import("@/lib/iegp/tactic-expansions");
+    const postgres = (await import("postgres")).default;
+    const source = (await listParsedDocuments([documentId]))[0]!.source_id;
+    const parent = (await loadState()).tactics.find(tactic => tactic.id === libraryId)!;
+    const review = await createTacticSuggestion({ run_id: "decision-contention", document_id: documentId,
+      source_id: source, source_quote: "The review also examines costs.", target_tactic_id: libraryId,
+      expected_tactic_version: tacticVersion(parent), shared_scope: "Review", new_scope: "Costs", expansion: scope,
+      separate: {name: "Cost review", type: "slr", status: "planned", evidence_question: scope.evidence_question} });
+    const quote = "An independent passage confirms the existing payer review.";
+    const { ctx } = context(call => call.purpose.startsWith("tactic-proposer:")
+      ? {tactics: [good({name: parent.name, type: parent.type, source_quote: quote})]}
+      : call.purpose === "tactic-critic" ? keepAll(call)
+      : {decisions: acceptAll(call).decisions.map(d => ({...d, match: "same", target_tactic_id: libraryId}))});
+    const schema = await currentSchemaName();
+    const connection = postgres(process.env.DATABASE_URL!, {max: 1});
+    const writers: Promise<unknown>[] = [];
+    try {
+      await connection.begin(async tx => {
+        await tx`select id from ${tx(schema)}.sources where id = ${source} for update`;
+        const waitForWriters = (count: number) => vi.waitFor(async () => {
+          await tx`select pg_stat_clear_snapshot()`;
+          const [locks] = await tx`select count(*)::int as waiting from pg_stat_activity
+            where datname = current_database() and cardinality(pg_blocking_pids(pid)) > 0`;
+          expect(locks?.waiting).toBe(count);
+        }, {timeout: 5_000, interval: 20});
+        writers.push(decideTacticSuggestion({id: review.id, decision: "reject", actor: ACTOR, rationale: "Cost review declined."}));
+        void writers[0]!.catch(() => {});
+        await waitForWriters(1);
+        writers.push(tacticExtractModule.run(input(false), ctx));
+        void writers[1]!.catch(() => {});
+        await waitForWriters(2);
+      });
+      const [decision] = await Promise.all(writers);
+      expect(decision).toMatchObject({ id: review.id, status: "rejected" });
+      expect(await listTacticSourceReferences(libraryId)).toContainEqual(expect.objectContaining({ source_quote: quote }));
+    } finally {
+      await Promise.allSettled(writers);
       await connection.end();
     }
   });
@@ -516,15 +605,15 @@ describe("S3 on the model path", () => {
 
   });
 
-  it("queues distinct same-run overlap alternatives supported by one passage and question", async () => {
+  it.each(["slr", "registry"])("queues distinct same-run overlap alternatives supported by one passage and question (%s)", async secondType => {
     const { listTacticSuggestions } = await import("@/modules/stages/s3-tactic-extract/suggestions");
     const { addSourceBlock } = await import("@/lib/iegp/source-blocks");
     const { listParsedDocuments } = await import("@/modules/stages/s1-parse/module");
     const doc = (await listParsedDocuments([documentId]))[0]!;
-    const quote = "A registry and a systematic review will both examine subgroup safety.";
+    const quote = `The Alder registry and the Hazel ${secondType} will both examine subgroup safety.`;
     const alternatives = [
-      { name: "Subgroup registry", type: "registry", status: "planned", evidence_question: scope.evidence_question },
-      { name: "Subgroup systematic review", type: "slr", status: "planned", evidence_question: scope.evidence_question },
+      { name: "Alder registry", type: "registry", status: "planned", evidence_question: scope.evidence_question },
+      { name: "Hazel study", type: secondType, status: "planned", evidence_question: scope.evidence_question },
     ];
     await addSourceBlock({ source_id: doc.source_id, text: quote, actor: ACTOR, rationale: "Document both studies." });
     const { ctx } = context(call => {
@@ -539,7 +628,7 @@ describe("S3 on the model path", () => {
       })) };
     });
     const { output } = await tacticExtractModule.run(input(false), ctx);
-    expect(output.accepted.map(candidate => candidate.type)).toEqual(["registry", "slr"]);
+    expect(output.accepted.map(candidate => candidate.type)).toEqual(["registry", secondType]);
     const rows = (await listTacticSuggestions()).filter(row => row.target_tactic_id === libraryId && row.source_quote === quote);
     expect(rows).toHaveLength(2);
     for (const option of alternatives) {

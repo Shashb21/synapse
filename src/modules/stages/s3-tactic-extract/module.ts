@@ -24,9 +24,10 @@ import {
   type TacticType,
 } from "@/lib/iegp/enums";
 import { tacticVersion, expansionScopeSchema, modelExpansionScope } from "@/lib/iegp/tactic-expansions";
-import { reclassifiedFindings, sourceFindingKey } from "@/lib/ingest/source-findings";
+import { matchingSourceQuestions, reclassifiedFindings, sourceFindingKey } from "@/lib/ingest/source-findings";
 import { createTacticSuggestion, recordedTacticEvidence, separateTacticOptionSchema } from "./suggestions";
 import type { ExpansionScope, SeparateTacticOption, Tactic } from "@/lib/iegp/types";
+import { lockRelationships } from "@/lib/iegp/relationship-change";
 import { commitExtractedRecords, loadState, withExtractionCommit } from "@/lib/iegp/store";
 import { extractCandidateTactics } from "@/lib/iegp/engine";
 import { lockCurrentExtractionDocuments, currentExtractionDocuments, selectedExtractionDocuments, listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
@@ -698,7 +699,9 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
 
     const committed_tactic_ids: string[] = [];
     if (!ctx.replay?.evaluation && !input.dry_run) await withExtractionCommit("S3", async () => {
-      // Match S4: own the existing tactics before locking any source rows.
+      // Human decisions take source then tactic. Join their lock before taking either row.
+      await lockRelationships();
+      // Match S4 and setup writers that take gap membership before tactics and sources.
       await db().execute(sql`LOCK TABLE gaps IN ROW EXCLUSIVE MODE`);
       const targetIds = [...new Set(accepted.flatMap(candidate => candidate.target_tactic_id ? [candidate.target_tactic_id] : []))];
       if (targetIds.length) {
@@ -707,16 +710,27 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
       }
       await lockCurrentExtractionDocuments(documents);
       const recorded = await recordedTacticEvidence(documents.map(doc => doc.source_id), (await loadState()).tactics, accepted);
-      // New activities keep their own identities, even when they answer the same question.
       const keyOf = (candidate: TacticCandidate) => sourceFindingKey(
-        candidate.source_id, candidate.source_quote, candidate.type, candidate.evidence_question,
-        candidate.match === "new" ? candidate.name : undefined,
+        candidate.source_id, candidate.source_quote, candidate.type, candidate.evidence_question, candidate.name,
       );
-      const reclassified = reclassifiedFindings(accepted.map(keyOf), recorded);
-      const unrecorded = accepted.filter(candidate => {
+      // A recognised library tactic can have a paraphrased title. Only its own
+      // recorded references can disambiguate that verdict on the same passage.
+      const represented: string[] = [];
+      const pending = accepted.filter(candidate => {
+        const target = candidate.target_tactic_id;
+        if (candidate.match !== "same" || !target) return true;
+        const owned = [...recorded].filter(([, entry]) => entry.owners.has(target)).map(([key]) => key);
+        const question = sourceFindingKey(candidate.source_id, candidate.source_quote, candidate.type, candidate.evidence_question);
+        const matches = matchingSourceQuestions(question, owned);
+        represented.push(...matches);
+        return !matches.length;
+      });
+      const reclassified = reclassifiedFindings([...represented, ...pending.map(keyOf)], recorded.keys(), key => recorded.get(key)!.labels);
+      const claimed = new Set(recorded.keys());
+      const unrecorded = pending.filter(candidate => {
         const key = keyOf(candidate);
-        if (recorded.has(key) || reclassified.has(key)) return false;
-        recorded.add(key);
+        if (claimed.has(key) || reclassified.has(key)) return false;
+        claimed.add(key);
         return true;
       });
       for (const document of documents) {

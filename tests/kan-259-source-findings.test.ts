@@ -21,6 +21,14 @@ describe("extraction finding identity", () => {
     expect(reclassifiedFindings([old, added], [old]).size).toBe(0);
   });
 
+  it("requires identifiable source evidence before reusing a different activity name", () => {
+    const named = (name?: string) => sourceFindingKey("s", "A registry follows treatment outcomes.", "registry", "What is safety?", name);
+    const original = named("Alpha registry"), ungrounded = named("Beta registry");
+    expect(() => reclassifiedFindings([ungrounded], [original])).toThrow(/unresolved activity/);
+    expect(() => reclassifiedFindings([original, ungrounded], [original])).toThrow(/unresolved activity/);
+    expect(() => reclassifiedFindings([original, ungrounded], [named()])).toThrow(/unresolved activity/);
+  });
+
   it("requires resolution before a different question on an already recorded passage can overwrite or duplicate a decision", () => {
     expect(() => reclassifiedFindings([key("How long do people live?")], [key("What is survival?")]))
       .toThrow(/previously recorded passage/);
