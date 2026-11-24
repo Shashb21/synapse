@@ -7,7 +7,7 @@ import { wipePlatform } from "@/modules/kernel/db";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { NoRouteError } from "@/modules/llm/provider";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
-import { createGap, createProposedTactic, loadState, resetDemoSetup } from "@/lib/iegp/store";
+import { createGap, createProposedTactic, loadState, resetDemoSetup, validateGap } from "@/lib/iegp/store";
 import { validatePlacement } from "@/modules/stages/s8-prioritization/module";
 import { ideationModule } from "@/modules/stages/s9-ideation/module";
 
@@ -162,6 +162,9 @@ describe("S9 on the model path", () => {
       .map((gap) => gap.id)
       .slice(0, 2);
     expect(ids).toHaveLength(2);
+    for (const gap_id of ids) {
+      await validateGap({ gap_id, actor_name: ACTOR.name, actor_function: ACTOR.function, note: "Confirm the evidence assessment" });
+    }
     for (const gap_id of ids) await validatePlacement({ ...await priorityDecision(gap_id, "Blocks dossier"),gap_id,band:"high",rationale:"Blocks dossier",actor:ACTOR});
     libraryId = state.tactics[0]!.id;
   }, 60_000);
@@ -264,11 +267,16 @@ describe("S9 on the model path", () => {
     expect(gapsOf(revision).map((gap) => gap.id)).toEqual([a]);
     expect(gapsOf(revision)[0]!.revise![0]!.objection).toBe("comparator should be physician's choice");
 
-    expect(output.proposals.map((row) => row.name)).toEqual(["A1 revised", "B2"]);
-    const [first, second] = output.proposals as [(typeof output.proposals)[0], (typeof output.proposals)[0]];
-    expect(first.design).toMatchObject({ comparator: "Physician's choice", duration_months: 18, readout_lag_months: 4, timing_rationale: "Timing for A1 revised" });
-    expect(first).toMatchObject({ score: 88, rank: 1, judge_note: "judge on A1 revised" });
-    expect(second).toMatchObject({ type: "itc", design: { duration_months: 11, readout_lag_months: 0 } });
+    expect(output.proposals.map((row) => row.name).sort()).toEqual(["A1 revised", "B2"]);
+    const revised = output.proposals.find((row) => row.name === "A1 revised");
+    expect(revised).toMatchObject({
+      gap_id: a,
+      design: { comparator: "Physician's choice", duration_months: 18, readout_lag_months: 4, timing_rationale: "Timing for A1 revised" },
+      score: 88,
+      rank: 1,
+      judge_note: "judge on A1 revised",
+    });
+    expect(output.proposals.find((row) => row.name === "B2")).toMatchObject({ gap_id: b, type: "itc", design: { duration_months: 11, readout_lag_months: 0 } });
     expect(output.rejected.map((row) => row.name)).toEqual(["B1"]);
     expect(output.rejected[0]).toMatchObject({ judge_note: "judge on B1", rank: null, score: 30 });
   });

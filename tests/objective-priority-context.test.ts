@@ -18,7 +18,7 @@ import "@/modules";
 import { POST } from "@/app/api/iegp/route";
 import { POST as modulePost } from "@/app/api/modules/route";
 import { GET as priorityGet, POST as priorityPost } from "@/app/api/plan/route";
-import { createGap, loadState, resetDemoSetup, saveProductSetup, setGapObjective } from "@/lib/iegp/store";
+import { createGap, loadState, resetDemoSetup, validateGap, saveProductSetup, setGapObjective } from "@/lib/iegp/store";
 import { parsePlanningContext, setupContextFromState, setupIssues } from "@/lib/iegp/planning-context";
 import { gapRecord } from "@/lib/iegp/gap-record";
 import { withWorkspaceTransaction } from "@/lib/iegp/db";
@@ -196,12 +196,13 @@ describe("objective dates and shared priority review", () => {
     const created = new Promise<void>(resolve => { ready = resolve; });
     const creation = scoped(() => withWorkspaceTransaction(async () => {
       const id = await createGap({ ...auditActor, statement: "Concurrent evidence need", objective_id: ctx.objectives[0]!.id });
-      await setPlacement({ gap_id: id, actor, band: "high", validate: true, reason: "Review concurrent gap", expected_version: null });
+      await validateGap({ ...auditActor, gap_id: id, note: "Confirm the concurrent evidence assessment" });
+      await setPlacement({ gap_id: id, actor, band: "high", validate: true, ...await priorityDecision(id, "Review concurrent gap") });
       ready();
       await waiting;
       return id;
     }));
-    await created;
+    await Promise.race([created, creation]);
     ctx.objectives[0]!.decision_date = "2030-02-01";
     const save = post({ action: "save_product_setup", context: ctx, reason: "Move the shared decision" });
     let outcome;
@@ -253,6 +254,7 @@ describe("objective dates and shared priority review", () => {
   it.each(["validate_band", "set_placement"])("refuses a pre-edit first %s confirmation and accepts a refreshed context snapshot without inventing a placement", async action => {
     const { ctx } = await fixture();
     const gapId = await scoped(() => createGap({ ...auditActor, statement: "Unplaced gap awaiting review", objective_id: ctx.objectives[0]!.id }));
+    await scoped(() => validateGap({ ...auditActor, gap_id: gapId, note: "Confirm the evidence assessment" }));
     const baseline = await scoped(async () => (await priorityGet()).json());
     const initialContextVersion = baseline.priority_context_versions?.[gapId] ?? null;
     ctx.objectives[0]!.decision_date = "2031-06-30";

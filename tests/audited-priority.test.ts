@@ -11,7 +11,7 @@ vi.mock("next/headers", () => ({
 import "@/modules";
 import { POST } from "@/app/api/plan/route";
 import { GET as referenceGET } from "@/app/api/plan/references/route";
-import { createGap, loadState, resetDemoSetup } from "@/lib/iegp/store";
+import { createGap, loadState, resetDemoSetup, validateGap } from "@/lib/iegp/store";
 import { db, sharedDb } from "@/modules/kernel/db";
 import { sql } from "drizzle-orm";
 import { WORKSPACE_COOKIE, workspaceCookieValue } from "@/modules/workspaces/context";
@@ -32,6 +32,14 @@ async function signIn(role: Role = "medical_affairs", email = owner) {
   jar.set(WORKSPACE_COOKIE, workspaceCookieValue(workspace.id, session.id));
   return session;
 }
+/** Creates and confirms an Open gap before testing changes to its priority. */
+async function createReviewedGap(input: Pick<Parameters<typeof createGap>[0], "statement" | "source_id" | "source_quote">) {
+  const reviewer = { actor_name: "Priority Reviewer", actor_function: "medical_affairs" as const };
+  const id = await createGap({ ...input, ...reviewer });
+  await validateGap({ gap_id: id, note: "Reviewed evidence before deciding priority", ...reviewer });
+  return id;
+}
+
 let gapId: string;
 const post = (body: Record<string, unknown>) => scoped(async () => {
   const response = await POST(new Request("http://localhost/api/plan", {
@@ -47,7 +55,7 @@ beforeAll(async () => {
   await signIn();
   await scoped(async () => {
     await resetDemoSetup();
-    gapId = await createGap({ statement: "No comparative evidence for the HTA submission.", actor_name: "Priority Reviewer", actor_function: "medical_affairs" });
+    gapId = await createReviewedGap({ statement: "No comparative evidence for the HTA submission." });
   });
 }, 60_000);
 afterAll(async () => {
@@ -106,7 +114,7 @@ describe("audited manual priority decisions", () => {
     expect(edits.find((result) => result.status !== 200)!.body.error).toMatch(/review the latest priority/i);
     const winner = edits.find((result) => result.status === 200)!.body.placement;
     expect((await scoped(listPlacements)).find((row) => row.gap_id === gapId)).toEqual(winner);
-    const firstId = await scoped(() => createGap({ statement: "No safety evidence in older patients.", actor_name: "Priority Reviewer", actor_function: "medical_affairs" }));
+    const firstId = await scoped(() => createReviewedGap({ statement: "No safety evidence in older patients." }));
     const first = await Promise.all(["high", "low"].map((band) => post({ gap_id: firstId, action: "set_placement", band, reason: "First manual assessment", expected_version: null })));
     expect(first.filter((result) => result.status === 200)).toHaveLength(1);
     expect((await scoped(() => entityHistory([firstId]))).filter((entry) => entry.field === "placement")).toHaveLength(1);
@@ -135,7 +143,7 @@ describe("audited manual priority decisions", () => {
     }
   });
   it("keeps legacy confirmed human priorities confirmed without inventing a reason", async () => {
-    const legacyId = await scoped(() => createGap({ statement: "Long-term comparative safety remains uncertain.", actor_name: "Priority Reviewer", actor_function: "medical_affairs" }));
+    const legacyId = await scoped(() => createReviewedGap({ statement: "Long-term comparative safety remains uncertain." }));
     await scoped(() => db().insert(kernel.priorityPlacements).values({ gap_id: legacyId, axis_scores: { decision_impact: 70 }, suggested_band: "high", suggested_rationale: "Original model rationale", band: "high", validated: true, rationale: "Original human rationale", actor_name: "Earlier reviewer", actor_function: "medical_affairs", at: "2025-01-01T00:00:00.000Z" }));
     const legacy = (await scoped(listPlacements)).find((row) => row.gap_id === legacyId)!;
     expect(legacy).toMatchObject({ validated: true, rationale: "Original human rationale", band: "high" });
@@ -147,7 +155,7 @@ describe("audited manual priority decisions", () => {
   });
 
   it("retains the suggested band when a reviewer edits one score on an unbanded suggestion", async () => {
-    const id = await scoped(() => createGap({ statement: "No comparative subgroup evidence.", actor_name: "Priority Reviewer", actor_function: "medical_affairs" }));
+    const id = await scoped(() => createReviewedGap({ statement: "No comparative subgroup evidence." }));
     await scoped(() => db().insert(kernel.priorityPlacements).values({ gap_id: id, axis_scores: { decision_impact: 60 }, suggested_band: "medium", suggested_rationale: "Relevant to the decision", band: null, validated: false, at: "2026-01-01T00:00:00.000Z" }));
     const current = (await scoped(listPlacements)).find((row) => row.gap_id === id)!;
     const result = await post({ action: "set_placement", gap_id: id, axis_scores: { decision_impact: 70 }, reason: "Reviewed the decision impact", expected_version: current.version });
@@ -172,7 +180,7 @@ describe("audited manual priority decisions", () => {
 
   it("accepts supplied support into the same attributable history and rejects unsupported or unrelated targets", async () => {
     await scoped(() => db().insert(sources).values({ id: "kan132-audit-source", filename: "committee.txt", title: "Committee interview", source_type: "stakeholder_interview", stakeholder_function: "medical_affairs", ingested_at: "2026-10-16T00:00:00Z", full_text: "Comparative evidence is required for the committee." }));
-    const id = await scoped(() => createGap({ statement: "Comparative evidence is required for the committee.", source_id: "kan132-audit-source", source_quote: "Comparative evidence is required for the committee.", actor_name: "Priority Reviewer", actor_function: "medical_affairs" }));
+    const id = await scoped(() => createReviewedGap({ statement: "Comparative evidence is required for the committee.", source_id: "kan132-audit-source", source_quote: "Comparative evidence is required for the committee." }));
     const reference = { entity_type: "gap" as const, entity_id: id, reason: "The evidence statement describes the missing comparison" };
     const state = await scoped(loadState);
     const references = [reference, { entity_type: "objective" as const, entity_id: state.gaps.find(row => row.id === id)!.objective_id, reason: "The linked objective identifies the affected decision" }, { entity_type: "source" as const, entity_id: "kan132-audit-source", reason: "The interview explicitly describes the committee evidence need" }];
@@ -216,7 +224,7 @@ describe("audited manual priority decisions", () => {
   });
 
   it("rolls back supported acceptance and its references if the audit insert fails", async () => {
-    const id = await scoped(() => createGap({ statement: "No comparative survival evidence.", actor_name: "Priority Reviewer", actor_function: "medical_affairs" }));
+    const id = await scoped(() => createReviewedGap({ statement: "No comparative survival evidence." }));
     await scoped(() => db().insert(kernel.priorityPlacements).values({ gap_id: id, axis_scores: { decision_impact: 80 }, suggested_band: "high", suggested_rationale: "Missing survival evidence informs access", suggested_references: [{ entity_type: "gap", entity_id: id, reason: "The statement identifies the missing survival evidence" }], band: "high", validated: false, at: "2026-01-01T00:00:00.000Z" }));
     const before = (await scoped(listPlacements)).find(row => row.gap_id === id)!;
     const history = await scoped(() => entityHistory([id]));

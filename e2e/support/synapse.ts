@@ -413,6 +413,24 @@ export async function seedMapped(request: APIRequestContext, demo_ids = DEMO_SOU
   return { ...seeded, gaps, tactics, mapping };
 }
 
+/** Confirms the mapped fixture's assessments and parks gaps that still need adjudication. */
+export async function preparePrioritizationInventory(request: APIRequestContext) {
+  for (const { gap_id, issue } of await planGapBlockers(request)) {
+    if (issue === "unconfirmed") {
+      await iegpAction(request, { action: "validate_gap", gap_id, note: "Confirmed for the prioritization fixture" });
+    } else if (issue === "partial" || issue === "candidate") {
+      await iegpAction(request, { action: "park_gap", gap_id, reason: "Set aside for the prioritization fixture" });
+    }
+  }
+  expect((await consolidate(request)).ready_for_prioritization).toBe(true);
+}
+
+/** Seeds evidence and completes the inventory review needed by downstream specs. */
+export async function seedPrioritizable(request: APIRequestContext) {
+  await seedMapped(request);
+  await preparePrioritizationInventory(request);
+}
+
 export type ConsolidationOutput = {
   open: { gap_id: string; name: string; tactic_ids: string[] }[];
   addressed: { gap_id: string; name: string }[];
@@ -440,10 +458,15 @@ export async function validateBandHigh(request: APIRequestContext, gap_id: strin
   return planAction(request, { action: "validate_band", gap_id, band: "high", rationale });
 }
 
-/**
- * The gap id issued just before `id` (GAP-007 → GAP-006). Ids are never
- * reissued after a reset (KAN-15), so specs derive them instead of assuming GAP-001.
- */
+async function planGapBlockers(request: APIRequestContext) {
+  const plan = await request.get("/api/plan");
+  expect(plan.ok()).toBeTruthy();
+  const { final_blockers } = (await plan.json()) as {
+    final_blockers: { issue: string; gap_id: string | null; message: string }[];
+  };
+  return final_blockers.filter((row) => row.gap_id && row.issue !== "foreign_reference");
+}
+
 /**
  * Resolves what a complete final waits on in the gap inventory (KAN-86), as a
  * person would: each gap the plan names is kept and confirmed, rewritten if
@@ -457,14 +480,11 @@ export async function resolveFinalPlanGaps(request: APIRequestContext) {
     return response.json() as Promise<GapRecord>;
   };
   for (let round = 0; round < 4; round += 1) {
-    const plan = await request.get("/api/plan");
-    expect(plan.ok()).toBeTruthy();
-    const { final_blockers } = (await plan.json()) as {
-      final_blockers: { issue: string; gap_id: string | null; message: string }[];
-    };
-    const gaps = final_blockers.filter((row) => row.gap_id && row.issue !== "foreign_reference");
+    const gaps = await planGapBlockers(request);
     if (gaps.length === 0) return;
-    for (const { gap_id, issue } of gaps) {
+    const inventory = gaps.filter(row => row.issue !== "no_band");
+    // Review the whole inventory before saving any band. Rewrites can produce new gaps.
+    for (const { gap_id, issue } of inventory.length ? inventory : gaps) {
       if (issue === "partial") {
         const record = await readGap(gap_id!);
         // Only completed, ongoing or planned work closes the addressed slice (a proposed scope does not).
@@ -555,6 +575,10 @@ export async function resolveFinalPlanGaps(request: APIRequestContext) {
   throw new Error("Gaps still block the final plan after four rounds.");
 }
 
+/**
+ * The gap id issued just before `id` (GAP-007 → GAP-006). Ids are never
+ * reissued after a reset (KAN-15), so specs derive them instead of assuming GAP-001.
+ */
 export function previousGapId(id: string): string {
   const match = /^GAP-(\d+)$/.exec(id);
   if (!match) throw new Error(`Not a numbered gap id: ${id}`);

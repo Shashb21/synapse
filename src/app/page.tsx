@@ -21,7 +21,7 @@ import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 import {
   buildPlanWorkspace,
   defaultPlanPlace,
-  gapsReadyForPrioritize,
+  gapPrioritizationReadiness,
   isPlanPlace,
   planGates,
   REVIEW_GAP_FILTERS,
@@ -107,7 +107,8 @@ export default async function HomePage({
   const fallback: PlanPlace = !ai && suggested === "upload" ? "gaps" : suggested;
   if (!ai && requested === "upload") redirect("/?place=gaps");
   const place: PlanPlace = isPlanPlace(requested) ? requested : fallback;
-  const ready = gapsReadyForPrioritize(state);
+  const readiness = gapPrioritizationReadiness(state);
+  const ready = readiness.blockers.length === 0;
   const gapFilter = (REVIEW_GAP_FILTERS as readonly string[]).includes(params.gap_filter ?? "")
     ? (params.gap_filter as ReviewGapFilter)
     : undefined;
@@ -132,7 +133,7 @@ export default async function HomePage({
           />
           <IngestPanel sources={state.sources} demoFiles={demo} />
         </AiOnly>
-        <InventoryReadiness cards={workspace.review} readyForPrioritize={ready} />
+        <InventoryReadiness cards={workspace.review} readyForPrioritize={ready} readiness={readiness} />
       </>
     );
   } else if (place === "gaps") {
@@ -156,6 +157,7 @@ export default async function HomePage({
           cards={workspace.review}
           availableTactics={workspace.availableTactics}
           readyForPrioritize={ready}
+          readiness={readiness}
           initialFilter={gapFilter}
           initialAttention={params.gap_attention === "needs_attention"}
           settingOptions={settingOptions(state)}
@@ -180,7 +182,7 @@ export default async function HomePage({
         {!gates.planUnlocked ? (
           <StepWaiting
             title="Waiting on Gaps"
-            body="Prioritize needs every live gap validated, with Partially Addressed gaps split or rewritten. Until then the matrix shows only the gaps already validated as Open, so priorities will be incomplete."
+            body="Confirm every live evidence assessment and resolve outstanding coverage before prioritizing gaps."
             href="/?place=gaps"
             cta="Go to Gaps"
           />

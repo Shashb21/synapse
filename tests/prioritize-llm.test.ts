@@ -1,5 +1,5 @@
-import { sources } from "@/lib/iegp/schema";
-import { sql } from "drizzle-orm";
+import { gaps, sources } from "@/lib/iegp/schema";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/modules/kernel/db";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import "@/modules";
@@ -7,7 +7,7 @@ import { wipePlatform } from "@/modules/kernel/db";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { NoRouteError } from "@/modules/llm/provider";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
-import { createGap, loadState, resetDemoSetup } from "@/lib/iegp/store";
+import { createGap, loadState, overrideGapStatus, parkGap, resetDemoSetup, validateGap } from "@/lib/iegp/store";
 import { DEFAULT_AXES, quadrantBand } from "@/modules/stages/s8-prioritization/axes";
 import { listPlacements, setPlacement, prioritizationModule } from "@/modules/stages/s8-prioritization/module";
 
@@ -21,6 +21,7 @@ const ACTOR = { name: "LLM Test", function: "medical_affairs" as const };
 const axis = (id: string) => DEFAULT_AXES.axes.find((row) => row.id === id)!;
 const X = "decision_impact";
 const Y = "time_pressure";
+const reviewActor = { actor_name: ACTOR.name, actor_function: ACTOR.function };
 
 type Call = { purpose: string; body: Record<string, unknown> };
 type Script = (call: Call) => unknown;
@@ -79,7 +80,8 @@ describe("S8 on the model path", () => {
       "No comparative effectiveness data versus standard of care for the payer dossier.",
       "Long-term safety in elderly patients is unknown.",
     ]) {
-      await createGap({ statement, source_id: "kan132-source", source_quote: statement, actor_name: ACTOR.name, actor_function: ACTOR.function });
+      const gap_id = await createGap({ statement, source_id: "kan132-source", source_quote: statement, ...reviewActor });
+      await validateGap({ gap_id, ...reviewActor });
     }
     const state = await loadState();
     ids = state.gaps
@@ -100,6 +102,78 @@ describe("S8 on the model path", () => {
 
   const input = () =>
     prioritizationModule.inputSchema.parse({ gap_ids: ids, x_axis: X, y_axis: Y, dry_run: true });
+
+  it.each([undefined, true])("blocks model scoring when another live assessment is unconfirmed, targeted=%s", async targeted => {
+    const blocker = await createGap({ statement: "Unreviewed evidence in a different setting", settings: ["Adjuvant"], ...reviewActor });
+    try {
+      const before = await listPlacements();
+      const { ctx, calls } = context(call => call.purpose === "priority-critic" ? reviewed(reviewIdsOf(call)) : scored(gapIdsOf(call), { [X]: 80, [Y]: 75 }));
+      await expect(prioritizationModule.run({ ...input(), gap_ids: targeted ? [ids[0]!] : undefined, dry_run: false }, ctx))
+        .rejects.toThrow(new RegExp(`${blocker}.*confirm`, "i"));
+      expect(calls).toEqual([]);
+      expect(await listPlacements()).toEqual(before);
+    } finally {
+      await parkGap({ gap_id: blocker, reason: "Remove test blocker from the live inventory", ...reviewActor });
+    }
+  });
+
+  it.each([
+    ["validated_partial", /split or rewrite/i],
+    ["candidate", /candidate/i],
+  ] as const)("blocks a confirmed target when another live gap is %s", async (status, guidance) => {
+    const blocker = await createGap({ statement: "Unresolved inventory status", ...reviewActor });
+    try {
+      await db().update(gaps).set({ status, computed_status: status === "candidate" ? null : status, human_validated: true }).where(eq(gaps.id, blocker));
+      const before = await listPlacements();
+      const { ctx, calls } = context(() => ({}));
+      const run = prioritizationModule.run({ ...input(), gap_ids: [ids[0]!], dry_run: false }, ctx);
+      await expect(run).rejects.toThrow(blocker);
+      await expect(run).rejects.toThrow(guidance);
+      expect(calls).toEqual([]);
+      expect(await listPlacements()).toEqual(before);
+    } finally {
+      await db().update(gaps).set({ retired: true }).where(eq(gaps.id, blocker));
+    }
+  });
+
+  it("identifies a stale target before model scoring", async () => {
+    const { ctx, calls } = context(() => ({}));
+    await expect(prioritizationModule.run({ ...input(), gap_ids: [ids[0]!, "missing-gap"], dry_run: false }, ctx))
+      .rejects.toThrow(/selected gap.*missing/i);
+    expect(calls).toEqual([]);
+  });
+
+  it("scores a confirmed Open override while a confirmed Addressed override stays outside the batch", async () => {
+    const [open, addressed] = ids as [string, string];
+    await overrideGapStatus({ gap_id: open, status: "validated_open", reason: "Assessment still leaves a decision-critical question", ...reviewActor });
+    await overrideGapStatus({ gap_id: addressed, status: "validated_addressed", reason: "Clinical review found sufficient evidence", ...reviewActor });
+    try {
+      const { ctx } = context(call => call.purpose === "priority-critic" ? reviewed(reviewIdsOf(call)) : scored(gapIdsOf(call), { [X]: 80, [Y]: 75 }));
+      const { output } = await prioritizationModule.run({ ...input(), gap_ids: undefined }, ctx);
+      expect(output.placements.map(row => row.gap_id)).toEqual([open]);
+    } finally {
+      await db().update(gaps).set({ status: "validated_open", status_override: null }).where(eq(gaps.id, open));
+      await db().update(gaps).set({ status: "validated_open", status_override: null }).where(eq(gaps.id, addressed));
+    }
+  });
+
+  it("rechecks the whole inventory before saving model scores", async () => {
+    const before = await listPlacements();
+    let blocker: string | undefined;
+    const { ctx, calls } = context(async call => {
+      if (call.purpose === "priority-critic") return reviewed(reviewIdsOf(call));
+      blocker ??= await createGap({ statement: "Evidence awaiting review added during scoring", ...reviewActor });
+      return scored(gapIdsOf(call), { [X]: 80, [Y]: 75 });
+    });
+    try {
+      await expect(prioritizationModule.run({ ...input(), gap_ids: [ids[0]!], dry_run: false }, ctx))
+        .rejects.toThrow(/confirm.*evidence assessment/i);
+      expect(calls.length).toBeGreaterThan(0);
+      expect(await listPlacements()).toEqual(before);
+    } finally {
+      if (blocker) await parkGap({ gap_id: blocker, reason: "Remove test blocker from the live inventory", ...reviewActor });
+    }
+  });
 
   it("throws before doing anything when no LLM is connected", async () => {
     const { ctx, calls } = context(() => ({}), false);

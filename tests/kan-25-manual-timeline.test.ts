@@ -1,4 +1,4 @@
-import { priorityDecision } from "./support/priority-decision";
+import { priorityDecision, reviewInventoryForPriorities } from "./support/priority-decision";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
@@ -123,6 +123,7 @@ describe("KAN-25 manual timeline, no stage run, AI off", () => {
     await resetDemo();
     await wipePlatform();
     await ensurePlatformSchema();
+    await reviewInventoryForPriorities(ACTOR);
     const state = await loadState();
     const open = state.gaps.filter((gap) => isLiveGap(gap) && displayedGapStatus(gap) === "validated_open");
     expect(open.length).toBeGreaterThan(2);

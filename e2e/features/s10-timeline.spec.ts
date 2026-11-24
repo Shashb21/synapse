@@ -6,7 +6,7 @@ import {
   planActionExpectingError,
   planState,
   runStage,
-  seedMapped,
+  seedPrioritizable,
   validateBandHigh, resolveFinalPlanGaps } from "../support/synapse";
 
 type TimelineOutput = {
@@ -31,7 +31,7 @@ test.describe.configure({ mode: "serial" });
 
 test.describe("S10 interactive Gantt IEGP", () => {
   test.beforeAll(async ({ request }) => {
-    await seedMapped(request);
+    await seedPrioritizable(request);
     await runStage(request, "S8");
     const gap = await firstOpenGap(request);
     await validateBandHigh(request, gap.gap_id, "Highest priority for the timeline spec");

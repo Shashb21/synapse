@@ -8,7 +8,7 @@ import {
   firstOpenGap,
   planAction,
   runStage,
-  seedMapped,
+  seedPrioritizable,
   validateBandHigh,
 } from "../support/synapse";
 import { freshWorkspace } from "../support/session";
@@ -22,7 +22,7 @@ test.describe("Tactic Ideation place", () => {
   let low: { gap_id: string; name: string } | null = null;
 
   test.beforeAll(async ({ request }) => {
-    await seedMapped(request);
+    await seedPrioritizable(request);
     await runStage(request, "S8");
     high = await firstOpenGap(request);
     await validateBandHigh(request, high.gap_id, "Blocks the EU5 submission, so it is High");

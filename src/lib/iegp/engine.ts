@@ -854,13 +854,42 @@ export function isParked(gap: Pick<EvidenceGap, "parked_at">): boolean {
   return Boolean(gap.parked_at);
 }
 
-export function gapsReadyForPrioritize(state: IegpState): boolean {
+export type PrioritizationBlocker =
+  | { gapId: null; reason: string }
+  | { gapId: string; gapName: string; reason: string };
+
+export type GapPrioritizationReadiness = {
+  liveCount: number;
+  blockers: PrioritizationBlocker[];
+};
+
+/** Reports which live evidence assessments need human review before prioritization. */
+export function gapPrioritizationReadiness(state: Pick<IegpState, "gaps">): GapPrioritizationReadiness {
   const live = state.gaps.filter(isLiveGap);
-  if (live.length === 0) return false;
-  return live.every((gap) => {
+  const blockers: PrioritizationBlocker[] = [];
+  if (live.length === 0) {
+    blockers.push({ gapId: null, reason: "Add and confirm at least one live gap in Evidence Inventory." });
+  }
+  for (const gap of live) {
     const shown = displayedGapStatus(gap);
-    return gap.human_validated && shown !== "validated_partial" && shown !== "candidate";
-  });
+    let reason: string;
+    if (shown === "validated_partial") {
+      reason = "Coverage is Partially Addressed and still provisional. Split or rewrite this gap as Open or Addressed, then confirm the assessment.";
+    } else if (shown === "candidate") {
+      reason = "Review this Candidate. Add and confirm an Open or Addressed gap if it belongs in the inventory, then park the Candidate.";
+    } else if (!gap.human_validated) {
+      reason = "Confirm the evidence assessment with your reason. If the computed status needs an Open or Addressed override, record the override with a reason.";
+    } else {
+      continue;
+    }
+    blockers.push({ gapId: gap.id, gapName: gap.name, reason });
+  }
+  return { liveCount: live.length, blockers };
+}
+
+/** Whether every live assessment is settled and the inventory is nonempty. */
+export function gapsReadyForPrioritize(state: IegpState): boolean {
+  return gapPrioritizationReadiness(state).blockers.length === 0;
 }
 
 const ACCEPTED_GAP_FOR_MAPPING: GapStatus[] = ["validated_open", "validated_partial"];
