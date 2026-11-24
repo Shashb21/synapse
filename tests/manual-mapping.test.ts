@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MappingTableWorkbench } from "@/components/mapping-table-workbench";
 import { gapRecord } from "@/lib/iegp/gap-record";
 import { relationshipSnapshot, relationshipVersion } from "@/lib/iegp/relationship-version";
 import { modelMappingSupport } from "./support/model-mapping";
@@ -6,11 +9,12 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import "@/modules";
 import { resetWorkspaceModules, wipePlatform } from "@/modules/kernel/db";
+import { closeRun, openRun, RunRecorder } from "@/modules/kernel/observability";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
 import { coverageReviewVersion } from "@/lib/iegp/requirement-basis";
-import { displayedGapStatus } from "@/lib/iegp/engine";
-import { buildMappingTableView } from "@/lib/iegp/mapping-table";
+import { buildPlanWorkspace, displayedGapStatus } from "@/lib/iegp/engine";
+import { buildMappingTableView, latestS4MappingRows } from "@/lib/iegp/mapping-table";
 import {
   acceptMapping,
   assignTacticToGap,
@@ -32,6 +36,8 @@ import { db, poolSize, withWorkspaceTransaction } from "@/lib/iegp/db";
 import { sql } from "drizzle-orm";
 import { acceptTacticExpansion, tacticVersion } from "@/lib/iegp/tactic-expansions";
 import { POST } from "@/app/api/iegp/route";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 
 const HUMAN = { actor_name: "A. Rao", actor_function: "heor" as const };
 const MODEL = { actor_name: "S4 model", actor_function: "medical_affairs" as const };
@@ -192,6 +198,9 @@ describe("S4 re-run leaves human decisions alone", () => {
       human: true,
       lock_coverage: true,
     });
+    await modifyTactic({ tactic_id: locked, fields: { comparator: "Active comparator" }, ...HUMAN, rationale: "Correct the protocol comparator." });
+    const stale = (await loadState()).coverages.find(row => row.id === covId)!;
+    expect(stale).toMatchObject({ stale: true, overall: "limited", overall_lock: { locked: true } });
     const bodies: Record<string, unknown>[] = [];
     const ctx: ModuleContext = {
       ai: true,
@@ -205,15 +214,17 @@ describe("S4 re-run leaves human decisions alone", () => {
         if (purpose === "mapping-table-proposer") {
           bodies.push(body);
           const ids = (body.gaps as { id: string }[]).map((g) => g.id);
+          // First return the human-rejected pair, then omit the stale pair, then correct both.
+          const targets = bodies.length === 1 ? [rejected, fresh] : bodies.length === 2 ? [fresh] : [locked, fresh];
           return {
             rows: ids.map((id) => ({
               gap_id: id,
-              mapping_status: "addressed",
+              mapping_status: "partially_addressed",
               confidence: 90,
-              rationale: "model row",
-              mappings: [rejected, locked, fresh].map((tactic_id) => ({
+              rationale: "The new study covers part of the gap; the reassessment is review-only.",
+              mappings: targets.map((tactic_id) => ({
                 tactic_id,
-                coverage: "full",
+                coverage: tactic_id === locked ? "full" : "partial",
                 confidence: 90,
                 rationale: `${tactic_id} covers it`,
                 dimensions: dims,
@@ -248,18 +259,92 @@ describe("S4 re-run leaves human decisions alone", () => {
       gap_ids: [gapId], tactic_ids: tacticIds, dry_run: false }),
       ctx,
     );
-    const gapPrompt = (bodies[0]!.gaps as { id: string; human_rejected_tactic_ids?: string[] }[])[0]!;
+    const gapPrompt = (bodies[0]!.gaps as { id: string; human_rejected_tactic_ids?: string[]; stale_tactic_ids?: string[] }[])[0]!;
     expect(gapPrompt.human_rejected_tactic_ids).toEqual([rejected]);
+    expect(gapPrompt.stale_tactic_ids).toEqual([locked]);
+    expect(bodies[1]?.gaps).toEqual([expect.objectContaining({ rejected_because: expect.stringMatching(/rejected by a reviewer/) })]);
+    expect(bodies[2]?.gaps).toEqual([expect.objectContaining({ rejected_because: expect.stringContaining(locked) })]);
     const row = output.rows.find((r) => r.gap_id === gapId)!;
     expect(row.mappings.map((m) => m.tactic_id)).not.toContain(rejected);
 
     const state = await loadState();
     expect(state.coverages.some((c) => c.gap_id === gapId && c.tactic_id === rejected)).toBe(false);
     const human = state.coverages.find((c) => c.id === covId)!;
-    expect(human.overall).toBe("limited");
-    expect(human.overall_lock.actor_name).toBe(HUMAN.actor_name);
+    expect(human).toEqual(stale);
+    expect(row.mappings).toContainEqual(expect.objectContaining({ tactic_id: locked, coverage: "full", review_only: true }));
+    expect(output.committed).toEqual([{ gap_id: gapId, tactic_ids: [fresh] }]);
     // A new suggestion is still allowed: S4 may add a pair nobody decided on.
-    expect(state.coverages.find((c) => c.gap_id === gapId && c.tactic_id === fresh)?.overall).toBe("full");
+    expect(state.coverages.find((c) => c.gap_id === gapId && c.tactic_id === fresh)?.overall).toBe("partial");
+    expect.soft(row).toMatchObject({ tactic_ids: [fresh], mapping_status: "partially_addressed" });
+
+    const view = buildMappingTableView(state, [row]).find(candidate => candidate.gap_id === gapId)!;
+    expect.soft(view).toMatchObject({ source: "proposal", mapping_status: "partially_addressed" });
+    // The stale relationship is retained because it was already recorded, so a row save cannot accidentally remove it.
+    expect.soft(new Set(view.tactic_ids)).toEqual(new Set([locked, fresh]));
+    const tactics = buildPlanWorkspace(state).availableTactics;
+    const markup = renderToStaticMarkup(createElement(MappingTableWorkbench, { rows: [view], tactics }));
+    expect.soft(markup).toContain("AI reassessment of stale coverage");
+    expect.soft(markup).toContain(`/gaps/${gapId}#gap-coverage-actions`);
+    expect.soft(markup.match(/>Accept<\/button>/g)).toHaveLength(1);
+    expect.soft(markup.match(/>Reject<\/button>/g)).toHaveLength(1);
+
+    const recorder = new RunRecorder({
+      workspace_id: ctx.workspace_id,
+      stage: "S4",
+      module_id: kgMappingModule.manifest.id,
+      module_version: kgMappingModule.manifest.version,
+      actor: ctx.actor,
+      input: { gap_ids: [gapId] },
+    });
+    await openRun(recorder);
+    await closeRun({ recorder, status: "ok", output });
+    // Use the direct-handler test session after exercising model S4 with the stub off.
+    process.env.SYNAPSE_TEST_STUB_LLM = "1";
+    const recorded = (await latestS4MappingRows())?.find(candidate => candidate.gap_id === gapId);
+    const review = recorded?.mappings.find(mapping => mapping.tactic_id === locked);
+    expect(review).toMatchObject({ review_only: true });
+    const accept = await post({
+      action: "accept_mapping",
+      judgement_origin: "model",
+      gap_id: gapId,
+      tactic_id: locked,
+      expected_suggestion: relationshipVersion(review),
+      rationale: "Accept this tentative AI coverage assessment.",
+    });
+    expect(accept).toMatchObject({ status: 400, json: { error: expect.stringMatching(/stale.*review|review.only/i) } });
+    const after = await loadState();
+    expect(after.coverages).toEqual(state.coverages);
+    expect(after.mapping_suggestions).toEqual(state.mapping_suggestions);
+
+    const supported = recorded?.mappings.find(mapping => mapping.tactic_id === fresh);
+    expect(supported).toMatchObject({ coverage: "partial" });
+    expect(await post({
+      action: "accept_mapping", judgement_origin: "model", gap_id: gapId, tactic_id: fresh,
+      expected_suggestion: relationshipVersion(supported), rationale: "Accept the supported coverage assessment.",
+    })).toMatchObject({ status: 200, json: { ok: true } });
+    expect(await coverageOf(gapId, locked)).toEqual(stale);
+  });
+
+  it("shows a not-relevant stale reassessment on a human-saved row without changing its defaults", async () => {
+    const { gapId, tacticIds: [locked, fresh] } = await workspace(2);
+    await saveMappingTableRow({ gap_id: gapId, tactic_ids: [locked!], mapping_status: "partially_addressed", ...HUMAN, rationale: "Keep the study on the saved row." });
+    const state = await loadState();
+    const candidate: MappingTableRow = {
+      gap_id: gapId, gap_name: "Gap", tactic_ids: [fresh!], tactic_names: ["Manual mapping tactic 2"],
+      mapping_status: "addressed", confidence: 90, rationale: ["Model verdict"], review: null,
+      mappings: [
+        { tactic_id: locked!, tactic_name: "Manual mapping tactic 1", coverage: "not_relevant", confidence: 90, rationale: "The revised comparator should be checked.", dimensions: null, review_only: true },
+        { tactic_id: fresh!, tactic_name: "Manual mapping tactic 2", coverage: "full", confidence: 90, rationale: "A suggested study covers the question.", dimensions: null },
+      ],
+    };
+    const view = buildMappingTableView(state, [candidate]).find(row => row.gap_id === gapId)!;
+    expect.soft(view).toMatchObject({ source: "human", tactic_ids: [locked!], mapping_status: "partially_addressed", mappings: [candidate.mappings[0]] });
+    const markup = renderToStaticMarkup(createElement(MappingTableWorkbench, { rows: [view], tactics: buildPlanWorkspace(state).availableTactics }));
+    expect(markup).toContain("AI reassessment of stale coverage");
+    expect(markup).toContain("not relevant");
+    expect(markup).toContain("The revised comparator should be checked.");
+    expect(markup).not.toContain("A suggested study covers the question.");
+    expect(markup).not.toMatch(/>(Accept|Reject)<\/button>/);
   });
 });
 

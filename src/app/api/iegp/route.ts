@@ -794,6 +794,9 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
         if (body.judgement_origin === "model" && (!suggestion || body.expected_suggestion !== relationshipVersion(suggestion))) {
           throw new TrustedApplicationError("Model suggestion changed or is unavailable. Review the current suggestion or make a manual judgement with a reason.");
         }
+        if (suggestion?.review_only) {
+          throw new TrustedApplicationError("This stale coverage reassessment is review-only. Review the existing coverage on the gap record.");
+        }
         await acceptMapping({
           model: body.judgement_origin === "model",
           references: suggestion?.references,

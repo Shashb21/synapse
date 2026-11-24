@@ -5,7 +5,7 @@ import "@/modules";
 import { wipePlatform } from "@/modules/kernel/db";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { NoRouteError } from "@/modules/llm/provider";
-import { gapEligibleForMapping, tacticEligibleForMapping } from "@/lib/iegp/engine";
+import { emptyDimensions, gapEligibleForMapping, tacticEligibleForMapping, unlocked } from "@/lib/iegp/engine";
 import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
 import { buildMappingTableView } from "@/lib/iegp/mapping-table";
 import { createGap, loadState, recordMissedTactic, resetDemoSetup } from "@/lib/iegp/store";
@@ -326,6 +326,378 @@ describe("S4 on the model path", () => {
     for (const row of output.rows) expect(row.rationale).toEqual(["nothing bears on it"]);
   });
 
+  it("retries duplicate rows without re-asking for an accepted gap", async () => {
+    const [a, b] = gapIds;
+    const { ctx, calls } = context((call) => {
+      if (call.purpose === "mapping-table-critic") return reviewsFor(call);
+      if (call.purpose === "mapping-table-judge") return verdictsFor(call);
+      const ids = gapIdsOf(call);
+      return { rows: ids.length > 1 ? [unmapped(a), unmapped(b), unmapped(b)] : ids.map(unmapped) };
+    });
+    await kgMappingModule.run(input(), ctx);
+    const proposes = calls.filter(call => call.purpose === "mapping-table-proposer");
+    expect(proposes.map(gapIdsOf)).toEqual([[a, b].sort(), [b]]);
+    expect(proposes[1]!.body.gaps).toEqual([expect.objectContaining({ rejected_because: expect.stringMatching(/duplicate/i) })]);
+  });
+
+  it("offers every eligible pair in bounded batches on frozen inputs", async () => {
+    const state = await loadState();
+    const template = state.tactics.find(tacticEligibleForMapping)!;
+    const targets = Array.from({ length: 53 }, (_, index) => ({ ...template, id: `TAC-BATCH-${index}` }));
+    const { ctx, calls } = context((call) => {
+      if (call.purpose === "mapping-table-critic") return reviewsFor(call);
+      if (call.purpose === "mapping-table-judge") return verdictsFor(call);
+      return { rows: gapIdsOf(call).map(unmapped) };
+    });
+    const request = kgMappingModule.inputSchema.parse({ gap_ids: gapIds });
+    ctx.replay = {
+      input: request,
+      module_id: kgMappingModule.manifest.id,
+      module_version: kgMappingModule.manifest.version,
+      prompt_version: "base",
+      facts: { state: { ...state, tactics: targets, expansions: [] } },
+      evaluation: true,
+    };
+    const { output } = await kgMappingModule.run(request, ctx);
+    const offers = calls.filter(call => call.purpose === "mapping-table-proposer");
+    expect(offers.length).toBeGreaterThan(1);
+    const pairs = offers.flatMap(call => {
+      const tactics = call.body.tactics as { id: string }[];
+      expect(tactics.length * gapIdsOf(call).length).toBeLessThanOrEqual(24);
+      return gapIdsOf(call).flatMap(gap => tactics.map(tactic => `${gap}::${tactic.id}`));
+    });
+    expect(pairs.sort()).toEqual(gapIds.flatMap(gap => targets.map(tactic => `${gap}::${tactic.id}`)).sort());
+    expect(output.rows.map(row => row.gap_id)).toEqual(gapIds);
+  });
+
+  it("uses identical request batches and retains the same tied mappings when frozen input order changes", async () => {
+    const [gapId, siblingId] = gapIds;
+    const state = await loadState();
+    const template = state.tactics.find(tacticEligibleForMapping)!;
+    const targets = Array.from({ length: 25 }, (_, index) => ({
+      ...template,
+      id: `TAC-TIED-${String(index).padStart(2, "0")}`,
+    }));
+    const [first, second] = [targets[0]!, targets[24]!];
+    const request = kgMappingModule.inputSchema.parse({ gap_ids: [gapId, siblingId], max_per_gap: 1, dry_run: true });
+
+    const forward = { ...state, gaps: [...state.gaps], tactics: [...targets], expansions: [] };
+    const reverse = { ...forward, gaps: [...forward.gaps].reverse(), tactics: [...targets].reverse() };
+    const runs = [];
+    for (const facts of [forward, reverse]) {
+      const { ctx, calls } = context(call => {
+        if (call.purpose === "mapping-table-critic") return reviewsFor(call);
+        if (call.purpose === "mapping-table-judge") return verdictsFor(call);
+        const offered = (call.body.tactics as { id: string }[]).map(tactic => tactic.id);
+        const tactic = [first, second].find(target => offered.includes(target.id))!;
+        return { rows: gapIdsOf(call).map(id => id === gapId ? mapped(id, tactic.id) : unmapped(id)) };
+      });
+      ctx.replay = {
+        input: request,
+        module_id: kgMappingModule.manifest.id,
+        module_version: kgMappingModule.manifest.version,
+        prompt_version: "base",
+        facts: { state: facts },
+        evaluation: true,
+      };
+      const { output } = await kgMappingModule.run(request, ctx);
+      runs.push(calls);
+      expect(output.accepted.map(row => row.gap_id)).toEqual(
+        facts.gaps.filter(gap => request.gap_ids!.includes(gap.id)).map(gap => gap.id),
+      );
+    }
+
+    expect(runs[1]).toEqual(runs[0]);
+    for (const calls of runs) {
+      const judged = calls.filter(call => call.purpose === "mapping-table-judge");
+      const retained = judged.flatMap(call => (
+        call.body.rows as { gap: { id: string }; mappings: { tactic_id: string }[] }[]
+      ).filter(row => row.gap.id === gapId).flatMap(row => row.mappings.map(mapping => mapping.tactic_id)));
+      expect(retained).toEqual([first.id]);
+    }
+  });
+
+  it.each([
+    { label: "complementary partials", secondOutcome: "endpoints match", status: "addressed" },
+    { label: "overlapping partials", secondOutcome: "endpoints missing", status: "partially_addressed" },
+  ])("judges combined coverage for $label retained from different tactic batches", async ({ secondOutcome, status }) => {
+    const [gapId] = gapIds;
+    const state = await loadState();
+    const template = state.tactics.find(tacticEligibleForMapping)!;
+    const first = { ...template, id: "TAC-CROSS-00", population: "target population", outcomes: "endpoints missing" };
+    const second = { ...template, id: "TAC-CROSS-24", population: "compatible cohort", outcomes: secondOutcome };
+    const stale = { ...template, id: "TAC-CROSS-25" };
+    const fillers = Array.from({ length: 23 }, (_, index) => ({ ...template, id: `TAC-CROSS-${String(index + 1).padStart(2, "0")}` }));
+    const request = kgMappingModule.inputSchema.parse({ gap_ids: [gapId], dry_run: true });
+    let combinedAttempts = 0;
+    const combinedRationale = status === "addressed" ? "Together the two selected designs cover the population and endpoints." : "Both selected designs omit the gap's required endpoints.";
+    const { ctx, calls } = context(call => {
+      if (call.purpose === "mapping-table-critic") return reviewsFor(call);
+      if (call.purpose === "mapping-table-judge") return verdictsFor(call);
+      if (call.purpose === "mapping-table-combined-coverage") {
+        combinedAttempts++;
+        const offered = call.body.tactics as { id: string; outcomes: string }[];
+        const evaluatedStatus = offered.some(target => target.outcomes === "endpoints match") ? "addressed" : "partially_addressed";
+        return { rows: [{
+          gap_id: gapId,
+          mapping_status: combinedAttempts === 1 ? "open" : evaluatedStatus,
+          confidence: 84,
+          rationale: combinedRationale,
+        }] };
+      }
+      const offered = (call.body.tactics as { id: string }[]).map(tactic => tactic.id);
+      const ordinary = [first, second].find(target => offered.includes(target.id))!;
+      const fragment = mapped(gapId, ordinary.id);
+      if (offered.includes(stale.id)) fragment.mappings.push(mapped(gapId, stale.id, "full").mappings[0]!);
+      return { rows: [fragment] };
+    });
+    ctx.replay = {
+      input: request,
+      module_id: kgMappingModule.manifest.id,
+      module_version: kgMappingModule.manifest.version,
+      prompt_version: "base",
+      facts: { state: {
+        ...state,
+        tactics: [first, ...fillers, second, stale],
+        expansions: [],
+        coverages: [{
+          id: "COV-STALE",
+          gap_id: gapId,
+          tactic_id: stale.id,
+          dimensions: emptyDimensions(),
+          overall: "limited",
+          overall_rationale: "Previous assessment",
+          overall_lock: unlocked(),
+          stale: true,
+          needs_review: false,
+        }],
+      } },
+      evaluation: true,
+    };
+
+    const { output } = await kgMappingModule.run(request, ctx);
+
+    expect(output.accepted[0]).toMatchObject({
+      mapping_status: status,
+      confidence: 84,
+      rationale: [combinedRationale, "model reason", "model reason"],
+      tactic_ids: [first.id, second.id],
+      mappings: expect.arrayContaining([expect.objectContaining({ tactic_id: stale.id, review_only: true })]),
+    });
+    const combined = calls.filter(call => call.purpose === "mapping-table-combined-coverage");
+    expect(combined).toHaveLength(2);
+    expect(combined[1].body).toMatchObject({
+      gap: { id: gapId },
+      tactics: [{ id: first.id }, { id: second.id }],
+      mappings: [{ tactic_id: first.id }, { tactic_id: second.id }],
+      rejected_because: expect.stringContaining("partially_addressed"),
+    });
+    const judged = calls.filter(call => call.purpose === "mapping-table-judge" && call.body.combined_coverage);
+    expect(judged).toHaveLength(1);
+    expect(judged[0].body).toMatchObject({
+      tactics: [{ id: first.id }, { id: second.id }],
+      rows: [{ gap: { id: gapId }, mapping_status: status, mappings: [{ tactic_id: first.id }, { tactic_id: second.id }] }],
+    });
+  });
+
+  it.each(["absent", "same batch", "separate batch"] as const)(
+    "preserves complementary ordinary coverage when a stale assessment is %s",
+    async placement => {
+      const [gapId] = gapIds;
+      const state = await loadState();
+      const template = state.tactics.find(tacticEligibleForMapping)!;
+      const first = { ...template, id: "TAC-POPULATION" };
+      const second = { ...template, id: "TAC-OUTCOMES" };
+      const stale = { ...template, id: "TAC-STALE" };
+      const fillers = Array.from({ length: placement === "separate batch" ? 22 : 0 },
+        (_, index) => ({ ...template, id: `TAC-FILLER-${index}` }));
+      const targets = [first, second, ...fillers, ...(placement === "absent" ? [] : [stale])];
+      const coverages = placement === "absent" ? [] : [{
+        id: "COV-STALE",
+        gap_id: gapId,
+        tactic_id: stale.id,
+        dimensions: emptyDimensions(),
+        overall: "limited" as const,
+        overall_rationale: "Previous assessment",
+        overall_lock: unlocked(),
+        stale: true,
+        needs_review: false,
+      }];
+      const request = kgMappingModule.inputSchema.parse({ gap_ids: [gapId], dry_run: true });
+      const { ctx, calls } = context(call => {
+        if (call.purpose === "mapping-table-critic") return reviewsFor(call);
+        if (call.purpose === "mapping-table-judge") return verdictsFor(call);
+        const offered = (call.body.tactics as { id: string }[]).map(tactic => tactic.id);
+        const ordinary = [first, second].filter(tactic => offered.includes(tactic.id));
+        const mappings = ordinary.map(tactic => ({
+          ...mapped(gapId, tactic.id).mappings[0]!,
+          rationale: tactic.id === first.id ? "Covers the target population" : "Covers the missing outcomes",
+        }));
+        if (offered.includes(stale.id)) mappings.push(mapped(gapId, stale.id, "full").mappings[0]!);
+        return { rows: [{
+          ...unmapped(gapId),
+          mapping_status: ordinary.length ? "addressed" : "open",
+          rationale: ordinary.length ? "The two ordinary studies cover complementary requirements." : "Only the stale relationship was reassessed.",
+          mappings,
+        }] };
+      });
+      ctx.replay = {
+        input: request,
+        module_id: kgMappingModule.manifest.id,
+        module_version: kgMappingModule.manifest.version,
+        prompt_version: "base",
+        facts: { state: { ...state, tactics: targets, expansions: [], coverages } },
+        evaluation: true,
+      };
+
+      const { output } = await kgMappingModule.run(request, ctx);
+
+      const proposals = calls.filter(call => call.purpose === "mapping-table-proposer");
+      expect(proposals).toHaveLength(placement === "separate batch" ? 2 : 1);
+      expect(output.accepted[0]).toMatchObject({ mapping_status: "addressed", tactic_ids: [first.id, second.id] });
+      expect(output.accepted[0]!.mappings.filter(mapping => mapping.review_only).map(mapping => mapping.tactic_id))
+        .toEqual(placement === "absent" ? [] : [stale.id]);
+    },
+  );
+
+  it.each([
+    { label: "one partial mapping", ordinaryCoverages: ["partial"] },
+    { label: "only limited mappings", ordinaryCoverages: ["limited", "limited"] },
+  ])("retries addressed when a stale full assessment accompanies $label", async ({ ordinaryCoverages }) => {
+    const [gapId, siblingId] = gapIds;
+    const state = await loadState();
+    const template = state.tactics.find(tacticEligibleForMapping)!;
+    const ordinary = ordinaryCoverages.map((coverage, index) => ({
+      tactic: { ...template, id: `TAC-ORDINARY-${index}` },
+      coverage,
+    }));
+    const stale = { ...template, id: "TAC-STALE" };
+    const request = kgMappingModule.inputSchema.parse({ gap_ids: [gapId, siblingId], dry_run: true });
+    const { ctx, calls } = context(call => {
+      if (call.purpose === "mapping-table-critic") return reviewsFor(call);
+      if (call.purpose === "mapping-table-judge") return verdictsFor(call);
+      const repair = Boolean(call.body.note);
+      return { rows: gapIdsOf(call).map(id => id === siblingId ? unmapped(id) : {
+        ...unmapped(gapId),
+        mapping_status: repair ? "partially_addressed" : "addressed",
+        rationale: repair ? "The ordinary mappings cover part of the gap." : "The stale assessment completes coverage.",
+        mappings: [
+          ...ordinary.map(({ tactic, coverage }) => mapped(gapId, tactic.id, coverage).mappings[0]!),
+          mapped(gapId, stale.id, "full").mappings[0]!,
+        ],
+      }) };
+    });
+    ctx.replay = {
+      input: request,
+      module_id: kgMappingModule.manifest.id,
+      module_version: kgMappingModule.manifest.version,
+      prompt_version: "base",
+      facts: { state: {
+        ...state,
+        tactics: [...ordinary.map(({ tactic }) => tactic), stale],
+        expansions: [],
+        coverages: [{
+          id: "COV-STALE",
+          gap_id: gapId,
+          tactic_id: stale.id,
+          dimensions: emptyDimensions(),
+          overall: "limited",
+          overall_rationale: "Previous assessment",
+          overall_lock: unlocked(),
+          stale: true,
+          needs_review: false,
+        }],
+      } },
+      evaluation: true,
+    };
+
+    const { output } = await kgMappingModule.run(request, ctx);
+
+    const proposals = calls.filter(call => call.purpose === "mapping-table-proposer");
+    expect(proposals.map(gapIdsOf)).toEqual([[gapId, siblingId].sort(), [gapId]]);
+    expect(proposals[1]!.body.gaps).toEqual([expect.objectContaining({
+      rejected_because: expect.stringMatching(/ordinary.*stale.*partially_addressed/i),
+    })]);
+    expect(output.accepted.find(row => row.gap_id === gapId)).toMatchObject({
+      mapping_status: "partially_addressed",
+      tactic_ids: ordinary.map(({ tactic }) => tactic.id),
+      mappings: expect.arrayContaining([expect.objectContaining({ tactic_id: stale.id, coverage: "full", review_only: true })]),
+    });
+    expect(output.accepted.find(row => row.gap_id === siblingId)).toMatchObject({ mapping_status: "open" });
+  });
+
+  it("bounds critic and judge calls even when all offered tactics get explicit verdicts", async () => {
+    const [gapId] = gapIds;
+    const state = await loadState();
+    const template = state.tactics.find(tacticEligibleForMapping)!;
+    const targets = Array.from({ length: 25 }, (_, index) => ({ ...template, id: `TAC-REVIEW-${String(index).padStart(2, "0")}` }));
+    const request = kgMappingModule.inputSchema.parse({ gap_ids: [gapId] });
+    const { ctx, calls } = context(call => {
+      if (call.purpose === "mapping-table-critic") return reviewsFor(call);
+      if (call.purpose === "mapping-table-judge") return verdictsFor(call, () =>
+        (call.body.tactics as { id: string }[]).some(tactic => tactic.id === targets.at(-1)!.id) ? "reject" : "accept");
+      const tactics = call.body.tactics as { id: string }[];
+      return { rows: [{
+        ...unmapped(gapId),
+        mappings: tactics.map(tactic => ({ ...mapped(gapId, tactic.id).mappings[0], coverage: "not_relevant", dimensions: null, references: [] })),
+      }] };
+    });
+    ctx.replay = {
+      input: request,
+      module_id: kgMappingModule.manifest.id,
+      module_version: kgMappingModule.manifest.version,
+      prompt_version: "base",
+      facts: { state: { ...state, tactics: targets, expansions: [] } },
+      evaluation: true,
+    };
+
+    const { output } = await kgMappingModule.run(request, ctx);
+
+    const reviews = calls.filter(call => call.purpose !== "mapping-table-proposer");
+    for (const review of reviews) {
+      expect((review.body.tactics as unknown[]).length).toBeLessThanOrEqual(24);
+      const [row] = review.body.rows as { mappings: unknown[] }[];
+      expect(row.mappings.length).toBeLessThanOrEqual(24);
+    }
+    expect(output.rejected[0].mappings.map(mapping => mapping.tactic_id)).toEqual(targets.map(tactic => tactic.id));
+  });
+
+  it("retries a wrong-batch tactic only in the slice where it was returned", async () => {
+    const [gapId] = gapIds;
+    const state = await loadState();
+    const template = state.tactics.find(tacticEligibleForMapping)!;
+    const targets = Array.from({ length: 25 }, (_, index) => ({ ...template, id: `TAC-SLICE-${String(index).padStart(2, "0")}` }));
+    const request = kgMappingModule.inputSchema.parse({ gap_ids: [gapId] });
+    let attemptsOnLastSlice = 0;
+    const { ctx, calls } = context(call => {
+      if (call.purpose === "mapping-table-critic") return reviewsFor(call);
+      if (call.purpose === "mapping-table-judge") return verdictsFor(call);
+      const tactics = call.body.tactics as { id: string }[];
+      if (tactics.length > 1) return { rows: [mapped(gapId, tactics[0].id)] };
+      attemptsOnLastSlice++;
+      return { rows: [mapped(gapId, attemptsOnLastSlice === 1 ? targets[0].id : tactics[0].id)] };
+    });
+    ctx.replay = {
+      input: request,
+      module_id: kgMappingModule.manifest.id,
+      module_version: kgMappingModule.manifest.version,
+      prompt_version: "base",
+      facts: { state: { ...state, tactics: targets, expansions: [] } },
+      evaluation: true,
+    };
+
+    const { output } = await kgMappingModule.run(request, ctx);
+
+    const offers = calls.filter(call => call.purpose === "mapping-table-proposer");
+    expect(offers.map(call => (call.body.tactics as { id: string }[]).map(tactic => tactic.id))).toEqual([
+      targets.slice(0, 24).map(tactic => tactic.id), [targets[24].id], [targets[24].id],
+    ]);
+    expect(offers[2].body.gaps).toEqual([expect.objectContaining({
+      id: gapId, rejected_because: expect.stringContaining(targets[0].id),
+    })]);
+    expect(output.accepted[0].tactic_ids).toEqual([targets[0].id, targets[24].id]);
+  });
+
   it("fails the run when the model never returns a row for a gap", async () => {
     const [a] = gapIds as [string, string];
     const { ctx } = context((call) => {
@@ -435,8 +807,7 @@ describe("S4 on the model path", () => {
       row.mappings[0].references = support === "missing" ? [] : [{ entity_type: "gap", entity_id: "not-a-supplied-gap", reason: "Claiming unrelated evidence" }];
       return { rows: [row] };
     });
-    const result = await kgMappingModule.run(kgMappingModule.inputSchema.parse({ gap_ids: [id], tactic_ids: [tacticId] }), ctx);
-    expect(result.output.committed).toEqual([]);
+    await expect(kgMappingModule.run(kgMappingModule.inputSchema.parse({ gap_ids: [id], tactic_ids: [tacticId] }), ctx)).rejects.toThrow(/supporting references/i);
     expect((await loadState()).coverages.some(row => row.gap_id === id)).toBe(false);
     expect(calls.find(call => call.purpose === "mapping-table-proposer")!.body.supporting_records).toEqual(expect.arrayContaining([expect.objectContaining({ entity_type: "gap", entity_id: id, excerpt: "Comparative outcomes needed for the committee" })]));
   });
