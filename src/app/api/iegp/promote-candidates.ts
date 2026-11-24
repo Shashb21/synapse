@@ -9,6 +9,7 @@ import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import { gapExtractModule } from "@/modules/stages/s2-gap-extract/module";
 import { gapCandidates } from "@/modules/stages/s2-gap-extract/schema";
 import { tacticExtractModule } from "@/modules/stages/s3-tactic-extract/module";
+import { tacticPromotionsForCandidates } from "@/modules/stages/s3-tactic-extract/promotions";
 import { tacticCandidates } from "@/modules/stages/s3-tactic-extract/schema";
 import { appendAudit, createGap, loadState, recordMissedTactic } from "@/lib/iegp/store";
 import {
@@ -42,24 +43,14 @@ export async function listRejectedGapCandidates(limit = 200): Promise<RejectedGa
 
 export async function listRejectedTacticCandidates(limit = 200): Promise<RejectedTacticCandidate[]> {
   await ensurePlatformSchema(tacticExtractModule.migrations);
-  const [rows, state] = await Promise.all([
-    db()
-      .select()
-      .from(tacticCandidates)
-      .where(eq(tacticCandidates.verdict, "reject"))
-      .orderBy(desc(tacticCandidates.created_at))
-      .limit(limit),
-    loadState(),
-  ]);
-  return rows.map((row) => {
-    if (row.citation_error) return { ...row, promoted_tactic_id: null };
-    const promoted = state.tactics.find(
-      (tactic) =>
-        tactic.name.trim().toLowerCase() === row.name.trim().toLowerCase() &&
-        (tactic.source_quote ?? "") === row.source_quote.trim(),
-    );
-    return { ...row, promoted_tactic_id: promoted?.id ?? null };
-  });
+  const rows = await db()
+    .select()
+    .from(tacticCandidates)
+    .where(eq(tacticCandidates.verdict, "reject"))
+    .orderBy(desc(tacticCandidates.created_at))
+    .limit(limit);
+  const promotions = await tacticPromotionsForCandidates(rows.map(({ id }) => id));
+  return rows.map((row) => ({ ...row, promoted_tactic_id: promotions.get(row.id) ?? null }));
 }
 
 export async function promoteGapCandidate(args: {
@@ -140,6 +131,9 @@ export async function promoteTacticCandidate(args: {
       .where(and(eq(tacticCandidates.id, args.candidate_id), eq(tacticCandidates.verdict, "reject")))
       .for("update");
     if (!row) throw new TrustedApplicationError("Rejected tactic candidate not found.", "not_found", 404);
+    // The edit and the tactic are committed together under the candidate lock.
+    const previous = (await tacticPromotionsForCandidates([row.id])).get(row.id);
+    if (previous) return previous;
     if (row.citation_error) throw new TrustedApplicationError(row.citation_error, "conflict", 409);
     await lockSourceCitationOwner(row.source_id);
     const citation = await resolveRetainedSourceQuote(row.source_id, row.block_id, row.source_quote);

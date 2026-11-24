@@ -1,10 +1,11 @@
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { withRelationshipChange } from "@/lib/iegp/relationship-change";
 import { lockSourceCitationOwner, requireRetainedSourceQuote, resolveRetainedSourceQuote } from "@/lib/iegp/source-citations";
+import { squashText } from "@/lib/ingest/manual-blocks";
 import { resolveSourceCitation, type SourceContext } from "@/lib/ingest/source-citation";
 /** S3 source review: immutable model baseline, source provenance and atomic human decisions. */
 import { createHash } from "node:crypto";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensureCurrentSchemaTables } from "@/lib/iegp/db";
 import * as t from "@/lib/iegp/schema";
@@ -18,9 +19,24 @@ import { captureTacticSuggestionDecision } from "@/lib/iegp/learning-capture";
 import { tacticSourceReferences, tacticSuggestions } from "./schema";
 
 export const separateTacticOptionSchema = z.object({name: z.string().trim().min(1), type: z.enum(TACTIC_TYPES), status: z.enum(TACTIC_STATUSES), evidence_question: z.string().trim().min(1)}).strict();
-const normalizeQuote = (quote: string) => quote.replace(/\s+/g, " ").trim();
-const quoteKey = (quote: string) => normalizeQuote(quote).toLowerCase();
 const suggestionKey = (parts: string[]) => createHash("sha256").update(JSON.stringify(parts)).digest("hex");
+async function findHistoricalCitation<T extends { source_quote: string; block_id?: string | null }>(
+  rows: T[],
+  sourceId: string,
+  blockId: string,
+  normalizedQuote: string,
+  tx: ExpansionTransaction,
+): Promise<T | undefined> {
+  const matching = rows.filter((row) => squashText(row.source_quote) === normalizedQuote);
+  const exact = matching.find((row) => row.block_id === blockId);
+  if (exact) return exact;
+  const unassigned = matching.filter((row) => !row.block_id);
+  if (unassigned.length !== 1) return;
+  const blocks = await tx.select().from(t.sourceBlocks).where(eq(t.sourceBlocks.source_id, sourceId));
+  if (resolveSourceCitation({
+    source_id: sourceId, quote: normalizedQuote, proposed_block_id: null, displayed: blocks, retained: blocks,
+  }).block_id === blockId) return unassigned[0];
+}
 function requireActor(actor: Actor) {
   if (!actor?.name?.trim() || !ACTOR_FUNCTIONS.includes(actor.function)) throw new TrustedApplicationError("A named actor with a known function is required.");
 }
@@ -42,8 +58,29 @@ export async function attachTacticSource(args: {
     const source_context = args.block_id || args.source_context
       ? await requireRetainedSourceQuote(args.source_id, args.block_id, args.source_quote, tx)
       : null;
+    const normalized = squashText(args.source_quote);
+    const legacyKey = normalized.toLowerCase();
+    const block_id = args.block_id ?? null;
+    // Keep a bounded index key even when the full passage is large.
+    const quote_key = block_id ? `grounded:${suggestionKey([normalized])}` : legacyKey;
+    if (block_id) {
+      const references = await tx.select().from(tacticSourceReferences).where(and(
+        eq(tacticSourceReferences.tactic_id, args.tactic_id),
+        eq(tacticSourceReferences.source_id, args.source_id),
+        inArray(tacticSourceReferences.quote_key, [quote_key, legacyKey]),
+      ));
+      if (references.some((row) => row.block_id === block_id && row.quote_key === quote_key)) return;
+      const historical = await findHistoricalCitation(
+        references.filter((row) => row.quote_key === legacyKey), args.source_id, block_id, normalized, tx,
+      );
+      if (historical) {
+        await tx.update(tacticSourceReferences).set({ block_id, source_context, quote_key })
+          .where(eq(tacticSourceReferences.id, historical.id));
+        return;
+      }
+    }
     await tx.insert(tacticSourceReferences).values({
-      ...args, source_context, id: newId("TSRC"), quote_key: quoteKey(args.source_quote), created_at: nowIso(),
+      ...args, block_id, source_context, id: newId("TSRC"), quote_key, created_at: nowIso(),
     }).onConflictDoNothing();
   };
   if (transaction) return run(transaction);
@@ -65,9 +102,13 @@ export async function createTacticSuggestion(args: {
   const { require_grounded_source, ...draft } = args;
   const expansion = expansionScopeSchema.parse(args.expansion), separate = separateTacticOptionSchema.parse(args.separate);
   if (![args.run_id, args.document_id, args.source_quote, args.shared_scope, args.new_scope].every(s => s.trim())) throw new TrustedApplicationError("Overlap requires source lineage, quote, shared and added scope.");
-  const citationKey = [args.source_id, args.target_tactic_id, quoteKey(args.source_quote)];
-  const legacyKey = suggestionKey(citationKey);
-  const source_key = args.block_id ? suggestionKey([...citationKey, args.block_id]) : legacyKey;
+  const normalized = squashText(args.source_quote);
+  const legacyParts = [args.source_id, args.target_tactic_id, normalized.toLowerCase()];
+  const legacyKey = suggestionKey(legacyParts);
+  const blockId = args.block_id;
+  const source_key = blockId
+    ? suggestionKey(["grounded", args.source_id, args.target_tactic_id, blockId, normalized])
+    : legacyKey;
   await ensureTacticSuggestionSchema();
   return db().transaction(async tx => {
     const source = await lockSourceCitationOwner(args.source_id, tx);
@@ -77,24 +118,23 @@ export async function createTacticSuggestion(args: {
       : null;
     const [parentRow] = await tx.select().from(t.tactics).where(eq(t.tactics.id, args.target_tactic_id)).for("update");
     if (!parentRow) throw new TrustedApplicationError("Target tactic not found in this workspace.", "not_found", 404);
-    const state = await readState(tx), parent = state.tactics.find(p => p.id === args.target_tactic_id)!;
     const [existing] = await tx.select().from(tacticSuggestions).where(eq(tacticSuggestions.source_key, source_key));
     if (existing) return existing.payload as TacticSuggestion;
-    if (args.block_id) {
-      const [legacy] = await tx.select().from(tacticSuggestions).where(eq(tacticSuggestions.source_key, legacyKey)).for("update");
-      const row = legacy?.payload as TacticSuggestion | undefined;
-      if (row && normalizeQuote(row.source_quote) === normalizeQuote(args.source_quote)) {
-        const match = resolveSourceCitation({ source_id: args.source_id, quote: row.source_quote,
-          proposed_block_id: row.block_id ?? null, displayed: state.blocks, retained: state.blocks });
-        if (match.block_id === args.block_id) {
-          // Keep the original key for older callers, and remember which exact block
-          // owns the decision even if another copy of its passage later appears.
-          const updated = { ...row, block_id: match.block_id, source_context: match.source_context };
-          await tx.update(tacticSuggestions).set({ payload: updated }).where(eq(tacticSuggestions.id, row.id));
-          return updated;
-        }
+    if (blockId) {
+      const legacy = await tx.select().from(tacticSuggestions)
+        .where(inArray(tacticSuggestions.source_key, [suggestionKey([...legacyParts, blockId]), legacyKey])).for("update");
+      const row = await findHistoricalCitation(
+        legacy.map(({ payload }) => payload as TacticSuggestion), args.source_id, blockId, normalized, tx,
+      );
+      if (row) {
+        if (row.block_id === blockId && row.source_context) return row;
+        // The saved decision now identifies its block even if another copy appears later.
+        const updated = { ...row, block_id: blockId, source_context };
+        await tx.update(tacticSuggestions).set({ payload: updated }).where(eq(tacticSuggestions.id, row.id));
+        return updated;
       }
     }
+    const parent = (await readState(tx)).tactics.find(p => p.id === args.target_tactic_id)!;
     if (tacticVersion(parent) !== args.expected_tactic_version) throw new TrustedApplicationError("Tactic changed during extraction; rerun to review its current scope.");
     const at = nowIso();
     const row: TacticSuggestion = {...draft, source_context, expansion, separate, id: newId("TSUG"), reviewed_parent: parent,

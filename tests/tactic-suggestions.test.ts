@@ -9,6 +9,8 @@ import { commitExtractedRecords, createProposedTactic, loadState, persistState }
 import { tacticVersion } from "@/lib/iegp/tactic-expansions";
 import type { ExpansionScope, TacticSuggestion } from "@/lib/iegp/types";
 import * as suggestions from "@/modules/stages/s3-tactic-extract/suggestions";
+import { editSourceBlock, SourceQuoteConflictError } from "@/lib/iegp/source-blocks";
+import { tacticSourceReferences } from "@/modules/stages/s3-tactic-extract/schema";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 
 const actor = {name: "Source reviewer", function: "medical_affairs" as const};
@@ -41,6 +43,54 @@ describe("S3 source matching", () => {
     await commitExtractedRecords({...args, tactics: [{...args.tactics[0]!, source_quote: "Another source sentence"}]});
     expect(await suggestions.listTacticSourceReferences(parentId)).toHaveLength(2);
   });
+  it("retains distinct case-sensitive passages on the same tactic and source block", async () => {
+    const upper = "Marker X was measured.";
+    const lower = "Marker x was measured.";
+    const block = { id: "marker-analysis", source_id: sourceId, heading: "Biomarkers", location: "p.2", text: `${upper} ${lower}` };
+    await db().insert(t.sourceBlocks).values(block);
+    const first = await proposal({ block_id: block.id, source_quote: upper });
+    await suggestions.decideTacticSuggestion({ id: first.id, decision: "reject", rationale: "Earlier passage reviewed", actor });
+    const second = await proposal({ block_id: block.id, source_quote: lower });
+    expect(second.id).not.toBe(first.id);
+    expect(second.status).toBe("pending");
+    expect((await proposal({ block_id: block.id, source_quote: upper })).status).toBe("rejected");
+    expect((await proposal({ block_id: block.id, source_quote: lower })).id).toBe(second.id);
+    await suggestions.decideTacticSuggestion({ id: second.id, decision: "reject", rationale: "Both reviews completed", actor });
+
+    for (const source_quote of [upper, lower, "Marker  X\nwas measured.", lower]) {
+      await suggestions.attachTacticSource({ tactic_id: parentId, source_id: sourceId, block_id: block.id, source_quote });
+    }
+    expect((await suggestions.listTacticSourceReferences(parentId)).map(row => row.source_quote).sort()).toEqual([upper, lower]);
+    await expect(editSourceBlock({ block_id: block.id, text: upper, rationale: "Remove the other marker", actor }))
+      .rejects.toBeInstanceOf(SourceQuoteConflictError);
+  });
+
+  it.each([false, true])("reconciles a historical reference with an unambiguous passage and preserves its ID (stored block %s)", async hasBlock => {
+    const location = { source_id: sourceId, source_quote: sourceQuote };
+    await db().insert(tacticSourceReferences).values({
+      ...location, tactic_id: parentId, block_id: hasBlock ? "fictional-subgroup" : null,
+      id: "old-source-reference", quote_key: sourceQuote.toLowerCase(), created_at: "2026-10-07",
+    });
+    for (let rerun = 0; rerun < 2; rerun++) {
+      await suggestions.attachTacticSource({ ...location, tactic_id: parentId, block_id: "fictional-subgroup" });
+    }
+    expect(await suggestions.listTacticSourceReferences(parentId)).toMatchObject([{
+      id: "old-source-reference", block_id: "fictional-subgroup", source_quote: sourceQuote,
+      source_context: { heading: "Analysis", location: "p.1" },
+    }]);
+  });
+
+  it("leaves a legacy reference unassigned when the passage appears in two blocks", async () => {
+    await suggestions.attachTacticSource({ tactic_id: parentId, source_id: sourceId, source_quote: sourceQuote });
+    const [original] = await suggestions.listTacticSourceReferences(parentId);
+    await db().insert(t.sourceBlocks).values({ id: "second-subgroup", source_id: sourceId, heading: "Other analysis", location: "p.2", text: sourceQuote });
+    await suggestions.attachTacticSource({ tactic_id: parentId, source_id: sourceId, source_quote: sourceQuote, block_id: "fictional-subgroup" });
+    expect(await suggestions.listTacticSourceReferences(parentId)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: original!.id, block_id: null }),
+      expect.objectContaining({ block_id: "fictional-subgroup" }),
+    ]));
+  });
+
   it("keeps overlaps pending with no unreviewed plan mutation and retains rejected reruns", async () => {
     const before = await loadState(); const row = await proposal();
     expect(row.status).toBe("pending"); expect(await loadState()).toEqual(before);

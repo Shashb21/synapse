@@ -13,8 +13,8 @@ vi.mock("@/modules/auth/request", () => ({
 import "@/modules";
 import { runStage } from "@/modules/kernel/run";
 import { wipePlatform, db } from "@/modules/kernel/db";
-import { listEdits } from "@/modules/kernel/edit-records";
-import { loadState, commitExtractedRecords, editNeed, persistSourceAndBlocks, resetDemoSetup } from "@/lib/iegp/store";
+import { listEdits, recordEdit } from "@/modules/kernel/edit-records";
+import { loadState, commitExtractedRecords, editNeed, persistSourceAndBlocks, recordMissedTactic, resetDemoSetup } from "@/lib/iegp/store";
 import * as t from "@/lib/iegp/schema";
 import { GET as blocksGet, POST as blocksPost } from "@/app/api/sources/blocks/route";
 import {
@@ -178,6 +178,28 @@ describe("S1 source blocks: human edit, add, split, merge, delete", () => {
       .rejects.toBeInstanceOf(SourceQuoteConflictError);
     const reparsed = await reparseSourceBlocks({ source_id, sections: [{ heading: "Other", text: "A different passage.", location: "p.3" }] });
     expect(reparsed.blocks.map(row => row.id)).toEqual(expect.arrayContaining([primary!.id, secondary!.id]));
+  });
+
+  it.each(["id", "title"] as const)("protects a historically promoted tactic using source %s", async identity => {
+    const { source_id, blocks } = await source(`legacy promotion ${identity}`);
+    const block = blocks[2]!;
+    const storedSource = (await loadState()).sources.find(row => row.id === source_id)!;
+    const tacticId = await recordMissedTactic({
+      name: "Historically promoted chart review", type: "rwe_study", status: "ongoing",
+      evidence_question: "What does routine care show?", source_quote: block.text,
+      data_source: storedSource[identity], actor_name: ACTOR.name, actor_function: ACTOR.function,
+    });
+    await recordEdit({
+      stage: "S3", entity_type: "tactic_candidate", entity_id: `old-${tacticId}`, field: "verdict",
+      action: "accept", before: "reject", after: tacticId, rationale: "Confirmed from source", actor: ACTOR,
+    });
+
+    await expect(editSourceBlock({ block_id: block.id, text: "Interview concluded.", rationale: "Edit notes", actor: ACTOR }))
+      .rejects.toBeInstanceOf(SourceQuoteConflictError);
+    await expect(deleteSourceBlock({ block_id: block.id, rationale: "Delete notes", actor: ACTOR }))
+      .rejects.toBeInstanceOf(SourceQuoteConflictError);
+    const reparsed = await reparseSourceBlocks({ source_id, sections: [{ heading: "Other", text: "Interview concluded.", location: "p.3" }] });
+    expect(reparsed.blocks.find(row => row.id === block.id)).toMatchObject({ text: block.text });
   });
 
   it("splits, merges and adds in reading order, labelling human blocks", async () => {

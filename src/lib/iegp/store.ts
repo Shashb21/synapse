@@ -1,5 +1,6 @@
 import { lockSourceCitationOwner, requireRetainedSourceQuote, resolveRetainedSourceQuote } from "./source-citations";
-import type { SourceContext } from "@/lib/ingest/source-citation";
+import { resolveSourceCitation, type SourceContext } from "@/lib/ingest/source-citation";
+import { squashText } from "@/lib/ingest/manual-blocks";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { assessmentBasis, coverageReviewVersion, fullConfirmationIssues, getRequirementBasisReview, reviewedRequirementDimensions, type RequirementReviewInput } from "./requirement-basis";
 import type { RequirementBasis } from "./types";
@@ -3501,18 +3502,26 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
   // Verified citations use the full quotation and its exact block. The historical
   // prefix still deduplicates unverified writes without suppressing a verified one.
   const quoteKey = (gapId: string, blockId: string | null, quote: string) => {
-    const normalized = quote.replace(/\s+/g, " ").trim();
+    const normalized = squashText(quote);
     return JSON.stringify([gapId, blockId, blockId ? normalized : normalized.toLowerCase().slice(0, 280)]);
   };
+  const historicalKey = (gapId: string, quote: string) => JSON.stringify([gapId, squashText(quote)]);
+  const historicalNeeds = new Map<string, IegpState["needs"]>();
+  const retainedBlocks = state.blocks.filter((block) => block.source_id === sourceId);
   const needsById = new Map(state.needs.map((need) => [need.id, need]));
-  const attached = new Set(
-    state.need_gap_links.flatMap((link) => {
-      const need = needsById.get(link.need_id);
-      if (!need || need.source_id !== sourceId) return [];
-      const blockId = args.require_grounded_sources && need.source_context ? need.block_id ?? null : null;
-      return [quoteKey(link.gap_id, blockId, need.source_quote ?? need.statement)];
-    }),
-  );
+  const attached = new Set<string>();
+  for (const link of state.need_gap_links) {
+    const need = needsById.get(link.need_id);
+    if (!need || need.source_id !== sourceId) continue;
+    const blockId = args.require_grounded_sources && need.source_context ? need.block_id ?? null : null;
+    attached.add(quoteKey(link.gap_id, blockId, need.source_quote ?? need.statement));
+    if (args.require_grounded_sources && need.run_id && !need.source_context && need.source_quote?.trim()) {
+      const key = historicalKey(link.gap_id, need.source_quote);
+      const candidates = historicalNeeds.get(key) ?? [];
+      candidates.push(need);
+      historicalNeeds.set(key, candidates);
+    }
+  }
 
   const addNeed = async (args2: {
     gapId: string;
@@ -3526,6 +3535,22 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
     const key = quoteKey(args2.gapId, blockId, args2.quote || args2.statement);
     if (attached.has(key)) return;
     attached.add(key);
+    if (blockId && context) {
+      const historical = historicalNeeds.get(historicalKey(args2.gapId, args2.quote)) ?? [];
+      let existing = historical.find((need) => need.block_id === blockId);
+      if (!existing) {
+        const unassigned = historical.filter((need) => !need.block_id);
+        if (unassigned.length === 1 && resolveSourceCitation({
+          source_id: sourceId, quote: args2.quote, proposed_block_id: null,
+          displayed: retainedBlocks, retained: retainedBlocks,
+        }).block_id === blockId) existing = unassigned[0];
+      }
+      if (existing) {
+        // Keep the linkage and reviewed gap unchanged when the only new data is citation context.
+        await db().update(t.needs).set({ block_id: blockId, source_context: context }).where(eq(t.needs.id, existing.id));
+        return;
+      }
+    }
     const needId = await allocateId("NEED", needIds);
     needIds.push(needId);
     createdNeedIds.push(needId);

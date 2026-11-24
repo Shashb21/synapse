@@ -190,6 +190,72 @@ describe("KAN-74 commit", () => {
       .toEqual(passages.map(([block, quote]) => [block.id, quote]));
   });
 
+  it.each([true, false])("preserves a historical linked need across grounded reruns (stored block %s)", async hasBlock => {
+    const { persistSourceAndBlocks } = await import("@/lib/iegp/store");
+    const quote = "The historical registry omitted patients from rural areas.";
+    const fixture = await persistSourceAndBlocks({
+      title: "Historical fictional registry", source_type: "stakeholder_interview", stakeholder_function: "heor", text: "",
+      sections: [
+        { heading: "Original minutes", location: "p.1", text: quote },
+        { heading: "Appendix", location: "p.4", text: hasBlock ? quote : "The appendix contains charts." },
+      ],
+    });
+    const original = fixture.blocks[0]!;
+    const attach = (runId: string, requireGrounding: boolean) => commit({
+      source_id: fixture.source_id, require_grounded_sources: requireGrounding,
+      validated_gap_ids: requireGrounding ? [gapId] : [],
+      needs: [{
+        id: runId, gap_id: gapId, statement: quote, source_quote: quote,
+        provenance: { run_id: runId, candidate_row_id: runId, block_id: requireGrounding || hasBlock ? original.id : null },
+      }],
+    });
+    const beforeFlag = (await loadState()).gaps.find(gap => gap.id === gapId)?.new_source_need_id;
+    const first = await attach("main-s2-run", false);
+    const [needId] = first.need_ids;
+    expect((await loadState()).needs.find(need => need.id === needId)).toMatchObject({
+      block_id: hasBlock ? original.id : null, run_id: "main-s2-run", source_context: null,
+    });
+
+    for (const runId of ["upgraded-first", "upgraded-second"]) {
+      expect(await attach(runId, true)).toMatchObject({ need_ids: [], flagged_gap_ids: [] });
+    }
+    const after = await loadState();
+    expect(after.needs.filter(need => need.source_id === fixture.source_id)).toMatchObject([{
+      id: needId, block_id: original.id, run_id: "main-s2-run",
+      source_context: { heading: original.heading, location: original.location },
+    }]);
+    expect(after.gaps.find(gap => gap.id === gapId)?.new_source_need_id).toBe(beforeFlag);
+  });
+
+  it("leaves an ambiguous historical need unassigned when attaching a verified passage", async () => {
+    const { persistSourceAndBlocks } = await import("@/lib/iegp/store");
+    const quote = "The registry omitted patients from rural areas.";
+    const fixture = await persistSourceAndBlocks({
+      title: "Two fictional interviews", source_type: "stakeholder_interview", stakeholder_function: "heor", text: "",
+      sections: [
+        { heading: "First interview", location: "p.1", text: quote },
+        { heading: "Second interview", location: "p.4", text: quote },
+      ],
+    });
+    const attach = (runId: string, blockId: string | null) => commit({
+      source_id: fixture.source_id, require_grounded_sources: blockId !== null,
+      needs: [{
+        id: runId, gap_id: gapId, statement: quote, source_quote: quote,
+        provenance: { run_id: runId, candidate_row_id: runId, block_id: blockId },
+      }],
+    });
+    const [historicalId] = (await attach("older-run", null)).need_ids;
+    const block = fixture.blocks[0]!;
+    const [verifiedId] = (await attach("verified-run", block.id)).need_ids;
+    expect(verifiedId).toBeDefined();
+    expect(verifiedId).not.toBe(historicalId);
+    expect((await attach("repeat-run", block.id)).need_ids).toEqual([]);
+    expect((await loadState()).needs.filter(need => need.source_id === fixture.source_id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: historicalId, block_id: null, source_context: null }),
+      expect.objectContaining({ id: verifiedId, block_id: block.id, source_context: { heading: block.heading, location: block.location } }),
+    ]));
+  });
+
   it("files an overlap as a pending suggestion and creates no gap", async () => {
     const before = (await loadState()).gaps.length;
     const result = await commit({

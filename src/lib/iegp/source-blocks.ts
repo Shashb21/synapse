@@ -1,6 +1,6 @@
 /** Owns source-block edits and preserves the provenance of existing evidence records. */
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, exists, inArray, isNull, or, sql } from "drizzle-orm";
 import { boolean, doublePrecision, pgTable, text } from "drizzle-orm/pg-core";
 import { db, ensureCurrentSchemaTables, withWorkspaceTransaction } from "./db";
 import * as t from "./schema";
@@ -8,9 +8,11 @@ import { ACTOR_FUNCTIONS, SOURCE_TYPES, type ActorFunction, type SourceType } fr
 import { appendAudit, persistSourceAndBlocks, loadState, lockAssessmentOwners, invalidateRelationshipAssessments } from "./store";
 import type { IegpState, TacticSuggestion } from "./types";
 import { lockSourceCitationOwner } from "./source-citations";
-import { tacticSourceReferences, tacticSuggestions } from "@/modules/stages/s3-tactic-extract/schema";
+import { tacticCandidates, tacticSourceReferences, tacticSuggestions } from "@/modules/stages/s3-tactic-extract/schema";
+import { tacticPromotionEdit } from "@/modules/stages/s3-tactic-extract/promotions";
 import { validateQuoteAgainstBlock } from "@/lib/ingest/quote-validator";
 import { recordEdit } from "@/modules/kernel/edit-records";
+import { editRecords } from "@/modules/kernel/schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { Actor } from "@/modules/kernel/contracts";
 import {
@@ -162,6 +164,16 @@ function citesBlock(citation: SourceQuote, block: BlockRow): boolean {
 
 async function quotesFor(source_id: string): Promise<SourceQuote[]> {
   const d = db();
+  const tacticNamesSource = or(eq(t.tactics.data_source, t.sources.id), eq(t.tactics.data_source, t.sources.title));
+  // Early promotions only saved a primary quote and an edit record. Use the
+  // candidate's source ID when it is still available.
+  const promotedFromSource = d.select({ id: editRecords.id }).from(editRecords)
+    .leftJoin(tacticCandidates, eq(tacticCandidates.id, editRecords.entity_id))
+    .where(and(
+      tacticPromotionEdit,
+      eq(editRecords.after, t.tactics.id),
+      or(eq(tacticCandidates.source_id, source_id), and(isNull(tacticCandidates.id), tacticNamesSource)),
+    ));
   const [needs, references, gapSuggestions, tacticSuggestionsForSource, legacyTactics] = await Promise.all([
     d.select({ id: t.needs.id, quote: t.needs.source_quote, block_id: t.needs.block_id,
       run_id: t.needs.run_id, source_context: t.needs.source_context })
@@ -173,8 +185,11 @@ async function quotesFor(source_id: string): Promise<SourceQuote[]> {
     d.select({ payload: tacticSuggestions.payload, status: tacticSuggestions.status })
       .from(tacticSuggestions).where(eq(tacticSuggestions.source_id, source_id)),
     d.select({ id: t.tactics.id, quote: t.tactics.source_quote, block_id: t.tactics.block_id })
-      .from(t.tactics).innerJoin(t.sources, or(eq(t.tactics.data_source, t.sources.id), eq(t.tactics.data_source, t.sources.title)))
-      .where(and(eq(t.sources.id, source_id), eq(t.tactics.lifecycle_stage, "extracted"))),
+      .from(t.tactics).innerJoin(t.sources, eq(t.sources.id, source_id))
+      .where(or(
+        and(eq(t.tactics.lifecycle_stage, "extracted"), tacticNamesSource),
+        and(eq(t.tactics.lifecycle_stage, "recorded"), exists(promotedFromSource)),
+      )),
   ]);
   const pendingGapQuotes = gapSuggestions.flatMap((suggestion) =>
     [suggestion, ...(Array.isArray(suggestion.extra_sources) ? suggestion.extra_sources : [])]
