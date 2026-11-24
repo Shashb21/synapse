@@ -1,4 +1,7 @@
 import { extractText, getDocumentProxy } from "unpdf";
+import type { ProviderRequestBudget } from "@/modules/llm/provider";
+import type { JsonCompletion } from "@/modules/kernel/contracts";
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { completeAll } from "@/modules/kernel/llm";
 import { STAKEHOLDER_FUNCTIONS, type ParsedBlock, type ParsedDocument, type StakeholderFunction } from "@/lib/schema";
 import { hashId } from "@/lib/text";
@@ -13,7 +16,7 @@ import { mimeForFilename, parseLocalDocument } from "./local-parse";
 
 export type RawUnit = { location: ParsedBlock["location"]; text: string };
 
-type Ask = (args: { system: string; user: string; purpose: string }) => Promise<unknown>;
+type Ask = JsonCompletion;
 
 const BLOCK_KINDS = [
   "title",
@@ -47,6 +50,26 @@ export function parseLimits(env: Record<string, string | undefined> = process.en
   return {
     units: positiveEnv("SYNAPSE_MAX_PARSE_UNITS", DEFAULT_MAX_PARSE_UNITS, env),
     calls: positiveEnv("SYNAPSE_MAX_PARSE_CALLS", DEFAULT_MAX_PARSE_CALLS, env),
+  };
+}
+
+/** One allowance shared by every provider request for a single document upload. */
+export function createParseRequestBudget(): ProviderRequestBudget {
+  const limit = parseLimits().calls;
+  let sent = 0;
+  return {
+    check(lastFailure) {
+      if (sent < limit) return;
+      const detail = lastFailure ? ` The last provider request returned HTTP ${lastFailure.status} (${lastFailure.kind}).` : "";
+      throw new TrustedApplicationError(
+        `This document reached its limit of ${limit} model calls before parsing finished.${detail} Split it into smaller files, or paste only the part you need.`,
+        "parse_limit", 422,
+      );
+    },
+    consume() {
+      this.check();
+      sent += 1;
+    },
   };
 }
 
@@ -161,6 +184,8 @@ function chunk(units: { id: string; unit: RawUnit }[]): { id: string; unit: RawU
 export async function structureWithLlm(args: {
   filename: string;
   units: RawUnit[];
+  /** Full document parsing also needs one classification request after structuring. */
+  includeStakeholder?: boolean;
   ask: Ask;
 }): Promise<{
   blocks: Omit<ParsedBlock, "id">[];
@@ -170,8 +195,14 @@ export async function structureWithLlm(args: {
 }> {
   const entries = args.units.map((unit, index) => ({ id: `u${index + 1}`, unit }));
   const groups = chunk(entries);
-  const tooLong = parseLimitError(args.filename, entries.length, groups.length);
-  if (tooLong) throw new Error(tooLong);
+  const requiredCalls = groups.length + (args.includeStakeholder ? 1 : 0);
+  const label = args.includeStakeholder ? "This document" : args.filename;
+  const tooLong = parseLimitError(label, entries.length, requiredCalls);
+  if (tooLong) {
+    // Only fixed copy and counts are suitable for customer-facing stage errors.
+    if (args.includeStakeholder) throw new TrustedApplicationError(tooLong, "parse_limit", 422);
+    throw new Error(tooLong);
+  }
   const answers = new Map<string, UnitAnswer>();
   for (const [index, group] of groups.entries()) {
     const byId = new Map(group.map((entry) => [entry.id, entry.unit]));
@@ -265,6 +296,7 @@ export async function parseWithLlm(args: {
   filename: string;
   buffer: Buffer;
   mime?: string;
+  requestBudget?: ProviderRequestBudget;
   ask: Ask;
 }): Promise<{
   document: ParsedDocument;
@@ -274,8 +306,10 @@ export async function parseWithLlm(args: {
 }> {
   const mime = args.mime || mimeForFilename(args.filename);
   const units = await extractRawUnits({ filename: args.filename, buffer: args.buffer, mime });
-  const { blocks, dropped, dropped_units } = await structureWithLlm({ filename: args.filename, units, ask: args.ask });
-  const stakeholder = await classifyStakeholder({ filename: args.filename, blocks, ask: args.ask });
+  const requestBudget = args.requestBudget ?? createParseRequestBudget();
+  const ask: Ask = (request) => args.ask({ ...request, requestBudget });
+  const { blocks, dropped, dropped_units } = await structureWithLlm({ filename: args.filename, units, includeStakeholder: true, ask });
+  const stakeholder = await classifyStakeholder({ filename: args.filename, blocks, ask });
   const id = hashId("DOC", `${args.filename}:${args.buffer.length}`);
   const numbered = blocks.map((block, index) => ({ ...block, id: `${id}-B${String(index + 1).padStart(2, "0")}` }));
   return {

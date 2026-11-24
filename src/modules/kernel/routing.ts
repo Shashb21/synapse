@@ -318,7 +318,7 @@ export type RawCompletionCall = { request: import("@/modules/llm/provider").LlmR
 export type RawCompletionExecutor = (call: RawCompletionCall) => Promise<string>;
 
 export function completionFor(route: ResolvedRoute, run: RunHandle, options?: { completeRaw?: RawCompletionExecutor }): JsonCompletion {
-  return async ({ system, user, purpose, maxTokens, role }) => {
+  return async ({ system, user, purpose, maxTokens, role, requestBudget }) => {
     if (!canPrompt(route)) {
       throw new NoRouteError(`${route.provider_label} cannot serve ${purpose}. ${KEY_PROMPT}`);
     }
@@ -340,6 +340,7 @@ export function completionFor(route: ResolvedRoute, run: RunHandle, options?: { 
         };
       const text = options?.completeRaw ? await options.completeRaw({ request, purpose, attempt, role }) : (await tracedCompletion({
         provider, request,
+        requestBudget,
         api_key: api_key!,
         run,
         step: `llm:${purpose}`,
