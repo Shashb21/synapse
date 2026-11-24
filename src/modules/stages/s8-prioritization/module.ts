@@ -254,7 +254,8 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
   freeze: freezeFacts,
   async run(input, ctx) {
     const { state, axesConfig } = (ctx.replay?.facts as Awaited<ReturnType<typeof freezeFacts>> | undefined) ?? await freezeFacts(input);
-    if (!ctx.replay?.evaluation) {
+    const ownerEvaluation = input.dry_run && ctx.purpose === "owner_evaluation";
+    if (!ctx.replay?.evaluation && !ownerEvaluation) {
       requirePrioritizationReadiness(state);
       for (const gapId of input.gap_ids ?? []) requireOpenGap(state, gapId);
     }

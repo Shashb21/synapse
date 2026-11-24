@@ -44,6 +44,7 @@ export async function POST(request: Request) {
         input: { ...(input as Record<string, unknown>), dry_run: true },
         actor: identity.actor,
         role: identity.role,
+        purpose: "owner_evaluation",
       });
       return result.output as never;
     });

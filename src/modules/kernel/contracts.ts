@@ -226,6 +226,8 @@ export type JsonCompletion = (args: {
 }) => Promise<unknown>;
 
 export type ModuleContext = {
+  /** Set by the owner evaluation routes for their dry runs. */
+  purpose?: "owner_evaluation";
   execution_policy?: "standard" | "single_pass";
   /** Enables source-only candidate eligibility, never customer acceptance. Requires evaluation replay. */
   execution_scope?: "development";
