@@ -57,7 +57,8 @@ function compareField(value: ComparisonCompatibility, name: string, left: unknow
 function nonempty(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
-function validFrozenRoute(route: FrozenRoute | null | undefined): boolean {
+/** Check that a saved route has complete requested settings and resolved model parameters. */
+export function validFrozenRoute(route: FrozenRoute | null | undefined): boolean {
   // Requested settings use the existing route schema; actual identity belongs to the saved resolution.
   return Boolean(route && nonempty(route.requested?.provider_id) && nonempty(route.requested?.model)
     && completeSnapshot(executionRouteSchema, route.requested) && nonempty(route.actual?.provider_id)

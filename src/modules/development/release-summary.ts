@@ -1,5 +1,5 @@
 /** Deterministically summarize repeated, already-saved paired Development evidence. */
-import type { ComparisonResult } from './comparison';
+import { validFrozenRoute, type ComparisonResult } from './comparison';
 import type { DevelopmentSection } from './schema';
 
 type Mode = 'single_pass' | 'standard';
@@ -7,7 +7,13 @@ type CostSummary = { known_total: number | null; known_call_count: number; zero_
 type RepeatObservation = {
   trial_id: string;
   latency_ms: number | null;
-  generation_cost_usd: { known_total: number | null; known_call_count: number; unknown_call_count: number; missing_call_history: boolean };
+  generation_cost_usd: {
+    known_total: number | null;
+    known_call_count: number;
+    zero_cost_call_count: number;
+    unknown_call_count: number;
+    missing_call_history: boolean;
+  };
   provisional_reference: { matches: number; false_positives: number; misses: number };
 };
 type SectionSummary = {
@@ -121,7 +127,16 @@ export function summarizePairedReleaseEvidence(trials: PairedReleaseEvidence[]):
       refusalReasons.push(...reasons(trial));
       continue;
     }
-    if (comparison.sections.some(({ section }) => canonical(comparison.left.execution.manifest.routes?.[section]?.proposer) !== canonical(comparison.right.execution.manifest.routes?.[section]?.proposer))) {
+    const leftRoutes = comparison.left.execution.manifest.routes;
+    const rightRoutes = comparison.right.execution.manifest.routes;
+    const incompleteProposer = comparison.sections.find(({ section }) =>
+      !validFrozenRoute(leftRoutes?.[section]?.proposer) || !validFrozenRoute(rightRoutes?.[section]?.proposer));
+    if (incompleteProposer) {
+      refusalReasons.push(`${trial.trial_id}: ${incompleteProposer.section}: missing or incomplete proposer route snapshot`);
+      continue;
+    }
+    if (comparison.sections.some(({ section }) =>
+      canonical(leftRoutes[section].proposer) !== canonical(rightRoutes[section].proposer))) {
       refusalReasons.push(`${trial.trial_id}: proposer route differs between modes`);
       continue;
     }
@@ -156,7 +171,13 @@ export function summarizePairedReleaseEvidence(trials: PairedReleaseEvidence[]):
         grouped.set(key, [...(grouped.get(key) ?? []), {
           trial_id: trial.trial_id,
           latency_ms: duration,
-          generation_cost_usd: { known_total: calls.length && known.length === costs.length ? known.reduce((sum, cost) => sum + cost, 0) : null, known_call_count: known.length, unknown_call_count: costs.length - known.length, missing_call_history: calls.length === 0 },
+          generation_cost_usd: {
+            known_total: calls.length && known.length === costs.length ? known.reduce((sum, cost) => sum + cost, 0) : null,
+            known_call_count: known.length,
+            zero_cost_call_count: known.filter(cost => cost === 0).length,
+            unknown_call_count: costs.length - known.length,
+            missing_call_history: calls.length === 0,
+          },
           provisional_reference: { matches: reference.matches.length, false_positives: reference.unmatched_output_ids.length, misses: reference.unmatched_reference_ids.length },
         }]);
       }
@@ -172,6 +193,7 @@ export function summarizePairedReleaseEvidence(trials: PairedReleaseEvidence[]):
     const max = latencies.length ? Math.max(...latencies) : null;
     const costs = observations.flatMap(item => item.generation_cost_usd.known_total === null ? [] : [item.generation_cost_usd.known_total]);
     const knownCalls = observations.reduce((sum, item) => sum + item.generation_cost_usd.known_call_count, 0);
+    const zeroCostCalls = observations.reduce((sum, item) => sum + item.generation_cost_usd.zero_cost_call_count, 0);
     const unknownCalls = observations.reduce((sum, item) => sum + item.generation_cost_usd.unknown_call_count, 0);
     const missingHistory = observations.filter(item => item.generation_cost_usd.missing_call_history).length;
     const provisional = observations.reduce((sum, item) => ({ matches: sum.matches + item.provisional_reference.matches, false_positives: sum.false_positives + item.provisional_reference.false_positives, misses: sum.misses + item.provisional_reference.misses }), { matches: 0, false_positives: 0, misses: 0 });
@@ -179,7 +201,7 @@ export function summarizePairedReleaseEvidence(trials: PairedReleaseEvidence[]):
     modes[mode]![section] = {
       trials: trials.length,
       latency_ms: { min, max, range: min === null || max === null ? null : max - min, observed_trial_count: latencies.length },
-      cost_usd: { known_total: costs.length === observations.length ? costs.reduce((sum, cost) => sum + cost, 0) : null, known_call_count: knownCalls, zero_cost_call_count: costs.filter(cost => cost === 0).length, unknown_call_count: unknownCalls, observed_trial_count: observations.length - missingHistory, missing_call_history_count: missingHistory },
+      cost_usd: { known_total: costs.length === observations.length ? costs.reduce((sum, cost) => sum + cost, 0) : null, known_call_count: knownCalls, zero_cost_call_count: zeroCostCalls, unknown_call_count: unknownCalls, observed_trial_count: observations.length - missingHistory, missing_call_history_count: missingHistory },
       provisional_reference: provisional,
       observations,
     };
