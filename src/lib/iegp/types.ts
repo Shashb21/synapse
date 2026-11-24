@@ -214,7 +214,13 @@ export type GapConfirmer = {
 export type GapSuggestionStatus = "pending" | "merged" | "split" | "rejected";
 
 /** A source sentence waiting on a suggestion: it follows the suggestion's outcome. */
-export type NeedProvenance = { run_id?: string | null; candidate_row_id?: string | null; block_id?: string | null };
+export type NeedProvenance = {
+  run_id?: string | null;
+  candidate_row_id?: string | null;
+  block_id?: string | null;
+  /** Current extraction can require a live citation even when no block was unique at proposal time. */
+  requires_current_citation?: boolean;
+};
 export type GapSuggestionSource = {
   source_id: string;
   statement: string;
@@ -235,6 +241,7 @@ export type GapSuggestion = {
   /** The S2 candidate row (gap_candidates), so a rejected one can be promoted later. */
   candidate_row_id: string | null;
   block_id?: string | null;
+  requires_current_citation?: boolean;
   source_id: string;
   name: string;
   statement: string;

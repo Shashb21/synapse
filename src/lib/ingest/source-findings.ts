@@ -30,6 +30,12 @@ export function currentSourceFindingKey(key: string): string {
   return parts ? sourceFindingKey(...parts) : key;
 }
 
+/** Compare the recorded source, passage and question independently of a model's classification. */
+export function sameSourceQuestion(left: string, right: string): boolean {
+  const a = findingParts(currentSourceFindingKey(left)), b = findingParts(currentSourceFindingKey(right));
+  return Boolean(a && b && a[0] === b[0] && a[1] === b[1] && a[3] === b[3]);
+}
+
 function groupFindings(keys: Iterable<string>, includeQuestion: boolean) {
   const groups = new Map<string, string[]>();
   for (const key of new Set(keys)) {
@@ -57,8 +63,12 @@ export function reclassifiedFindings(current: Iterable<string>, prior: Iterable<
   const matches = new Map<string, string>();
   for (const [scope, incoming] of groupFindings(incomingKeys, true)) {
     const stored = byQuestion.get(scope);
-    if (incoming.length === 1 && stored?.length === 1 && incoming[0] !== stored[0]) {
-      matches.set(incoming[0]!, stored[0]!);
+    if (stored?.length === 1) {
+      for (const key of incoming) {
+        if (key !== stored[0]) matches.set(key, stored[0]!);
+      }
+    } else if (stored && incoming.some(key => !storedKeys.has(key))) {
+      throw new TrustedApplicationError("This question has several recorded classifications. Review the source before retrying.", "ambiguous_source_finding", 409);
     }
   }
   const incomingByPassage = groupFindings(incomingKeys, false);

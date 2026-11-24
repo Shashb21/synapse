@@ -425,6 +425,7 @@ describe("S3 on the model path", () => {
       if (call.purpose.startsWith("tactic-proposer:")) return {tactics: [
         good({name: "Vega subgroup", type: "registry", evidence_question: "What evidence is available on long-term real-world safety in treated patients?", source_quote: suggestion.source_quote}),
         good({name: "New Vega registry", source_quote: "A distinct Vega registry enrolls children."}),
+        good({name: "Vega subgroup", type: "slr", source_quote: suggestion.source_quote}),
       ]};
       if (call.purpose === "tactic-critic") return keepAll(call);
       return acceptAll(call);

@@ -210,7 +210,7 @@ describe("S2 on the model path", () => {
             domain: rerun ? "treatment_patterns" : gapA.domain, name: rerun ? "Survival comparison" : "Survival", source_quote: firstQuote},
           {...gapA, statement: rerun ? "What evidence is available on comparative hospitalization?" : "What is comparative hospitalization?",
             domain: rerun ? "treatment_patterns" : gapA.domain, name: rerun ? "Admissions" : "Hospitalization", source_quote: reviewQuote},
-          ...(rerun ? [{...gapB, source_quote: newQuote}] : []),
+          ...(rerun ? [{...gapB, source_quote: newQuote}, {...gapA, statement: "What is comparative hospitalization?", source_quote: reviewQuote}] : []),
         ]};
         if (call.purpose === "gap-critic") return keepAll(call);
         return {decisions: subjectsOf(call, "candidates").map((subject, index) => ({
@@ -243,6 +243,33 @@ describe("S2 on the model path", () => {
     expect(after.needs).toContainEqual(expect.objectContaining({source_quote: newQuote, block_id: block.id, run_id: "repeat-gap-run"}));
     expect(repeats[0]!.output.accepted.every(row => row.document_id === current.id)).toBe(true);
     documentId = current.id;
+  });
+
+  it("keeps a fresh overlap pending when all initially ambiguous supporting blocks disappear", async () => {
+    const { addSourceBlock, deleteSourceBlock } = await import("@/lib/iegp/source-blocks");
+    const { acceptGapMerge, acceptGapSplit } = await import("@/lib/iegp/store");
+    const doc = (await listParsedDocuments([documentId]))[0]!;
+    const quote = "Both copies describe the Hazel cost study.";
+    const blockInput = { source_id: doc.source_id, text: quote, actor: ACTOR, rationale: "Record the passage." };
+    const blocks = [await addSourceBlock(blockInput), await addSourceBlock(blockInput)];
+    const { ctx } = context(call => {
+      if (call.purpose.startsWith("gap-proposer:")) return { gaps: [{...gapA, source_quote: quote}] };
+      if (call.purpose === "gap-critic") return keepAll(call);
+      return { decisions: subjectsOf(call, "candidates").map(subject => ({ subject, verdict: "accept", confidence: 90,
+        reason: "Hazel study", match: "overlaps", match_gap_id: planGapId, shared_part: "Costs", new_part: "Admissions",
+        merged_name: "Cost and admissions", merged_statement: "What are the costs and admissions?",
+        split_name: "Admissions", split_statement: "What are the admissions?" })) };
+    });
+    const { output } = await gapExtractModule.run(input(false), ctx);
+    const suggestion_id = output.suggestion_ids[0]!;
+    expect((await loadState()).gap_suggestions.find(row => row.id === suggestion_id)).toMatchObject({block_id: null});
+    for (const block of blocks) await deleteSourceBlock({block_id: block.id, actor: ACTOR, rationale: "Withdraw this duplicate."});
+    const before = await loadState();
+    for (const decide of [acceptGapMerge, acceptGapSplit]) {
+      await expect(decide({suggestion_id, actor_name: ACTOR.name, actor_function: ACTOR.function, rationale: "Review current source."}))
+        .rejects.toThrow(/cited passage/);
+    }
+    expect(await loadState()).toEqual(before);
   });
 
   it("claims repeated findings within a batch and keeps distinct questions citing the same sentence on rerun", async () => {

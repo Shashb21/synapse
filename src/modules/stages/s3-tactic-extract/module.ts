@@ -698,7 +698,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
     const committed_tactic_ids: string[] = [];
     if (!ctx.replay?.evaluation && !input.dry_run) await withExtractionCommit("S3", async () => {
       await lockCurrentExtractionDocuments(documents);
-      const recorded = await recordedTacticEvidence(documents.map(doc => doc.source_id), (await loadState()).tactics);
+      const recorded = await recordedTacticEvidence(documents.map(doc => doc.source_id), (await loadState()).tactics, accepted);
       const keyOf = (candidate: TacticCandidate) => sourceFindingKey(candidate.source_id, candidate.source_quote, candidate.type, candidate.evidence_question);
       const reclassified = reclassifiedFindings(accepted.map(keyOf), recorded);
       const unrecorded = accepted.filter(candidate => {

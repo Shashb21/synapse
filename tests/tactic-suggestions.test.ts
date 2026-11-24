@@ -55,6 +55,28 @@ describe("S3 source matching", () => {
     const keys = await suggestions.recordedTacticEvidence([sourceId], (await loadState()).tactics);
     expect(keys.has(sourceFindingKey(sourceId, row.source_quote, candidate.type, original))).toBe(true);
     expect(keys.has(sourceFindingKey(sourceId, row.source_quote, candidate.type, distinct))).toBe(false);
+    const repeated = await suggestions.createTacticSuggestion({...row, ...matching, run_id: "new-run",
+      finding_key: sourceFindingKey(sourceId, row.source_quote, "slr", original)});
+    expect(repeated).toEqual(row);
+  });
+
+  it("protects a rejected legacy overlap whose original candidates have indistinguishable alternatives", async () => {
+    const row = await proposal();
+    const rejected = await suggestions.decideTacticSuggestion({id: row.id, decision: "reject", actor, rationale: "Declined the overlapping scope."});
+    const baseline = {shared_scope: row.shared_scope, new_scope: row.new_scope, expansion: row.original_expansion, separate: row.original_separate};
+    const candidate = {run_id: row.run_id, document_id: row.document_id, source_id: sourceId, source_quote: row.source_quote,
+      match: "overlaps", target_tactic_id: parentId, type: "registry", status: "planned", verdict: "accept", score: 90,
+      critic_note: "Source supports it", proposer: "llm", created_at: row.created_at, name: "Rowan registry", matching: baseline};
+    const originals = ["What is survival?", "What is cost?"].map((evidence_question, i) => ({...candidate, id: "ambiguous-" + i, evidence_question}));
+    await db().insert(tacticCandidates).values(originals);
+    const current = {...originals[0]!, run_id: "repeat", type: "slr"};
+    const state = await loadState();
+    await expect(suggestions.recordedTacticEvidence([sourceId], state.tactics, [{...current, source_quote: "Unrelated passage."}])).resolves.toBeInstanceOf(Set);
+    await expect(suggestions.recordedTacticEvidence([sourceId], state.tactics, [current])).rejects.toThrow(/legacy review/);
+    const key = sourceFindingKey(sourceId, row.source_quote, current.type, current.evidence_question);
+    await expect(suggestions.createTacticSuggestion({...row, ...baseline, run_id: "repeat", finding_key: key}))
+      .rejects.toThrow(/legacy review/);
+    expect(await suggestions.listTacticSuggestions()).toEqual([rejected]);
   });
 
   it("keeps the legacy parent question when attaching a different finding to the same source reference", async () => {

@@ -857,6 +857,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       const validatedGapIds = await validatedPlacementGapIds();
       // Each need records where it came from (KAN-97): this run, its candidate row and the block it quotes.
       const provenanceOf = (candidate: GapCandidate) => ({
+        requires_current_citation: true,
         run_id: ctx.run.id,
         candidate_row_id: rowIdByCandidate.get(candidate.id) ?? null,
         block_id: blockIdFor(documents.find((document) => document.id === candidate.document_id), candidate.source_quote),
@@ -904,9 +905,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
             overlaps: asOverlap.map((candidate) => ({
               id: candidate.id,
               gap_id: candidate.match_gap_id!,
-              run_id: ctx.run.id,
-              candidate_row_id: rowIdByCandidate.get(candidate.id) ?? null,
-              block_id: provenanceOf(candidate).block_id,
+              ...provenanceOf(candidate),
               name: candidate.name,
               statement: candidate.statement,
               domain: candidate.domain,

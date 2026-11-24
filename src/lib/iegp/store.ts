@@ -3342,6 +3342,7 @@ export type OverlapRow = {
   run_id: string;
   candidate_row_id?: string | null;
   block_id?: string | null;
+  requires_current_citation?: boolean;
   name: string;
   statement: string;
   domain: EvidenceDomain;
@@ -3577,6 +3578,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
       run_id: overlap.run_id,
       candidate_row_id: overlap.candidate_row_id ?? null,
       block_id: overlap.block_id ?? null,
+      requires_current_citation: overlap.requires_current_citation ?? false,
       source_id: sourceId,
       name: overlap.name,
       statement: overlap.statement,
@@ -3728,7 +3730,8 @@ async function closeSuggestion(
 }
 
 function suggestionProvenance(suggestion: GapSuggestion): NeedProvenance {
-  return { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id, block_id: suggestion.block_id };
+  return { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id, block_id: suggestion.block_id,
+    requires_current_citation: suggestion.requires_current_citation };
 }
 
 /** Keep historical run/candidate lineage, and resolve the quote against source edits before creating needs. */
@@ -3743,7 +3746,7 @@ async function currentSuggestionSources(suggestion: GapSuggestion) {
   return sources.map(source => {
     const provenance = source.provenance ?? { run_id: suggestion.run_id };
     const block_id = supportingBlockId(blocks.filter(block => block.source_id === source.source_id), source.source_quote, provenance.block_id);
-    if (provenance.block_id && !block_id) {
+    if ((provenance.requires_current_citation || provenance.block_id) && !block_id) {
       throw new TrustedApplicationError("The cited passage no longer resolves to a single source block. Review the current source before accepting.");
     }
     return { ...source, provenance: { ...provenance, block_id } };

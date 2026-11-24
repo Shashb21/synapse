@@ -324,7 +324,7 @@ describe("KAN-74 S2 run across two documents", () => {
     expect(suggestion.candidate_row_id).toBeTruthy();
     expect(suggestion.extra_sources).toEqual([
       { source_id: sourceB, statement: over75.statement, source_quote: corroboratingQuote, domain: over75.domain,
-        provenance: { run_id: "kan74-run", candidate_row_id: expect.any(String), block_id: null } },
+        provenance: { run_id: "kan74-run", candidate_row_id: expect.any(String), block_id: null, requires_current_citation: true } },
     ]);
     expect(state.gaps.some((row) => row.name === "Over-75s versus SoC")).toBe(false);
   });

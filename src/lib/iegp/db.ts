@@ -462,6 +462,7 @@ function iegpStatements(): string[] {
     "ALTER TABLE needs ADD COLUMN IF NOT EXISTS candidate_row_id text",
     "ALTER TABLE needs ADD COLUMN IF NOT EXISTS block_id text",
     "ALTER TABLE gap_suggestions ADD COLUMN IF NOT EXISTS block_id text",
+    "ALTER TABLE gap_suggestions ADD COLUMN IF NOT EXISTS requires_current_citation boolean NOT NULL DEFAULT false",
     "ALTER TABLE needs ADD COLUMN IF NOT EXISTS source_basis_text text",
     "ALTER TABLE gap_versions ADD COLUMN IF NOT EXISTS snapshot jsonb",
     // KAN-15: per-prefix id counters that only move up, so ids are never reissued.
