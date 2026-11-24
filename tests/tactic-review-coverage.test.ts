@@ -33,6 +33,15 @@ function post(body: Record<string, string>) {
   }));
 }
 
+/** Submit a validation stage action using the public module API. */
+function postValidation(input: Record<string, string>) {
+  return postModule(new Request("http://localhost/api/modules", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...actor, stage: "S5", input }),
+  }));
+}
+
 /** Create an accepted tactic that can contribute toward coverage. */
 function createTactic(name: string) {
   return recordMissedTactic({
@@ -49,6 +58,34 @@ async function reviewTactic(tacticId: string, action: "lock_tactic_review" | "re
       ? { rationale: "The study data are available again" }
       : { review_status: "rejected", note: "The study data are no longer available" }),
   });
+}
+
+/** Start an action after restoration has recomputed the gap and before it commits. */
+async function overlapTacticRestore(tacticId: string, restoreChecks: () => Promise<void>, action: () => Promise<Response>) {
+  const ready = Promise.withResolvers<number>();
+  const release = Promise.withResolvers<void>();
+  const restoring = withWorkspaceTransaction(async () => {
+    const pid = Number((await db().execute(sql`select pg_backend_pid() as pid`))[0].pid);
+    const restored = await reviewTactic(tacticId, "restore_tactic");
+    expect(restored.status, await restored.text()).toBe(200);
+    await restoreChecks();
+    ready.resolve(pid);
+    await release.promise;
+  });
+  const restorerPid = await Promise.race([ready.promise, restoring.then(() => {
+    throw new Error("Restore released its locks before the overlapping action");
+  })]);
+  const pending = action();
+  try {
+    await vi.waitFor(async () => {
+      const waiting = await db().execute(sql`select pid from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and ${restorerPid} = any(pg_blocking_pids(pid))`);
+      expect(waiting).toHaveLength(1);
+    }, { timeout: 5000, interval: 20 });
+  } finally {
+    release.resolve();
+    await Promise.all([restoring, pending]);
+  }
+  return pending;
 }
 
 /** Capture the same version the mapping row sends when saved. */
@@ -141,15 +178,9 @@ describe("gap actions after a tactic review", () => {
     {
       route: "validation stage",
       after: "validated_addressed",
-      override: (gapId: string, reason: string) => postModule(new Request("http://localhost/api/modules", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          ...actor,
-          stage: "S5",
-          input: { action: "classify", gap_id: gapId, status: "validated_addressed", rationale: reason },
-        }),
-      })),
+      override: (gapId: string, reason: string) => postValidation({
+        action: "classify", gap_id: gapId, status: "validated_addressed", rationale: reason,
+      }),
     },
   ])("uses the restored gap computation when a $route override waits for tactic restoration", async ({ after, override }) => {
     const gapId = await createGap({ ...actor, statement: "What are the outcomes for the community care population?" });
@@ -171,30 +202,10 @@ describe("gap actions after a tactic review", () => {
     expect(rejected.status, await rejected.text()).toBe(200);
     expect((await readState()).gaps.find(row => row.id === gapId)).toMatchObject({ computed_status: "validated_open" });
 
-    const ready = Promise.withResolvers<number>();
-    const release = Promise.withResolvers<void>();
-    const restoring = withWorkspaceTransaction(async () => {
-      const pid = Number((await db().execute(sql`select pg_backend_pid() as pid`))[0].pid);
-      const restored = await reviewTactic(tacticId, "restore_tactic");
-      expect(restored.status, await restored.text()).toBe(200);
-      expect((await readState()).gaps.find(row => row.id === gapId)).toMatchObject({ computed_status: "validated_addressed" });
-      ready.resolve(pid);
-      await release.promise;
-    });
-    const restorerPid = await Promise.race([ready.promise, restoring.then(() => { throw new Error("Restore released its locks before the override"); })]);
     const reason = "I confirm that the available evidence addresses the gap";
-    const overriding = override(gapId, reason);
-    try {
-      await vi.waitFor(async () => {
-        const waiting = await db().execute(sql`select pid from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and ${restorerPid} = any(pg_blocking_pids(pid))`);
-        expect(waiting).toHaveLength(1);
-      }, { timeout: 5000, interval: 20 });
-    } finally {
-      release.resolve();
-      await Promise.all([restoring, overriding]);
-    }
-
-    const result = await overriding;
+    const result = await overlapTacticRestore(tacticId, async () => {
+      expect((await readState()).gaps.find(row => row.id === gapId)).toMatchObject({ computed_status: "validated_addressed" });
+    }, () => override(gapId, reason));
     expect(result.status, await result.text()).toBe(200);
     expect((await readState()).gaps.find(row => row.id === gapId)).toMatchObject({
       status: "validated_addressed", computed_status: "validated_addressed", status_override: { reason, stale: false },
@@ -202,5 +213,49 @@ describe("gap actions after a tactic review", () => {
     expect((await listEdits({ entity_id: gapId })).find(row => row.action === "override")).toMatchObject({
       before: "validated_addressed", after, rationale: reason,
     });
+  });
+
+  it.each([
+    {
+      route: "gap action",
+      validate: (gapId: string, reason: string) => post({
+        action: "validate_gap", gap_id: gapId, note: reason,
+      }),
+    },
+    {
+      route: "validation stage",
+      validate: (gapId: string, reason: string) => postValidation({
+        action: "validate", gap_id: gapId, rationale: reason,
+      }),
+    },
+  ])("rejects a $route validation when tactic restoration makes the gap partial", async ({ validate }) => {
+    const gapId = await createGap({ ...actor, statement: "What are the outcomes for the community care population?" });
+    const tacticId = await createTactic("Community care outcomes study");
+    await assignTacticToGap({
+      ...actor, gap_id: gapId, tactic_id: tacticId, coverage: "partial", human: true, note: "The study covers some outcomes",
+    });
+    const rejected = await reviewTactic(tacticId, "lock_tactic_review");
+    expect(rejected.status, await rejected.text()).toBe(200);
+    expect((await readState()).gaps.find(row => row.id === gapId)).toMatchObject({
+      status: "validated_open", computed_status: "validated_open", human_validated: false,
+    });
+
+    const result = await overlapTacticRestore(tacticId, async () => {
+      expect((await readState()).gaps.find(row => row.id === gapId)).toMatchObject({
+        status: "validated_partial", computed_status: "validated_partial", human_validated: false,
+      });
+    }, () => validate(gapId, "I confirm that this gap is Open"));
+
+    const response = await result.json();
+    expect(result.status, JSON.stringify(response)).toBe(400);
+    expect(response.error).toMatch(/Partially Addressed.*Split or rewrite/);
+    const after = await readState();
+    expect(after.gaps.find(row => row.id === gapId)).toMatchObject({
+      status: "validated_partial", computed_status: "validated_partial", human_validated: false,
+      status_lock: { locked: false }, validated_by: null, validated_at: null, validation_rationale: null,
+    });
+    expect(after.residuals.filter(row => row.gap_id === gapId)).toEqual([]);
+    expect(after.audit.filter(row => row.entity_id === gapId && row.action === "validate")).toEqual([]);
+    expect((await listEdits({ entity_id: gapId })).filter(row => row.action === "validate")).toEqual([]);
   });
 });

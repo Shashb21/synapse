@@ -4611,12 +4611,18 @@ async function insertProvisionalClosingCoverage(args: {
   });
 }
 
+/** Confirm a live Open or Addressed gap using its status under the gap row lock. */
 export async function validateGap(args: {
   gap_id: string;
   actor_name: string;
   actor_function: ActorFunction;
   note?: string;
-}) {
+}): Promise<void> {
+  if (!inWorkspaceTransaction()) {
+    await loadState();
+    return withWorkspaceTransaction(() => validateGap(args));
+  }
+  await db().execute(sql`select id from gaps where id = ${args.gap_id ?? null} for update`);
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
   if (!gap || !isLiveGap(gap)) throw new TrustedApplicationError("Gap not found", "not_found", 404);
