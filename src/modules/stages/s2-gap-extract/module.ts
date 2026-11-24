@@ -238,8 +238,8 @@ async function recordedGapEvidence(state: IegpState, sourceIds: Set<string>) {
       : suggestion.status !== "rejected" && gapId && activeIds.has(gapId) ? { gap_id: gapId } : {};
     for (const row of [suggestion, ...suggestion.extra_sources]) {
       const key = sourceFindingKey(row.source_id, row.source_quote, row.domain ?? suggestion.domain, row.statement);
-      // A human can reject an overlap and later promote the same finding to its own gap.
-      if (suggestion.status === "rejected" && evidence.get(key)?.gap_id) continue;
+      // Closed history can coexist with a live need owner after a rewrite or promotion.
+      if (!destination.gap_id && !destination.suggestion_id && evidence.get(key)?.gap_id) continue;
       evidence.set(key, destination);
     }
   }

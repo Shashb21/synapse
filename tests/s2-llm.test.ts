@@ -13,7 +13,7 @@ import { wipePlatform } from "@/modules/kernel/db";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { NoRouteError } from "@/modules/llm/provider";
 import { promoteGapCandidate } from "@/app/api/iegp/promote-candidates";
-import { rejectGapSuggestionKeepingCandidate } from "@/modules/stages/s2-gap-extract/suggestions";
+import { acceptGapMergeSuggestion, rejectGapSuggestionKeepingCandidate } from "@/modules/stages/s2-gap-extract/suggestions";
 import { isLiveGap } from "@/lib/iegp/engine";
 import { commitExtractedRecords, createGap, loadState, resetDemoSetup } from "@/lib/iegp/store";
 import { listParsedDocuments } from "@/modules/stages/s1-parse/module";
@@ -366,13 +366,27 @@ describe("S2 on the model path", () => {
     expect(state.need_gap_links).toContainEqual(expect.objectContaining({need_id: corroboration.id, gap_id: first.output.committed_gap_ids[0]}));
   });
 
-  it("corroborates the live rewrite successor when the original still has a historical link", async () => {
+  it.each([false, true])("corroborates the live rewrite successor with accepted overlap history %s", async (mergeOverlap) => {
     const { db } = await import("@/lib/iegp/db");
     const { sql } = await import("drizzle-orm");
     const { gapResolutionVersion } = await import("@/lib/iegp/relationship-version");
     const { rewritePartialGap } = await import("@/lib/iegp/store");
-    const originalQuote = "The fictional Vale assessment requests comparative effectiveness.";
-    const newQuote = "The fictional Vale committee confirmed the same comparison is needed.";
+    const subjectName = mergeOverlap ? "Rowan" : "Vale";
+    const originalQuote = `The fictional ${subjectName} assessment requests comparative effectiveness.`;
+    const newQuote = `The fictional ${subjectName} committee confirmed the same comparison is needed.`;
+    const who = { actor_name: ACTOR.name, actor_function: ACTOR.function };
+    if (mergeOverlap) {
+      const { editSourceBlock } = await import("@/lib/iegp/source-blocks");
+      const doc = (await listParsedDocuments()).find(row => row.id === documentId)!;
+      const block = (await loadState()).blocks.find(row => row.source_id === doc.source_id)!;
+      await editSourceBlock({
+        block_id: block.id, text: `${block.text} ${originalQuote} ${newQuote}`,
+        actor: ACTOR, rationale: "Add the Rowan panel evidence.",
+      });
+    }
+    const targetId = mergeOverlap
+      ? await createGap({ statement: "What is the comparative effectiveness in the Rowan cohort?", ...who })
+      : null;
     const run = (corroborate: boolean) => {
       const { ctx } = context(call => {
         if (call.purpose.startsWith("gap-proposer:")) return { gaps: [
@@ -382,22 +396,35 @@ describe("S2 on the model path", () => {
         if (call.purpose === "gap-critic") return keepAll(call);
         const ids = subjectsOf(call, "candidates");
         return { decisions: ids.map((subject, index) => ({
-          subject, verdict: "accept", confidence: 90, reason: "Vale evidence",
-          ...(index ? { match: "same", same_as_candidate: ids[0] } : { match: "new" }),
+          subject, verdict: "accept", confidence: 90, reason: `${subjectName} evidence`,
+          ...(index ? { match: "same", same_as_candidate: ids[0] } : !corroborate && targetId ? {
+            match: "overlaps", match_gap_id: targetId, shared_part: "Comparative data",
+            new_part: "Panel outcomes", merged_name: "Comparative outcomes", merged_statement: "Compare both cohorts",
+            split_name: "Panel outcomes", split_statement: "What are the panel outcomes?",
+          } : { match: "new" }),
         })) };
       });
       return gapExtractModule.run(input(false), ctx);
     };
     const { output: initial } = await run(false);
-    const originalId = initial.committed_gap_ids[0]!;
+    const originalId = targetId
+      ? (await acceptGapMergeSuggestion({
+        suggestion_id: initial.suggestion_ids[0]!, rationale: "Include the panel outcomes.", ...who,
+      })).gap_id
+      : initial.committed_gap_ids[0]!;
+    const historicalNeedId = (await loadState()).needs.find(need => need.source_quote === originalQuote)!.id;
     await db().execute(sql`UPDATE gaps SET status = 'validated_partial', computed_status = 'validated_partial' WHERE id = ${originalId}`);
     const successorId = await rewritePartialGap({
       gap_id: originalId, expected_resolution: gapResolutionVersion(await loadState(), originalId),
       name: "Remaining Vale comparison", status: "validated_open", note: "Keep the unanswered comparison.",
       actor_name: ACTOR.name, actor_function: ACTOR.function,
     });
-    const historicalNeedId = initial.committed_need_ids[0]!;
     const rewritten = await loadState();
+    if (mergeOverlap) {
+      expect(rewritten.gap_suggestions).toContainEqual(expect.objectContaining({
+        id: initial.suggestion_ids[0], status: "merged", gap_id: originalId,
+      }));
+    }
     expect(rewritten.need_gap_links.filter(link => link.need_id === historicalNeedId).map(link => link.gap_id))
       .toEqual(expect.arrayContaining([originalId, successorId]));
 
