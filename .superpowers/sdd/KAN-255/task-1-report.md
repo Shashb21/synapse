@@ -43,4 +43,4 @@ Attempted `git ls-remote` and `gh pr list`, but DNS resolution for `github.com` 
 
 ## Delivery
 
-Local commit: pending at report creation; commit locally only and do not push.
+Local commit: `1db6cc7` (`feat(KAN-255): summarize paired release evidence`). It is local only and has not been pushed.
