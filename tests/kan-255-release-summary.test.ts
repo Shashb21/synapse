@@ -23,23 +23,28 @@ const pair = (id: string, controlled = true, standardFinishedAt = '2026-01-01T00
   },
 } as unknown as PairedReleaseEvidence);
 
-it('reports repeated per-mode/stage variation, known zero and unknown costs, misses, and false positives', () => {
-  expect(summarizePairedReleaseEvidence([pair('repeat-1'), pair('repeat-2', true, '2026-01-01T00:00:07Z')])).toEqual({
+it('reports provisional per-repeat variation, known zero and unknown costs, misses, and false positives', () => {
+  const summary = summarizePairedReleaseEvidence([pair('repeat-1'), pair('repeat-2', true, '2026-01-01T00:00:07Z')]);
+  expect(summary).toMatchObject({
     controlled: true,
     refusal_reasons: [],
     trials_total: 2,
     modes: {
-      single_pass: { gap_extraction: { trials: 2, latency_ms: { min: 2000, max: 2000, range: 0 }, cost_usd: { known_total: 0, known_call_count: 2, zero_cost_call_count: 2, unknown_call_count: 0 }, reference: { matches: 2, false_positives: 2, misses: 2 } } },
-      standard: { gap_extraction: { trials: 2, latency_ms: { min: 5000, max: 7000, range: 2000 }, cost_usd: { known_total: null, known_call_count: 0, zero_cost_call_count: 0, unknown_call_count: 2 }, reference: { matches: 4, false_positives: 0, misses: 0 } } },
+      single_pass: { gap_extraction: { trials: 2, latency_ms: { min: 2000, max: 2000, range: 0, observed_trial_count: 2 }, cost_usd: { known_total: 0, known_call_count: 2, zero_cost_call_count: 2, unknown_call_count: 0, observed_trial_count: 2, missing_call_history_count: 0 }, provisional_reference: { matches: 2, false_positives: 2, misses: 2 } } },
+      standard: { gap_extraction: { trials: 2, latency_ms: { min: 5000, max: 7000, range: 2000, observed_trial_count: 2 }, cost_usd: { known_total: null, known_call_count: 0, zero_cost_call_count: 0, unknown_call_count: 2, observed_trial_count: 2, missing_call_history_count: 0 }, provisional_reference: { matches: 4, false_positives: 0, misses: 0 } } },
     },
   });
+  expect(summary.modes.standard?.gap_extraction?.observations).toEqual([
+    expect.objectContaining({ trial_id: 'repeat-1', latency_ms: 5000, generation_cost_usd: expect.objectContaining({ known_total: null, missing_call_history: false }) }),
+    expect.objectContaining({ trial_id: 'repeat-2', latency_ms: 7000, generation_cost_usd: expect.objectContaining({ known_total: null, missing_call_history: false }) }),
+  ]);
 });
 
 it('refuses incomplete or incomparable saved pairs rather than averaging them', () => {
-  expect(summarizePairedReleaseEvidence([pair('repeat-1', false)])).toMatchObject({
+  expect(summarizePairedReleaseEvidence([pair('repeat-1', false), pair('repeat-2')])).toMatchObject({
     controlled: false,
     refusal_reasons: ['repeat-1: sources'],
-    trials_total: 1,
+    trials_total: 2,
     modes: {},
   });
 });
@@ -74,5 +79,39 @@ it('refuses repeats whose frozen cohort identity drifts', () => {
     controlled: false,
     refusal_reasons: ['repeat-2: frozen cohort, reference, evaluator, or proposer route differs from the other controlled pairs'],
     modes: {},
+  });
+});
+
+it('refuses an absent or single-pair release study', () => {
+  expect(summarizePairedReleaseEvidence([])).toMatchObject({
+    controlled: false,
+    refusal_reasons: ['At least two distinct complete pairs are required.'],
+  });
+  expect(summarizePairedReleaseEvidence([pair('repeat-1')])).toMatchObject({
+    controlled: false,
+    refusal_reasons: ['At least two distinct complete pairs are required.'],
+  });
+});
+
+it('refuses a pair whose proposer snapshots differ between modes', () => {
+  const mismatched = pair('repeat-1');
+  mismatched.comparison.left.execution.manifest.routes = { gap_extraction: { proposer: { actual: { model: 'single' } } } } as never;
+  mismatched.comparison.right.execution.manifest.routes = { gap_extraction: { proposer: { actual: { model: 'standard' } } } } as never;
+
+  expect(summarizePairedReleaseEvidence([mismatched, pair('repeat-2')])).toMatchObject({
+    controlled: false,
+    refusal_reasons: ['repeat-1: proposer route differs between modes'],
+  });
+});
+
+it('marks absent call history as missing rather than zero cost', () => {
+  const missing = pair('repeat-2');
+  missing.comparison.left.execution.calls = [];
+  const summary = summarizePairedReleaseEvidence([pair('repeat-1'), missing]);
+
+  expect(summary.modes.single_pass?.gap_extraction?.cost_usd).toMatchObject({
+    known_total: null,
+    missing_call_history_count: 1,
+    observed_trial_count: 1,
   });
 });

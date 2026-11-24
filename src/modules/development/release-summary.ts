@@ -3,12 +3,19 @@ import type { ComparisonResult } from './comparison';
 import type { DevelopmentSection } from './schema';
 
 type Mode = 'single_pass' | 'standard';
-type CostSummary = { known_total: number | null; known_call_count: number; zero_cost_call_count: number; unknown_call_count: number };
+type CostSummary = { known_total: number | null; known_call_count: number; zero_cost_call_count: number; unknown_call_count: number; observed_trial_count: number; missing_call_history_count: number };
+type RepeatObservation = {
+  trial_id: string;
+  latency_ms: number | null;
+  generation_cost_usd: { known_total: number | null; known_call_count: number; unknown_call_count: number; missing_call_history: boolean };
+  provisional_reference: { matches: number; false_positives: number; misses: number };
+};
 type SectionSummary = {
   trials: number;
-  latency_ms: { min: number | null; max: number | null; range: number | null };
+  latency_ms: { min: number | null; max: number | null; range: number | null; observed_trial_count: number };
   cost_usd: CostSummary;
-  reference: { matches: number; false_positives: number; misses: number };
+  provisional_reference: { matches: number; false_positives: number; misses: number };
+  observations: RepeatObservation[];
 };
 export type PairedReleaseEvidence = { trial_id: string; comparison: ComparisonResult };
 export type PairedReleaseSummary = {
@@ -33,12 +40,20 @@ function elapsed(startedAt: string | null | undefined, finishedAt: string | null
 }
 /** Stable study controls that must remain fixed across independently saved repeats. */
 function repeatControlIdentity(comparison: ComparisonResult): string {
+  const controls = (side: ComparisonResult['left']) => ({
+    mode: side.execution.manifest.config.mode,
+    generation_config: side.execution.manifest.config,
+    generation_code: side.execution.manifest.code_identity,
+    modules: side.execution.manifest.modules,
+    prompts: side.execution.manifest.prompts,
+    routes: side.execution.manifest.routes,
+    prerequisites: side.execution.manifest.prerequisites,
+  });
   const left = comparison.left;
   return canonical({
     sources: left.execution.manifest.sources,
     target: left.execution.manifest.target,
-    generation_code: left.execution.manifest.code_identity,
-    proposer_routes: Object.fromEntries(comparison.sections.map(({ section }) => [section, left.execution.manifest.routes?.[section]?.proposer])),
+    modes: { single_pass: controls(comparison.left), standard: controls(comparison.right) },
     evaluations: left.evaluations.map(evaluation => ({
       section: evaluation.manifest?.section,
       profile: evaluation.manifest?.profile,
@@ -77,11 +92,12 @@ function reasons(trial: PairedReleaseEvidence): string[] {
  */
 export function summarizePairedReleaseEvidence(trials: PairedReleaseEvidence[]): PairedReleaseSummary {
   const refusalReasons: string[] = [];
+  if (trials.length < 2) return { controlled: false, refusal_reasons: ['At least two distinct complete pairs are required.'], trials_total: trials.length, modes: {} };
   const seen = new Set<string>();
   const usedExecutionIds = new Set<string>();
   let expectedControls: string | undefined;
   let expectedSections: string | undefined;
-  const grouped = new Map<string, { latencies: number[]; costs: (number | null)[]; matches: number; falsePositives: number; misses: number }>();
+  const grouped = new Map<string, RepeatObservation[]>();
   for (const trial of trials) {
     if (!trial.trial_id.trim() || seen.has(trial.trial_id)) {
       refusalReasons.push(`${trial.trial_id || '(missing trial id)'}: duplicate or missing trial id`);
@@ -103,6 +119,10 @@ export function summarizePairedReleaseEvidence(trials: PairedReleaseEvidence[]):
     }
     if (!comparison.compatibility.controlled || comparison.sections.some(section => !section.compatibility.controlled)) {
       refusalReasons.push(...reasons(trial));
+      continue;
+    }
+    if (comparison.sections.some(({ section }) => canonical(comparison.left.execution.manifest.routes?.[section]?.proposer) !== canonical(comparison.right.execution.manifest.routes?.[section]?.proposer))) {
+      refusalReasons.push(`${trial.trial_id}: proposer route differs between modes`);
       continue;
     }
     const sectionIdentity = comparison.sections.map(section => section.section).sort().join(',');
@@ -129,30 +149,39 @@ export function summarizePairedReleaseEvidence(trials: PairedReleaseEvidence[]):
           continue;
         }
         const key = `${mode}:${section.section}`;
-        const current = grouped.get(key) ?? { latencies: [], costs: [], matches: 0, falsePositives: 0, misses: 0 };
         const duration = elapsed(attempt.started_at, attempt.finished_at);
-        if (duration !== null) current.latencies.push(duration);
-        current.costs.push(...side.execution.calls.filter(call => call.section_id === attempt.id).map(callCost));
-        current.matches += reference.matches.length;
-        current.falsePositives += reference.unmatched_output_ids.length;
-        current.misses += reference.unmatched_reference_ids.length;
-        grouped.set(key, current);
+        const calls = side.execution.calls.filter(call => call.section_id === attempt.id);
+        const costs = calls.map(callCost);
+        const known = costs.filter((cost): cost is number => cost !== null);
+        grouped.set(key, [...(grouped.get(key) ?? []), {
+          trial_id: trial.trial_id,
+          latency_ms: duration,
+          generation_cost_usd: { known_total: calls.length && known.length === costs.length ? known.reduce((sum, cost) => sum + cost, 0) : null, known_call_count: known.length, unknown_call_count: costs.length - known.length, missing_call_history: calls.length === 0 },
+          provisional_reference: { matches: reference.matches.length, false_positives: reference.unmatched_output_ids.length, misses: reference.unmatched_reference_ids.length },
+        }]);
       }
     }
   }
   if (refusalReasons.length) return { controlled: false, refusal_reasons: [...new Set(refusalReasons)], trials_total: trials.length, modes: {} };
   const modes: PairedReleaseSummary['modes'] = {};
-  for (const [key, value] of grouped) {
+  for (const [key, unsorted] of grouped) {
     const [mode, section] = key.split(':') as [Mode, DevelopmentSection];
-    const known = value.costs.filter((cost): cost is number => cost !== null);
-    const min = value.latencies.length ? Math.min(...value.latencies) : null;
-    const max = value.latencies.length ? Math.max(...value.latencies) : null;
+    const observations = [...unsorted].sort((a, b) => a.trial_id.localeCompare(b.trial_id));
+    const latencies = observations.flatMap(item => item.latency_ms === null ? [] : [item.latency_ms]);
+    const min = latencies.length ? Math.min(...latencies) : null;
+    const max = latencies.length ? Math.max(...latencies) : null;
+    const costs = observations.flatMap(item => item.generation_cost_usd.known_total === null ? [] : [item.generation_cost_usd.known_total]);
+    const knownCalls = observations.reduce((sum, item) => sum + item.generation_cost_usd.known_call_count, 0);
+    const unknownCalls = observations.reduce((sum, item) => sum + item.generation_cost_usd.unknown_call_count, 0);
+    const missingHistory = observations.filter(item => item.generation_cost_usd.missing_call_history).length;
+    const provisional = observations.reduce((sum, item) => ({ matches: sum.matches + item.provisional_reference.matches, false_positives: sum.false_positives + item.provisional_reference.false_positives, misses: sum.misses + item.provisional_reference.misses }), { matches: 0, false_positives: 0, misses: 0 });
     modes[mode] ??= {};
     modes[mode]![section] = {
       trials: trials.length,
-      latency_ms: { min, max, range: min === null || max === null ? null : max - min },
-      cost_usd: { known_total: known.length === value.costs.length ? known.reduce((sum, cost) => sum + cost, 0) : null, known_call_count: known.length, zero_cost_call_count: known.filter(cost => cost === 0).length, unknown_call_count: value.costs.length - known.length },
-      reference: { matches: value.matches, false_positives: value.falsePositives, misses: value.misses },
+      latency_ms: { min, max, range: min === null || max === null ? null : max - min, observed_trial_count: latencies.length },
+      cost_usd: { known_total: costs.length === observations.length ? costs.reduce((sum, cost) => sum + cost, 0) : null, known_call_count: knownCalls, zero_cost_call_count: costs.filter(cost => cost === 0).length, unknown_call_count: unknownCalls, observed_trial_count: observations.length - missingHistory, missing_call_history_count: missingHistory },
+      provisional_reference: provisional,
+      observations,
     };
   }
   return { controlled: true, refusal_reasons: [], trials_total: trials.length, modes };

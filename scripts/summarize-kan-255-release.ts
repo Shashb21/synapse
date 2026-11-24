@@ -10,6 +10,9 @@ async function main(): Promise<void> {
   const parsed: unknown = JSON.parse(await readFile(resolve(input), 'utf8'));
   const trials = Array.isArray(parsed) ? parsed : (parsed && typeof parsed === 'object' && Array.isArray((parsed as { trials?: unknown }).trials) ? (parsed as { trials: unknown[] }).trials : null);
   if (!trials) throw new Error('The evidence file must be a JSON array or an object with a trials array.');
+  if (trials.some(trial => !trial || typeof trial !== 'object' || typeof (trial as { trial_id?: unknown }).trial_id !== 'string' || !(trial as { comparison?: unknown }).comparison)) {
+    throw new Error('Every evidence entry must contain a string trial_id and a saved comparison object.');
+  }
   process.stdout.write(`${JSON.stringify(summarizePairedReleaseEvidence(trials as PairedReleaseEvidence[]), null, 2)}\n`);
 }
 

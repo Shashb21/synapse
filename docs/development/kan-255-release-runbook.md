@@ -46,8 +46,17 @@ For every disagreement, record the two ratings and the KAN-181 adjudication deci
 
 ## Aggregate and decide
 
-1. Retrieve each pair through the owner-only saved-comparison endpoint, then save the returned `comparison` objects in a local JSON array (or `{ "trials": [...] }`) with unique, operator-assigned `trial_id` values. For example, after authenticated retrieval from `/api/admin/development/comparison?left_experiment_id=…&left_execution_id=…&right_experiment_id=…&right_execution_id=…`, create `saved-comparisons.json`; this endpoint reads saved records only and does not run a worker.
-2. Run the offline-only command `npx tsx scripts/summarize-kan-255-release.ts saved-comparisons.json`. It reads that local JSON file and prints a summary; it makes no provider, database, route, billing, or remote call. The helper refuses aggregation if a pair is incomplete or incomparable, reuses an execution, or differs in stage coverage. Current `buildComparison` represents an empty-output/all-miss reference assessment as unscored, so retain that valid observation and its expert decision record in the handoff package and report it separately; do not silently drop it or relabel it as missing evidence.
+1. Retrieve each pair through the owner-only saved-comparison endpoint, then save the returned `comparison` objects in a local JSON wrapper with unique, operator-assigned `trial_id` values. For example, after authenticated retrieval from `/api/admin/development/comparison?left_experiment_id=…&left_execution_id=…&right_experiment_id=…&right_execution_id=…`, create `saved-comparisons.json` as:
+
+   ```json
+   { "trials": [
+     { "trial_id": "R1", "comparison": { "left": { "execution": { "id": "saved-single-R1" } }, "right": { "execution": { "id": "saved-standard-R1" } } } },
+     { "trial_id": "R2", "comparison": { "left": { "execution": { "id": "saved-single-R2" } }, "right": { "execution": { "id": "saved-standard-R2" } } } }
+   ] }
+   ```
+
+   The abbreviated objects above show the wrapper only: each `comparison` must be the complete object returned by the endpoint. This endpoint reads saved records only and does not run a worker.
+2. Run the offline-only command `npx tsx scripts/summarize-kan-255-release.ts saved-comparisons.json`. It reads that local JSON file and prints a summary; it makes no provider, database, route, billing, or remote call. The helper refuses aggregation if fewer than two complete pairs are supplied, a pair is incomplete or incomparable, execution evidence is reused, proposer settings differ between arms, or frozen controls drift. It prints explicitly labelled `provisional_reference` counts plus per-repeat `observations`, timing coverage, and generation-cost coverage; it does not present provisional evaluator counts as expert judgments. Current `buildComparison` represents an empty-output/all-miss reference assessment as unscored, so retain that valid observation and its expert decision record in the handoff package and report it separately; do not silently drop it or relabel it as missing evidence.
 3. The summary is generation-call accounting only; external-evaluation charges must be read from the linked saved evaluation receipts/cost account and included separately in the budget ledger. Treat `known_total: null` or any unknown generation/evaluation charge as **unknown cost**, not `$0`. Obtain provider accounting or record the unresolved amount before asserting a budget total.
 4. Do not calculate a significance claim from these few repeats. Report raw counts/ranges and all deviations.
 5. KAN-181's approved rubric and human sign-off determine whether the evidence is acceptable. This runbook only establishes evidence traceability and accounting.
