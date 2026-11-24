@@ -317,7 +317,7 @@ export function canPrompt(route: ResolvedRoute): boolean {
 export type RawCompletionCall = { request: import("@/modules/llm/provider").LlmRequest; purpose: string; attempt: number; role?: import("./contracts").CompletionRole };
 export type RawCompletionExecutor = (call: RawCompletionCall) => Promise<string>;
 
-export function completionFor(route: ResolvedRoute, run: RunHandle, options?: { completeRaw?: RawCompletionExecutor }): JsonCompletion {
+export function completionFor(route: ResolvedRoute, run: RunHandle, options?: { completeRaw?: RawCompletionExecutor; beforeSend?: () => Promise<void> }): JsonCompletion {
   return async ({ system, user, purpose, maxTokens, role }) => {
     if (!canPrompt(route)) {
       throw new NoRouteError(`${route.provider_label} cannot serve ${purpose}. ${KEY_PROMPT}`);
@@ -346,6 +346,7 @@ export function completionFor(route: ResolvedRoute, run: RunHandle, options?: { 
         detail: `${route.provider_label} · ${route.model}`,
         purpose,
         attempt,
+        beforeSend: options?.beforeSend,
         stage: route.stage,
         workspace_id: run.workspace_id ?? null,
       })).text;

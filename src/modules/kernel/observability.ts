@@ -167,13 +167,21 @@ function comparisonRunLock(schema: string, id: string): string {
   return `source-comparison-run:${schema}:${id}`;
 }
 
+type ComparisonRunOwnership = {
+  assertLive: () => Promise<void>;
+  finalize: (args: Omit<CloseRunArgs, "recorder">) => Promise<void>;
+};
+
 /** Keep a source comparison recoverable while it awaits a model outside workspace transactions. */
-export async function withRunningSourceComparison<T>(recorder: RunRecorder, execute: () => Promise<T>): Promise<T> {
+export async function withRunningSourceComparison<T>(recorder: RunRecorder, execute: (ownership: ComparisonRunOwnership) => Promise<T>): Promise<T> {
   const schema = await currentSchemaName();
-  return withIndependentAdvisoryLock(comparisonRunLock(schema, recorder.id), async () => {
-    const [row] = await db().select({ id: t.moduleRuns.id }).from(t.moduleRuns).where(runningRun(recorder));
+  return withIndependentAdvisoryLock(schema, comparisonRunLock(schema, recorder.id), async ({ assertLive, withOwnership }) => {
+    const [row] = await withOwnership(() => db().select({ id: t.moduleRuns.id }).from(t.moduleRuns).where(runningRun(recorder)).execute());
     if (!row) throw new Error("The module run is already finalized.");
-    return execute();
+    return execute({
+      assertLive,
+      finalize: (args) => withOwnership(() => closeRun({ ...args, recorder })),
+    });
   });
 }
 
@@ -185,8 +193,7 @@ function runningRun(recorder: RunRecorder) {
   );
 }
 
-/** Preserve the first terminal result, including across concurrent recovery. */
-export async function closeRun(args: {
+type CloseRunArgs = {
   recorder: RunRecorder;
   status: Exclude<RunStatus, "running">;
   summary?: string;
@@ -194,7 +201,10 @@ export async function closeRun(args: {
   error?: string;
   route?: ResolvedRoute | null;
   evals?: EvalScore[];
-}) {
+};
+
+/** Preserve the first terminal result, including across concurrent recovery. */
+export async function closeRun(args: CloseRunArgs) {
   await db()
     .update(t.moduleRuns)
     .set({

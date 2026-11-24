@@ -278,13 +278,27 @@ export async function runStage<O = unknown>(args: {
     }
   }
 
-  let result: StageRunResult<O>;
-  try {
-    result = await withRunningRun(recorder, execute);
-  } catch (error) {
-    tagStageError(error, args.stage);
+  const closeFailedRun = (error: unknown) => {
     const message = inputDiagnostic ?? (error instanceof Error ? error.message : String(error));
-    const closeFailedRun = () => closeRun({ recorder, status: "error", error: message, route });
+    return closeRun({ recorder, status: "error", error: message, route });
+  };
+  let stageFailure: { error: unknown } | undefined;
+  let outcome: { result: StageRunResult<O> } | { error: unknown };
+  try {
+    outcome = await withRunningRun(recorder, async () => {
+      // Ingestion owns the surrounding checkpoint and its failure write. For
+      // standalone work, roll back only the stage savepoint before finalizing.
+      if (args.deferFailureRecord) return { result: await execute() };
+      try {
+        return { result: await withWorkspaceTransaction(execute) };
+      } catch (error) {
+        stageFailure = { error };
+        await closeFailedRun(error);
+        return stageFailure;
+      }
+    });
+  } catch (transactionError) {
+    const error = stageFailure ? stageFailure.error : transactionError;
     const persist = async () => {
       try {
         if (args.deferFailureRecord) {
@@ -292,23 +306,25 @@ export async function runStage<O = unknown>(args: {
           // with the original ID and write the terminal state in one commit.
           await withWorkspaceTransaction(async () => {
             await openRun(recorder);
-            await closeFailedRun();
+            await closeFailedRun(error);
           });
         } else {
-          await closeFailedRun();
+          await closeFailedRun(error);
         }
       } catch {
         // A database failure while closing must not replace the stage's error.
         console.error("Could not finalize failed module run", { run_id: recorder.id, stage: args.stage });
       }
     };
-    if (args.deferFailureRecord) {
-      args.deferFailureRecord(persist);
-    } else {
-      await persist();
-    }
-    throw error;
+    if (args.deferFailureRecord) args.deferFailureRecord(persist);
+    else await persist();
+    outcome = { error };
   }
+  if ("error" in outcome) {
+    tagStageError(outcome.error, args.stage);
+    throw outcome.error;
+  }
+  const { result } = outcome;
 
   try {
     if (!ingestStage) await recordFollowUps(result.evals, result.summary);

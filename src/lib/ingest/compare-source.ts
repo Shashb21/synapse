@@ -188,18 +188,29 @@ export async function compareSource(sourceId: string, actor: Actor): Promise<voi
       const recorder = new RunRecorder({ workspace_id: await scopedWorkspaceId() ?? "default", stage: "S1", module_id: SOURCE_COMPARISON_MODULE, module_version: "1", actor, input: { source_id: sourceId, basis_version } }, version);
       await openRun(recorder);
       let route: ResolvedRoute | null = null;
+      let result: { outcomes: ComparisonOutcome[] } | { error: unknown };
       try {
-        pendingOutcomes = await withRunningSourceComparison(recorder, async () => {
-          route = await resolveRoute("S1");
-          const complete = completionFor(route, recorder);
-          const reply = replySchema.parse(await complete({ system: SYSTEM, user: JSON.stringify(await facts(state, sourceId)), purpose: "incoming-source-comparison" }));
-          await closeRun({ recorder, status: "ok", route, output: reply, summary: "Incoming comparison provider reply received." });
-          return reply.outcomes;
+        result = await withRunningSourceComparison(recorder, async ({ assertLive, finalize }) => {
+          let reply: z.infer<typeof replySchema>;
+          try {
+            route = await resolveRoute("S1");
+            const complete = completionFor(route, recorder, { beforeSend: assertLive });
+            reply = replySchema.parse(await complete({ system: SYSTEM, user: JSON.stringify(await facts(state, sourceId)), purpose: "incoming-source-comparison" }));
+          } catch (error) {
+            await finalize({ status: "error", route, error: error instanceof Error ? error.message : String(error) });
+            return { error };
+          }
+          await finalize({ status: "ok", route, output: reply, summary: "Incoming comparison provider reply received." });
+          return reply;
         });
       } catch (error) {
+        // A lost lock rolls back terminal writes. Close an interrupted run only
+        // if recovery has left it open. Late provider work cannot finalize this run.
         await closeRun({ recorder, status: "error", route, error: error instanceof Error ? error.message : String(error) });
         throw error;
       }
+      if ("error" in result) throw result.error;
+      pendingOutcomes = result.outcomes;
     }
     // Normalize and validate the entire reply under current owner locks before saving or applying it.
     // This also upgrades pre-normalization saved outcomes without calling the model on durable retry.

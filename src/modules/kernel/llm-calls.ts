@@ -269,7 +269,11 @@ export async function tracedCompletion(args: {
           text = replayReply({ stage: args.stage, purpose: args.purpose, system: args.request.system, user: args.request.user });
         } else {
           await args.beforeSend?.();
-          text = await args.provider.complete(args.request, { api_key: args.api_key }, { maxAttempts: args.maxAttempts, onUsage: (reported) => (usage = reported) });
+          text = await args.provider.complete(args.request, { api_key: args.api_key }, {
+            maxAttempts: args.maxAttempts,
+            beforeRetry: args.beforeSend,
+            onUsage: (reported) => (usage = reported),
+          });
         }
       } catch (error) {
         usage = callUsage({ usage, status: "error", reply: null, system_prompt: args.request.system, user_prompt: args.request.user });

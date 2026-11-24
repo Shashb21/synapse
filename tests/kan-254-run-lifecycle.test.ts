@@ -7,6 +7,7 @@ import postgres from "postgres";
 import { db } from "@/modules/kernel/db";
 import { HISTORICAL_FAILURE_MESSAGE } from "@/modules/kernel/failure-presentation";
 import { closeRun, openRun, RunRecorder, SOURCE_COMPARISON_MODULE, withRunningSourceComparison } from "@/modules/kernel/observability";
+import * as observability from "@/modules/kernel/observability";
 import * as routing from "@/modules/kernel/routing";
 import { runStage } from "@/modules/kernel/run";
 import { moduleRuns } from "@/modules/kernel/schema";
@@ -54,6 +55,39 @@ describe("stage run lifecycle", () => {
       expect(JSON.stringify(body)).not.toContain(failure.message);
     } finally {
       route.mockRestore();
+      await db().delete(moduleRuns).where(actorFilter);
+    }
+  });
+
+  it("commits the stage diagnostic before an overdue recovery can close the run", async () => {
+    const actorFilter = and(eq(moduleRuns.actor_name, actor.name), eq(moduleRuns.stage, "S8"));
+    const failure = new Error("Original synthetic setup failure");
+    const worker = postgres(process.env.DATABASE_URL!, { max: 1, ssl: false });
+    const insertRun = observability.openRun;
+    const finalizeRun = observability.closeRun;
+    vi.spyOn(observability, "openRun").mockImplementation(async (recorder) => {
+      await insertRun(recorder);
+      await db().update(moduleRuns).set({ started_at: old }).where(eq(moduleRuns.id, recorder.id));
+    });
+    vi.spyOn(routing, "routeConfig").mockRejectedValue(failure);
+    vi.spyOn(observability, "closeRun").mockImplementation(async (args) => {
+      // A separate recovery worker claims only overdue rows it can lock immediately.
+      await worker.begin(async (tx) => {
+        const [claim] = await tx`
+          select id from module_runs where status = 'running' and started_at = ${old}
+          and id = ${args.recorder.id} for update skip locked
+        `;
+        if (claim) await tx`update module_runs set status = 'error', error = 'Interrupted' where id = ${claim.id}`;
+      });
+      return finalizeRun(args);
+    });
+    try {
+      await expect(runStage({ stage: "S8", input: {}, actor, role: "medical_affairs" })).rejects.toBe(failure);
+      const [row] = await db().select().from(moduleRuns).where(actorFilter);
+      expect(row).toMatchObject({ status: "error", error: failure.message });
+    } finally {
+      vi.restoreAllMocks();
+      await worker.end();
       await db().delete(moduleRuns).where(actorFilter);
     }
   });
