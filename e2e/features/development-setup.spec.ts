@@ -252,6 +252,7 @@ test("slow uploads disable competing writes and preserve the edited name", async
   let requests = 0;
   await page.route("**/source-upload", async (route) => {
     requests += 1;
+    expect(route.request().postDataJSON().preparation).toMatchObject({ id: expect.stringMatching(/^[a-f0-9-]{36}$/), allowance_usd: 7 });
     const response = await route.fetch();
     await gate;
     await route.fulfill({ response });
@@ -261,6 +262,7 @@ test("slow uploads disable competing writes and preserve the edited name", async
     mimeType: "text/plain",
     buffer: Buffer.from("Need evidence for comparative survival."),
   });
+  await page.getByLabel("Preparation allowance per upload (USD)").fill("7");
   await page
     .getByRole("button", { name: "Upload source", exact: true })
     .click();
@@ -488,4 +490,97 @@ test("reopened draft shows saved documents when source choices fail", async ({
   ).json();
   expect(reopened.experiment.revision).toBe(saved.revision);
   expect(reopened.experiment.documents).toEqual(saved.documents);
+});
+
+test("KAN-264 reuses the paid upload authorization after a lost response until the owner starts a fresh attempt", async ({ page }) => {
+  const name = `Preparation retry ${Date.now()}`;
+  await page.goto("/admin/development");
+  await page.getByLabel("New experiment name").fill(name);
+  await page.getByRole("button", { name: "Create experiment", exact: true }).click();
+  await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(name);
+
+  const authorizations: { id: string; allowance_usd: number }[] = [];
+  await page.route("**/source-upload", async route => {
+    authorizations.push(route.request().postDataJSON().preparation);
+    if (authorizations.length === 1) {
+      await route.abort("failed");
+      return;
+    }
+    if (authorizations.length === 2) {
+      await route.fulfill({ status: 409, json: { code: "preparation_already_started", error: "This upload authorization was already used." } });
+      return;
+    }
+    await route.fulfill({ response: await route.fetch() });
+  });
+
+  async function chooseUpload() {
+    await page.getByLabel("Preparation allowance per upload (USD)").fill("7");
+    await page.getByLabel("Private source file").setInputFiles({
+      name: "retry-source.txt", mimeType: "text/plain", buffer: Buffer.from("A fictional source for an upload retry."),
+    });
+  }
+  const upload = page.getByRole("button", { name: "Upload source", exact: true });
+  await chooseUpload();
+  await upload.click();
+  await expect(page.getByText(/Retrying this upload reuses its authorization/)).toBeVisible();
+
+  await page.reload();
+  await page.getByRole("button", { name, exact: true }).click();
+  await chooseUpload();
+  await upload.click();
+  await expect(page.getByText(/This upload authorization was already used/)).toBeVisible();
+  expect(authorizations).toHaveLength(2);
+  expect(authorizations[0]).toMatchObject({ id: expect.stringMatching(/^[a-f0-9-]{36}$/), allowance_usd: 7 });
+  expect(authorizations[1]).toEqual(authorizations[0]);
+
+  await expect(page.getByText(/The earlier request may still incur charges/)).toBeVisible();
+  await page.getByRole("button", { name: "Authorize new paid source attempt", exact: true }).click();
+  await expect(page.getByText("retry-source.txt", { exact: true })).toBeVisible();
+  expect(authorizations).toHaveLength(3);
+  expect(authorizations[2].allowance_usd).toBe(7);
+  expect(authorizations[2].id).not.toBe(authorizations[0].id);
+});
+
+test("KAN-264 blocks a paid upload when the browser cannot save its authorization", async ({ page }) => {
+  await page.addInitScript(() => {
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (this: Storage, key, value) {
+      if (key.startsWith("synapse.development.preparation.")) {
+        throw new DOMException("Storage quota exceeded", "QuotaExceededError");
+      }
+      setItem.call(this, key, value);
+    };
+  });
+
+  const name = `Preparation storage ${Date.now()}`;
+  await page.goto("/admin/development");
+  await page.getByLabel("New experiment name").fill(name);
+  await page.getByRole("button", { name: "Create experiment", exact: true }).click();
+  await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(name);
+
+  const posted: number[] = [];
+  await page.route("**/source-upload", async route => {
+    const amount = route.request().postDataJSON().preparation.allowance_usd;
+    posted.push(amount);
+    if (amount > 0) {
+      await route.abort("failed");
+      return;
+    }
+    await route.fulfill({ response: await route.fetch() });
+  });
+
+  const allowance = page.getByLabel("Preparation allowance per upload (USD)");
+  const upload = page.getByRole("button", { name: "Upload source", exact: true });
+  await allowance.fill("7");
+  await page.getByLabel("Private source file").setInputFiles({
+    name: "storage-source.txt", mimeType: "text/plain", buffer: Buffer.from("A fictional source for an upload storage test."),
+  });
+  await upload.click();
+  await expect(page.getByText(/Allow session storage in this browser, then retry/)).toBeVisible();
+  expect(posted).toEqual([]);
+
+  await allowance.fill("0");
+  await upload.click();
+  await expect(page.getByText("storage-source.txt", { exact: true })).toBeVisible();
+  expect(posted).toEqual([0]);
 });

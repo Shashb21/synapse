@@ -1,6 +1,6 @@
 /** Bounded durable progression: replay real stages, dispatch one claimed raw request, checkpoint and return. */
 import { CostPause, CostSettlementPending, reserveCost, settleCost } from './cost-store';
-import { rawCallBound, developmentUsageCost } from './cost';
+import { developmentReceiptBilling, HISTORICAL_USAGE_COST, rawCallBound } from './cost';
 import { progressEvaluation } from './evaluation-worker';
 import { findProvider, providerServes } from '@/modules/llm/provider';
 import { providerApiKey } from '@/modules/llm/api-keys';
@@ -60,10 +60,9 @@ export function assertSafeReceiptText(text: string, secrets: string[]): void {
 }
 /** Reconcile only saved evidence; a ledger outage must not terminally fail replayable work. */
 async function settleSavedCallCost(executionId: string, call: ExecutionCall): Promise<void> {
-  const route = call.route.actual;
-  const usage = call.receipt?.usage ?? call.failure_accounting?.usage ?? null;
+  const billing = call.receipt?.billing ?? call.failure_accounting?.billing ?? HISTORICAL_USAGE_COST;
   try {
-    await settleCost(executionId, call.id, developmentUsageCost(route.provider_id, route.model, usage), call.status === 'succeeded');
+    await settleCost(executionId, call.id, billing, call.status === 'succeeded');
   } catch (error) {
     throw new CostSettlementPending(error);
   }
@@ -74,18 +73,24 @@ async function dispatch(execution: Execution, token: string, section: SectionAtt
   const provider = findProvider(route.provider_id);
   const api_key = providerApiKey(route.provider_id);
   if (!provider || !providerServes(provider, route.model) || !api_key) throw new DevelopmentError(409, 'route_unavailable', 'The frozen provider/model credentials are no longer available. Start a fresh execution after correcting them.');
+  if (call.request.request.model !== route.model) throw new DevelopmentError(409, 'route_mismatch', 'The frozen request and its pricing route differ.');
   await requireSectionAi(section.section);
   await requireClaim(execution.id, token);
   await reserveCost(execution.id, call.id, 'generation', rawCallBound(route.provider_id, call.request.request));
   if (!await beginCall(execution.id, token, call.id)) throw new DevelopmentError(409, 'dispatch_conflict', 'This call was already claimed; it cannot be resent.');
+  const began = new Date();
   let receipt: CallReceipt;
   let failure: ExecutionCall['failure_accounting'] = null;
   try {
-    receipt = await tracedCompletion({ provider, request: call.request.request, api_key, run: recorder(section.id), step: `llm:${call.request.purpose}`, detail: `${provider.label} · ${route.model}`, purpose: call.request.purpose, attempt: call.request.attempt, stage: route.stage, workspace_id: null, maxAttempts: 1,
+    receipt = await tracedCompletion({ provider, request: call.request.request, api_key, run: recorder(section.id), step: `llm:${call.request.purpose}`, detail: `${provider.label} · ${route.model}`, purpose: call.request.purpose, attempt: call.request.attempt, stage: route.stage, workspace_id: null, maxAttempts: 1, standardBilling: true,
       beforeSend: async () => { await requireClaim(execution.id, token); await requireSectionAi(section.section); },
-      onFailure: accounting => { failure = accounting; },
+      onFailure: accounting => {
+        failure = { ...accounting, ...developmentReceiptBilling(route.provider_id, route.model, accounting.usage, began, new Date()) };
+      },
     });
-    failure = { usage: receipt.usage, cost_usd: receipt.cost_usd, price_source: receipt.price_source };
+    const billing = developmentReceiptBilling(route.provider_id, route.model, receipt.usage, began, new Date());
+    receipt = { ...receipt, ...billing };
+    failure = { usage: receipt.usage, ...billing };
     assertSafeReceiptText(receipt.text, ['xai-grok', 'anthropic-claude', 'openai', 'google-gemini', 'openrouter'].map(providerApiKey).filter((key): key is string => Boolean(key)));
   } catch (error) {
     // Even an explicit provider failure is terminal. The call can never return to queued.
@@ -109,11 +114,11 @@ export async function progressExecution(id?: string): Promise<WorkerProgress> {
     return { processed: true, execution_id: execution.id, generation_status: 'needs_attention' };
   }
   try {
-    if (execution.manifest.code_identity !== executionCodeIdentity()) throw new DevelopmentError(409, 'code_changed', 'The deployed code changed. Start a new execution; saved calls cannot resume under different code.');
-    // A crash can leave saved outcomes ahead of the ledger. Repeating settlement cannot charge twice.
+    // Saved accounting can settle even after a deployment changes the replay code.
     for (const call of execution.calls) {
       if (call.status === 'succeeded' || call.status === 'failed') await settleSavedCallCost(execution.id, call);
     }
+    if (execution.manifest.code_identity !== executionCodeIdentity()) throw new DevelopmentError(409, 'code_changed', 'The deployed code changed. Start a new execution; saved calls cannot resume under different code.');
     for (const initial of execution.sections) {
       const section = execution.sections.find(attempt => attempt.id === initial.id)!;
       if (!['queued', 'running'].includes(section.status)) continue;

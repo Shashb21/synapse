@@ -53,14 +53,16 @@ function reply(section: DevelopmentSection, additions = {}) {
   return { criteria: effectiveCriteria(balancedProfile, section).map(c => ({ criterion_id: c.id, score: 3, reason: 'Supported by the frozen source.' })), matches: [], unmatched_output_ids: [], unmatched_reference_ids: [], ...additions };
 }
 const create = async (f: Awaited<ReturnType<typeof fixture>>, additions = {}) => POST(req({ ...f.input, cost_controls: { allowance_usd: 100, unknown_acknowledged: true }, ...additions }), ctx(f.e.id));
+const originalXaiModel = xaiGrok.default_model;
 beforeEach(async () => {
+  xaiGrok.default_model = 'grok-3'; // Documented non-reasoning redirect with a funded text ceiling.
   vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Paid or unscripted network forbidden.'));
   vi.spyOn(llm, 'isTestStub').mockReturnValue(false);
   vi.stubEnv('SYNAPSE_DEVELOPMENT_DELIVERY', 'github_actions'); vi.stubEnv('CRON_SECRET', 'isolated-test-worker-secret-long-enough'); vi.stubEnv('XAI_API_KEY', 'test-key-never-send');
   await setAiEnabled({ enabled: true, actor_name: 'test' });
   for (const section of ['gap_extraction', 'tactic_extraction', 'mapping', 'partial_split'] as const) await setAiSection({ section, enabled: true, actor_name: 'test' });
 });
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+afterEach(() => { xaiGrok.default_model = originalXaiModel; vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 it.each(['gap_extraction', 'tactic_extraction', 'matching_coverage', 'partial_splitting'] as const)('evaluates persisted %s without generation and preserves exact historical manifest', async section => {
   const f = await fixture(section);
   const response = await create(f); expect(response.status).toBe(202);
