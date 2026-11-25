@@ -42,6 +42,23 @@ export {
   type MappingScoreExtras,
 } from "./mapping";
 
+/** Reconcile a verified occurrence while preserving uncertainty about a historical citation. */
+export function reconcileHistoricalCitation(
+  blocks: { id: string; text: string }[],
+  historicalQuote: string,
+  observedId: string,
+  observedIds: string[] | null | undefined,
+): { block_id: string } | { observed_block_ids: string[] } | null {
+  if (observedIds?.includes(observedId)) return null;
+  const normalize = (value: string) => value.toLowerCase().replace(/\s+/g, " ").trim();
+  const needle = normalize(historicalQuote);
+  if (!needle) return null;
+  const matches = blocks.filter(block => normalize(block.text).includes(needle));
+  if (!matches.some(block => block.id === observedId)) return null;
+  if (matches.length === 1 && !observedIds?.length) return { block_id: observedId };
+  return { observed_block_ids: [...(observedIds ?? []), observedId] };
+}
+
 export const unlocked = (): {
   locked: false;
   actor_name: null;
@@ -785,6 +802,7 @@ export function extractCandidateGaps(
 }
 
 export type ExtractedTactic = {
+  block_id?: string | null;
   id: string;
   name: string;
   type: TacticType;

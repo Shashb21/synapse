@@ -7,27 +7,21 @@ An evidence gap is a decision-relevant question the available evidence does not 
 Rules:
 - One gap per atomic question. Do not merge two questions into one statement.
 - Quote the source sentence you relied on, verbatim, in source_quote. Every gap needs one; leave out a gap you cannot quote.
+- Include the block_id shown beside the heading when you can identify the quoted block.
 - domain must be one of: ${EVIDENCE_DOMAINS.join(", ")}.
 - name is a short label (max 8 words). statement is one sentence. Both are required.
 - Return JSON only: {"gaps":[{"name":"","statement":"","domain":"","source_quote":""}]}`;
 
-export function documentBody(blocks: { heading: string; text: string }[]): string {
-  return blocks
-    .map((block) => `## ${block.heading}\n${block.text}`)
-    .join("\n\n")
-    .slice(0, 40_000);
-}
-
 export function gapProposerUser(args: {
   title: string;
-  blocks: { heading: string; text: string }[];
+  body: string;
   hints: string;
 }): string {
   return [
     `Source document: ${args.title}`,
     args.hints ? `\n${args.hints}\n` : "",
     "Document:",
-    documentBody(args.blocks),
+    args.body,
   ]
     .filter(Boolean)
     .join("\n");
@@ -45,7 +39,7 @@ You are given candidate gaps you proposed from one source document. Each carries
 
 A candidate that repeats or overlaps a gap already in the plan is not withdrawn for that: the judge links it to that gap so its source is kept.
 
-Never invent a quote. If the document holds no sentence supporting the gap, withdraw it.
+Include the quoted block_id if shown. Never invent a quote. If the document holds no sentence supporting the gap, withdraw it.
 
 Answer every candidate you are given, keeping its id. Do not add new candidates.
 

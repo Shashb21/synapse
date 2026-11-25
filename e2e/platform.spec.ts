@@ -48,7 +48,7 @@ test.describe("platform surfaces", () => {
     ]) {
       await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
     }
-    await expect(page.getByText("s2-gap-extract.pcj v1.0.0")).toBeVisible();
+    await expect(page.getByText("s2-gap-extract.pcj v1.1.0")).toBeVisible();
     await expect(page.getByRole("button", { name: /upload and parse/i })).toBeVisible();
   });
 

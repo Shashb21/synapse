@@ -9,6 +9,7 @@ import { registerModule } from "@/modules/kernel/registry";
 import type { SynapseModule } from "@/modules/kernel/contracts";
 import { persistSourceAndBlocks } from "@/lib/iegp/store";
 import {
+  listSourceBlocks,
   persistDroppedSourceUnits,
   recordLlmSourceStakeholder,
   reparseSourceBlocks,
@@ -370,6 +371,17 @@ export async function listParsedDocuments(ids?: string[]): Promise<ParsedDocumen
   }
   const rows = await db().select().from(parsedDocuments).orderBy(desc(parsedDocuments.parsed_at));
   return rows.map(toRecord);
+}
+
+/** Load current editor blocks for extraction while retaining the selected parse IDs. */
+export async function listExtractionDocuments(ids?: string[]): Promise<ParsedDocumentRecord[]> {
+  const documents: ParsedDocumentRecord[] = [];
+  for (const document of await listParsedDocuments(ids)) {
+    const blocks = (await listSourceBlocks(document.source_id)).map(({ id, source_id, heading, text, location }) =>
+      ({ id, source_id, heading, text, location }));
+    if (blocks.length) documents.push({ ...document, blocks });
+  }
+  return documents;
 }
 
 export async function parsedDocument(id: string): Promise<ParsedDocumentRecord | null> {
