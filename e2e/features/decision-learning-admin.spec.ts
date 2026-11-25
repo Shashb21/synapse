@@ -83,7 +83,7 @@ test("supported S8 candidate earns owner approval and rollback restores baseline
     const page = await owner.newPage();
     await page.goto(`${url}/admin/learning`);
     await expect(page.getByRole("heading", { name: "Decision learning", level: 1 })).toBeVisible();
-    await page.getByLabel("Stage", { exact: true }).selectOption("S8");
+    await expect(page.getByLabel("Stage", { exact: true })).toHaveValue("S8");
     await page.getByRole("button", { name: "Create Gap prioritization candidate", exact: true }).click();
     await expect(page.getByTestId("learning-created")).toContainText("active prompt is unchanged");
     const proposed = await report();
@@ -191,6 +191,7 @@ test("owner sees decision counts and a reason for unsupported candidates; custom
   await expect(page.getByRole("heading", { name: "Decision learning", level: 1 })).toBeVisible();
   await expect(page.getByTestId("admin-workspace-bar")).toHaveAttribute("data-workspace-id", ws.id);
   await expect(page.getByTestId("learning-summary")).toContainText("4 decisions");
+  await page.getByLabel("Stage", { exact: true }).selectOption("S2");
   const table = page.getByRole("table", { name: "S2 agreement counts and shares" });
   await expect(table).toContainText("1 (25.0%)"); await expect(table).toContainText("2 (50.0%)");
   await expect(page.getByRole("img", { name: /S2 agreement chart/ })).toBeVisible();

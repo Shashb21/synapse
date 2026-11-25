@@ -18,7 +18,7 @@ const percent = (share: number | null) => share === null ? "—" : `${(share * 1
 /** Display UTC periods with counts, an equivalent textual table, and candidate provenance. */
 export function LearningConsole({ initial }: { initial: LearningReport }) {
   const [report, setReport] = useState(initial);
-  const [stage, setStage] = useState<typeof STAGES[number]>("S2");
+  const [stage, setStage] = useState<typeof STAGES[number]>("S8");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [checkRequired, setCheckRequired] = useState(false);
