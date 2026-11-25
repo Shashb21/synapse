@@ -1,10 +1,10 @@
 /** Promotes rejected extraction candidates after verifying their citations. */
 import { ensureCurrentSchemaTables, withWorkspaceTransaction } from "@/lib/iegp/db";
 import { lockSourceCitationOwner, resolveRetainedSourceQuote } from "@/lib/iegp/source-citations";
-import { attachTacticSource } from "@/modules/stages/s3-tactic-extract/suggestions";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { and, desc, eq } from "drizzle-orm";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
+import { lockRelationships } from "@/lib/iegp/relationship-change";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import { gapExtractModule } from "@/modules/stages/s2-gap-extract/module";
 import { gapCandidates } from "@/modules/stages/s2-gap-extract/schema";
@@ -75,7 +75,7 @@ export async function promoteGapCandidate(args: {
     if (row.committed_gap_id) throw new Error(`Already promoted as ${row.committed_gap_id}.`);
     if (row.citation_error) throw new TrustedApplicationError(row.citation_error, "conflict", 409);
     await lockSourceCitationOwner(row.source_id);
-    const citation = await resolveRetainedSourceQuote(row.source_id, row.block_id, row.source_quote);
+    const citation = await resolveRetainedSourceQuote(row.source_id, row.block_id, row.source_quote, db(), !row.source_context);
     const domain = (args.domain || row.domain) as EvidenceDomain;
     const gapId = await createGap({
       name: args.name?.trim() || row.name,
@@ -125,6 +125,7 @@ export async function promoteTacticCandidate(args: {
   await ensurePlatformSchema(tacticExtractModule.migrations);
   await ensureCurrentSchemaTables();
   return withWorkspaceTransaction(async () => {
+    if (args.gap_id) await lockRelationships();
     const [row] = await db()
       .select()
       .from(tacticCandidates)
@@ -136,7 +137,7 @@ export async function promoteTacticCandidate(args: {
     if (previous) return previous;
     if (row.citation_error) throw new TrustedApplicationError(row.citation_error, "conflict", 409);
     await lockSourceCitationOwner(row.source_id);
-    const citation = await resolveRetainedSourceQuote(row.source_id, row.block_id, row.source_quote);
+    const citation = await resolveRetainedSourceQuote(row.source_id, row.block_id, row.source_quote, db(), !row.source_context);
     const state = await loadState();
     const source = state.sources.find((s) => s.id === row.source_id);
     const type = (args.type || row.type) as TacticType;
@@ -147,6 +148,7 @@ export async function promoteTacticCandidate(args: {
       description: `Promoted by hand from a rejected S3 candidate${source ? ` in ${source.title}` : ""}.`,
       status: args.status || row.status,
       data_source: source?.title ?? row.source_id,
+      source_id: row.source_id,
       source_quote: row.source_quote,
       ...citation,
       rationale,
@@ -154,7 +156,6 @@ export async function promoteTacticCandidate(args: {
       actor_name: args.actor_name,
       actor_function: args.actor_function,
     });
-    await attachTacticSource({ tactic_id: tacticId, source_id: row.source_id, source_quote: row.source_quote, ...citation });
     await appendAudit(args.actor_name, args.actor_function, "tactic", tacticId, "promote_candidate", `${row.id}: ${rationale}`);
     await recordEdit({
       stage: "S3",

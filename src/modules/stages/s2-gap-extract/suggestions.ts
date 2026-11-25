@@ -5,7 +5,7 @@ import type { ActorFunction } from "@/lib/iegp/enums";
 import type { GapSuggestion } from "@/lib/iegp/types";
 import { captureGapSuggestionDecision } from "@/lib/iegp/learning-capture";
 import { resetPlacementValidation } from "@/modules/stages/s8-prioritization/module";
-import { GAP_CANDIDATES_DDL, gapCandidates } from "./schema";
+import { GAP_CANDIDATES_DDL, GAP_BLOCK_DDL, gapCandidates } from "./schema";
 
 /**
  * A person's decision on an overlap suggestion (KAN-75). The store owns the gaps
@@ -37,7 +37,7 @@ async function beforeDecision(
 /** The S2 candidate row records the gap it became or joined (KAN-97). */
 async function linkCandidateToGap(candidateRowId: string | null | undefined, gapId: string) {
   if (!candidateRowId) return;
-  await ensurePlatformSchema([GAP_CANDIDATES_DDL]);
+  await ensurePlatformSchema([GAP_CANDIDATES_DDL, GAP_BLOCK_DDL]);
   await db().update(gapCandidates).set({ committed_gap_id: gapId }).where(eq(gapCandidates.id, candidateRowId));
 }
 
@@ -94,7 +94,7 @@ export async function rejectGapSuggestionKeepingCandidate(args: Decision): Promi
   const suggestion = await rejectGapSuggestion(args);
   if (before) await captureGapSuggestionDecision({ ...before, actor: { name: args.actor_name, function: args.actor_function }, decision: "reject", rationale: args.rationale });
   if (!suggestion.candidate_row_id) return;
-  await ensurePlatformSchema([GAP_CANDIDATES_DDL]);
+  await ensurePlatformSchema([GAP_CANDIDATES_DDL, GAP_BLOCK_DDL]);
   await db()
     .update(gapCandidates)
     .set({ verdict: "reject", critic_note: `Overlap with ${suggestion.gap_id} rejected by a person: ${args.rationale.trim()}` })

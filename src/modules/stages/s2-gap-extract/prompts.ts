@@ -11,23 +11,16 @@ Rules:
 - name is a short label (max 8 words). statement is one sentence. Both are required.
 - Return JSON only: {"gaps":[{"name":"","statement":"","domain":"","source_quote":"","block_id":""}]}`;
 
-export function documentBody(blocks: { id: string; heading: string; text: string }[]): string {
-  return blocks
-    .map((block) => `## ${block.heading} [block_id=${block.id}]\n${block.text}`)
-    .join("\n\n")
-    .slice(0, 40_000);
-}
-
 export function gapProposerUser(args: {
   title: string;
-  blocks: { id: string; heading: string; text: string }[];
+  body: string;
   hints: string;
 }): string {
   return [
     `Source document: ${args.title}`,
     args.hints ? `\n${args.hints}\n` : "",
     "Document:",
-    documentBody(args.blocks),
+    args.body,
   ]
     .filter(Boolean)
     .join("\n");
@@ -45,7 +38,7 @@ You are given candidate gaps you proposed from one source document. Each carries
 
 A candidate that repeats or overlaps a gap already in the plan is not withdrawn for that: the judge links it to that gap so its source is kept.
 
-Never invent a quote. If the document holds no sentence supporting the gap, withdraw it.
+Include the quoted block_id if shown. Never invent a quote. If the document holds no sentence supporting the gap, withdraw it.
 
 Answer every candidate you are given, keeping its id. Do not add new candidates.
 

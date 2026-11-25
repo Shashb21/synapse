@@ -3,7 +3,7 @@ import { priorityDecision } from "./support/priority-decision";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db as workspaceDb, withWorkspaceTransaction } from "@/lib/iegp/db";
-import { gapSuggestions } from "@/lib/iegp/schema";
+import { gapSuggestions, sourceBlocks } from "@/lib/iegp/schema";
 import "@/modules";
 import { db, ensurePlatformSchema, wipePlatform } from "@/modules/kernel/db";
 import { listEdits } from "@/modules/kernel/edit-records";
@@ -19,6 +19,7 @@ import {
   recordMissedTactic,
   resetDemoSetup,
 } from "@/lib/iegp/store";
+import { deleteSourceBlock, mergeSourceBlocks, reparseSourceBlocks, splitSourceBlock } from "@/lib/iegp/source-blocks";
 import { iegpActionCapability } from "@/app/api/iegp/capabilities";
 import { can } from "@/modules/auth/roles";
 import { listPlacements, validatePlacement } from "@/modules/stages/s8-prioritization/module";
@@ -104,6 +105,108 @@ beforeAll(async () => {
   repeatSourceId = repeat.source_id;
   repeatBlockId = repeat.blocks[0]!.id;
 }, 60_000);
+
+it.each([
+  ["merge", acceptGapMergeSuggestion],
+  ["split", acceptGapSplitSuggestion],
+] as const)("preserves both overlap citations through reparse and %s", async (_decision, acceptSuggestion) => {
+  const gapId = await newGap();
+  const citations = await Promise.all([
+    "The Finch panel has no data for patients over 75.",
+    "The Aster committee confirmed the lack of data for older patients.",
+  ].map(async (quote) => {
+    const section = { heading: "Evidence", text: quote, location: "Section 1" };
+    const source = await persistSourceAndBlocks({
+      title: quote, source_type: "advisory_board", stakeholder_function: ACTOR.function,
+      text: quote, sections: [section],
+    });
+    return {
+      source_id: source.source_id, block_id: source.blocks[0]!.id,
+      source_quote: quote, statement: OVERLAP.split_statement,
+    };
+  }));
+  const [primary, repeat] = citations;
+  const result = await commitExtractedRecords({
+    source_id: primary!.source_id, title: "Finch panel", stakeholder_function: ACTOR.function,
+    ...who, needs: [], gaps: [], tactics: [],
+    overlaps: [{
+      id: "reparse-overlap", gap_id: gapId, run_id: "reparse-overlap-run",
+      candidate_row_id: null, block_id: primary!.block_id, name: "Over-75s versus SoC",
+      statement: primary!.statement, domain: "comparative_effectiveness",
+      source_quote: primary!.source_quote, ...OVERLAP,
+    }],
+  });
+  const suggestionId = result.suggestion_id_by_row["reparse-overlap"]!;
+  await addSuggestionSources(suggestionId, [repeat!]);
+
+  for (const citation of citations) {
+    const reparsed = await reparseSourceBlocks({
+      source_id: citation.source_id,
+      sections: [{ heading: "Background", text: "Updated background.", location: "Section 1" }],
+    });
+    expect(reparsed.blocks).toContainEqual(expect.objectContaining({
+      id: citation.block_id, text: citation.source_quote,
+    }));
+  }
+
+  await acceptSuggestion({ suggestion_id: suggestionId, rationale: "Reviewed both sources", ...who });
+  const { needs } = await loadState();
+  for (const { source_id, block_id, source_quote } of citations) {
+    expect(needs).toContainEqual(expect.objectContaining({ source_id, block_id, source_quote }));
+  }
+});
+
+it.each([
+  ["merge", acceptGapMergeSuggestion],
+  ["split", acceptGapSplitSuggestion],
+  ["removed quote", acceptGapSplitSuggestion],
+] as const)("checks current primary and extra source citations before %s", async (decision, acceptSuggestion) => {
+  const gapId = await newGap();
+  const background = { heading: "Background", text: "The panel reviewed the literature.", location: "1" };
+  const quote = "The panel found no evidence for older patients.";
+  const evidence = { heading: "Evidence", text: quote, location: "2" };
+  const primary = await persistSourceAndBlocks({
+    title: "Primary panel", source_type: "advisory_board", stakeholder_function: ACTOR.function,
+    text: `${background.text} ${quote}`, sections: [{ ...background, text: `${background.text} ${quote}` }],
+  });
+  const extra = await persistSourceAndBlocks({
+    title: "Second panel", source_type: "advisory_board", stakeholder_function: ACTOR.function,
+    text: `${background.text} ${quote}`, sections: [background, evidence],
+  });
+  const { suggestion_id_by_row } = await commitExtractedRecords({
+    source_id: primary.source_id, title: "Primary panel", stakeholder_function: ACTOR.function,
+    ...who, needs: [], gaps: [], tactics: [],
+    overlaps: [{
+      id: "edited-overlap", gap_id: gapId, run_id: "edited-source-run",
+      block_id: primary.blocks[0]!.id, name: OVERLAP.split_name,
+      statement: OVERLAP.split_statement, domain: "comparative_effectiveness",
+      source_quote: quote, ...OVERLAP,
+    }],
+  });
+  const suggestionId = suggestion_id_by_row["edited-overlap"]!;
+  await addSuggestionSources(suggestionId, [{
+    source_id: extra.source_id, block_id: extra.blocks[1]!.id, source_quote: quote, statement: OVERLAP.split_statement,
+  }]);
+  const split = await splitSourceBlock({ block_id: primary.blocks[0]!.id, at_text: quote, rationale: "Separate evidence", actor: ACTOR });
+  const accept = () => acceptSuggestion({ suggestion_id: suggestionId, rationale: "Reviewed both sources", ...who });
+  if (decision === "removed quote") {
+    await expect(deleteSourceBlock({ block_id: extra.blocks[1]!.id, rationale: "Remove obsolete evidence", actor: ACTOR })).rejects.toThrow(/would orphan/);
+    await workspaceDb().delete(sourceBlocks).where(eq(sourceBlocks.id, extra.blocks[1]!.id));
+    const before = await loadState();
+    await expect(accept()).rejects.toThrow(/source passage changed.*rerun/i);
+    expect(await loadState()).toEqual(before);
+    return;
+  }
+
+  const merge = await mergeSourceBlocks({ block_id: extra.blocks[0]!.id, rationale: "Combine related text", actor: ACTOR });
+  await accept();
+  const needs = (await loadState()).needs;
+  for (const [sourceId, blockId] of [[primary.source_id, split.second_id], [extra.source_id, merge.block_id]]) {
+    const citations = needs.filter(need => need.source_id === sourceId && need.source_quote === quote);
+    expect(citations.length).toBeGreaterThan(0);
+    expect(citations.map(need => need.block_id)).toEqual(citations.map(() => blockId));
+  }
+});
 
 describe("KAN-75 merge", () => {
   let gapId = "";

@@ -22,6 +22,8 @@ export const gapCandidates = pgTable("gap_candidates", {
   created_at: text("created_at").notNull(),
 });
 
+export const GAP_BLOCK_DDL = "ALTER TABLE gap_candidates ADD COLUMN IF NOT EXISTS block_id text";
+
 export const GAP_CANDIDATES_DDL = `
 CREATE TABLE IF NOT EXISTS gap_candidates (
   id text PRIMARY KEY, run_id text NOT NULL, document_id text NOT NULL,

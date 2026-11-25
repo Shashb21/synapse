@@ -1,5 +1,5 @@
 import { lockSourceCitationOwner, requireRetainedSourceQuote, resolveRetainedSourceQuote } from "./source-citations";
-import { resolveSourceCitation, type SourceContext } from "@/lib/ingest/source-citation";
+import type { SourceContext } from "@/lib/ingest/source-citation";
 import { squashText } from "@/lib/ingest/manual-blocks";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { assessmentBasis, coverageReviewVersion, fullConfirmationIssues, getRequirementBasisReview, reviewedRequirementDimensions, type RequirementReviewInput } from "./requirement-basis";
@@ -67,6 +67,7 @@ import {
   gapsReadyForPrioritize,
   isLiveGap,
   persistedResidualGaps,
+  reconcileHistoricalCitation,
   requireOverrideReason,
   splitSourceIntoBlocks,
   tacticEligibleForMapping,
@@ -990,7 +991,7 @@ export const editNeed = atomic(async function editNeed(args: {
     .set({
       ...(statement !== undefined ? { statement } : {}),
       ...(quote !== undefined ? { source_quote: quote } : {}),
-      ...(citationChanged ? { source_basis_text: null, block_id: citedBlock?.id ?? null } : {}),
+      ...(citationChanged ? { source_basis_text: null, observed_block_ids: null, block_id: citedBlock?.id ?? null } : {}),
       ...(groundedCitation ?? {}),
       lock: makeLock(args.actor_name, args.actor_function, rationale),
     })
@@ -2215,6 +2216,7 @@ async function createProposedTacticChange(args: {
 
 /** Gaps catch-up create. Rejects `proposed` — ideation is Tactics after Prioritize. */
 async function recordMissedTacticChange(args: {
+  source_id?: string;
   name: string;
   type: IegpState["tactics"][0]["type"];
   description?: string;
@@ -2275,6 +2277,10 @@ async function recordMissedTacticChange(args: {
     audit_action: "record_missed",
     note: reasonLabel,
   });
+  if (args.source_id && args.source_quote?.trim()) {
+    const { attachTacticSource } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    await attachTacticSource({ tactic_id: id, source_id: args.source_id, source_quote: args.source_quote, block_id: args.block_id, source_context: args.source_context });
+  }
   if (args.gap_id) {
     await assignTacticToGap({
       gap_id: args.gap_id,
@@ -3513,9 +3519,10 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
   for (const link of state.need_gap_links) {
     const need = needsById.get(link.need_id);
     if (!need || need.source_id !== sourceId) continue;
-    const blockId = args.require_grounded_sources && need.source_context ? need.block_id ?? null : null;
+    const blockId = args.require_grounded_sources && !need.source_context ? null : need.block_id ?? null;
     attached.add(quoteKey(link.gap_id, blockId, need.source_quote ?? need.statement));
-    if (args.require_grounded_sources && need.run_id && !need.source_context && need.source_quote?.trim()) {
+    if (!args.require_grounded_sources) attached.add(quoteKey(link.gap_id, null, need.source_quote ?? need.statement));
+    if (!need.source_context && need.source_quote?.trim() && (!args.require_grounded_sources || !need.candidate_row_id || need.run_id)) {
       const key = historicalKey(link.gap_id, need.source_quote);
       const candidates = historicalNeeds.get(key) ?? [];
       candidates.push(need);
@@ -3531,24 +3538,32 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
     provenance?: NeedProvenance;
   }) => {
     const context = await groundedContext(args2.provenance?.block_id, args2.quote);
-    const blockId = context ? args2.provenance?.block_id ?? null : null;
+    const blockId = args2.provenance?.block_id ?? null;
     const key = quoteKey(args2.gapId, blockId, args2.quote || args2.statement);
     if (attached.has(key)) return;
     attached.add(key);
-    if (blockId && context) {
+    if (blockId) {
+      if (!args.require_grounded_sources) attached.add(quoteKey(args2.gapId, null, args2.quote || args2.statement));
       const historical = historicalNeeds.get(historicalKey(args2.gapId, args2.quote)) ?? [];
-      let existing = historical.find((need) => need.block_id === blockId);
-      if (!existing) {
-        const unassigned = historical.filter((need) => !need.block_id);
-        if (unassigned.length === 1 && resolveSourceCitation({
-          source_id: sourceId, quote: args2.quote, proposed_block_id: null,
-          displayed: retainedBlocks, retained: retainedBlocks,
-        }).block_id === blockId) existing = unassigned[0];
-      }
-      if (existing) {
-        // Keep the linkage and reviewed gap unchanged when the only new data is citation context.
-        await db().update(t.needs).set({ block_id: blockId, source_context: context }).where(eq(t.needs.id, existing.id));
+      const exact = historical.find((need) => need.block_id === blockId);
+      if (exact && context) {
+        await db().update(t.needs).set({ source_context: context }).where(eq(t.needs.id, exact.id));
         return;
+      }
+      const unassigned = historical.filter((need) => !need.block_id);
+      if (unassigned.length === 1) {
+        const legacy = unassigned[0]!;
+        const update = reconcileHistoricalCitation(retainedBlocks, args2.quote, blockId, legacy.observed_block_ids);
+        if (update && "block_id" in update) {
+          const citation = { ...update, source_context: context };
+          await db().update(t.needs).set(citation).where(eq(t.needs.id, legacy.id));
+          Object.assign(legacy, citation);
+          return;
+        }
+        if (update) {
+          await db().update(t.needs).set(update).where(eq(t.needs.id, legacy.id));
+          Object.assign(legacy, update);
+        }
       }
     }
     const needId = await allocateId("NEED", needIds);
@@ -3723,6 +3738,9 @@ export const addSuggestionSources = atomic(async function addSuggestionSources(
   sources: GapSuggestionSource[],
 ): Promise<void> {
   if (sources.length === 0) return;
+  for (const sourceId of [...new Set(sources.map(source => source.source_id))].sort()) {
+    await lockSourceCitationOwner(sourceId);
+  }
   const suggestion = await lockGapSuggestion(suggestionId);
   if (!suggestion || suggestion.status !== "pending") {
     throw new TrustedApplicationError("Pending gap suggestion not found.", "conflict", 409);
@@ -3734,7 +3752,7 @@ export const addSuggestionSources = atomic(async function addSuggestionSources(
     .where(eq(t.gapSuggestions.id, suggestionId));
 });
 
-/** Append and decision own the suggestion before taking source and gap locks. */
+/** Lock the suggestion row before changing its state. */
 async function lockGapSuggestion(id: string) {
   const [suggestion] = await db().select().from(t.gapSuggestions).where(eq(t.gapSuggestions.id, id)).for("update");
   return suggestion;
@@ -3742,9 +3760,6 @@ async function lockGapSuggestion(id: string) {
 
 /** Verify each explicit citation or recover a unique historical quote under the source lock. */
 async function verifySuggestionSourceQuotes(sources: GapSuggestionSource[]): Promise<GapSuggestionSource[]> {
-  for (const sourceId of [...new Set(sources.map((source) => source.source_id))].sort()) {
-    await lockSourceCitationOwner(sourceId);
-  }
   return Promise.all(sources.map(async (source) => ({
     ...source,
     ...await resolveRetainedSourceQuote(source.source_id, source.block_id, source.source_quote),
@@ -3788,12 +3803,46 @@ async function closeSuggestion(
 }
 
 /** Every source a suggestion carries: its own candidate first, then repeats. */
-function suggestionSources(suggestion: GapSuggestion): GapSuggestionSource[] {
+function suggestionSources(suggestion: GapSuggestion): [GapSuggestionSource, ...GapSuggestionSource[]] {
   return [
     { source_id: suggestion.source_id, statement: suggestion.statement, source_quote: suggestion.source_quote,
       block_id: suggestion.block_id, source_context: suggestion.source_context },
     ...suggestion.extra_sources,
   ];
+}
+
+class GapSuggestionSourcesChanged extends TrustedApplicationError {
+  constructor() {
+    super("This suggestion changed while you were reviewing it. Refresh and review it again.", "conflict", 409);
+  }
+}
+
+/** Retry once in a new transaction or savepoint to lock any newly appended sources in order. */
+async function retryGapSuggestionDecision<T>(decide: () => Promise<T>): Promise<T> {
+  try {
+    return await decide();
+  } catch (error) {
+    if (!(error instanceof GapSuggestionSourcesChanged)) throw error;
+    return decide();
+  }
+}
+
+/** Lock cited sources, the assessment gap and then the suggestion, in writer order. */
+async function lockGapSuggestionCitations(id: string) {
+  const { suggestion, gap } = await pendingSuggestion(id);
+  const citedSourceIds = new Set(suggestionSources(suggestion).map(source => source.source_id));
+  for (const sourceId of [...citedSourceIds].sort()) {
+    await db().select({ id: t.sources.id }).from(t.sources).where(eq(t.sources.id, sourceId)).for("update");
+  }
+  const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [gap.id] });
+  await lockGapSuggestion(id);
+  const current = await pendingSuggestion(id);
+  const [primary, ...extraSources] = suggestionSources(current.suggestion);
+  if (current.gap.id !== gap.id || [primary, ...extraSources].some(source => !citedSourceIds.has(source.source_id))) {
+    throw new GapSuggestionSourcesChanged();
+  }
+  const [verifiedPrimary, ...verifiedExtras] = await verifySuggestionSourceQuotes([primary, ...extraSources]);
+  return { ...current, primary: verifiedPrimary!, extraSources: verifiedExtras, assessmentGapIds };
 }
 
 /**
@@ -3807,11 +3856,7 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
   args: SuggestionDecision & { name?: string; statement?: string },
 ): Promise<{ gap_id: string }> {
   const rationale = requireRationale(args.rationale);
-  await lockGapSuggestion(args.suggestion_id);
-  const pending = await pendingSuggestion(args.suggestion_id);
-  const sourced = await verifySuggestionSourceQuotes(suggestionSources(pending.suggestion));
-  const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [pending.gap.id] });
-  const { state: before, suggestion, gap } = await pendingSuggestion(args.suggestion_id);
+  const { suggestion, gap, primary, extraSources, assessmentGapIds, state: before } = await lockGapSuggestionCitations(args.suggestion_id);
   const name = (args.name ?? suggestion.merged_name).trim();
   const statement = (args.statement ?? suggestion.merged_statement).trim();
   if (!name) throw new TrustedApplicationError("Give the merged gap a name.");
@@ -3855,7 +3900,7 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
       actor_function: args.actor_function,
     });
   }
-  for (const [index, source] of sourced.entries()) {
+  for (const [index, source] of [primary, ...extraSources].entries()) {
     await insertNeedForGap({
       gapId: gap.id,
       sourceId: source.source_id,
@@ -3892,16 +3937,11 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
  * the incoming source as its primary need; the shared part joins the existing gap
  * as a supporting need; and the two gaps are linked as related.
  */
-export const acceptGapSplit = atomic(async function acceptGapSplit(
+const acceptGapSplitChange = atomic(async function acceptGapSplit(
   args: SuggestionDecision & { name?: string; statement?: string },
 ): Promise<{ gap_id: string; new_gap_id: string }> {
   const rationale = requireRationale(args.rationale);
-  await lockGapSuggestion(args.suggestion_id);
-  const pending = await pendingSuggestion(args.suggestion_id);
-  const sourced = await verifySuggestionSourceQuotes(suggestionSources(pending.suggestion));
-  const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [pending.gap.id] });
-  const { state: before, suggestion, gap } = await pendingSuggestion(args.suggestion_id);
-  const [primary, ...extraSources] = sourced;
+  const { suggestion, gap, primary, extraSources, assessmentGapIds, state: before } = await lockGapSuggestionCitations(args.suggestion_id);
   const name = (args.name ?? suggestion.split_name).trim();
   const statement = (args.statement ?? suggestion.split_statement).trim();
   if (!name) throw new TrustedApplicationError("Give the new gap a name.");
@@ -5320,5 +5360,9 @@ export function rewritePartialGap(args: Parameters<typeof rewritePartialGapChang
 }
 
 export function acceptGapMerge(args: Parameters<typeof acceptGapMergeChange>[0]) {
-  return withRelationshipChange(args, () => acceptGapMergeChange(args));
+  return withRelationshipChange(args, () => retryGapSuggestionDecision(() => acceptGapMergeChange(args)));
+}
+
+export function acceptGapSplit(args: Parameters<typeof acceptGapSplitChange>[0]) {
+  return retryGapSuggestionDecision(() => acceptGapSplitChange(args));
 }

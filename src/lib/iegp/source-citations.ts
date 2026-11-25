@@ -25,7 +25,7 @@ export async function requireRetainedSourceQuote(
     ? (await reader.select().from(sourceBlocks).where(and(eq(sourceBlocks.source_id, sourceId), eq(sourceBlocks.id, blockId))))[0]
     : undefined;
   if (!block || !validateQuoteAgainstBlock({ block, quote }).ok) {
-    throw new TrustedApplicationError("The full quote no longer matches its retained source block. Rerun extraction.", "conflict", 409);
+    throw new TrustedApplicationError("The source passage changed: the full quote no longer matches its retained source block. Rerun extraction.", "conflict", 409);
   }
   return { heading: block.heading, location: block.location };
 }
@@ -36,12 +36,14 @@ export async function resolveRetainedSourceQuote(
   blockId: string | null | undefined,
   quote: string,
   reader: SourceReader = db(),
+  recoverLegacyBlock = false,
 ) {
-  if (blockId) {
+  if (blockId && !recoverLegacyBlock) {
     return { block_id: blockId, source_context: await requireRetainedSourceQuote(sourceId, blockId, quote, reader) };
   }
   const blocks = await reader.select().from(sourceBlocks).where(eq(sourceBlocks.source_id, sourceId));
-  const match = resolveSourceCitation({ source_id: sourceId, proposed_block_id: null, quote, displayed: blocks, retained: blocks });
+  const prior = blocks.find(block => block.id === blockId && validateQuoteAgainstBlock({ block, quote }).ok);
+  const match = resolveSourceCitation({ source_id: sourceId, proposed_block_id: prior?.id ?? null, quote, displayed: blocks, retained: blocks });
   if (!match.block_id || !match.source_context) {
     throw new TrustedApplicationError(match.citation_error ?? "Quote could not be verified in a source block.", "conflict", 409);
   }

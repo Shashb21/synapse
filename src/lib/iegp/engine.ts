@@ -1,3 +1,4 @@
+import { validateQuoteAgainstBlock } from "@/lib/ingest/quote-validator";
 import type { SourceContext } from "@/lib/ingest/source-citation";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { assessmentDesignVersion, getRequirementBasisReview, hasSupportedFullConfirmation } from "./requirement-basis";
@@ -42,6 +43,20 @@ export {
   type MappingScore,
   type MappingScoreExtras,
 } from "./mapping";
+
+/** Reconcile a verified occurrence while preserving uncertainty about a historical citation. */
+export function reconcileHistoricalCitation(
+  blocks: { id: string; text: string }[],
+  historicalQuote: string,
+  observedId: string,
+  observedIds: string[] | null | undefined,
+): { block_id: string } | { observed_block_ids: string[] } | null {
+  if (observedIds?.includes(observedId)) return null;
+  const matches = blocks.filter(block => validateQuoteAgainstBlock({ block, quote: historicalQuote }).ok);
+  if (!matches.some(block => block.id === observedId)) return null;
+  if (matches.length === 1 && !observedIds?.length) return { block_id: observedId };
+  return { observed_block_ids: [...(observedIds ?? []), observedId] };
+}
 
 export const unlocked = (): {
   locked: false;

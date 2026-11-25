@@ -102,7 +102,7 @@ test.describe("S3 overlap source review", () => {
       const schema = workspace!.schema_name as string;
       const [parent] = await pg<Tactic[]>`select * from ${pg(`${schema}.tactics`)} where name='Reviewed parent registry'`;
       parent!.lock = {locked: true, actor_name: "Feature E2E", actor_function: "medical_affairs", locked_at: "2026-10-07T12:00:00.000Z", note: "Reviewed locked protocol"};
-      await pg`update ${pg(`${schema}.tactics`)} set lock=${pg.json(parent!.lock)} where id=${parent!.id}`;
+      await pg`update ${pg(`${schema}.tactics`)} set lock=${pg.json({...parent!.lock})} where id=${parent!.id}`;
       const [source] = await pg`select * from ${pg(`${schema}.sources`)} limit 1`;
       const citation = {
         block_id: "S3-BROWSER-SOURCE-BLOCK",

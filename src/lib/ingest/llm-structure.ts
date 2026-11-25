@@ -1,4 +1,7 @@
 import { extractText, getDocumentProxy } from "unpdf";
+import type { ProviderRequestBudget } from "@/modules/llm/provider";
+import type { JsonCompletion } from "@/modules/kernel/contracts";
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { completeAll } from "@/modules/kernel/llm";
 import { STAKEHOLDER_FUNCTIONS, type ParsedBlock, type ParsedDocument, type StakeholderFunction } from "@/lib/schema";
 import { hashId } from "@/lib/text";
@@ -13,7 +16,7 @@ import { mimeForFilename, parseLocalDocument } from "./local-parse";
 
 export type RawUnit = { location: ParsedBlock["location"]; text: string };
 
-type Ask = (args: { system: string; user: string; purpose: string }) => Promise<unknown>;
+type Ask = JsonCompletion;
 
 const BLOCK_KINDS = [
   "title",
@@ -50,6 +53,26 @@ export function parseLimits(env: Record<string, string | undefined> = process.en
   };
 }
 
+/** One allowance shared by every provider request for a single document upload. */
+export function createParseRequestBudget(): ProviderRequestBudget {
+  const limit = parseLimits().calls;
+  let sent = 0;
+  return {
+    check(lastFailure) {
+      if (sent < limit) return;
+      const detail = lastFailure ? ` The last provider request returned HTTP ${lastFailure.status} (${lastFailure.kind}).` : "";
+      throw new TrustedApplicationError(
+        `This document reached its limit of ${limit} model calls before parsing finished.${detail} Split it into smaller files, or paste only the part you need.`,
+        "parse_limit", 422,
+      );
+    },
+    consume() {
+      this.check();
+      sent += 1;
+    },
+  };
+}
+
 /** Plain-English refusal for a document over the parse limits, or null when it fits. */
 export function parseLimitError(filename: string, units: number, calls: number, limits = parseLimits()): string | null {
   if (units > limits.units) {
@@ -64,7 +87,7 @@ export function parseLimitError(filename: string, units: number, calls: number, 
 const STRUCTURE_SYSTEM = `You structure text extracted from a pharma evidence-planning document (slides, a report, interview notes, a spreadsheet) into blocks.
 
 You get numbered units of raw extracted text, each with its location (slide, page or sheet). For every unit, return the blocks it contains, in order:
-- text: a verbatim span of the unit's text. Copy it exactly; never paraphrase, summarize, translate or fix it. A unit may split into several blocks, or be one block.
+- text: a verbatim span of the unit's text. Copy it exactly; never paraphrase, summarize, translate or fix it. A unit may split into several blocks, or be one block. Together the blocks must cover the entire unit in source order without gaps, overlaps or repetition beyond what appears in the source. Only whitespace may be skipped between blocks.
 - kind: one of ${BLOCK_KINDS.join(", ")}.
 - heading: the section heading this block sits under, copied verbatim from the document, or null when there is none.
 
@@ -117,11 +140,15 @@ function readAnswer(unit: RawUnit, row: unknown): UnitAnswer | undefined {
   if (!Array.isArray(blocks)) return undefined;
   const source = squash(unit.text);
   const out: UnitAnswer["blocks"] = [];
+  let offset = 0;
   for (const block of blocks) {
     const { text, kind, heading } = (block ?? {}) as { text?: unknown; kind?: unknown; heading?: unknown };
-    if (typeof text !== "string" || !squash(text)) return undefined;
-    // Verbatim is checked, not trusted: a block must be a span of its unit.
-    if (!source.includes(squash(text))) return undefined;
+    if (typeof text !== "string") return undefined;
+    const span = squash(text);
+    if (!span || !source.startsWith(span, offset)) return undefined;
+    offset += span.length;
+    // Skip a normalized space between blocks. Adjacent spans can also meet within a word.
+    if (source[offset] === " ") offset += 1;
     if (typeof kind !== "string" || !(BLOCK_KINDS as readonly string[]).includes(kind)) return undefined;
     if (heading !== null && heading !== undefined && typeof heading !== "string") return undefined;
     out.push({
@@ -131,8 +158,8 @@ function readAnswer(unit: RawUnit, row: unknown): UnitAnswer | undefined {
     });
   }
   const reason = typeof dropped_reason === "string" ? dropped_reason.trim() : "";
-  // An empty unit must say why it was dropped.
-  if (out.length === 0 && !reason) return undefined;
+  // An omission reason is only sufficient when the entire unit is dropped.
+  if (out.length === 0 ? !reason : offset !== source.length) return undefined;
   return { blocks: out, dropped_reason: reason || null };
 }
 
@@ -157,6 +184,8 @@ function chunk(units: { id: string; unit: RawUnit }[]): { id: string; unit: RawU
 export async function structureWithLlm(args: {
   filename: string;
   units: RawUnit[];
+  /** Full document parsing also needs one classification request after structuring. */
+  includeStakeholder?: boolean;
   ask: Ask;
 }): Promise<{
   blocks: Omit<ParsedBlock, "id">[];
@@ -166,8 +195,14 @@ export async function structureWithLlm(args: {
 }> {
   const entries = args.units.map((unit, index) => ({ id: `u${index + 1}`, unit }));
   const groups = chunk(entries);
-  const tooLong = parseLimitError(args.filename, entries.length, groups.length);
-  if (tooLong) throw new Error(tooLong);
+  const requiredCalls = groups.length + (args.includeStakeholder ? 1 : 0);
+  const label = args.includeStakeholder ? "This document" : args.filename;
+  const tooLong = parseLimitError(label, entries.length, requiredCalls);
+  if (tooLong) {
+    // Only fixed copy and counts are suitable for customer-facing stage errors.
+    if (args.includeStakeholder) throw new TrustedApplicationError(tooLong, "parse_limit", 422);
+    throw new Error(tooLong);
+  }
   const answers = new Map<string, UnitAnswer>();
   for (const [index, group] of groups.entries()) {
     const byId = new Map(group.map((entry) => [entry.id, entry.unit]));
@@ -183,7 +218,7 @@ export async function structureWithLlm(args: {
             filename: args.filename,
             note:
               attempt > 1
-                ? "An earlier answer left these units out, or returned text that is not a verbatim span of the unit, or an unknown kind. Answer each again."
+                ? "An earlier answer did not provide a valid parse for these units. For each unit, return verbatim blocks that cover its complete text in source order, using only the listed kinds. If the whole unit is noise, return no blocks and give a dropped_reason."
                 : undefined,
             units: missing.map((id) => ({ unit: id, location: byId.get(id)!.location.ref, text: byId.get(id)!.text })),
           }),
@@ -261,6 +296,7 @@ export async function parseWithLlm(args: {
   filename: string;
   buffer: Buffer;
   mime?: string;
+  requestBudget?: ProviderRequestBudget;
   ask: Ask;
 }): Promise<{
   document: ParsedDocument;
@@ -270,8 +306,10 @@ export async function parseWithLlm(args: {
 }> {
   const mime = args.mime || mimeForFilename(args.filename);
   const units = await extractRawUnits({ filename: args.filename, buffer: args.buffer, mime });
-  const { blocks, dropped, dropped_units } = await structureWithLlm({ filename: args.filename, units, ask: args.ask });
-  const stakeholder = await classifyStakeholder({ filename: args.filename, blocks, ask: args.ask });
+  const requestBudget = args.requestBudget ?? createParseRequestBudget();
+  const ask: Ask = (request) => args.ask({ ...request, requestBudget });
+  const { blocks, dropped, dropped_units } = await structureWithLlm({ filename: args.filename, units, includeStakeholder: true, ask });
+  const stakeholder = await classifyStakeholder({ filename: args.filename, blocks, ask });
   const id = hashId("DOC", `${args.filename}:${args.buffer.length}`);
   const numbered = blocks.map((block, index) => ({ ...block, id: `${id}-B${String(index + 1).padStart(2, "0")}` }));
   return {
