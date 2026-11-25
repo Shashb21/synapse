@@ -1,105 +1,139 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { currentSchemaName } from "@/lib/iegp/db";
+import { DEFAULT_WORKSPACE_ID, scopedWorkspaceId } from "@/modules/workspaces/context";
+import { getWorkspace } from "@/modules/workspaces/store";
+import { TrustedApplicationError } from "./stage-errors";
 import { ensurePlatformSchema, sharedDb } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "./ids";
-import type { EvalScore, StageId, SynapseModule } from "./contracts";
+import type { EvalScore, StageId } from "./contracts";
 
-export type EvalRunRecord = {
-  id: string;
-  at: string;
-  stage: StageId;
-  module_id: string;
-  module_version: string;
-  run_id: string | null;
-  passed: boolean;
-  metrics: EvalScore[];
-  note: string | null;
+const kinds = ["live_diagnostic", "harness_case", "harness_summary", "sweep_case", "sweep_summary"] as const;
+export type EvalKind = (typeof kinds)[number];
+export type EvalExecution = "routed" | "synthetic" | "mechanical" | "mixed";
+export type EvalLineage = {
+  execution: EvalExecution;
+  route_hash: string | null;
+  prompt_hash: string | null;
+  first_prompt_hash?: string | null;
+  transcript_hash?: string | null;
+  case_hash: string | null;
+  case_name?: string;
+  variant?: string;
 };
+export async function evalWorkspace(): Promise<string> {
+  const id = await scopedWorkspaceId();
+  if (id) return id;
+  // Outside a request, database operations use public. Invalid request cookies throw here.
+  if ((await currentSchemaName()) === "public") return DEFAULT_WORKSPACE_ID;
+  throw new Error("The evaluation workspace is unavailable.");
+}
+
+/** Read the authoritative workspace flag. A failed lookup cannot certify a diagnostic. */
+export async function assertDiagnosticWorkspace(expected: string) {
+  if ((await evalWorkspace()) !== expected) throw new TrustedApplicationError("The diagnostic workspace changed.");
+  const workspace = await getWorkspace(expected);
+  if (!workspace && expected === DEFAULT_WORKSPACE_ID && (await currentSchemaName()) === "public") return;
+  if (
+    !workspace ||
+    workspace.id !== expected ||
+    workspace.schema_name !== (await currentSchemaName()) ||
+    workspace.demo_mode
+  )
+    throw new TrustedApplicationError("Select a workspace with live routing for diagnostics.");
+}
+
+export function validScores(scores: EvalScore[]): boolean {
+  return (
+    scores.length > 0 &&
+    new Set(scores.map((s) => s.name)).size === scores.length &&
+    scores.every(
+      (s) =>
+        typeof s.name === "string" &&
+        !!s.name.trim() &&
+        Number.isFinite(s.value) &&
+        (s.target === undefined ||
+          (Number.isFinite(s.target) &&
+            (s.unit !== "ratio" || (s.value >= 0 && s.value <= 1 && s.target >= 0 && s.target <= 1)))),
+    )
+  );
+}
 
 export function scoresPassed(scores: EvalScore[]): boolean {
-  return scores.every((score) => score.target === undefined || score.value >= score.target);
+  return (
+    validScores(scores) &&
+    scores.some((s) => s.target !== undefined) &&
+    scores.every((s) => s.target === undefined || s.value >= s.target)
+  );
+}
+
+export function aggregateCaseMetrics(cases: EvalScore[][]): EvalScore[] {
+  const names = [...new Set(cases.flat().map((s) => s.name))];
+  return names.flatMap((name) => {
+    const observations = cases.flatMap((scores) => scores.filter((s) => s.name === name));
+    if (observations.some((s) => !Number.isFinite(s.value))) return [];
+    const first = observations[0];
+    const targeted = cases.every(
+      (scores) =>
+        validScores(scores) &&
+        scores.some((s) => s.name === name && s.target === first.target && s.unit === first.unit),
+    );
+    return [
+      {
+        name,
+        value: Number((observations.reduce((n, s) => n + s.value, 0) / observations.length).toFixed(4)),
+        target: targeted ? first.target : undefined,
+        unit: first.unit,
+        detail: `${observations.length}/${cases.length} cases`,
+      },
+    ];
+  });
 }
 
 export async function recordEvalRun(args: {
+  workspace_id: string;
+  kind: EvalKind;
+  group_id?: string;
+  lineage: EvalLineage;
   stage: StageId;
   module_id: string;
   module_version: string;
-  run_id?: string | null;
+  run_id?: string;
   metrics: EvalScore[];
   note?: string;
-}): Promise<EvalRunRecord> {
+}) {
+  if ((await evalWorkspace()) !== args.workspace_id) throw new Error("Evaluation workspace changed.");
   await ensurePlatformSchema();
-  const record: EvalRunRecord = {
-    id: newId("eval"),
-    at: nowIso(),
-    stage: args.stage,
-    module_id: args.module_id,
-    module_version: args.module_version,
-    run_id: args.run_id ?? null,
-    passed: scoresPassed(args.metrics),
-    metrics: args.metrics,
-    note: args.note ?? null,
-  };
-  await sharedDb().insert(t.evalRuns).values({
-    id: record.id,
-    at: record.at,
-    stage: record.stage,
-    module_id: record.module_id,
-    module_version: record.module_version,
-    run_id: record.run_id,
-    passed: record.passed,
-    metrics: record.metrics,
-    note: record.note,
-  });
-  return record;
+  const assessed =
+    args.kind !== "live_diagnostic" &&
+    !!args.group_id &&
+    !!args.lineage.route_hash &&
+    !!args.lineage.case_hash &&
+    !!args.lineage.prompt_hash &&
+    args.lineage.execution === "routed" &&
+    validScores(args.metrics) &&
+    args.metrics.some((s) => s.target !== undefined);
+  const row = { ...args, id: newId("eval"), at: nowIso(), passed: assessed ? scoresPassed(args.metrics) : null };
+  await sharedDb().insert(t.evalRuns).values(row);
+  return row;
 }
 
-export async function listEvalRuns(args?: { stage?: StageId; limit?: number }): Promise<EvalRunRecord[]> {
+export async function listEvalRuns(args?: { stage?: StageId; kind?: EvalKind; run_id?: string; limit?: number }) {
+  const workspace = await evalWorkspace();
   await ensurePlatformSchema();
-  const limit = args?.limit ?? 50;
-  const query = sharedDb().select().from(t.evalRuns);
-  const rows = args?.stage
-    ? await query.where(eq(t.evalRuns.stage, args.stage)).orderBy(desc(t.evalRuns.at)).limit(limit)
-    : await query.orderBy(desc(t.evalRuns.at)).limit(limit);
-  return rows.map((row) => ({
-    id: row.id,
-    at: row.at,
-    stage: row.stage as StageId,
-    module_id: row.module_id,
-    module_version: row.module_version,
-    run_id: row.run_id,
-    passed: row.passed,
-    metrics: (row.metrics as EvalScore[]) ?? [],
-    note: row.note,
-  }));
-}
-
-/**
- * Runs a module's own gold cases through its own scorer. Each stage owns its
- * harness, so a stage can hillclimb without touching sibling stages.
- */
-export async function runStageEvals<I, O>(
-  module: SynapseModule<I, O>,
-  execute: (input: I) => Promise<O>,
-): Promise<{ metrics: EvalScore[]; cases: number }> {
-  if (!module.evals) return { metrics: [], cases: 0 };
-  const cases = await module.evals.cases();
-  const perCase: EvalScore[][] = [];
-  for (const testCase of cases) {
-    const output = await execute(testCase.input);
-    perCase.push(module.evals.score({ case: testCase, output }));
-  }
-  const names = [...new Set(perCase.flat().map((score) => score.name))];
-  const metrics = names.map<EvalScore>((name) => {
-    const scores = perCase.flat().filter((score) => score.name === name);
-    const value = scores.reduce((sum, score) => sum + score.value, 0) / scores.length;
-    return {
-      name,
-      value: Number(value.toFixed(4)),
-      target: scores[0]?.target,
-      unit: scores[0]?.unit,
-      detail: `${scores.length} case(s)`,
-    };
-  });
-  return { metrics, cases: cases.length };
+  const rows = await sharedDb()
+    .select()
+    .from(t.evalRuns)
+    .where(
+      and(
+        eq(t.evalRuns.workspace_id, workspace),
+        isNotNull(t.evalRuns.lineage),
+        args?.kind ? eq(t.evalRuns.kind, args.kind) : inArray(t.evalRuns.kind, [...kinds]),
+        args?.stage ? eq(t.evalRuns.stage, args.stage) : undefined,
+        args?.run_id ? eq(t.evalRuns.run_id, args.run_id) : undefined,
+      ),
+    )
+    .orderBy(desc(t.evalRuns.at))
+    .limit(args?.limit ?? 50);
+  return rows.map((row) => ({ ...row, metrics: row.metrics as EvalScore[], lineage: row.lineage as EvalLineage }));
 }

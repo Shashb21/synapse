@@ -701,7 +701,7 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
             note: verdict.reason,
           };
         }),
-    }, { kinds: ["s4_mapping"], text: gaps.map((gap) => `${gap.name} ${gap.statement}`).join(" ") });
+    }, { kinds: ["s4_mapping"], subject_ids: gaps.map(item => item.id), text: gaps.map((gap) => `${gap.name} ${gap.statement}`).join(" ") });
 
     if (ctx.execution_policy === "single_pass") return {
       output: { mode: outcome.mode, proposed: outcome.proposed.length, rows: outcome.unreviewed, accepted: [], rejected: [], withdrawn: [], committed: [], table: { gaps: gaps.length, tactics: tactics.length, rows_accepted: 0, gaps_still_open: 0 } },

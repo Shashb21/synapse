@@ -244,7 +244,7 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
         // way: stop the stage so the run fails and the cause reaches the person (KAN-68).
         if (error instanceof ProviderError) throw error;
         const reason = customerErrorMessage(error);
-        await markFileFailed({ id: file_id, note: reason });
+        if (!input.dry_run) await markFileFailed({ id: file_id, note: reason });
         failures.push({ file_id, reason });
         ctx.run.note(`parse-failed:${file_id}`, { reason });
       }
@@ -296,12 +296,12 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
       const clean = documents.filter((doc) => doc.quality.warnings.length === 0);
       const doc = documents[0];
       const blocksOk =
-        testCase.gold?.parse_min_blocks && doc
-          ? doc.quality.blocks >= testCase.gold.parse_min_blocks
+        testCase.gold?.parse_min_blocks
+          ? !!doc && doc.quality.blocks >= testCase.gold.parse_min_blocks
           : true;
       const cuesOk =
-        testCase.gold?.parse_min_need_cues && doc
-          ? doc.quality.need_cue_blocks >= testCase.gold.parse_min_need_cues
+        testCase.gold?.parse_min_need_cues
+          ? !!doc && doc.quality.need_cue_blocks >= testCase.gold.parse_min_need_cues
           : true;
       return [
         {

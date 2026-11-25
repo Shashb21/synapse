@@ -1,6 +1,6 @@
 import { ownerGate } from "@/modules/auth/owner";
 import { POST as runSweep } from "@/app/api/modules/hillclimb/route";
-import { inAdminWorkspace, peekBody } from "../_shared";
+import { inSelectedDiagnosticWorkspace } from "../_shared";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,5 +9,5 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   const denied = await ownerGate();
   if (denied) return denied;
-  return inAdminWorkspace(await peekBody(request), () => runSweep(request));
+  return inSelectedDiagnosticWorkspace(request, () => runSweep(request));
 }

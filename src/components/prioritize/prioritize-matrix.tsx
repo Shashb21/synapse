@@ -792,7 +792,7 @@ export function PrioritizeMatrix({
           <GapPanel gapId={selectedId} onClose={() => setSelectedId(null)}
             returnFocusRef={gapTriggerRef}
             refreshVersion={JSON.stringify([gaps.find(gap => gap.gap_id === selectedId)?.version, gaps.find(gap => gap.gap_id === selectedId)?.context_version, tacticsUnlocked])}
-            priorityEditor={{ xAxis, yAxis, identity, mayPrioritize }} />
+            priorityEditor={{ xAxis, yAxis, setting: scope === "all" ? undefined : scope, identity, mayPrioritize }} />
           <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">
             {unplaced.length > 0 && !busy ? (
               <section aria-label="Gaps not placed yet">

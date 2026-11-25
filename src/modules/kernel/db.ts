@@ -18,8 +18,18 @@ CREATE TABLE IF NOT EXISTS prompt_baselines (
   metrics jsonb NOT NULL, composite numeric NOT NULL,
   recorded_at text NOT NULL, note text
 );
-CREATE UNIQUE INDEX IF NOT EXISTS prompt_baselines_stage_version
-  ON prompt_baselines(stage, prompt_version);
+ALTER TABLE eval_runs ADD COLUMN IF NOT EXISTS workspace_id text, ADD COLUMN IF NOT EXISTS kind text,
+  ADD COLUMN IF NOT EXISTS group_id text, ADD COLUMN IF NOT EXISTS lineage jsonb,
+  ALTER COLUMN passed DROP NOT NULL;
+CREATE INDEX IF NOT EXISTS eval_runs_workspace_kind ON eval_runs(workspace_id, kind, at);
+CREATE UNIQUE INDEX IF NOT EXISTS prompt_baselines_stage_version ON prompt_baselines(stage, prompt_version);
+CREATE TABLE IF NOT EXISTS prompt_baseline_observations (
+  id text PRIMARY KEY, workspace_id text NOT NULL, stage text NOT NULL, module_id text NOT NULL, module_version text NOT NULL,
+  prompt_version text NOT NULL, route_hash text NOT NULL, prompt_hash text NOT NULL, case_hash text NOT NULL,
+  comparison_key text NOT NULL, group_id text NOT NULL, previous_id text, metrics jsonb NOT NULL,
+  composite numeric NOT NULL, recorded_at text NOT NULL
+);
+CREATE INDEX IF NOT EXISTS prompt_observations_comparison ON prompt_baseline_observations(workspace_id, comparison_key, recorded_at);
 CREATE TABLE IF NOT EXISTS routing_config (
   stage text PRIMARY KEY, provider_id text NOT NULL, model text NOT NULL,
   params jsonb NOT NULL, fallbacks jsonb NOT NULL,

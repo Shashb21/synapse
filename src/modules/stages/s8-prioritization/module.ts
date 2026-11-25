@@ -30,6 +30,7 @@ import {
 } from "./axes";
 import { plural } from "@/lib/plural";
 import { inspectJudgementReferences, inspectSuppliedJudgementReferences, judgementReferenceSchema, suppliedJudgementRecords, type JudgementReference } from "@/lib/iegp/judgement-references";
+import { priorityReviewHash } from "./review-basis";
 import { captureBandDecision } from "@/lib/iegp/learning-capture";
 
 /**
@@ -459,7 +460,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
             note: critique?.note ?? "not reviewed",
           };
         }),
-    }, { kinds: ["s8_band"], text: openGaps.map((gap) => `${gap.name} ${gap.statement}`).join(" ") });
+    }, { kinds: ["s8_band"], subject_ids: openGaps.map(item => item.id), text: openGaps.map((gap) => `${gap.name} ${gap.statement}`).join(" ") });
 
     if (!ctx.replay?.evaluation && !input.dry_run) {
       await ensurePlacementSchema();
@@ -789,6 +790,10 @@ function placementVersion(row: PlacementRow): string {
 }
 
 type ManualDecision = {
+  displayed_axes?: unknown;
+  x_axis?: string;
+  y_axis?: string;
+  setting?: string;
   gap_id: string;
   actor: Actor;
   workspace_id?: string;
@@ -812,7 +817,7 @@ function requireDecisionReason(reason: string | undefined): string {
 /** The shared save owner for scores, overrides, drags and intentional reconfirmations. */
 async function saveManualDecision(args: ManualDecision, decide: (current: PlacementRow | undefined) => {
   band: Band; axis_scores: Record<string, number>; human_axes: string[]; validated: boolean;
-}, confirm: boolean): Promise<PlacementRecord> {
+}, confirm: boolean, scoredAxes?: StoredAxes): Promise<PlacementRecord> {
   const reason = requireDecisionReason(args.reason);
   await ensurePlacementSchema();
   const result = await db().transaction(async (tx) => {
@@ -839,7 +844,7 @@ async function saveManualDecision(args: ManualDecision, decide: (current: Placem
     // Saving the same scores/band/rationale is not a decision. Explicit confirmation always is.
     const sameScores = current && JSON.stringify(Object.entries(current.axis_scores as Record<string, number>).sort()) === JSON.stringify(Object.entries(decision.axis_scores).sort());
     if (!confirm && current && sameScores && current.band === decision.band && current.rationale === rationale && current.validated === decision.validated) {
-      return { row: current, current, eventId: null, state };
+      return { row: current, current, eventId: null, state, gap, reviewHash: null };
     }
     const row: PlacementRow = {
       gap_id: args.gap_id, run_id: current?.run_id ?? null,
@@ -867,10 +872,17 @@ async function saveManualDecision(args: ManualDecision, decide: (current: Placem
       field: "placement", action: confirm ? "validate" : current ? "edit" : "add",
       before: current ? snapshot(current) : null, after: JSON.stringify({ ...JSON.parse(snapshot(row)), decision_origin: args.accept_suggestion ? "supported_ai" : "manual" }), rationale: reason, actor: args.actor, references, reference_gap_ids: [args.gap_id],
     }, tx);
-    return { row, current, eventId: edit.id, state };
+    const reviewHash = confirm && current?.run_id && args.x_axis && args.y_axis
+      ? priorityReviewHash(state, scoredAxes ?? await loadAxes(), gap.id, args) : null;
+    return { row, current, eventId: edit.id, state, gap, reviewHash };
   });
-  if (confirm && result.eventId) {
-    await captureValidatedBand(result.current, result.row.band as Band, reason, args.actor, result.eventId, args.workspace_id);
+  const { current, eventId, gap, reviewHash } = result;
+  if (confirm && eventId && current?.run_id && current.suggested_band) {
+    await captureBandDecision({
+      gap, run_id: current.run_id, capture_key: eventId, actor: args.actor, workspace_id: args.workspace_id,
+      priority_review_hash: reviewHash, suggested_band: current.suggested_band,
+      suggested_rationale: current.suggested_rationale, band: result.row.band as Band, rationale: reason,
+    });
   }
   return toRecord(result.row, result.state);
 }
@@ -883,26 +895,6 @@ export async function validatePlacement(args: ManualDecision & { band: Band }): 
   }), true);
 }
 
-/** Both validation surfaces observe the same proven model origin and saved event. */
-async function captureValidatedBand(current: PlacementRow | null | undefined, band: Band, rationale: string, actor: Actor, eventId: string, workspace_id?: string) {
-  if (current?.suggested_band && current.run_id) {
-    const gap = (await loadState().catch(() => null))?.gaps.find((candidate) => candidate.id === current.gap_id);
-    if (gap) {
-      await captureBandDecision({
-        gap: { id: gap.id, name: gap.name, statement: gap.statement },
-        run_id: current.run_id,
-        capture_key: eventId,
-        actor,
-        suggested_band: current.suggested_band,
-        suggested_rationale: current.suggested_rationale,
-        band,
-        rationale,
-        workspace_id,
-      });
-    }
-  }
-}
-
 /**
  * A person places a gap by hand, with no model run: typed axis scores (raw
  * 0–100 on each axis's own scale), a band, or both. With both plotted axes
@@ -912,7 +904,7 @@ async function captureValidatedBand(current: PlacementRow | null | undefined, ba
  * validation only while its band is unchanged.
  */
 export async function setPlacement(args: ManualDecision & {
-  axis_scores?: Record<string, number>; x_axis?: string; y_axis?: string; band?: Band; validate?: boolean;
+  axis_scores?: Record<string, number>; band?: Band; validate?: boolean;
 }): Promise<PlacementRecord> {
   requireDecisionReason(args.reason);
   const axes = await loadAxes();
@@ -938,7 +930,7 @@ export async function setPlacement(args: ManualDecision & {
     if (!band) throw new TrustedApplicationError("Give a band, or score both plotted axes so the quadrant sets it.");
     return { band, axis_scores, human_axes: [...new Set([...humanAxesOf(current), ...Object.keys(typed)])],
       validated: Boolean(args.validate) || Boolean(current?.validated && current.band === band) };
-  }, Boolean(args.validate));
+  }, Boolean(args.validate), axes);
 }
 
 /** A drag is a reasoned score edit through the same audited owner as typed scores. */

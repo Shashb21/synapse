@@ -1,3 +1,4 @@
+import { assertEvaluationRoute, inEvaluationIsolation } from "./evaluation-isolation";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { sql } from "drizzle-orm";
 import { selectCredentialRoute, stageHasRoute } from "./credential-route";
@@ -319,6 +320,7 @@ export type RawCompletionExecutor = (call: RawCompletionCall) => Promise<string>
 
 export function completionFor(route: ResolvedRoute, run: RunHandle, options?: { completeRaw?: RawCompletionExecutor }): JsonCompletion {
   return async ({ system, user, purpose, maxTokens, role, requestBudget }) => {
+    if (inEvaluationIsolation()) assertEvaluationRoute(route);
     if (!canPrompt(route)) {
       throw new NoRouteError(`${route.provider_label} cannot serve ${purpose}. ${KEY_PROMPT}`);
     }

@@ -65,7 +65,7 @@ export default async function CatalogPage() {
           Prompt variants
         </h2>
         <p className="text-[11px] text-muted-foreground">
-          Hillclimb stages: {HILLCLIMB_STAGES.join(", ")}. Sweeps run from Runs &amp; traces.
+          Prompt sweep stages: {PROMPT_VARIANT_STAGES.join(", ")}. Sweeps run from Runs &amp; traces.
         </p>
         <ul className="grid gap-1 text-[12px]" aria-label="Prompt versions by stage">
           {HILLCLIMB_STAGES.map((stage) => (
@@ -75,7 +75,7 @@ export default async function CatalogPage() {
                 {promptVersionsFor(stage).join(", ")}
                 {PROMPT_VARIANT_STAGES.includes(stage)
                   ? " · uses the S2 variant instructions below"
-                  : " · no variant instructions of its own: every version runs the baseline prompt"}
+                  : " · only the baseline instruction is available"}
               </span>
             </li>
           ))}

@@ -62,6 +62,8 @@ export function captureGapSuggestionDecision(args: Origin & {
       subject_id: suggestion.id,
       ai_input: {
         existing_gap: args.gap,
+        source_id: suggestion.source_id,
+        source_quote: suggestion.source_quote,
         candidate: { name: suggestion.name, statement: suggestion.statement },
       },
       ai_output: {
@@ -95,7 +97,9 @@ export function captureProposalDecision(args: Origin & {
     const { proposal } = args;
     const edited =
       !!args.final &&
-      (!same(args.final.name, proposal.name) ||
+      ((args.final.proposal_kind ?? "new") !== (proposal.proposal_kind ?? "new") ||
+        (args.final.target_tactic_id ?? null) !== (proposal.target_tactic_id ?? null) ||
+        !same(args.final.name, proposal.name) ||
         !same(args.final.type, proposal.type) ||
         !same(args.final.evidence_question, proposal.evidence_question) ||
         !same(args.final.rationale, proposal.rationale) ||
@@ -162,6 +166,7 @@ export function captureMappingRowDecision(args: Origin & {
 /** A person validating a priority band the S8 model had suggested. */
 export function captureBandDecision(args: Origin & {
   gap: GapText & { id: string };
+  priority_review_hash?: string | null;
   suggested_band: string;
   suggested_rationale?: string | null;
   band: string;
@@ -175,6 +180,7 @@ export function captureBandDecision(args: Origin & {
       workspace_id: args.workspace_id,
       stage: "S8",
       kind: "s8_band",
+      priority_review_hash: args.priority_review_hash,
       subject_id: args.gap.id,
       ai_input: { gap: { name: args.gap.name, statement: args.gap.statement } },
       ai_output: { band: args.suggested_band, rationale: args.suggested_rationale ?? null },

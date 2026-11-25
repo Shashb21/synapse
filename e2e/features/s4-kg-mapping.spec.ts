@@ -71,12 +71,12 @@ test.describe("S4 LLM mapping table", () => {
     });
     expect(response.ok(), await response.text()).toBeTruthy();
     const body = (await response.json()) as {
-      passed: boolean;
+      passed: boolean | null;
       metrics: { name: string; value: number; detail?: string }[];
     };
     const names = body.metrics.map((metric) => metric.name);
     expect(names).toContain("rows_with_rationale");
     expect(names).toContain("gaps_left_unmapped");
-    expect(body.passed, JSON.stringify(body.metrics)).toBeTruthy();
+    expect(body.passed, JSON.stringify(body.metrics)).toBeNull();
   });
 });

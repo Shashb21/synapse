@@ -929,7 +929,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
             };
           });
       },
-    }, { kinds: ["s9_proposal"], text: gaps.map((gap) => `${gap.name} ${gap.statement}`).join(" ") });
+    }, { kinds: ["s9_proposal"], subject_ids: gaps.map(item => item.id), text: gaps.map((gap) => `${gap.name} ${gap.statement}`).join(" ") });
 
     // Hash-only rejection memory is pre-generation provenance, never human answer text.
     // Explicit restore removes that source row from the rejected set.

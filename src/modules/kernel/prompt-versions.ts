@@ -31,6 +31,6 @@ export const HILLCLIMB_STAGES: StageId[] = ["S2", "S3", "S4", "S6", "S8", "S9"];
 export const PROMPT_VARIANT_STAGES: StageId[] = ["S2", "S3"];
 
 export function promptVersionsFor(stage: StageId): PromptVersionId[] {
-  if (!HILLCLIMB_STAGES.includes(stage)) return ["v1.0-baseline"];
+  if (!PROMPT_VARIANT_STAGES.includes(stage)) return ["v1.0-baseline"];
   return [...PROMPT_VERSION_IDS];
 }

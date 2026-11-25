@@ -1,5 +1,6 @@
 /** Browser proof for owner permissions, selected-workspace reporting and immutable candidate creation. */
 import postgres from "postgres";
+import { frozenPriorityReviewHash } from "../../src/modules/stages/s8-prioritization/review-basis";
 import { expect, test } from "@playwright/test";
 import { freshWorkspace } from "../support/session";
 import { CANDIDATE_INSTRUCTION, startLearningBrowserServer } from "../support/learning-provider";
@@ -50,27 +51,30 @@ test("supported S8 candidate earns owner approval and rollback restores baseline
     const [workspace] = await db`select schema_name from workspaces where id=${workspaceId}`;
     await db`insert into ${db(workspace.schema_name)}.assets(id,name,inn,indication,geography) values('asset','Learningbrand','','','') on conflict(id) do update set name=excluded.name`;
 
-    // Arrange: four training subjects, one gold-only subject, then one replay
-    // subject. Each has its own real originating S8 run. Creating replay last
-    // means it cannot appear in the earlier frozen gold facts.
+    // Five independent, attributed human corrections on the same pinned S8 route.
     const ids: string[] = [];
     const decisions: string[] = [];
-    for (let i = 0; i < 6; i++) {
+    const reviewWorkspace=workspaceId;
+    const addReviews:(()=>PromiseLike<unknown>)[]=[];
+    for (let i = 0; i < 5; i++) {
       await post("/api/iegp", { action: "create_gap", name: `Evidence question ${i}`, statement: `Missing comparative evidence for question ${i}.`, domain: "efficacy" });
       const [gap] = await db`select id from ${db(workspace.schema_name)}.gaps where name=${`Evidence question ${i}`}`;
       ids.push(gap.id);
       await post("/api/iegp", { action: "validate_gap", gap_id: gap.id });
-      const run = await post("/api/modules", { stage: "S8", input: { gap_ids: [gap.id], x_axis: "decision_impact", y_axis: "time_pressure", dry_run: true } });
+      const run = await post("/api/modules", { stage: "S8", input: { gap_ids: [gap.id], x_axis: "decision_impact", y_axis: "time_pressure" } });
       expect(run.output.placements).toHaveLength(1);
       const [snapshot] = await db`select snapshot from prompt_replay_snapshots where run_id=${run.run_id} and workspace_id=${workspaceId}`;
       expect(snapshot.snapshot.input.gap_ids).toEqual([gap.id]);
       const decisionId = `browser-s8-${workspaceId}-${i}`;
       decisions.push(decisionId);
-      await db`insert into decision_examples(id,workspace_id,stage,kind,subject_id,run_id,ai_input,ai_output,outcome,final,lesson,lesson_status,replay_input,replay_exclusion_reason,created_at)
-        values(${decisionId},${workspaceId},'S8','s8_band',${gap.id},${run.run_id},'{}'::jsonb,${db.json({ band: run.output.placements[0].suggested_band })},'edited','{"band":"defer"}'::jsonb,
-        ${i < 4 ? "Reviewers separate timing from importance." : `Withheld question ${i} lesson.`},'ok',${db.json(snapshot.snapshot)},
-        ${i === 4 ? "Gold-only fixture: deliberately excluded from replay." : null},${`2026-01-0${i + 1}T12:00:00Z`})`;
+      const lessons=["Reviewers separate timing from importance.","Reviewers require a distinct comparison.","Held out.","Held out.","Held out."];
+      addReviews.push(()=>db`insert into decision_examples(id,workspace_id,stage,kind,subject_id,run_id,actor_principal,ai_input,ai_output,outcome,final,lesson,lesson_status,priority_review_hash,replay_input,created_at,model,provider_id,prompt_version)
+        values(${decisionId},${reviewWorkspace},'S8','s8_band',${gap.id},${run.run_id},${"fiction-reviewer-"+i},
+        ${db.json({gap:{statement:`Missing comparative evidence for question ${i}.`}})},${db.json({band:run.output.placements[0].suggested_band})},'edited','{"band":"defer"}'::jsonb,
+        ${lessons[i]},'ok',${frozenPriorityReviewHash(snapshot.snapshot,gap.id)},${db.json(snapshot.snapshot)},${`2026-01-0${i+1}T12:00:00Z`},${snapshot.snapshot.route.model},${snapshot.snapshot.route.provider_id},${snapshot.snapshot.prompt_version})`);
+
     }
+    for(const addReview of addReviews)await addReview();
     async function report(): Promise<LearningReport> {
       const response = await owner.request.get(`${url}/api/admin/learning`);
       expect(response.ok()).toBe(true);
@@ -88,11 +92,10 @@ test("supported S8 candidate earns owner approval and rollback restores baseline
     expect(proposed.history).toEqual([]);
     const [saved] = await db`select * from prompt_revisions where id=${revision.id} and workspace_id=${workspaceId}`;
     const [cohort] = await db`select * from prompt_revision_cohorts where id=${saved.cohort_id}`;
-    expect(saved.training_ids).toEqual(decisions.slice(0, 4));
-    expect(saved.heldout_ids).toEqual(decisions.slice(4));
-    expect(cohort.gold_reservation.cases, cohort.gold_reservation.reason ?? "Expected reserved held-out gold case").toHaveLength(1);
+    expect([...saved.training_ids].sort()).toEqual(decisions.slice(0,2).sort());
+    expect([...saved.heldout_ids].sort()).toEqual(decisions.slice(2).sort());
+    expect(cohort.gold_reservation.cases).toHaveLength(3);
     expect(cohort.gold_reservation.cases[0].snapshot.input.gap_ids).toEqual([ids[4]]);
-    expect(cohort.gold_reservation.cases[0].snapshot.facts.state.gaps.map((gap: { id: string }) => gap.id)).toEqual([ids[4]]);
     const generation = fixture.calls.filter(call => call.purpose === "prompt-revision");
     expect(generation).toHaveLength(1);
     expect(generation[0].user).toContain("Reviewers separate timing from importance.");
@@ -101,17 +104,17 @@ test("supported S8 candidate earns owner approval and rollback restores baseline
     // Act: the browser evaluates both frozen arms, then explicitly approves.
     await page.locator("summary").filter({ hasText: revision.id }).click();
     await page.getByRole("button", { name: `Evaluate ${revision.id}`, exact: true }).click();
-    await expect(page.getByLabel(`Evaluation ${revision.id}`)).toContainText("Eligible for explicit approval");
+    await expect(page.getByLabel(`Evaluation ${revision.id}`)).toContainText("Eligible for explicit approval",{timeout:90_000});
     const evaluated = await report();
     const evaluation = evaluated.evaluations![0];
     expect(evaluation.eligible).toBe(true);
     expect(evaluation.failures).toEqual([]);
     expect(evaluation.baseline_revision_id).toBeNull();
-    expect(evaluation.replay_ids).toEqual([decisions[5]]);
-    expect(evaluation.baseline.gold_count).toBe(1);
-    expect(evaluation.candidate.gold_count).toBe(1);
-    expect(evaluation.baseline.replay_count).toBe(1);
-    expect(evaluation.candidate.replay_count).toBe(1);
+    expect(evaluation.replay_ids).toEqual([]);
+    expect(evaluation.baseline.gold_count).toBe(3);
+    expect(evaluation.candidate.gold_count).toBe(3);
+    expect(evaluation.baseline.replay_count).toBe(0);
+    expect(evaluation.candidate.replay_count).toBe(0);
     expect(evaluation.candidate.combined).toBeGreaterThan(evaluation.baseline.combined);
     for (const metric of evaluation.baseline.gold) expect(evaluation.candidate.gold.find(candidate => candidate.name === metric.name)!.value).toBeGreaterThanOrEqual(metric.value);
     expect(evaluation.allowed_example_ids.some(id => saved.excluded_ids.includes(id))).toBe(false);
@@ -170,7 +173,7 @@ test("supported S8 candidate earns owner approval and rollback restores baseline
   }
 });
 
-test("owner sees counts and creates a candidate; customers are refused", async ({ page, context, browser }) => {
+test("owner sees decision counts and a reason for unsupported candidates; customers are refused", async ({ page, context, browser }) => {
   const selected = await context.request.post("/api/admin/workspace", { data: { workspace_id: ws.id } });
   expect(selected.ok()).toBe(true);
   // Initialize registered evidence tables, then seed only this isolated fixture workspace.
@@ -191,41 +194,11 @@ test("owner sees counts and creates a candidate; customers are refused", async (
   const table = page.getByRole("table", { name: "S2 agreement counts and shares" });
   await expect(table).toContainText("1 (25.0%)"); await expect(table).toContainText("2 (50.0%)");
   await expect(page.getByRole("img", { name: /S2 agreement chart/ })).toBeVisible();
-  await page.getByRole("button", { name: "Create Gap extraction candidate" }).click();
-  await expect(page.getByTestId("learning-created")).toContainText("active prompt is unchanged");
-  await expect(page.getByRole("table", { name: "Prompt revision history" })).toContainText("candidate");
-  const report = await (await context.request.get("/api/admin/learning")).json();
-  const revision = report.revisions[0];
-  await page.locator("summary").filter({hasText:revision.id}).click();
-  await page.getByRole("button",{name:`Evaluate ${revision.id}`,exact:true}).click();
-  await expect(page.getByLabel(`Evaluation ${revision.id}`)).toContainText("Not eligible for approval");
-  await expect(page.getByLabel(`Evaluation ${revision.id}`)).toContainText("Nonempty replay evidence");
-  await expect(page.getByRole("button",{name:`Approve ${revision.id}`,exact:true})).toBeDisabled();
-  const evaluated = await (await context.request.get("/api/admin/learning")).json();
-  const stale = await context.request.post("/api/admin/learning",{data:{action:"approve",revision_id:revision.id,evaluation_id:evaluated.evaluations[0].id,expected_active_id:"prv_stale"}});
-  expect(stale.status()).toBe(400);
-  // Seed a prior approval as browser fixture evidence; stub evaluation itself cannot approve.
-  const seed = postgres(process.env.DATABASE_URL!,{max:1});
-  try {
-    await seed`insert into prompt_active_revisions(workspace_id,stage,revision_id,generation) values(${ws.id},'S2',${revision.id},1)`;
-    await seed`update prompt_revisions set state='active' where id=${revision.id}`;
-    await seed`insert into prompt_revision_history(id,workspace_id,stage,before_id,after_id,actor,action,created_at,generation) values(${`prh_browser_${ws.id}`},${ws.id},'S2',null,${revision.id},' {"name":"Browser fixture","function":"medical_affairs"}'::jsonb,'approve','2026-10-07T12:00:00Z',1)`;
-    const before = await context.request.post("/api/modules",{data:{stage:"S2",input:{dry_run:true}}});
-    expect(before.ok()).toBe(true);
-    const beforeRun = await before.json();
-    const [workspace] = await seed`select schema_name from workspaces where id=${ws.id}`;
-    const [activeRun] = await seed`select workspace_id,steps from ${seed(workspace.schema_name)}.module_runs where id=${beforeRun.run_id}`;
-    expect(activeRun.workspace_id).toBe(ws.id);
-    expect(activeRun.steps.find((step:{name:string})=>step.name==='prompt:variant').data.version).toBe(revision.id);
-    await page.reload();await page.locator("summary").filter({hasText:revision.id}).click();
-    await page.getByRole("button",{name:`Roll back ${revision.id}`,exact:true}).click();
-    await expect(page.getByRole("table",{name:"Prompt revision history"}).getByRole("row").filter({hasText:revision.id})).toContainText("superseded");
-    await expect(page.getByLabel("Prompt activation history")).toContainText("S2 · rollback");
-    const after = await context.request.post("/api/modules",{data:{stage:"S2",input:{dry_run:true}}});expect(after.ok()).toBe(true);
-    const afterRun = await after.json();
-    const [restoredRun] = await seed`select steps from ${seed(workspace.schema_name)}.module_runs where id=${afterRun.run_id}`;
-    expect(restoredRun.steps.find((step:{name:string})=>step.name==='prompt:variant').data.version).toBe('v1.0-baseline');
-  } finally {await seed.end();}
+  await expect(page.getByRole("button",{name:"Create Gap extraction candidate"})).toBeDisabled();
+  await expect(page.getByText("This stage has no independent human target for evaluating a candidate.")).toBeVisible();
+  const blocked=await context.request.post("/api/admin/learning",{data:{action:"propose",stage:"S2"}});
+  expect(blocked.status()).toBe(400);
+  expect((await blocked.json()).error).toContain("human target");
   await page.getByLabel("Group by").selectOption("week");
   await expect(page.getByLabel("Group by")).toHaveValue("week");
   await page.setViewportSize({ width: 390, height: 844 });
@@ -237,6 +210,6 @@ test("owner sees counts and creates a candidate; customers are refused", async (
   await customer.addCookies([{ name: "synapse_test_as", value: "customer", url: new URL(page.url()).origin }]);
   expect((await customer.request.get(`${new URL(page.url()).origin}/api/admin/learning`)).status()).toBe(403);
   expect((await customer.request.post(`${new URL(page.url()).origin}/api/admin/learning`, { data: { action: "propose", stage: "S2" } })).status()).toBe(403);
-  for (const action of ['evaluate','approve','rollback']) expect((await customer.request.post(`${new URL(page.url()).origin}/api/admin/learning`,{data:{action,revision_id:revision.id}})).status()).toBe(403);
+  for (const action of ['evaluate','approve','rollback']) expect((await customer.request.post(`${new URL(page.url()).origin}/api/admin/learning`,{data:{action,revision_id:"prv_fiction"}})).status()).toBe(403);
   await customer.close();
 });

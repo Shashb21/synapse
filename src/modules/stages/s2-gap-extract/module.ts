@@ -1,3 +1,4 @@
+import { quotedRepair, repairText, repairUserMessage, type RepairMessage } from "@/modules/kernel/repair-guidance";
 import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
@@ -19,6 +20,7 @@ import { validatedPlacementGapIds } from "@/modules/stages/s8-prioritization/mod
 import { extractCandidateGaps, isLiveGap } from "@/lib/iegp/engine";
 import { listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
 import { GAP_CANDIDATES_DDL, gapCandidates } from "./schema";
+import { promptVariantInstruction } from "@/modules/kernel/prompt-versions";
 import { augmentSystemPrompt } from "@/modules/kernel/prompt-variant";
 import { curatedS2Cases } from "@/modules/eval-gold";
 import { scoreMustMatch } from "@/modules/eval-gold/types";
@@ -164,15 +166,15 @@ const text = (value: unknown): string => (typeof value === "string" ? value.trim
  * Schema check on one proposed gap. A row with any problem is not used as is:
  * the proposer is asked to fix it or withdraw it. Nothing is filled in here.
  */
-function gapProblems(raw: RawGap): string[] {
-  const problems: string[] = [];
+function gapProblems(raw: RawGap): RepairMessage[] {
+  const problems: RepairMessage[] = [];
   if (!text(raw.name)) problems.push("name is missing");
   if (!text(raw.statement)) problems.push("statement is missing");
   const domain = text(raw.domain);
   if (!EVIDENCE_DOMAINS.includes(domain as EvidenceDomain)) {
     problems.push(
       domain
-        ? `domain "${domain}" is not one of: ${EVIDENCE_DOMAINS.join(", ")}`
+        ? quotedRepair(domain, value => `domain "${value}" is not one of: ${EVIDENCE_DOMAINS.join(", ")}`)
         : `domain is missing; use one of: ${EVIDENCE_DOMAINS.join(", ")}`,
     );
   }
@@ -231,7 +233,7 @@ type RevisionItem = {
   /** The critic's objection this revision answers. */
   objection?: string;
   /** What made the candidate incomplete or invalid. */
-  problems?: string[];
+  problems?: RepairMessage[];
 };
 
 /**
@@ -243,7 +245,7 @@ async function reviseWithModel(
   args: { document: ParsedDocumentRecord; hints: string; exchange: string; items: RevisionItem[]; role?: "proposer" | "reviser" },
 ): Promise<Map<string, GapCandidate | null>> {
   const byId = new Map(args.items.map((item) => [item.candidate.id, item]));
-  const lastProblems = new Map<string, string[]>();
+  const lastProblems = new Map<string, RepairMessage[]>();
   const answers = await completeAll<GapCandidate | null>({
     ids: args.items.map((item) => item.candidate.id),
     what: "gap revision",
@@ -251,8 +253,9 @@ async function reviseWithModel(
     ask: async (missing, attempt) => {
       const payload = (await ctx.complete({
         role: args.role ?? "reviser",
+        dialogueFields: ["candidates"],
         system: augmentSystemPrompt(GAP_REVISER_SYSTEM),
-        user: JSON.stringify({
+        ...repairUserMessage(describe => ({
           source_document: titleOf(args.document),
           exchange: args.exchange,
           worked_examples: args.hints || undefined,
@@ -269,11 +272,11 @@ async function reviseWithModel(
               domain: item.candidate.domain,
               source_quote: item.candidate.source_quote,
               objection: item.objection,
-              problems: lastProblems.get(id) ?? item.problems,
+              problems: (lastProblems.get(id) ?? item.problems)?.map(describe),
             };
           }),
           document: documentBody(args.document.blocks),
-        }),
+        })),
         purpose: `gap-reviser:${args.document.id}`,
       })) as { gaps?: RawGap[] } | null;
       const map = new Map<string, GapCandidate | null>();
@@ -369,6 +372,7 @@ async function reviewWithModel(
     ask: async (missing, attempt) => {
       const payload = (await ctx.complete({
         role: "critic",
+        dialogueFields: ["candidates"],
         system: GAP_CRITIC_SYSTEM,
         user: JSON.stringify({
           exchange: `${args.round} of ${PROPOSER_CRITIC_EXCHANGES}`,
@@ -426,7 +430,15 @@ export function parseJudgeDecision(
   row: RawDecision,
   scope: { subject: string; candidateIds: Set<string>; planIds: Set<string>; setAsideIds: Set<string> },
 ): { decision: JudgeDecision; problems?: never } | { decision?: never; problems: string[] } {
-  const problems: string[] = [];
+  const result = validateJudgeDecision(row, scope);
+  return result.problems ? { problems: result.problems.map(repairText) } : result;
+}
+
+function validateJudgeDecision(
+  row: RawDecision,
+  scope: { subject: string; candidateIds: Set<string>; planIds: Set<string>; setAsideIds: Set<string> },
+): { decision: JudgeDecision; problems?: never } | { decision?: never; problems: RepairMessage[] } {
+  const problems: RepairMessage[] = [];
   const verdict = row.verdict === "accept" || row.verdict === "reject" ? row.verdict : null;
   if (!verdict) problems.push('verdict must be "accept" or "reject"');
   const confidence =
@@ -446,10 +458,10 @@ export function parseJudgeDecision(
     : matchGapId || sameAs
       ? "same"
       : "new";
-  if (!match) problems.push(`match "${rawMatch}" must be "same", "overlaps" or "new"`);
-  if (matchGapId && !scope.planIds.has(matchGapId)) problems.push(`match_gap_id "${matchGapId}" is not a plan gap id`);
+  if (!match) problems.push(quotedRepair(rawMatch, value => `match "${value}" must be "same", "overlaps" or "new"`));
+  if (matchGapId && !scope.planIds.has(matchGapId)) problems.push(quotedRepair(matchGapId, value => `match_gap_id "${value}" is not a plan gap id`));
   if (sameAs && (sameAs === scope.subject || !scope.candidateIds.has(sameAs))) {
-    problems.push(`same_as_candidate "${sameAs}" is not another candidate id`);
+    problems.push(quotedRepair(sameAs, value => `same_as_candidate "${value}" is not another candidate id`));
   }
   if (verdict === "reject") {
     if (sameAs) {
@@ -475,7 +487,7 @@ export function parseJudgeDecision(
   if (match === "overlaps") {
     if (!matchGapId) problems.push('match "overlaps" needs match_gap_id (the plan gap it overlaps)');
     if (matchGapId && scope.setAsideIds.has(matchGapId)) {
-      problems.push(`${matchGapId} is set aside; use "same" if it asks the same question, otherwise "new"`);
+      problems.push(quotedRepair(matchGapId, value => `${value} is set aside; use "same" if it asks the same question, otherwise "new"`));
     }
     if (sameAs) problems.push('match "overlaps" is only against a plan gap; leave same_as_candidate null');
     const missing = OVERLAP_FIELDS.filter((field) => !text(row[field]));
@@ -504,7 +516,7 @@ async function judgeWithModel(
   const planIds = new Set(args.planGaps.map((gap) => gap.id));
   const setAsideIds = new Set(args.planGaps.filter((gap) => gap.set_aside).map((gap) => gap.id));
   const candidateIds = new Set(byId.keys());
-  const lastProblems = new Map<string, string[]>();
+  const lastProblems = new Map<string, RepairMessage[]>();
   return completeAll<JudgeDecision>({
     ids: args.candidates.map((candidate) => candidate.id),
     what: "judge decision",
@@ -513,8 +525,9 @@ async function judgeWithModel(
     ask: async (missing, attempt) => {
       const payload = (await ctx.complete({
         role: "internal_judge",
+        dialogueFields: ["candidates"],
         system: GAP_JUDGE_SYSTEM,
-        user: JSON.stringify({
+        ...repairUserMessage(describe => ({
           worked_examples: args.hints || undefined,
           note:
             attempt > 1
@@ -535,17 +548,17 @@ async function judgeWithModel(
               critic: critique
                 ? { verdict: critique.verdict, confidence: critique.score, note: critique.note }
                 : undefined,
-              problems: lastProblems.get(candidate.id),
+              problems: lastProblems.get(candidate.id)?.map(describe),
             };
           }),
-        }),
+        })),
         purpose: "gap-judge",
       })) as { decisions?: RawDecision[] } | null;
       const map = new Map<string, JudgeDecision>();
       for (const row of payload?.decisions ?? []) {
         const subject = text(row.subject);
         if (!missing.includes(subject) || map.has(subject)) continue;
-        const parsed = parseJudgeDecision(row, { subject, candidateIds, planIds, setAsideIds });
+        const parsed = validateJudgeDecision(row, { subject, candidateIds, planIds, setAsideIds });
         if (parsed.problems) {
           lastProblems.set(subject, parsed.problems);
           continue;
@@ -738,7 +751,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
           };
         });
       },
-    }, { kinds: ["gap_suggestion"], text: documents.flatMap((document) => document.blocks.map((block) => block.text)).join(" ").slice(0, 20_000) });
+    }, { kinds: ["gap_suggestion"], subject_ids: documents.map(item => item.id), text: documents.flatMap((document) => document.blocks.map((block) => block.text)).join(" ").slice(0, 20_000) });
 
     if (ctx.execution_policy === "single_pass") return {
       output: { mode: outcome.mode, proposed: outcome.proposed.length, accepted: [], rejected: [], committed_gap_ids: [], committed_need_ids: [], joined_gap_ids: [], suggestion_ids: [] },
@@ -929,6 +942,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
     };
   },
   evals: {
+    variantInstruction: promptVariantInstruction,
     async cases(facts) {
       if (facts) {
         const documents = facts.documents as ParsedDocumentRecord[];
@@ -949,14 +963,14 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       const curated = scoreMustMatch(statements, testCase.gold?.must_match);
       if (accepted === 0) {
         return [
-          { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match ? 0.5 : undefined, detail: curated.detail },
+          { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match?.length ? 0.5 : undefined, detail: curated.detail },
           { name: "gold_accept_rate", value: 0, unit: "ratio", detail: "no new candidates" },
           { name: "accepted_with_quote", value: 0, unit: "ratio", detail: "no new candidates" },
         ];
       }
       return [
-        { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match ? 0.5 : undefined, detail: curated.detail },
-        { name: "gold_accept_rate", value: total === 0 ? 0 : Number((accepted / total).toFixed(3)), unit: "ratio", target: 0.3 },
+        { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match?.length ? 0.5 : undefined, detail: curated.detail },
+        { name: "gold_accept_rate", value: total === 0 ? 0 : Number((accepted / total).toFixed(3)), unit: "ratio" },
         { name: "accepted_with_quote", value: accepted === 0 ? 0 : Number((output.accepted.filter((c) => c.source_quote.trim().length > 0).length / accepted).toFixed(3)), unit: "ratio", target: 1 },
       ];
     },

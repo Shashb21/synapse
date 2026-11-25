@@ -225,6 +225,10 @@ export type JsonCompletion = (args: {
   purpose: string;
   maxTokens?: number;
   requestBudget?: ProviderRequestBudget;
+  /** Top-level JSON fields populated by previous model replies, for diagnostic template identity. */
+  dialogueFields?: readonly string[];
+  /** Authored validation instructions embedded in those dialogue fields, with generated terms excluded. */
+  repairGuidance?: readonly string[];
 }) => Promise<unknown>;
 
 export type ModuleContext = {
@@ -267,6 +271,8 @@ export type EvalCase<I> = {
 };
 
 export type EvalHarness<I, O> = {
+  /** Effective system instruction appended by this implementation for each sweep variant. */
+  variantInstruction?: (version: import("./prompt-versions").PromptVersionId) => string;
   /** Gold cases the stage scores itself against. */
   cases: (facts?: Record<string, unknown>) => Promise<EvalCase<I>[]>;
   score: (args: { case: EvalCase<I>; output: O }) => EvalScore[];

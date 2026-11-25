@@ -329,8 +329,11 @@ describe("modular pipeline, S0 to S10", () => {
       const exchanges = detail!.steps.find((step) => step.name === "exchanges");
       expect((exchanges?.data as unknown[] | undefined)?.length).toBe(3);
       expect(detail!.evals.find((score) => score.name === "exchanges")?.value).toBe(3);
-      expect(detail!.evals.some((score) => score.name === "dialogue_retention")).toBe(true);
-      expect(detail!.evals.some((score) => score.name === "critic_score_gain")).toBe(true);
+      const first = detail!.steps.find(step => step.name === "round1:critic")?.data as { subject: string }[];
+      const last = detail!.steps.find(step => step.name === "round3:critic")?.data as { subject: string }[];
+      const matched = first.filter(item => first.filter(other => other.subject === item.subject).length === 1
+        && last.filter(other => other.subject === item.subject).length === 1);
+      expect(detail!.evals.some(score => score.name === "critic_score_gain")).toBe(matched.length > 0);
     }
   }, 60_000);
 

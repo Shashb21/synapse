@@ -1,3 +1,4 @@
+import { quotedRepair, repairUserMessage, type RepairMessage } from "@/modules/kernel/repair-guidance";
 import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
 import { desc } from "drizzle-orm";
 import { z } from "zod";
@@ -12,6 +13,7 @@ import {
 } from "@/modules/kernel/agentic";
 import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import { NoRouteError } from "@/modules/llm/provider";
+import { promptVariantInstruction } from "@/modules/kernel/prompt-versions";
 import { augmentSystemPrompt } from "@/modules/kernel/prompt-variant";
 import { curatedS3Cases } from "@/modules/eval-gold";
 import { scoreMustMatch } from "@/modules/eval-gold/types";
@@ -170,14 +172,14 @@ type RawTactic = {
 const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 
 /** What is wrong with a proposed row, in words the model can act on. Empty when valid. */
-function tacticProblems(raw: RawTactic): string[] {
-  const problems: string[] = [];
+function tacticProblems(raw: RawTactic): RepairMessage[] {
+  const problems: RepairMessage[] = [];
   if (!text(raw.name)) problems.push("name is missing");
   if (!TACTIC_TYPES.includes(text(raw.type) as TacticType)) {
-    problems.push(`type "${text(raw.type)}" is not one of ${TACTIC_TYPES.join(", ")}`);
+    problems.push(quotedRepair(text(raw.type), value => `type "${value}" is not one of ${TACTIC_TYPES.join(", ")}`));
   }
   if (!TACTIC_STATUSES.includes(text(raw.status) as TacticStatus)) {
-    problems.push(`status "${text(raw.status)}" is not one of ${TACTIC_STATUSES.join(", ")}`);
+    problems.push(quotedRepair(text(raw.status), value => `status "${value}" is not one of ${TACTIC_STATUSES.join(", ")}`));
   }
   if (!text(raw.evidence_question)) problems.push("evidence_question is missing");
   if (!text(raw.source_quote)) problems.push("source_quote is missing; give the verbatim passage from the document");
@@ -210,7 +212,7 @@ const tacticFields = (candidate: TacticCandidate) => ({
 type ProposerRow = {
   id: string;
   previous?: RawTactic | ReturnType<typeof tacticFields>;
-  problem?: string;
+  problem?: RepairMessage[];
   objection?: string;
 };
 
@@ -232,17 +234,21 @@ async function answerRows(
     ask: async (missing, attempt) => {
       const payload = (await ctx.complete({
         role: args.role ?? "reviser",
+        dialogueFields: ["rows"],
         system: augmentSystemPrompt(TACTIC_REVISER_SYSTEM),
-        user: JSON.stringify({
+        ...repairUserMessage(describe => ({
           worked_examples: args.hints || undefined,
           source: args.document.source_id,
           note:
             attempt > 1
               ? "An earlier answer left these rows unanswered or invalid. Answer each, fixing the problem named."
               : undefined,
-          rows: missing.map((id) => rowById.get(id)!),
+          rows: missing.map(id => {
+            const row = rowById.get(id)!;
+            return { ...row, problem: row.problem?.map(describe).join("; ") };
+          }),
           document: documentText(args.document),
-        }),
+        })),
         purpose: `${args.purpose}:${args.document.id}`,
       })) as { tactics?: RawTactic[] } | null;
       const answers = new Map<string, ProposerAnswer>();
@@ -253,14 +259,14 @@ async function answerRows(
         if (raw.withdraw === true) {
           const reason = text(raw.reason);
           if (reason) answers.set(id, { kind: "withdrawn", reason });
-          else row.problem = "withdraw needs a reason";
+          else row.problem = ["withdraw needs a reason"];
           continue;
         }
         const problems = tacticProblems(raw);
         if (problems.length > 0) {
           // Left out so it is asked for again, with the problem named.
           row.previous = raw;
-          row.problem = problems.join("; ");
+          row.problem = problems;
           continue;
         }
         answers.set(id, { kind: "tactic", tactic: toCandidate(args.document, id, raw) });
@@ -290,7 +296,7 @@ async function llmProposals(
       const id = `${document.id}-LT${String(index + 1).padStart(3, "0")}`;
       const problems = tacticProblems(raw);
       if (problems.length > 0) {
-        invalid.push({ id, previous: raw, problem: problems.join("; ") });
+        invalid.push({ id, previous: raw, problem: problems });
         proposed.push({ id });
       } else {
         proposed.push({ id, candidate: toCandidate(document, id, raw) });
@@ -365,6 +371,7 @@ async function llmReviews(
 ): Promise<Map<string, Review>> {
   const payload = (await ctx.complete({
     role: "critic",
+    dialogueFields: ["candidates"],
     system: augmentSystemPrompt(TACTIC_CRITIC_SYSTEM),
     user: JSON.stringify({
       worked_examples: args.hints || undefined,
@@ -410,6 +417,7 @@ async function llmDecisions(
   const critiqueOf = (id: string) => args.critiques.find((critique) => critique.subject === id);
   const payload = (await ctx.complete({
     role: "internal_judge",
+    dialogueFields: ["batch", "decide"],
     system: augmentSystemPrompt(TACTIC_JUDGE_SYSTEM),
     user: JSON.stringify({
       worked_examples: args.hints || undefined,
@@ -629,7 +637,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
             note: critique?.note ?? "not reviewed",
           };
         }),
-    }, { kinds: ["tactic_suggestion"], text: documents.flatMap((document) => document.blocks.map((block) => block.text)).join(" ").slice(0, 20_000) });
+    }, { kinds: ["tactic_suggestion"], subject_ids: documents.map(item => item.id), text: documents.flatMap((document) => document.blocks.map((block) => block.text)).join(" ").slice(0, 20_000) });
 
     if (ctx.execution_policy === "single_pass") return {
       output: { mode: outcome.mode, proposed: outcome.proposed.length, accepted: [], rejected: [], committed_tactic_ids: [], suggestion_ids: [] },
@@ -767,6 +775,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
     };
   },
   evals: {
+    variantInstruction: promptVariantInstruction,
     async cases(facts) {
       if (facts) {
         const documents = facts.documents as ParsedDocumentRecord[];
@@ -791,13 +800,13 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
       );
       if (accepted.length === 0) {
         return [
-          { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match ? 0.3 : undefined, detail: curated.detail },
+          { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match?.length ? 0.3 : undefined, detail: curated.detail },
           { name: "accepted_with_quote", value: 0, unit: "ratio", detail: "no new candidates" },
           { name: "real_inventory_share", value: 0, unit: "ratio", detail: "no new candidates" },
         ];
       }
       return [
-        { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match ? 0.3 : undefined, detail: curated.detail },
+        { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match?.length ? 0.3 : undefined, detail: curated.detail },
         {
           name: "accepted_with_quote",
           value:

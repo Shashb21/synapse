@@ -9,10 +9,11 @@ import type { PriorityAxis } from "@/modules/stages/s8-prioritization/axis-math"
 import type { PrioritizeGap } from "./prioritize-matrix";
 
 /** Existing S8 editors; every submission carries the displayed saved snapshot. */
-export function GapPriorityActions({ gap, xAxis, yAxis, identity, mayPrioritize }: {
-  gap: PrioritizeGap; xAxis: PriorityAxis; yAxis: PriorityAxis;
+export function GapPriorityActions({ gap, xAxis, yAxis, setting, identity, mayPrioritize }: {
+  gap: PrioritizeGap; setting?: string; xAxis: PriorityAxis; yAxis: PriorityAxis;
   identity: ActionIdentity; mayPrioritize: boolean;
 }) {
+  const matrix = { x_axis: xAxis.id, y_axis: yAxis.id, displayed_axes: [xAxis, yAxis], setting };
   const [saved, setSaved] = useState<string | null>(null);
   const confirmed = () => setSaved("Priority validated across all settings.");
   const ai = useAiEnabled("prioritization");
@@ -26,7 +27,7 @@ export function GapPriorityActions({ gap, xAxis, yAxis, identity, mayPrioritize 
       {ai && band && mayPrioritize && !gap.validated && !gap.needs_review && !gap.human_band && !gap.human_axes?.length && gap.support_status === "supported" ? (
         <ActionDialog onOpenChange={(open) => { if (open) setSaved(null); }} protectUnsavedChanges endpoint="/api/plan"
           onSuccess={confirmed}
-          payload={{ action: "accept_priority_suggestion", gap_id: gap.gap_id, band: gap.suggested_band, expected_version: gap.version ?? null }}
+          payload={{ action: "accept_priority_suggestion", gap_id: gap.gap_id, ...matrix, band: gap.suggested_band, expected_version: gap.version ?? null }}
           label="Accept supported AI suggestion" title={`Accept AI priority for ${gap.gap_name}`}
           description="Inspect the supporting records before accepting this suggestion. Your reason and its references will be retained in history."
           confirmLabel="Accept supported AI suggestion" requireRationale rationaleFieldName="reason" rationaleLabel="Reason for acceptance (required)" identity={identity} />
@@ -35,7 +36,7 @@ export function GapPriorityActions({ gap, xAxis, yAxis, identity, mayPrioritize 
         <ActionDialog onOpenChange={(open) => { if (open) setSaved(null); }} protectUnsavedChanges
           endpoint="/api/plan"
           onSuccess={(result) => setSaved((result.placement as { validated?: boolean } | undefined)?.validated ? "Priority validated across all settings." : "Draft placement saved. Validate priority when you are ready.")}
-          payload={{ action: "set_placement", gap_id: gap.gap_id, x_axis: xAxis.id, y_axis: yAxis.id, expected_version: gap.version ?? null, expected_context_version: gap.context_version ?? null }}
+          payload={{ action: "set_placement", gap_id: gap.gap_id, ...matrix, expected_version: gap.version ?? null, expected_context_version: gap.context_version ?? null }}
           fields={[
             { name: "rationale", label: "Priority rationale (optional)", type: "textarea", defaultValue: gap.rationale ?? "", hint: "Why this priority is appropriate. Kept separately from the reason for this change." },
             {
