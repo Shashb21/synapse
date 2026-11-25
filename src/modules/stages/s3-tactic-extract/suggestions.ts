@@ -11,7 +11,7 @@ import { z } from "zod";
 import { db, ensureCurrentSchemaTables } from "@/lib/iegp/db";
 import * as t from "@/lib/iegp/schema";
 import { appendAudit, insertLibraryTactic, readState } from "@/lib/iegp/store";
-import { acceptTacticExpansion, expansionScopeSchema, tacticVersion, type ExpansionTransaction } from "@/lib/iegp/tactic-expansions";
+import { acceptTacticExpansion, expansionScopeSchema, isCurrentTacticReviewParent, tacticVersion, type ExpansionTransaction } from "@/lib/iegp/tactic-expansions";
 import { ACTOR_FUNCTIONS, TACTIC_STATUSES, TACTIC_TYPES } from "@/lib/iegp/enums";
 import type { Actor, ExpansionScope, SeparateTacticOption, TacticSuggestion } from "@/lib/iegp/types";
 import { requireRationale } from "@/modules/kernel/edit-records";
@@ -251,19 +251,21 @@ export async function decideTacticSuggestion(args: {id: string; decision: "expan
     if (row.source_id !== source.id) throw new TrustedApplicationError("Suggestion source lineage is invalid.");
     const [parent] = await tx.select().from(t.tactics).where(eq(t.tactics.id, row.target_tactic_id)).for("update");
     if (!parent) throw new TrustedApplicationError("Target tactic no longer exists in this workspace.");
+    let currentVersion = row.expected_tactic_version;
     if (args.decision !== "reject") {
       const citation = await resolveRetainedSourceQuote(row.source_id, row.block_id, row.source_quote, tx);
       row.block_id = citation.block_id;
       row.source_context = citation.source_context;
       const current = (await readState(tx)).tactics.find(t => t.id === row.target_tactic_id)!;
-      if (tacticVersion(current) !== row.expected_tactic_version) throw new TrustedApplicationError("Tactic changed; reject this obsolete suggestion or review a new source proposal before accepting.");
+      if (!isCurrentTacticReviewParent(current, row.reviewed_parent)) throw new TrustedApplicationError("Tactic changed; reject this obsolete suggestion or review a new source proposal before accepting.");
+      currentVersion = tacticVersion(current);
     }
     let result_expansion_id: string | null = null, result_tactic_id: string | null = null;
     if (args.decision === "expand") {
       if (!row.gap_id) throw new TrustedApplicationError("Choose a live gap before accepting the expansion.");
       const [gap] = await tx.select().from(t.gaps).where(eq(t.gaps.id, row.gap_id)).for("update");
       if (!gap || gap.retired || gap.status === "excluded" || gap.parked_at) throw new TrustedApplicationError("Choose a live gap in this workspace before accepting.");
-      result_expansion_id = (await acceptTacticExpansion({proposal_id: `s3:${row.id}`, tactic_id: row.target_tactic_id, gap_id: row.gap_id, scope: row.expansion, expected_tactic_version: row.expected_tactic_version, rationale, actor: args.actor}, tx)).id;
+      result_expansion_id = (await acceptTacticExpansion({proposal_id: `s3:${row.id}`, tactic_id: row.target_tactic_id, gap_id: row.gap_id, scope: row.expansion, expected_tactic_version: currentVersion, rationale, actor: args.actor}, tx)).id;
       await attachTacticSource({ tactic_id: row.target_tactic_id, source_id: row.source_id, source_quote: row.source_quote, block_id: row.block_id, source_context: row.source_context }, tx);
     } else if (args.decision === "separate") {
       result_tactic_id = await insertLibraryTactic({...row.separate, description: `Separate source activity linked to ${row.target_tactic_id}.`, source_quote: row.source_quote, block_id: row.block_id, source_context: row.source_context, data_source: source.title,

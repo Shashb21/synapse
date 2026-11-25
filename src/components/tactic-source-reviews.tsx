@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { ActionDialog, type ActionField, type ActionIdentity } from "@/components/platform/action-dialog";
 import type { IegpState, TacticSuggestion } from "@/lib/iegp/types";
-import { tacticVersion } from "@/lib/iegp/tactic-expansions";
+import { isCurrentTacticReviewParent } from "@/lib/iegp/tactic-expansions";
 
 const scopeLabels = {name: "Name", evidence_question: "Evidence question", population: "Population", outcomes: "Endpoints", geography: "Geography", data_cut: "Data cut", analysis: "Analysis", instrument: "Instrument", study_design: "Study design", gap_coverage: "Gap coverage", cost_effort: "Incremental cost / effort", timing: "Timing", feasibility_risks: "Feasibility risks", start_date: "Start date", evidence_available: "Evidence available"} as const;
 const requiredScope = new Set(["name", "evidence_question", "study_design", "gap_coverage", "cost_effort", "timing", "feasibility_risks"]);
@@ -15,7 +15,7 @@ export function TacticSourceReviews({suggestions, state, identity, canReview}: {
     <p className="max-w-prose text-sm">These source activities overlap the tactic library. Review the added scope, then expand the existing tactic, record a separate linked tactic or reject the suggestion.</p>
     {suggestions.map(row => {
       const parent = state.tactics.find(t => t.id === row.target_tactic_id);
-      const stale = !parent || tacticVersion(parent) !== row.expected_tactic_version;
+      const stale = !parent || !isCurrentTacticReviewParent(parent, row.reviewed_parent);
       const source = state.sources.find(s => s.id === row.source_id);
       const fields: ActionField[] = [{name: "gap_id", label: "Gap to cover", type: "select", defaultValue: row.gap_id ?? "", options: gapOptions}, ...Object.entries(scopeLabels).map(([key, label]): ActionField => ({name: key, label, type: key === "start_date" || key === "evidence_available" ? "text" : "textarea", defaultValue: row.expansion[key as keyof typeof scopeLabels] ?? "", required: requiredScope.has(key)})), ...(["post_hoc", "prospective_enrolment", "protocol_amendment"] as const).map((key): ActionField => ({name: key, label: key === "post_hoc" ? "Post-hoc analysis" : key === "prospective_enrolment" ? "Prospective enrolment" : "Protocol amendment", type: "select", defaultValue: row.expansion[key] ? "yes" : "no", options: [{value: "no", label: "No"}, {value: "yes", label: "Yes"}]}))];
       const payload = {suggestion_id: row.id, expected_version: row.version};

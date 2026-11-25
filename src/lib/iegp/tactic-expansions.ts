@@ -89,6 +89,15 @@ export function tacticVersion(tactic: Tactic): string {
   return createHash("sha256").update(JSON.stringify(canonical(sorted))).digest("hex");
 }
 
+/** Check a source review's saved parent while allowing its verified citation to move. */
+export function isCurrentTacticReviewParent(current: Tactic, reviewed: Tactic): boolean {
+  return tacticVersion({
+    ...current,
+    block_id: reviewed.block_id,
+    source_context: reviewed.source_context,
+  }) === tacticVersion(reviewed);
+}
+
 function validateActor(actor: Actor) {
   if (!actor?.name?.trim() || !(ACTOR_FUNCTIONS as readonly string[]).includes(actor.function)) {
     throw new TrustedApplicationError("A named actor with a known function is required.");

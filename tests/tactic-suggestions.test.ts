@@ -156,6 +156,48 @@ describe("S3 source matching", () => {
     expect(original.map(reference => reference.id)).toContain(references[0]!.id);
   });
 
+  it.each([
+    { edit: "split", decision: "expand", changeScope: false },
+    { edit: "merge", decision: "separate", changeScope: false },
+    { edit: "split", decision: "separate", changeScope: true },
+  ] as const)("handles a parent citation $edit before $decision (scope changed: $changeScope)", async ({ edit, decision, changeScope }) => {
+    const parentQuote = "The registry follows outcomes in routine care.";
+    const background = { heading: "Background", text: "Registry study background.", location: "1" };
+    const evidence = { heading: "Registry", text: parentQuote, location: "2" };
+    const sections = edit === "split"
+      ? [{ ...background, text: `${background.text} ${parentQuote}` }]
+      : [background, evidence];
+    const parentSource = await persistSourceAndBlocks({
+      title: "Parent evidence", source_type: "advisory_board", stakeholder_function: actor.function,
+      text: sections.map(section => section.text).join("\n\n"), sections,
+    });
+    const cited = parentSource.blocks.at(-1)!;
+    await db().update(t.tactics).set({
+      source_quote: parentQuote, block_id: cited.id,
+      source_context: { heading: cited.heading, location: cited.location },
+    }).where(eq(t.tactics.id, parentId));
+
+    const row = await proposal();
+    const edited = await suggestions.editTacticSuggestion({ id: row.id, gap_id: gapId, rationale: "Select a gap", actor });
+    const firstId = parentSource.blocks[0]!.id;
+    const movedId = edit === "split"
+      ? (await splitSourceBlock({ block_id: firstId, at_text: parentQuote, rationale: "Separate evidence", actor })).second_id
+      : (await mergeSourceBlocks({ block_id: firstId, rationale: "Combine evidence", actor })).block_id;
+    const parent = (await loadState()).tactics.find(tactic => tactic.id === parentId)!;
+    expect(parent.block_id).toBe(movedId);
+    expect(parent.block_id).not.toBe(row.reviewed_parent.block_id);
+    expect(tacticVersion(parent)).not.toBe(row.expected_tactic_version);
+
+    const review = { id: row.id, expected_version: edited.version, decision, rationale: "Reviewed the proposal", actor };
+    if (changeScope) {
+      await db().update(t.tactics).set({ evidence_question: "Which patients have adverse events?" }).where(eq(t.tactics.id, parentId));
+      await expect(suggestions.decideTacticSuggestion(review)).rejects.toThrow(/tactic changed/i);
+      expect((await suggestions.listTacticSuggestions()).find(suggestion => suggestion.id === row.id)?.status).toBe("pending");
+    } else {
+      expect((await suggestions.decideTacticSuggestion(review)).status).toBe(decision === "expand" ? "expanded" : "separate");
+    }
+  });
+
   it("keeps overlaps pending with no unreviewed plan mutation and retains rejected reruns", async () => {
     const before = await loadState(); const row = await proposal();
     expect(row.status).toBe("pending"); expect(await loadState()).toEqual(before);
