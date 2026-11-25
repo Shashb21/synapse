@@ -17,7 +17,7 @@ import {
   recordMissedTactic,
   resetDemoSetup,
 } from "@/lib/iegp/store";
-import { reparseSourceBlocks } from "@/lib/iegp/source-blocks";
+import { deleteSourceBlock, mergeSourceBlocks, reparseSourceBlocks, splitSourceBlock } from "@/lib/iegp/source-blocks";
 import { iegpActionCapability } from "@/app/api/iegp/capabilities";
 import { can } from "@/modules/auth/roles";
 import { listParsedDocuments } from "@/modules/stages/s1-parse/module";
@@ -134,6 +134,57 @@ it.each([
   const { needs } = await loadState();
   for (const { source_id, block_id, source_quote } of citations) {
     expect(needs).toContainEqual(expect.objectContaining({ source_id, block_id, source_quote }));
+  }
+});
+
+it.each([
+  ["merge", acceptGapMergeSuggestion],
+  ["split", acceptGapSplitSuggestion],
+  ["removed quote", acceptGapSplitSuggestion],
+] as const)("checks current primary and extra source citations before %s", async (decision, acceptSuggestion) => {
+  const gapId = await newGap();
+  const background = { heading: "Background", text: "The panel reviewed the literature.", location: "1" };
+  const quote = "The panel found no evidence for older patients.";
+  const evidence = { heading: "Evidence", text: quote, location: "2" };
+  const primary = await persistSourceAndBlocks({
+    title: "Primary panel", source_type: "advisory_board", stakeholder_function: ACTOR.function,
+    text: `${background.text} ${quote}`, sections: [{ ...background, text: `${background.text} ${quote}` }],
+  });
+  const extra = await persistSourceAndBlocks({
+    title: "Second panel", source_type: "advisory_board", stakeholder_function: ACTOR.function,
+    text: `${background.text} ${quote}`, sections: [background, evidence],
+  });
+  const { suggestion_id_by_row } = await commitExtractedRecords({
+    source_id: primary.source_id, title: "Primary panel", stakeholder_function: ACTOR.function,
+    ...who, needs: [], gaps: [], tactics: [],
+    overlaps: [{
+      id: "edited-overlap", gap_id: gapId, run_id: "edited-source-run",
+      block_id: primary.blocks[0]!.id, name: OVERLAP.split_name,
+      statement: OVERLAP.split_statement, domain: "comparative_effectiveness",
+      source_quote: quote, ...OVERLAP,
+    }],
+  });
+  const suggestionId = suggestion_id_by_row["edited-overlap"]!;
+  await addSuggestionSources(suggestionId, [{
+    source_id: extra.source_id, block_id: extra.blocks[1]!.id, source_quote: quote, statement: OVERLAP.split_statement,
+  }]);
+  const split = await splitSourceBlock({ block_id: primary.blocks[0]!.id, at_text: quote, rationale: "Separate evidence", actor: ACTOR });
+  const accept = () => acceptSuggestion({ suggestion_id: suggestionId, rationale: "Reviewed both sources", ...who });
+  if (decision === "removed quote") {
+    await deleteSourceBlock({ block_id: extra.blocks[1]!.id, rationale: "Remove obsolete evidence", actor: ACTOR });
+    const before = await loadState();
+    await expect(accept()).rejects.toThrow(/source passage changed or is ambiguous/i);
+    expect(await loadState()).toEqual(before);
+    return;
+  }
+
+  const merge = await mergeSourceBlocks({ block_id: extra.blocks[0]!.id, rationale: "Combine related text", actor: ACTOR });
+  await accept();
+  const needs = (await loadState()).needs;
+  for (const [sourceId, blockId] of [[primary.source_id, split.second_id], [extra.source_id, merge.block_id]]) {
+    const citations = needs.filter(need => need.source_id === sourceId && need.source_quote === quote);
+    expect(citations.length).toBeGreaterThan(0);
+    expect(citations.map(need => need.block_id)).toEqual(citations.map(() => blockId));
   }
 });
 

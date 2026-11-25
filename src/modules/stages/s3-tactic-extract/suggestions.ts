@@ -19,6 +19,33 @@ import { tacticSourceReferences, tacticSuggestions } from "./schema";
 
 export const separateTacticOptionSchema = z.object({name: z.string().trim().min(1), type: z.enum(TACTIC_TYPES), status: z.enum(TACTIC_STATUSES), evidence_question: z.string().trim().min(1)}).strict();
 const quoteKey = (quote: string) => quote.toLowerCase().replace(/\s+/g, " ").trim();
+const blockQuoteKey = (blockId: string, quote: string) => JSON.stringify([blockId, quoteKey(quote)]);
+
+/** Move block-scoped references within the source editor's locked transaction. */
+export async function moveTacticSourceReferences(
+  sourceId: string,
+  originalBlockId: string,
+  replacements: readonly { id: string; text: string }[],
+) {
+  const transaction = db();
+  const references = await transaction.select().from(tacticSourceReferences)
+    .where(eq(tacticSourceReferences.source_id, sourceId));
+  const referenceKeys = new Set(references.map(reference => JSON.stringify([reference.tactic_id, reference.quote_key])));
+  for (const reference of references.filter(row => row.block_id === originalBlockId)) {
+    const blockId = quotedBlock(replacements, reference.source_quote, originalBlockId);
+    if (!blockId || blockId === originalBlockId) continue;
+
+    const updatedQuoteKey = blockQuoteKey(blockId, reference.source_quote);
+    const key = JSON.stringify([reference.tactic_id, updatedQuoteKey]);
+    if (referenceKeys.has(key)) {
+      await transaction.delete(tacticSourceReferences).where(eq(tacticSourceReferences.id, reference.id));
+    } else {
+      await transaction.update(tacticSourceReferences).set({ block_id: blockId, quote_key: updatedQuoteKey })
+        .where(eq(tacticSourceReferences.id, reference.id));
+      referenceKeys.add(key);
+    }
+  }
+}
 function requireActor(actor: Actor) {
   if (!actor?.name?.trim() || !ACTOR_FUNCTIONS.includes(actor.function)) throw new TrustedApplicationError("A named actor with a known function is required.");
 }
@@ -28,11 +55,19 @@ export async function ensureTacticSuggestionSchema() { await ensureCurrentSchema
 export async function attachTacticSource(args: {tactic_id: string; source_id: string; source_quote: string; block_id?: string | null}, transaction?: ExpansionTransaction) {
   if (!args.source_quote.trim()) throw new TrustedApplicationError("Source quote is required.");
   const run = async (tx: ExpansionTransaction) => {
-    const [parent] = await tx.select().from(t.tactics).where(eq(t.tactics.id, args.tactic_id)).for("update");
-    const [source] = await tx.select().from(t.sources).where(eq(t.sources.id, args.source_id));
+    const sourceQuery = tx.select({ id: t.sources.id }).from(t.sources).where(eq(t.sources.id, args.source_id));
+    const [source] = await (args.block_id ? sourceQuery.for("update") : sourceQuery);
+    const [parent] = await tx.select({ id: t.tactics.id }).from(t.tactics).where(eq(t.tactics.id, args.tactic_id)).for("update");
     if (!parent || !source) throw new TrustedApplicationError("Tactic or source not found in this workspace.", "not_found", 404);
+    if (args.block_id) {
+      const [block] = await tx.select({ text: t.sourceBlocks.text }).from(t.sourceBlocks)
+        .where(and(eq(t.sourceBlocks.id, args.block_id), eq(t.sourceBlocks.source_id, args.source_id)));
+      if (!block || !quoteKey(block.text).includes(quoteKey(args.source_quote))) {
+        throw new TrustedApplicationError("The source passage changed during extraction. Rerun tactic extraction.");
+      }
+    }
     const legacyKey = quoteKey(args.source_quote);
-    const key = args.block_id ? JSON.stringify([args.block_id, legacyKey]) : legacyKey;
+    const key = args.block_id ? blockQuoteKey(args.block_id, args.source_quote) : legacyKey;
     const existing = await tx.select().from(tacticSourceReferences).where(and(
       eq(tacticSourceReferences.tactic_id, args.tactic_id),
       eq(tacticSourceReferences.source_id, args.source_id),

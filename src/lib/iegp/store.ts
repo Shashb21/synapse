@@ -30,6 +30,7 @@ import type {
 import { normalizeCustomType, readCustomType, type CustomTacticType } from "./custom-tactic-type";
 import { tacticDateError, tacticDateOrderError, type TacticDateField } from "./tactic-dates";
 import type { ExtractedGap, ExtractedTactic } from "./engine";
+import { quotedBlock } from "@/modules/stages/extraction-sections";
 import type {
   ActorFunction,
   CatchUpReason,
@@ -3403,6 +3404,10 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
   /** Validated gaps a new source joined; they now show "New source added". */
   flagged_gap_ids: string[];
 }> {
+  if (args.tactics.some(tactic => tactic.block_id && tactic.source_quote?.trim())) {
+    // Source editors take this lock before assessment or tactic writes too.
+    await db().select({ id: t.sources.id }).from(t.sources).where(eq(t.sources.id, args.source_id)).for("update");
+  }
   const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [...args.gaps.flatMap(g => g.duplicate_of ? [g.duplicate_of] : []), ...args.needs.flatMap(n => n.gap_id ? [n.gap_id] : [])] });
   const state = await loadState();
   const sourceId = args.source_id;
@@ -3733,11 +3738,38 @@ async function closeSuggestion(
 }
 
 /** Every source a suggestion carries: its own candidate first, then repeats. */
-function suggestionSources(suggestion: GapSuggestion): GapSuggestionSource[] {
+function suggestionSources(suggestion: GapSuggestion): [GapSuggestionSource, ...GapSuggestionSource[]] {
   return [
     { source_id: suggestion.source_id, statement: suggestion.statement, source_quote: suggestion.source_quote, block_id: suggestion.block_id },
     ...suggestion.extra_sources,
   ];
+}
+
+/** Lock cited sources, the assessment gap and then the suggestion, in writer order. */
+async function lockGapSuggestionCitations(id: string) {
+  const { suggestion, gap } = await pendingSuggestion(id);
+  const citedSourceIds = new Set(suggestionSources(suggestion).filter(source => source.block_id).map(source => source.source_id));
+  for (const sourceId of [...citedSourceIds].sort()) {
+    await db().select({ id: t.sources.id }).from(t.sources).where(eq(t.sources.id, sourceId)).for("update");
+  }
+  const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [gap.id] });
+  await db().select({ id: t.gapSuggestions.id }).from(t.gapSuggestions)
+    .where(eq(t.gapSuggestions.id, id)).for("update");
+  const current = await pendingSuggestion(id);
+  const [primary, ...extraSources] = suggestionSources(current.suggestion);
+  if (current.gap.id !== gap.id || [primary, ...extraSources].some(source => source.block_id && !citedSourceIds.has(source.source_id))) {
+    throw new TrustedApplicationError("This suggestion changed while you were reviewing it. Refresh and review it again.");
+  }
+  const currentCitation = (source: GapSuggestionSource): GapSuggestionSource => {
+    if (!source.block_id) return source;
+    const blocks = current.state.blocks.filter(block => block.source_id === source.source_id);
+    const blockId = quotedBlock(blocks, source.source_quote, source.block_id);
+    if (!blockId) {
+      throw new TrustedApplicationError("The source passage changed or is ambiguous. Rerun gap extraction before accepting.");
+    }
+    return { ...source, block_id: blockId };
+  };
+  return { ...current, primary: currentCitation(primary), extraSources: extraSources.map(currentCitation), assessmentGapIds };
 }
 
 /**
@@ -3751,10 +3783,7 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
   args: SuggestionDecision & { name?: string; statement?: string },
 ): Promise<{ gap_id: string }> {
   const rationale = requireRationale(args.rationale);
-  const pending = await pendingSuggestion(args.suggestion_id);
-  const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [pending.gap.id] });
-  const { suggestion, gap } = await pendingSuggestion(args.suggestion_id);
-  const before = await loadState();
+  const { suggestion, gap, primary, extraSources, assessmentGapIds, state: before } = await lockGapSuggestionCitations(args.suggestion_id);
   const name = (args.name ?? suggestion.merged_name).trim();
   const statement = (args.statement ?? suggestion.merged_statement).trim();
   if (!name) throw new TrustedApplicationError("Give the merged gap a name.");
@@ -3798,7 +3827,7 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
       actor_function: args.actor_function,
     });
   }
-  for (const [index, source] of suggestionSources(suggestion).entries()) {
+  for (const [index, source] of [primary, ...extraSources].entries()) {
     await insertNeedForGap({
       gapId: gap.id,
       sourceId: source.source_id,
@@ -3838,10 +3867,7 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
   args: SuggestionDecision & { name?: string; statement?: string },
 ): Promise<{ gap_id: string; new_gap_id: string }> {
   const rationale = requireRationale(args.rationale);
-  const pending = await pendingSuggestion(args.suggestion_id);
-  const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [pending.gap.id] });
-  const { suggestion, gap } = await pendingSuggestion(args.suggestion_id);
-  const before = await loadState();
+  const { suggestion, gap, primary, extraSources, assessmentGapIds, state: before } = await lockGapSuggestionCitations(args.suggestion_id);
   const name = (args.name ?? suggestion.split_name).trim();
   const statement = (args.statement ?? suggestion.split_statement).trim();
   if (!name) throw new TrustedApplicationError("Give the new gap a name.");
@@ -3861,9 +3887,9 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
     settings: gap.settings,
     metadata: gap.metadata,
     origin_gap_id: gap.id,
-    need_provenance: { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id, block_id: suggestion.block_id },
+    need_provenance: { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id, block_id: primary.block_id },
   });
-  for (const source of suggestion.extra_sources) {
+  for (const source of extraSources) {
     await insertNeedForGap({
       gapId: newGapId,
       sourceId: source.source_id,
@@ -3881,7 +3907,7 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
     sourceQuote: suggestion.source_quote,
     role: "supporting",
     actor_function: args.actor_function,
-    provenance: { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id, block_id: suggestion.block_id },
+    provenance: { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id, block_id: primary.block_id },
   });
   await linkRelatedGaps(gap.id, newGapId);
   await closeSuggestion(suggestion.id, "split", { ...args, rationale, result_gap_id: newGapId });
@@ -3918,8 +3944,10 @@ async function linkRelatedGaps(a: string, b: string) {
 }
 
 /** Rejects an overlap: nothing changes in the plan, and the suggestion stays on record. */
-export async function rejectGapSuggestion(args: SuggestionDecision): Promise<GapSuggestion> {
+export const rejectGapSuggestion = atomic(async function rejectGapSuggestion(args: SuggestionDecision): Promise<GapSuggestion> {
   const rationale = requireRationale(args.rationale);
+  await db().select({ id: t.gapSuggestions.id }).from(t.gapSuggestions)
+    .where(eq(t.gapSuggestions.id, args.suggestion_id)).for("update");
   const state = await loadState();
   const suggestion = state.gap_suggestions.find((row) => row.id === args.suggestion_id);
   if (!suggestion) throw new TrustedApplicationError("Suggestion not found.", "not_found", 404);
@@ -3939,7 +3967,7 @@ export async function rejectGapSuggestion(args: SuggestionDecision): Promise<Gap
     signal_kind: "user_rejected_proposal",
   });
   return suggestion;
-}
+});
 
 /** A person has looked at the source that joined a validated gap (KAN-74). */
 export async function clearNewSourceFlag(args: {

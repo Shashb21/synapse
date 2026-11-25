@@ -75,6 +75,36 @@ describe("S3 source matching", () => {
     expect(reparsed).toMatchObject({ kept_cited: 1, inserted: 1, skipped_duplicates: 1 });
     expect(await suggestions.listTacticSourceReferences(parentId)).toEqual(original);
   });
+  it.each(["split", "merge", "merge repeated quote"] as const)("retains one current tactic source reference after %s and re-extraction", async edit => {
+    const background = { heading: "Background", text: "Registry study background.", location: "1" };
+    const evidence = { heading: "Registry", text: sourceQuote, location: "2" };
+    const sections = edit === "split"
+      ? [{ ...background, text: `${background.text} ${sourceQuote}` }]
+      : [edit === "merge repeated quote" ? { ...background, text: sourceQuote } : background, evidence];
+    const source = await persistSourceAndBlocks({
+      title: "Registry notes", source_type: "advisory_board", stakeholder_function: actor.function,
+      text: sections.map(section => section.text).join("\n\n"), sections,
+    });
+    const cite = (blockId: string) => suggestions.attachTacticSource({
+      tactic_id: parentId, source_id: source.source_id, source_quote: sourceQuote, block_id: blockId,
+    });
+    await cite(source.blocks.at(-1)!.id);
+    if (edit === "merge repeated quote") await cite(source.blocks[0]!.id);
+    const original = await suggestions.listTacticSourceReferences(parentId);
+
+    const currentBlockId = edit === "split"
+      ? (await splitSourceBlock({ block_id: source.blocks[0]!.id, at_text: sourceQuote, rationale: "Separate evidence", actor })).second_id
+      : (await mergeSourceBlocks({ block_id: source.blocks[0]!.id, rationale: "Combine related text", actor })).block_id;
+    expect(await suggestions.listTacticSourceReferences(parentId)).toEqual([
+      expect.objectContaining({ id: expect.any(String), block_id: currentBlockId, source_quote: sourceQuote }),
+    ]);
+    await expect(cite(source.blocks.at(-1)!.id)).rejects.toThrow(/source passage changed.*rerun/i);
+    await cite(currentBlockId);
+    const references = await suggestions.listTacticSourceReferences(parentId);
+    expect(references).toHaveLength(1);
+    expect(original.map(reference => reference.id)).toContain(references[0]!.id);
+  });
+
   it("keeps overlaps pending with no unreviewed plan mutation and retains rejected reruns", async () => {
     const before = await loadState(); const row = await proposal();
     expect(row.status).toBe("pending"); expect(await loadState()).toEqual(before);
