@@ -135,6 +135,30 @@ describe("S3 source matching", () => {
     expect(reparsed).toMatchObject({ kept_cited: 1, inserted: 1, skipped_duplicates: 1 });
     expect(reparsed.blocks.map(block => block.text)).toEqual([cited.text, "Updated background."]);
   });
+  it.each(["split", "merge", "merge repeated quote"] as const)("retains a rejected overlap after %s and re-extraction", async edit => {
+    const background = { heading: "Background", text: "Registry study background.", location: "1" };
+    const cited = { heading: "Results", text: sourceQuote, location: "2" };
+    const sections = edit === "split" ? [{ ...background, text: `${background.text} ${sourceQuote}` }]
+      : [edit === "merge repeated quote" ? { ...background, text: sourceQuote } : background, cited];
+    const source = await persistSourceAndBlocks({
+      title: "Registry notes", source_type: "advisory_board", stakeholder_function: actor.function,
+      text: sections.map(section => section.text).join("\n\n"), sections,
+    });
+    sourceId = source.source_id;
+    const existing = edit === "merge repeated quote" ? await proposal(source.blocks[0]!.id) : undefined;
+    const original = await proposal(source.blocks.at(-1)!.id);
+    const rejected = await suggestions.decideTacticSuggestion({
+      id: original.id, decision: "reject", rationale: "Unsupported subgroup", actor,
+    });
+
+    const currentBlockId = edit === "split"
+      ? (await splitSourceBlock({ block_id: original.block_id!, at_text: sourceQuote, rationale: "Separate evidence", actor })).second_id
+      : (await mergeSourceBlocks({ block_id: source.blocks[0]!.id, rationale: "Combine related text", actor })).block_id;
+
+    const moved = { ...rejected, block_id: currentBlockId };
+    expect(await proposal(currentBlockId)).toEqual(moved);
+    expect(await suggestions.listTacticSuggestions()).toEqual(existing ? [moved, existing] : [moved]);
+  });
   it("asks for a rerun if S1 has replaced the passage before S3 saves its overlap", async () => {
     const source = await persistSourceAndBlocks({
       title: "Registry notes", source_type: "advisory_board", stakeholder_function: actor.function,

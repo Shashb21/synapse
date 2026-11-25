@@ -3,7 +3,7 @@ import { withRelationshipChange } from "@/lib/iegp/relationship-change";
 /** S3 source review: immutable model baseline, source provenance and atomic human decisions. */
 import { createHash } from "node:crypto";
 import { reconcileHistoricalCitation } from "@/lib/iegp/engine";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensureCurrentSchemaTables } from "@/lib/iegp/db";
 import * as t from "@/lib/iegp/schema";
@@ -20,20 +20,25 @@ import { tacticSourceReferences, tacticSuggestions } from "./schema";
 export const separateTacticOptionSchema = z.object({name: z.string().trim().min(1), type: z.enum(TACTIC_TYPES), status: z.enum(TACTIC_STATUSES), evidence_question: z.string().trim().min(1)}).strict();
 const quoteKey = (quote: string) => quote.toLowerCase().replace(/\s+/g, " ").trim();
 const blockQuoteKey = (blockId: string, quote: string) => JSON.stringify([blockId, quoteKey(quote)]);
+function suggestionKey(sourceId: string, targetId: string, quote: string, blockId?: string | null) {
+  const parts = [sourceId, targetId, quoteKey(quote)];
+  if (blockId) parts.push(blockId);
+  return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
+}
 
-/** Move block-scoped references within the source editor's locked transaction. */
-export async function moveTacticSourceReferences(
+/** Move tactic citations and suggestion identities within the source editor's locked transaction. */
+export async function moveTacticSourceCitations(
   sourceId: string,
-  originalBlockId: string,
+  original: { id: string; text: string },
   replacements: readonly { id: string; text: string }[],
 ) {
   const transaction = db();
   const references = await transaction.select().from(tacticSourceReferences)
     .where(eq(tacticSourceReferences.source_id, sourceId));
   const referenceKeys = new Set(references.map(reference => JSON.stringify([reference.tactic_id, reference.quote_key])));
-  for (const reference of references.filter(row => row.block_id === originalBlockId)) {
-    const blockId = quotedBlock(replacements, reference.source_quote, originalBlockId);
-    if (!blockId || blockId === originalBlockId) continue;
+  for (const reference of references.filter(row => row.block_id === original.id)) {
+    const blockId = quotedBlock(replacements, reference.source_quote, original.id);
+    if (!blockId || blockId === original.id) continue;
 
     const updatedQuoteKey = blockQuoteKey(blockId, reference.source_quote);
     const key = JSON.stringify([reference.tactic_id, updatedQuoteKey]);
@@ -44,6 +49,20 @@ export async function moveTacticSourceReferences(
         .where(eq(tacticSourceReferences.id, reference.id));
       referenceKeys.add(key);
     }
+  }
+  const suggestions = await transaction.select().from(tacticSuggestions).where(and(
+    eq(tacticSuggestions.source_id, sourceId),
+    sql`${tacticSuggestions.payload}->>'block_id' = ${original.id}`,
+  )).for("update");
+  for (const stored of suggestions) {
+    const suggestion = stored.payload as TacticSuggestion;
+    if (!quotedBlock([original], suggestion.source_quote)) continue;
+    const blockId = quotedBlock(replacements, suggestion.source_quote, original.id);
+    if (!blockId || blockId === original.id) continue;
+    await transaction.update(tacticSuggestions).set({
+      source_key: suggestionKey(sourceId, stored.target_tactic_id, suggestion.source_quote, blockId),
+      payload: { ...suggestion, block_id: blockId },
+    }).where(eq(tacticSuggestions.id, stored.id));
   }
 }
 function requireActor(actor: Actor) {
@@ -105,10 +124,8 @@ export async function createTacticSuggestion(args: {
   const expansion = expansionScopeSchema.parse(args.expansion), separate = separateTacticOptionSchema.parse(args.separate);
   if (![args.run_id, args.document_id, args.source_quote, args.shared_scope, args.new_scope].every(s => s.trim())) throw new TrustedApplicationError("Overlap requires source lineage, quote, shared and added scope.");
   const normalizedQuote = quoteKey(args.source_quote);
-  const identity = [args.source_id, args.target_tactic_id, normalizedQuote];
-  const keyFor = (parts: string[]) => createHash("sha256").update(JSON.stringify(parts)).digest("hex");
-  const legacyKey = keyFor(identity);
-  const source_key = args.block_id ? keyFor([...identity, args.block_id]) : legacyKey;
+  const legacyKey = suggestionKey(args.source_id, args.target_tactic_id, args.source_quote);
+  const source_key = args.block_id ? suggestionKey(args.source_id, args.target_tactic_id, args.source_quote, args.block_id) : legacyKey;
   await ensureTacticSuggestionSchema();
   return db().transaction(async tx => {
     // S1 reparsing locks the same source before replacing any blocks.
@@ -117,7 +134,10 @@ export async function createTacticSuggestion(args: {
     const [parentRow] = await tx.select().from(t.tactics).where(eq(t.tactics.id, args.target_tactic_id)).for("update");
     if (!parentRow) throw new TrustedApplicationError("Target tactic not found in this workspace.", "not_found", 404);
     const state = await readState(tx), parent = state.tactics.find(p => p.id === args.target_tactic_id)!;
-    const [existing] = await tx.select().from(tacticSuggestions).where(eq(tacticSuggestions.source_key, source_key));
+    // A merge can bring together previously distinct suggestions. Keep their
+    // histories and return a completed review first when extraction sees one block.
+    const [existing] = await tx.select().from(tacticSuggestions).where(eq(tacticSuggestions.source_key, source_key))
+      .orderBy(sql`${tacticSuggestions.status} = 'pending'`, tacticSuggestions.created_at, tacticSuggestions.id).limit(1);
     if (existing) return existing.payload as TacticSuggestion;
     if (args.block_id) {
       const [legacy] = await tx.select().from(tacticSuggestions).where(eq(tacticSuggestions.source_key, legacyKey));
@@ -177,8 +197,10 @@ export async function decideTacticSuggestion(args: {id: string; decision: "expan
   if (!["expand", "separate", "reject"].includes(args.decision)) throw new TrustedApplicationError("Unknown tactic suggestion decision.");
   await ensureTacticSuggestionSchema();
   const updated = await withRelationshipChange({ actor_name: args.actor.name, actor_function: args.actor.function, rationale }, () => db().transaction(async tx => {
+    // The source editor locks the source before touching any suggestion rows.
+    const owner = tx.select({ source_id: tacticSuggestions.source_id }).from(tacticSuggestions).where(eq(tacticSuggestions.id, args.id));
+    const [source] = await tx.select().from(t.sources).where(inArray(t.sources.id, owner)).for("update");
     const row = await pending(tx, args.id, args.expected_version);
-    const [source] = await tx.select().from(t.sources).where(eq(t.sources.id, row.source_id)).for("update");
     if (!source) throw new TrustedApplicationError("Documented source no longer exists in this workspace.");
     const [parent] = await tx.select().from(t.tactics).where(eq(t.tactics.id, row.target_tactic_id)).for("update");
     if (!parent) throw new TrustedApplicationError("Target tactic no longer exists in this workspace.");

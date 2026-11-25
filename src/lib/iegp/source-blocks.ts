@@ -7,7 +7,7 @@ import { ACTOR_FUNCTIONS, SOURCE_TYPES, type ActorFunction, type SourceType } fr
 import { appendAudit, persistSourceAndBlocks, loadState, lockAssessmentOwners, invalidateRelationshipAssessments } from "./store";
 import type { IegpState } from "./types";
 import { recordEdit } from "@/modules/kernel/edit-records";
-import { moveTacticSourceReferences } from "@/modules/stages/s3-tactic-extract/suggestions";
+import { moveTacticSourceCitations } from "@/modules/stages/s3-tactic-extract/suggestions";
 import { tacticSourceReferences, tacticSuggestions } from "@/modules/stages/s3-tactic-extract/schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { Actor } from "@/modules/kernel/contracts";
@@ -461,7 +461,7 @@ export const splitSourceBlock = assessmentSourceEdit(async function splitSourceB
   const secondRow: BlockRow = { ...toBlock(block), id: nextHumanId(block.source_id), text: second };
   await db().update(t.sourceBlocks).set({ text: first }).where(eq(t.sourceBlocks.id, block.id));
   await db().insert(t.sourceBlocks).values(secondRow);
-  await moveTacticSourceReferences(block.source_id, block.id, [{ id: block.id, text: first }, secondRow]);
+  await moveTacticSourceCitations(block.source_id, block, [{ id: block.id, text: first }, secondRow]);
   await markHuman({ block: toBlock(block), current_text: first, position: block.position, actor: args.actor });
   await markHuman({ block: secondRow, current_text: second, origin: "human", position: positionAfter(blocks, at), actor: args.actor });
   await logEdit({
@@ -485,7 +485,7 @@ export const mergeSourceBlocks = assessmentSourceEdit(async function mergeSource
   const merged = `${block.text}\n\n${next.text}`;
   await db().update(t.sourceBlocks).set({ text: merged }).where(eq(t.sourceBlocks.id, block.id));
   await db().delete(t.sourceBlocks).where(eq(t.sourceBlocks.id, next.id));
-  await moveTacticSourceReferences(block.source_id, next.id, [{ id: block.id, text: merged }]);
+  await moveTacticSourceCitations(block.source_id, next, [{ id: block.id, text: merged }]);
   await markHuman({ block: toBlock(block), current_text: merged, position: block.position, actor: args.actor });
   await markHuman({ block: toBlock(next), current_text: next.text, position: next.position, deleted: true, actor: args.actor });
   await logEdit({

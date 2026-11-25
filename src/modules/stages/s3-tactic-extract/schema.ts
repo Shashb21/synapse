@@ -1,4 +1,4 @@
-import { integer, jsonb, pgTable, text } from "drizzle-orm/pg-core";
+import { index, integer, jsonb, pgTable, text } from "drizzle-orm/pg-core";
 
 /** Module-owned table: tactic proposals with critic score and judge verdict. */
 export const tacticCandidates = pgTable("tactic_candidates", {
@@ -49,11 +49,11 @@ export const tacticSourceReferences = pgTable("tactic_source_references", {
   quote_key: text("quote_key").notNull(), created_at: text("created_at").notNull(),
 });
 export const tacticSuggestions = pgTable("tactic_suggestions", {
-  id: text("id").primaryKey(), source_key: text("source_key").notNull().unique(),
+  id: text("id").primaryKey(), source_key: text("source_key").notNull(),
   target_tactic_id: text("target_tactic_id").notNull(), source_id: text("source_id").notNull(),
   status: text("status").notNull(), payload: jsonb("payload").notNull(),
   created_at: text("created_at").notNull(), updated_at: text("updated_at").notNull(),
-});
+}, table => [index("tactic_suggestions_source_key_idx").on(table.source_key)]);
 export const TACTIC_MATCHING_DDL = `
 ALTER TABLE tactic_candidates ADD COLUMN IF NOT EXISTS match text NOT NULL DEFAULT 'new';
 ALTER TABLE tactic_candidates ADD COLUMN IF NOT EXISTS target_tactic_id text;
@@ -66,8 +66,10 @@ CREATE TABLE IF NOT EXISTS tactic_source_references (
 ALTER TABLE tactic_source_references ADD COLUMN IF NOT EXISTS block_id text;
 ALTER TABLE tactic_source_references ADD COLUMN IF NOT EXISTS observed_block_ids jsonb;
 CREATE TABLE IF NOT EXISTS tactic_suggestions (
- id text PRIMARY KEY, source_key text NOT NULL UNIQUE, target_tactic_id text NOT NULL,
+ id text PRIMARY KEY, source_key text NOT NULL, target_tactic_id text NOT NULL,
  source_id text NOT NULL, status text NOT NULL, payload jsonb NOT NULL,
  created_at text NOT NULL, updated_at text NOT NULL
 );
+CREATE INDEX IF NOT EXISTS tactic_suggestions_source_key_idx ON tactic_suggestions (source_key);
+ALTER TABLE tactic_suggestions DROP CONSTRAINT IF EXISTS tactic_suggestions_source_key_key;
 `;
