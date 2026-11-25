@@ -63,6 +63,7 @@ export const sourceDroppedUnits = pgTable("source_dropped_units", {
   location: text("location").notNull(),
   reason: text("reason").notNull(),
   text: text("text").notNull(),
+  occurrence_id: text("occurrence_id"),
   restored_block_id: text("restored_block_id"),
   created_at: text("created_at").notNull(),
   source_generation: text("source_generation"),
@@ -512,16 +513,25 @@ export async function listDroppedSourceUnits(source_id: string) {
 
 export async function persistDroppedSourceUnits(
   source_id: string,
-  units: { location: string; reason: string; text: string }[],
+  units: { location: string; reason: string; text: string; occurrence_id?: string }[],
 ) {
   const existing = await listDroppedSourceUnits(source_id);
   const source_generation = await generationOf(source_id);
   const stale = existing.filter((row) => !row.restored_block_id).map((row) => row.id);
   if (stale.length) await db().delete(sourceDroppedUnits).where(inArray(sourceDroppedUnits.id, stale));
-  const restored = new Set(existing.filter((row) => row.restored_block_id).map((row) => squashText(row.text)));
+  const restored = existing.filter((row) => row.restored_block_id);
+  const matchedRestored = new Set<string>();
   const created_at = nowIso();
   for (const unit of units) {
-    if (restored.has(squashText(unit.text))) continue;
+    const matchingRestored = restored.find((row) => {
+      if (matchedRestored.has(row.id)) return false;
+      if (unit.occurrence_id && row.occurrence_id) return row.occurrence_id === unit.occurrence_id;
+      return squashText(row.text) === squashText(unit.text);
+    });
+    if (matchingRestored) {
+      matchedRestored.add(matchingRestored.id);
+      continue;
+    }
     await db().insert(sourceDroppedUnits).values({ id: newId("drop"), source_id, ...unit, restored_block_id: null, created_at, source_generation });
   }
 }
@@ -762,7 +772,7 @@ export type ReparseResult = {
  */
 export const reparseSourceBlocks = assessmentSourceEdit(async function reparseSourceBlocks(args: {
   source_id: string;
-  sections: { heading: string; text: string; location: string }[];
+  sections: { heading: string; text: string; location: string; split_unit?: { index: number; text: string } }[];
 }): Promise<ReparseResult> {
   await requireSourceRow(args.source_id);
   const current = await listSourceBlocks(args.source_id);
@@ -809,11 +819,26 @@ export const reparseSourceBlocks = assessmentSourceEdit(async function reparseSo
     await db().delete(t.sourceBlocks).where(and(eq(t.sourceBlocks.source_id, args.source_id), inArray(t.sourceBlocks.id, replaced)));
     await db().delete(sourceBlockMeta).where(and(inArray(sourceBlockMeta.block_id, replaced), eq(sourceBlockMeta.locked, false)));
   }
-  const covered = new Set<string>(kept.map((b) => squashText(b.text)));
+  const covered = new Map<string, number>();
+  const cover = (text: string) => {
+    const key = squashText(text);
+    covered.set(key, (covered.get(key) ?? 0) + 1);
+  };
+  kept.forEach((block) => cover(block.text));
   for (const meta of metas) {
     if (!meta.locked) continue;
-    if (meta.original_text) covered.add(squashText(meta.original_text));
-    if (meta.deleted) covered.add(squashText(meta.current_text));
+    if (meta.original_text && squashText(meta.original_text) !== squashText(meta.current_text)) cover(meta.original_text);
+    if (meta.deleted) cover(meta.current_text);
+  }
+  // Reconcile a legacy whole block before checking individual new slices.
+  // Consume its text once per raw occurrence, even when the model dropped part of it.
+  const matchedSplitUnits = new Map<number, boolean>();
+  for (const { split_unit } of args.sections) {
+    if (!split_unit || matchedSplitUnits.has(split_unit.index)) continue;
+    const key = squashText(split_unit.text);
+    const remaining = covered.get(key) ?? 0;
+    matchedSplitUnits.set(split_unit.index, remaining > 0);
+    if (remaining > 0) covered.set(key, remaining - 1);
   }
   const usedIds = new Set([...kept.map((b) => b.id), ...metas.map((m) => m.block_id)]);
   let ordinal = Math.max(0, ...[...usedIds].map(idOrdinal).filter((n) => n < 1_000_000));
@@ -821,7 +846,14 @@ export const reparseSourceBlocks = assessmentSourceEdit(async function reparseSo
   let inserted = 0;
   for (const [index, section] of args.sections.entries()) {
     if (!section.text.trim()) continue;
-    if (covered.has(squashText(section.text))) {
+    if (section.split_unit && matchedSplitUnits.get(section.split_unit.index)) {
+      skipped_duplicates += 1;
+      continue;
+    }
+    const key = squashText(section.text);
+    const remaining = covered.get(key) ?? 0;
+    if (remaining > 0) {
+      covered.set(key, remaining - 1);
       skipped_duplicates += 1;
       continue;
     }
