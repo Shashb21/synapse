@@ -47,6 +47,7 @@ export async function moveTacticSourceCitations(
   sourceId: string,
   original: { id: string; text: string },
   replacements: readonly { id: string; text: string; heading: string; location: string }[],
+  recordConsolidation: (removedId: string, retainedId: string) => void,
 ) {
   const transaction = db();
   const movedBlock = (quote: string) => {
@@ -57,17 +58,21 @@ export async function moveTacticSourceCitations(
   };
   const references = await transaction.select().from(tacticSourceReferences)
     .where(eq(tacticSourceReferences.source_id, sourceId));
-  const referenceKeys = new Set(references.map(reference => JSON.stringify([reference.tactic_id, reference.block_id, squashText(reference.source_quote)])));
+  const referenceIds = new Map(references.map(reference => [
+    JSON.stringify([reference.tactic_id, reference.block_id, squashText(reference.source_quote)]), reference.id,
+  ]));
   for (const reference of references.filter(row => row.block_id === original.id)) {
     const block = movedBlock(reference.source_quote);
     if (!block) continue;
     const key = JSON.stringify([reference.tactic_id, block.id, squashText(reference.source_quote)]);
-    if (referenceKeys.has(key)) {
+    const retainedId = referenceIds.get(key);
+    if (retainedId) {
       await transaction.delete(tacticSourceReferences).where(eq(tacticSourceReferences.id, reference.id));
+      recordConsolidation(reference.id, retainedId);
     } else {
       await transaction.update(tacticSourceReferences).set({ block_id: block.id, quote_key: groundedQuoteKey(reference.source_quote), source_context: { heading: block.heading, location: block.location } })
         .where(eq(tacticSourceReferences.id, reference.id));
-      referenceKeys.add(key);
+      referenceIds.set(key, reference.id);
     }
   }
   const suggestions = await transaction.select().from(tacticSuggestions).where(and(

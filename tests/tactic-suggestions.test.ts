@@ -126,6 +126,22 @@ describe("S3 source matching", () => {
     expect(reparsed).toMatchObject({ kept_cited: 1, inserted: 1, skipped_duplicates: 1 });
     expect(await suggestions.listTacticSourceReferences(parentId)).toEqual(original);
   });
+  it.each(["fictional-subgroup", "fictional-subgroup-copy"])("protects the individual tactic citation in %s", async blockId => {
+    const copyId = "fictional-subgroup-copy";
+    await db().insert(t.sourceBlocks).values({ id: copyId, source_id: sourceId, heading: "Appendix", location: "p.2", text: sourceQuote });
+    for (const id of ["fictional-subgroup", copyId]) {
+      await suggestions.attachTacticSource({ tactic_id: parentId, source_id: sourceId, source_quote: sourceQuote, block_id: id });
+    }
+    const before = await suggestions.listTacticSourceReferences(parentId);
+    expect(before.map(reference => reference.block_id).sort()).toEqual(["fictional-subgroup", copyId]);
+
+    await expect(deleteSourceBlock({ block_id: blockId, rationale: "Remove repeated text", actor }))
+      .rejects.toBeInstanceOf(SourceQuoteConflictError);
+
+    expect(await suggestions.listTacticSourceReferences(parentId)).toEqual(before);
+    expect((await loadState()).blocks.some(block => block.id === blockId)).toBe(true);
+  });
+
   it.each(["split", "merge", "merge repeated quote"] as const)("retains one current tactic source reference after %s and re-extraction", async edit => {
     const background = { heading: "Background", text: "Registry study background.", location: "1" };
     const evidence = { heading: "Registry", text: sourceQuote, location: "2" };

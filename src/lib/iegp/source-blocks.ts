@@ -155,7 +155,8 @@ async function metasFor(source_id: string): Promise<MetaRow[]> {
   return db().select().from(sourceBlockMeta).where(eq(sourceBlockMeta.source_id, source_id));
 }
 
-type SourceQuote = QuoteDependent & { block_id: string | null };
+type SourceQuote = QuoteDependent & { citationKey: string; block_id: string | null };
+type RecordCitationConsolidation = (removedId: string, retainedId: string) => void;
 
 /** Use exact identity for model records and quote-only matching for older records. */
 function citesBlock(citation: SourceQuote, block: BlockRow): boolean {
@@ -179,7 +180,7 @@ async function quotesFor(source_id: string): Promise<SourceQuote[]> {
     d.select({ id: t.needs.id, quote: t.needs.source_quote, block_id: t.needs.block_id,
       run_id: t.needs.run_id, source_context: t.needs.source_context })
       .from(t.needs).where(eq(t.needs.source_id, source_id)),
-    d.select({ id: tacticSourceReferences.tactic_id, quote: tacticSourceReferences.source_quote,
+    d.select({ id: tacticSourceReferences.tactic_id, referenceId: tacticSourceReferences.id, quote: tacticSourceReferences.source_quote,
       block_id: tacticSourceReferences.block_id })
       .from(tacticSourceReferences).where(eq(tacticSourceReferences.source_id, source_id)),
     d.select().from(t.gapSuggestions).where(eq(t.gapSuggestions.status, "pending")),
@@ -194,20 +195,25 @@ async function quotesFor(source_id: string): Promise<SourceQuote[]> {
   ]);
   const pendingGapQuotes = gapSuggestions.flatMap((suggestion) =>
     [suggestion, ...(Array.isArray(suggestion.extra_sources) ? suggestion.extra_sources : [])]
-      .filter((source) => source.source_id === source_id)
-      .map((source) => ({ id: suggestion.id, quote: source.source_quote, block_id: source.block_id ?? null })),
+      .map((source, index) => ({
+        id: suggestion.id, citationKey: `gap-suggestion:${suggestion.id}:${index}`,
+        quote: source.source_quote, block_id: source.block_id ?? null, source_id: source.source_id,
+      }))
+      .filter((source) => source.source_id === source_id),
   );
   const citations = [
-    ...needs.map((need) => ({ ...need, block_id: need.run_id || need.source_context ? need.block_id : null })),
-    ...references,
-    ...legacyTactics,
+    ...needs.map((need) => ({
+      ...need, citationKey: `need:${need.id}`, block_id: need.run_id || need.source_context ? need.block_id : null,
+    })),
+    ...references.map((reference) => ({ ...reference, citationKey: `tactic-reference:${reference.referenceId}` })),
+    ...legacyTactics.map((tactic) => ({ ...tactic, citationKey: `tactic:${tactic.id}` })),
     ...pendingGapQuotes,
     ...tacticSuggestionsForSource.filter(({ status }) => status !== "rejected").map(({ payload }) => {
       const row = payload as TacticSuggestion;
-      return { id: row.id, quote: row.source_quote, block_id: row.block_id ?? null };
+      return { id: row.id, citationKey: `tactic-suggestion:${row.id}`, quote: row.source_quote, block_id: row.block_id ?? null };
     }),
   ].filter((row) => row.quote?.trim());
-  return [...new Map(citations.map((row) => [JSON.stringify([row.id, row.block_id, row.quote]), row])).values()];
+  return citations;
 }
 
 /** Blocks of one source in reading order, with human/model provenance and citing needs. */
@@ -337,7 +343,7 @@ function toBlock(view: SourceBlockView): BlockRow {
 
 /** Keep source edits, provenance logs and affected assessments in the same transaction. */
 function assessmentSourceEdit<A extends { source_id?: string; block_id?: string; actor?: Actor }, R>(
-  edit: (args: A) => Promise<R>,
+  edit: (args: A, recordConsolidation: RecordCitationConsolidation) => Promise<R>,
   preserveSupportingText = false,
 ): (args: A) => Promise<R> {
   return async (args: A) => {
@@ -352,15 +358,22 @@ function assessmentSourceEdit<A extends { source_id?: string; block_id?: string;
       const before = await loadState();
       const quotes = await quotesFor(sourceId);
       const exactCitations = quotes.filter((quote) => quote.block_id && before.blocks.some((block) => citesBlock(quote, block)));
-      const result = await edit(args);
+      const consolidated = new Map<string, string>();
+      const result = await edit(args, (removedId, retainedId) => {
+        consolidated.set(`tactic-reference:${removedId}`, `tactic-reference:${retainedId}`);
+      });
       // Resolve citations against the actual post-edit reading order. A retained
       // legacy passage may span newly split blocks, but must still occur verbatim
       // (apart from whitespace); changed or missing support drops the retention.
       const blocks = await listSourceBlocks(sourceId);
-      const currentCitations = await quotesFor(sourceId);
-      const lost = exactCitations.filter(quote => !currentCitations.some(current =>
-        current.id === quote.id && current.quote === quote.quote && current.block_id &&
-        blocks.some(block => citesBlock(current, block))));
+      const currentCitations = new Map((await quotesFor(sourceId)).map(quote => [quote.citationKey, quote]));
+      const lost = exactCitations.filter(quote => {
+        const retainedKey = consolidated.get(quote.citationKey);
+        const current = currentCitations.get(retainedKey ?? quote.citationKey);
+        return !current?.block_id ||
+          (retainedKey ? squashText(current.quote) !== squashText(quote.quote) : current.quote !== quote.quote) ||
+          !blocks.some(block => citesBlock(current, block));
+      });
       if (lost.length) throw new SourceQuoteConflictError(lost);
       const sourceText = squashText(blocks.map(block => block.text).join(" "));
       for (const need of before.needs.filter(need => need.source_id === sourceId)) {
@@ -502,7 +515,9 @@ export const deleteSourceBlock = assessmentSourceEdit(async function deleteSourc
 });
 
 /** Move citations only when the entire quotation has one destination. */
-async function moveSplitOrMergedCitations(sourceId: string, original: BlockRow, replacements: BlockRow[]) {
+async function moveSplitOrMergedCitations(
+  sourceId: string, original: BlockRow, replacements: BlockRow[], recordConsolidation: RecordCitationConsolidation,
+) {
   const movedCitation = (quote: string) => {
     if (!validateQuoteAgainstBlock({ block: original, quote }).ok) return;
     if (replacements.some(block => block.id === original.id && validateQuoteAgainstBlock({ block, quote }).ok)) return;
@@ -542,7 +557,7 @@ async function moveSplitOrMergedCitations(sourceId: string, original: BlockRow, 
         .where(eq(t.gapSuggestions.id, suggestion.id));
     }
   }
-  await moveTacticSourceCitations(sourceId, original, replacements);
+  await moveTacticSourceCitations(sourceId, original, replacements, recordConsolidation);
 }
 
 export const splitSourceBlock = assessmentSourceEdit(async function splitSourceBlock(args: {
@@ -551,7 +566,7 @@ export const splitSourceBlock = assessmentSourceEdit(async function splitSourceB
   at_text?: string;
   rationale: string;
   actor: Actor;
-}) {
+}, recordConsolidation) {
   const rationale = requireEditRationale(args.rationale);
   const { block, blocks } = await requireBlock(args.block_id);
   const [first, second] = splitAtOffset(block.text, resolveSplitOffset(block.text, args));
@@ -564,7 +579,7 @@ export const splitSourceBlock = assessmentSourceEdit(async function splitSourceB
   const secondRow: BlockRow = { ...toBlock(block), id: nextHumanId(block.source_id), text: second };
   await db().update(t.sourceBlocks).set({ text: first }).where(eq(t.sourceBlocks.id, block.id));
   await db().insert(t.sourceBlocks).values(secondRow);
-  await moveSplitOrMergedCitations(block.source_id, block, [{ ...block, text: first }, secondRow]);
+  await moveSplitOrMergedCitations(block.source_id, block, [{ ...block, text: first }, secondRow], recordConsolidation);
   await markHuman({ block: toBlock(block), current_text: first, position: block.position, actor: args.actor });
   await markHuman({ block: secondRow, current_text: second, origin: "human", position: positionAfter(blocks, at), actor: args.actor });
   await logEdit({
@@ -580,7 +595,9 @@ export const splitSourceBlock = assessmentSourceEdit(async function splitSourceB
   return { first_id: block.id, second_id: secondRow.id };
 }, true);
 
-export const mergeSourceBlocks = assessmentSourceEdit(async function mergeSourceBlocks(args: { block_id: string; rationale: string; actor: Actor }) {
+export const mergeSourceBlocks = assessmentSourceEdit(async function mergeSourceBlocks(
+  args: { block_id: string; rationale: string; actor: Actor }, recordConsolidation,
+) {
   const rationale = requireEditRationale(args.rationale);
   const { block, blocks } = await requireBlock(args.block_id);
   const next = blocks[blocks.findIndex((b) => b.id === block.id) + 1];
@@ -588,7 +605,7 @@ export const mergeSourceBlocks = assessmentSourceEdit(async function mergeSource
   const merged = `${block.text}\n\n${next.text}`;
   await db().update(t.sourceBlocks).set({ text: merged }).where(eq(t.sourceBlocks.id, block.id));
   await db().delete(t.sourceBlocks).where(eq(t.sourceBlocks.id, next.id));
-  await moveSplitOrMergedCitations(block.source_id, next, [{ ...block, text: merged }]);
+  await moveSplitOrMergedCitations(block.source_id, next, [{ ...block, text: merged }], recordConsolidation);
   await markHuman({ block: toBlock(block), current_text: merged, position: block.position, actor: args.actor });
   await markHuman({ block: toBlock(next), current_text: next.text, position: next.position, deleted: true, actor: args.actor });
   await logEdit({
