@@ -243,6 +243,57 @@ describe("S1 source blocks: human edit, add, split, merge, delete", () => {
     expect(state.sources.find((s) => s.id === source_id)!.stakeholder_function).toBe("hta");
   });
 
+  it("restores the second of two identical dropped occurrences without suppressing the first", async () => {
+    const { source_id } = await source("duplicate-drop");
+    const text = "Repeated footer text.";
+    await persistDroppedSourceUnits(source_id, [
+      { location: "p.9", reason: "Footer", text, occurrence_id: "u1" },
+      { location: "p.10", reason: "Footer", text, occurrence_id: "u2" },
+    ]);
+    const dropped = await listDroppedSourceUnits(source_id);
+    await restoreDroppedSourceUnit({ dropped_id: dropped.find((unit) => unit.occurrence_id === "u2")!.id, rationale: "Relevant result", actor: ACTOR });
+
+    await persistDroppedSourceUnits(source_id, [
+      { location: "p.9", reason: "Footer", text, occurrence_id: "u1" },
+      { location: "p.10", reason: "Footer", text, occurrence_id: "u2" },
+    ]);
+
+    const remaining = await listDroppedSourceUnits(source_id);
+    expect(remaining).toHaveLength(2);
+    expect(remaining.find((unit) => unit.restored_block_id)?.occurrence_id).toBe("u2");
+    expect(remaining.find((unit) => !unit.restored_block_id)).toMatchObject({ occurrence_id: "u1", text });
+  });
+
+  it("matches legacy dropped rows by normalized text one occurrence at a time", async () => {
+    const { source_id } = await source("legacy-duplicate-drop");
+    const text = "Legacy repeated footer text.";
+    await persistDroppedSourceUnits(source_id, [
+      { location: "p.9", reason: "Footer", text },
+      { location: "p.10", reason: "Footer", text },
+    ]);
+    const dropped = await listDroppedSourceUnits(source_id);
+    await restoreDroppedSourceUnit({ dropped_id: dropped[1]!.id, rationale: "Relevant result", actor: ACTOR });
+
+    await persistDroppedSourceUnits(source_id, [
+      { location: "p.9", reason: "Footer", text },
+      { location: "p.10", reason: "Footer", text },
+    ]);
+
+    const remaining = await listDroppedSourceUnits(source_id);
+    expect(remaining.filter((unit) => !unit.restored_block_id)).toHaveLength(1);
+  });
+
+  it("keeps whitespace-only dropped units verbatim but does not restore them as blank blocks", async () => {
+    const { source_id } = await source("whitespace-drop");
+    await persistDroppedSourceUnits(source_id, [{ location: "p.11", reason: "Formatting", text: "   ", occurrence_id: "u1" }]);
+    const [unit] = await listDroppedSourceUnits(source_id);
+
+    await expect(restoreDroppedSourceUnit({ dropped_id: unit!.id, rationale: "Inspect formatting", actor: ACTOR })).rejects.toThrow(
+      /Block text is required/,
+    );
+    expect(await listDroppedSourceUnits(source_id)).toEqual(expect.arrayContaining([expect.objectContaining({ text: "   ", restored_block_id: null })]));
+  });
+
   it("creates a typed source with human-entered blocks via the API, no AI", async () => {
     const res = await post({
       action: "manual_source",
@@ -261,6 +312,66 @@ describe("S1 source blocks: human edit, add, split, merge, delete", () => {
     const body = (await get.json()) as { stakeholder: { set_by: string }; edits: unknown[] };
     expect(body.stakeholder.set_by).toBe("human");
     expect(body.edits.length).toBeGreaterThan(0);
+  });
+});
+
+describe("S1 re-parse preserves duplicate occurrences", () => {
+  beforeAll(async () => {
+    await resetDemoSetup();
+  }, 60_000);
+
+  it.each(["edited", "deleted"] as const)("preserves a legacy %s block when its raw unit is split", async (decision) => {
+    const first = "Original evidence. ".repeat(700);
+    const second = "Additional observations. ".repeat(300);
+    const text = first + second;
+    const { source_id, blocks } = await persistSourceAndBlocks({
+      title: "Oversized legacy evidence", source_type: "stakeholder_interview",
+      stakeholder_function: "medical_affairs", text,
+      sections: [{ heading: "Evidence", text, location: "p.1" }],
+    });
+    const block_id = blocks[0]!.id;
+    const corrected = "Reviewed evidence replaces the original observations.";
+    if (decision === "edited") {
+      await editSourceBlock({ block_id, text: corrected, rationale: "Correct the source", actor: ACTOR });
+    } else {
+      await deleteSourceBlock({ block_id, rationale: "Remove duplicate evidence", actor: ACTOR });
+    }
+
+    const slices = (index: number) => [first, second].map((text) => ({
+      heading: "Evidence", text, location: "p.1", split_unit: { index, text: first + second },
+    }));
+    const identicalIndependentOccurrence = decision === "edited" ? slices(1) : [];
+    const result = await reparseSourceBlocks({ source_id, sections: [...slices(0), ...identicalIndependentOccurrence] });
+    expect(result.skipped_duplicates).toBe(2);
+    expect(result.inserted).toBe(identicalIndependentOccurrence.length);
+    expect(result.blocks.map(block => block.text)).toEqual(decision === "edited" ? [corrected, first, second] : []);
+  });
+
+  it("keeps one new peer when one identical block occurrence is human-retained", async () => {
+    const repeated = "Repeated evidence.";
+    const { source_id, blocks } = await persistSourceAndBlocks({
+      title: "Duplicate reparse",
+      source_type: "stakeholder_interview",
+      stakeholder_function: "medical_affairs",
+      text: `${repeated}\n\n${repeated}`,
+      sections: [
+        { heading: "Evidence", text: repeated, location: "p.1" },
+        { heading: "Evidence", text: repeated, location: "p.2" },
+      ],
+    });
+    await editSourceBlock({ block_id: blocks[0]!.id, text: `${repeated} (reviewed)`, rationale: "Review duplicate", actor: ACTOR });
+
+    const result = await reparseSourceBlocks({
+      source_id,
+      sections: [
+        { heading: "Evidence", text: `${repeated} (reviewed)`, location: "p.1" },
+        { heading: "Evidence", text: `${repeated} (reviewed)`, location: "p.2" },
+      ],
+    });
+
+    expect(result.skipped_duplicates).toBe(1);
+    expect(result.inserted).toBe(1);
+    expect((await listSourceBlocks(source_id)).filter((block) => block.text === `${repeated} (reviewed)`).length).toBe(2);
   });
 });
 

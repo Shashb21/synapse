@@ -100,6 +100,7 @@ import {
 } from "@/modules/stages/s2-gap-extract/suggestions";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 /** Actions that replace the whole workspace: its owner only, on top of the reset_workspace capability. */
 const WORKSPACE_OWNER_ACTIONS = new Set(["reset", "load_demo", "clear_ingested_files"]);

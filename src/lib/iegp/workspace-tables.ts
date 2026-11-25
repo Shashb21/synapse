@@ -96,7 +96,8 @@ export const SOURCE_BLOCKS_DDL = [
   )`,
   `CREATE TABLE IF NOT EXISTS source_dropped_units (
     id text PRIMARY KEY, source_id text NOT NULL, location text NOT NULL,
-    reason text NOT NULL, text text NOT NULL, restored_block_id text, created_at text NOT NULL
+    reason text NOT NULL, text text NOT NULL, occurrence_id text,
+    restored_block_id text, created_at text NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS source_stakeholder_meta (
     source_id text PRIMARY KEY, llm_function text, llm_rationale text, llm_at text,
@@ -104,6 +105,7 @@ export const SOURCE_BLOCKS_DDL = [
   )`,
   "ALTER TABLE source_block_meta ADD COLUMN IF NOT EXISTS source_generation text",
   "ALTER TABLE source_dropped_units ADD COLUMN IF NOT EXISTS source_generation text",
+  "ALTER TABLE source_dropped_units ADD COLUMN IF NOT EXISTS occurrence_id text",
   "ALTER TABLE source_stakeholder_meta ADD COLUMN IF NOT EXISTS source_generation text",
 ];
 

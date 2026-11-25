@@ -27,6 +27,7 @@ import { advanceIngest } from "@/app/api/iegp/ingest-pipeline";
 import { getRun } from "@/modules/kernel/observability";
 import { HISTORICAL_FAILURE_MESSAGE } from "@/modules/kernel/failure-presentation";
 import { moduleRuns } from "@/modules/kernel/schema";
+import * as routing from "@/modules/kernel/routing";
 import { runStage } from "@/modules/kernel/run";
 import { findProvider } from "@/modules/llm/provider";
 import { listParsedDocuments } from "@/modules/stages/s1-parse/module";
@@ -51,6 +52,20 @@ async function post(body: Record<string, unknown>) { const response = await POST
 async function parse() { await runStage({ stage: "S0", input: { files: [file] }, actor, role: "medical_affairs" }); return runStage({ stage: "S1", input: {}, actor, role: "medical_affairs" }); }
 async function comparison() { const { listSourceComparisons } = await import("@/lib/ingest/compare-source"); return (await listSourceComparisons())[0]; }
 function outcome(input: ComparisonInput, judgment: ComparisonOutcome["judgment"] = "conflict", extra: Partial<ComparisonOutcome> = {}): ComparisonOutcome { return { block_id: input.blocks[0].id, passage: "The study includes children only.", match: "same", judgment, gap_id: gap, tactic_id: tactic, coverage_id: coverage, rationale: "The source challenges the adult population", ...extra }; }
+/** Close the backend holding this fixture's advisory lock, even if other tests use the same server. */
+async function disconnectComparisonWorker(runId: string) {
+ const key = `source-comparison-run:public:${runId}`;
+ const [worker] = await db().execute(sql`
+   select pid from pg_locks
+   where locktype = 'advisory' and granted and pid <> pg_backend_pid()
+   and database = (select oid from pg_database where datname = current_database())
+   and classid::bigint = ((hashtextextended(${key}, 0) >> 32) & 4294967295)
+   and objid::bigint = (hashtextextended(${key}, 0) & 4294967295)
+ `);
+ expect(worker?.pid).toEqual(expect.any(Number));
+ const [disconnected] = await db().execute(sql`select pg_terminate_backend(${worker.pid}::integer, 5000) as terminated`);
+ expect(disconnected?.terminated).toBe(true);
+}
 beforeEach(async () => {
  jar.values.clear();
  await store.resetDemoSetup(); await wipePlatform(["source_files", "parsed_documents"]); await setAiEnabled({ enabled: true, actor_name: actor.name });
@@ -88,6 +103,67 @@ describe("KAN-146 incoming document comparison", () => {
   } else expect(run!.output).toMatchObject({ outcomes: [expect.objectContaining({ coverage_id: coverage })] });
  });
 
+ it("skips the provider when the comparison lock connection closes before the call", async () => {
+  const completionFor = routing.completionFor;
+  let finish!: () => void;
+  const completeSettled = new Promise<void>(resolve => { finish = resolve; });
+  vi.spyOn(routing, "completionFor").mockImplementation((route, run, options) => {
+   const complete = completionFor(route, run, options);
+   return async request => {
+    if (request.purpose !== "incoming-source-comparison") return complete(request);
+    try {
+     await disconnectComparisonWorker(run.id);
+     return await complete(request);
+    } finally {
+     finish();
+    }
+   };
+  });
+  await parse();
+  await completeSettled;
+  const saved = await comparison();
+  expect(saved).toMatchObject({ status: "failed", outcomes: null });
+  expect(calls).toHaveLength(0);
+  expect((await getRun(saved.version))?.status).toBe("error");
+ });
+ it.each(["success", "failure"])("discards late provider %s after the comparison lock connection closes", async result => {
+  const started = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const settled = Promise.withResolvers<void>();
+  respond = async input => {
+   started.resolve();
+   await release.promise;
+   if (result === "failure") throw new Error("Late provider diagnostic");
+   return { outcomes: [outcome(input)] };
+  };
+  const completionFor = routing.completionFor;
+  vi.spyOn(routing, "completionFor").mockImplementation((route, run, options) => {
+   const complete = completionFor(route, run, options);
+   return async request => {
+    if (request.purpose !== "incoming-source-comparison") return complete(request);
+    try { return await complete(request); }
+    finally { settled.resolve(); }
+   };
+  });
+  const parsing = parse();
+  try {
+   await started.promise;
+   const running = await comparison();
+   await disconnectComparisonWorker(running.version);
+   await parsing;
+   expect(await comparison()).toMatchObject({ status: "failed", outcomes: null, review_ids: [] });
+   expect((await getRun(running.version))?.status).toBe("error");
+   release.resolve();
+   await settled.promise;
+   const [row] = await db().select().from(moduleRuns).where(eq(moduleRuns.id, running.version));
+   expect(row).toMatchObject({ status: "error", output: null });
+   expect(row.error).not.toBe("Late provider diagnostic");
+   expect(calls).toHaveLength(1);
+  } finally {
+   release.resolve();
+   await parsing;
+  }
+ });
  it("compares a direct parse against current plan records and preserves the human verdict", async () => {
   const before = await store.loadState(); await parse();
   expect((await listParsedDocuments())).toHaveLength(1);

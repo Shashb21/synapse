@@ -17,6 +17,8 @@ import { listParsedDocuments, parseModule } from "@/modules/stages/s1-parse/modu
 import { ingestionJobs } from "@/lib/ingest/schema";
 import { DEMO_PACK } from "@/lib/iegp/demo-pack";
 import { setAiSection } from "@/modules/kernel/ai-switch";
+import * as routing from "@/modules/kernel/routing";
+import { stageOf } from "@/modules/kernel/stage-errors";
 import { completedIngestSourceIds } from "@/lib/ingest/status";
 
 const actor = { name: "Ingestion test", function: "medical_affairs" } as const;
@@ -80,6 +82,24 @@ describe("KAN-110 ingestion checkpoints", () => {
       expect((await listSourceFiles())[0].status).toBe("uploaded");
       expect((await db().select().from(ingestionJobs))[0].checkpoint).toMatchObject({ completed: 1 });
     } finally { spy.mockRestore(); }
+    expect(await advanceIngest({ actor, role: args.role, job_id: first.job_id })).toMatchObject({ completed: 2, stage: "S2" });
+    expect(await listParsedDocuments()).toHaveLength(1);
+  }));
+
+  it("retains a setup failure trace while rolling back the stage checkpoint", async () => isolated(async () => {
+    const first = await advanceIngest({ ...args, files: [...args.files] });
+    const failure = new Error("Synthetic route lookup failure");
+    const route = vi.spyOn(routing, "routeConfig").mockRejectedValueOnce(failure);
+    try {
+      await expect(advanceIngest({ actor, role: args.role, job_id: first.job_id })).rejects.toBe(failure);
+      expect(stageOf(failure)).toBe("S1");
+      expect((await db().select().from(ingestionJobs))[0].checkpoint).toMatchObject({ completed: 1 });
+      expect(await listParsedDocuments()).toHaveLength(0);
+      const runs = await db().execute(sql`select status, error, finished_at from module_runs where stage = 'S1'`);
+      expect([...runs]).toEqual([{ status: "error", error: failure.message, finished_at: expect.any(String) }]);
+    } finally {
+      route.mockRestore();
+    }
     expect(await advanceIngest({ actor, role: args.role, job_id: first.job_id })).toMatchObject({ completed: 2, stage: "S2" });
     expect(await listParsedDocuments()).toHaveLength(1);
   }));
