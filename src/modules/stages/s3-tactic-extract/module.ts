@@ -28,8 +28,7 @@ import { createTacticSuggestion, separateTacticOptionSchema } from "./suggestion
 import type { ExpansionScope, SeparateTacticOption, Tactic } from "@/lib/iegp/types";
 import { commitExtractedRecords, loadState } from "@/lib/iegp/store";
 import { extractCandidateTactics } from "@/lib/iegp/engine";
-import { listSourceBlocks } from "@/lib/iegp/source-blocks";
-import { listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
+import { listExtractionDocuments, listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
 import { TACTIC_CANDIDATES_DDL, TACTIC_BLOCK_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL, TACTIC_MATCHING_DDL, tacticCandidates } from "./schema";
 import { plural } from "@/lib/plural";
 
@@ -192,7 +191,7 @@ function toCandidate(section: ExtractionSection, id: string, raw: RawTactic): Ta
   return {
     id,
     source_section: section.number,
-    block_id: quotedBlock(section, text(raw.source_quote), raw.block_id),
+    block_id: quotedBlock(section.blocks, text(raw.source_quote), raw.block_id),
     document_id: document.id,
     source_id: document.source_id,
     name: text(raw.name),
@@ -842,11 +841,5 @@ export async function listTacticCandidates(limit = 200) {
 
 /** Freeze the current source editor blocks while preserving each selected parse ID. */
 async function freezeFacts(input: z.infer<typeof inputSchema>) {
-  const documents: ParsedDocumentRecord[] = [];
-  for (const document of await listParsedDocuments(input.document_ids)) {
-    const blocks = (await listSourceBlocks(document.source_id)).map(({ id, source_id, heading, text, location }) =>
-      ({ id, source_id, heading, text, location }));
-    if (blocks.length) documents.push({ ...document, blocks });
-  }
-  return { documents, state: await loadState() };
+  return { documents: await listExtractionDocuments(input.document_ids), state: await loadState() };
 }

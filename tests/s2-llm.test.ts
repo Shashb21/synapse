@@ -19,7 +19,8 @@ import { wipePlatform } from "@/modules/kernel/db";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { NoRouteError } from "@/modules/llm/provider";
 import { isLiveGap } from "@/lib/iegp/engine";
-import { commitExtractedRecords, createGap, loadState, resetDemoSetup } from "@/lib/iegp/store";
+import { mergeSourceBlocks } from "@/lib/iegp/source-blocks";
+import { commitExtractedRecords, createGap, loadState, persistSourceAndBlocks, resetDemoSetup } from "@/lib/iegp/store";
 import { listParsedDocuments } from "@/modules/stages/s1-parse/module";
 import { gapExtractModule } from "@/modules/stages/s2-gap-extract/module";
 
@@ -289,7 +290,11 @@ describe("S2 on the model path", () => {
   });
   it("keeps the cited block on stored gap candidates, suggestions and reviewed needs", async () => {
     const quote = "Fictional study asks about comparative safety.";
-    const blocks = ["first", "second"].map(id => ({ id, text: quote, heading: id, location: id }));
+    const [document] = await db().select().from(parsedDocuments).where(eq(parsedDocuments.id, documentId));
+    const blocks = ["overlap-first", "overlap-second"].map(id => ({
+      id, text: quote, source_id: document.source_id, heading: id, location: id,
+    }));
+    await db().insert(tables.sourceBlocks).values(blocks);
     await db().update(parsedDocuments).set({ blocks }).where(eq(parsedDocuments.id, documentId));
     const { ctx } = context(call => {
       if (call.purpose.startsWith("gap-proposer:")) return { gaps: blocks.map(block => ({ ...gapA, source_quote: quote, block_id: block.id })) };
@@ -302,14 +307,14 @@ describe("S2 on the model path", () => {
     });
     const { output } = await gapExtractModule.run(input(false), ctx);
     const persisted = await db().select().from(gapCandidates).where(eq(gapCandidates.source_quote, quote));
-    expect(persisted.map(row => row.block_id).sort()).toEqual(["first", "second"]);
+    expect(persisted.map(row => row.block_id).sort()).toEqual(["overlap-first", "overlap-second"]);
     const suggestions = (await loadState()).gap_suggestions.filter(row => output.suggestion_ids.includes(row.id));
-    expect(suggestions.map(row => row.block_id).sort()).toEqual(["first", "second"]);
+    expect(suggestions.map(row => row.block_id).sort()).toEqual(["overlap-first", "overlap-second"]);
     const review = { rationale: "Checked cited passage", actor_name: ACTOR.name, actor_function: ACTOR.function };
-    await acceptGapMergeSuggestion({ ...review, suggestion_id: suggestions.find(row => row.block_id === "first")!.id });
-    await acceptGapSplitSuggestion({ ...review, suggestion_id: suggestions.find(row => row.block_id === "second")!.id });
+    await acceptGapMergeSuggestion({ ...review, suggestion_id: suggestions.find(row => row.block_id === "overlap-first")!.id });
+    await acceptGapSplitSuggestion({ ...review, suggestion_id: suggestions.find(row => row.block_id === "overlap-second")!.id });
     const needs = (await loadState()).needs.filter(row => row.source_quote === quote);
-    expect(needs.map(row => row.block_id).sort()).toEqual(["first", "second", "second"]);
+    expect(needs.map(row => row.block_id).sort()).toEqual(["overlap-first", "overlap-second", "overlap-second"]);
   });
   it("reconciles historical quote-only need rows on repeated extraction", async () => {
     const [document] = await db().select().from(parsedDocuments).where(eq(parsedDocuments.id, documentId));
@@ -351,5 +356,43 @@ describe("S2 on the model path", () => {
     const after = await loadState();
     expect(after.needs.filter(n => n.source_quote === unique).map(n => n.block_id).sort()).toEqual(["later", "unique"]);
     expect(after.gaps.find(g => g.id === planGapId)?.new_source_need_id).toBe(after.needs.find(n => n.block_id === "later")?.id);
+  });
+  it("cites the surviving block when overlap extraction follows a source merge", async () => {
+    const quote = "The fictional study lacks outpatient safety results.";
+    const sections = [
+      { heading: "Background", text: "Study background.", location: "1" },
+      { heading: "Results", text: quote, location: "2" },
+    ];
+    const source = await persistSourceAndBlocks({
+      title: "Fictional study", source_type: "advisory_board", stakeholder_function: ACTOR.function,
+      text: sections.map(section => section.text).join("\n\n"), sections,
+    });
+    const [document] = await db().select().from(parsedDocuments).where(eq(parsedDocuments.id, documentId));
+    const mergedDocumentId = "merged-document";
+    await db().insert(parsedDocuments).values({
+      ...document, id: mergedDocumentId, source_id: source.source_id, blocks: source.blocks,
+    });
+    const merged = await mergeSourceBlocks({ block_id: source.blocks[0].id, rationale: "Join the study passage", actor: ACTOR });
+    expect(merged.absorbed_id).toBe(source.blocks[1].id);
+    const { ctx } = context(call => {
+      if (call.purpose.startsWith("gap-proposer:")) return { gaps: [{ ...gapA, source_quote: quote }] };
+      if (call.purpose === "gap-critic") return keepAll(call);
+      return { decisions: subjectsOf(call, "candidates").map(subject => ({
+        subject, verdict: "accept", match: "overlaps", match_gap_id: planGapId, confidence: 85, reason: "Partial overlap",
+        shared_part: "Safety", new_part: "Outpatients", merged_name: "Merged", merged_statement: "Merged outpatient comparison",
+        split_name: "Separate", split_statement: "Distinct outpatient comparison",
+      })) };
+    });
+    const { output } = await gapExtractModule.run({ document_ids: [mergedDocumentId], dry_run: false }, ctx);
+    expect(output.suggestion_ids).toHaveLength(1);
+    const suggestionId = output.suggestion_ids[0]!;
+    expect((await loadState()).gap_suggestions.find(row => row.id === suggestionId)?.block_id).toBe(merged.block_id);
+    await acceptGapSplitSuggestion({
+      suggestion_id: suggestionId, rationale: "Checked the merged passage",
+      actor_name: ACTOR.name, actor_function: ACTOR.function,
+    });
+    const needs = (await loadState()).needs.filter(row => row.source_quote === quote);
+    expect(needs.length).toBeGreaterThan(0);
+    expect(needs.every(row => row.block_id === merged.block_id)).toBe(true);
   });
 });

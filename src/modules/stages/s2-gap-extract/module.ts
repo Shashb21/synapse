@@ -18,7 +18,7 @@ import { EVIDENCE_DOMAINS, type EvidenceDomain } from "@/lib/iegp/enums";
 import { addSuggestionSources, commitExtractedRecords, loadState } from "@/lib/iegp/store";
 import { validatedPlacementGapIds } from "@/modules/stages/s8-prioritization/module";
 import { extractCandidateGaps, isLiveGap } from "@/lib/iegp/engine";
-import { listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
+import { listExtractionDocuments, listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
 import { GAP_CANDIDATES_DDL, GAP_BLOCK_DDL, gapCandidates } from "./schema";
 import { augmentSystemPrompt } from "@/modules/kernel/prompt-variant";
 import { curatedS2Cases } from "@/modules/eval-gold";
@@ -189,7 +189,7 @@ function toCandidate(id: string, section: ExtractionSection, raw: RawGap): GapCa
   return {
     id,
     source_section: section.number,
-    block_id: quotedBlock(section, text(raw.source_quote), raw.block_id),
+    block_id: quotedBlock(section.blocks, text(raw.source_quote), raw.block_id),
     document_id: document.id,
     source_id: document.source_id,
     name: text(raw.name),
@@ -1005,5 +1005,5 @@ export async function gapCandidatesForRun(run_id: string) {
 
 /** Freeze the source facts this stage consumes, before any proposal or human decision. */
 async function freezeFacts(input: z.infer<typeof inputSchema>) {
-  return { documents: await listParsedDocuments(input.document_ids), state: await loadState() };
+  return { documents: await listExtractionDocuments(input.document_ids), state: await loadState() };
 }

@@ -14,6 +14,7 @@ import type { Actor, ExpansionScope, SeparateTacticOption, TacticSuggestion } fr
 import { requireRationale } from "@/modules/kernel/edit-records";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { captureTacticSuggestionDecision } from "@/lib/iegp/learning-capture";
+import { quotedBlock } from "../extraction-sections";
 import { tacticSourceReferences, tacticSuggestions } from "./schema";
 
 export const separateTacticOptionSchema = z.object({name: z.string().trim().min(1), type: z.enum(TACTIC_TYPES), status: z.enum(TACTIC_STATUSES), evidence_question: z.string().trim().min(1)}).strict();
@@ -146,9 +147,18 @@ export async function decideTacticSuggestion(args: {id: string; decision: "expan
     if (!source) throw new TrustedApplicationError("Documented source no longer exists in this workspace.");
     const [parent] = await tx.select().from(t.tactics).where(eq(t.tactics.id, row.target_tactic_id)).for("update");
     if (!parent) throw new TrustedApplicationError("Target tactic no longer exists in this workspace.");
+    let blockId = row.block_id;
     if (args.decision !== "reject") {
-      const current = (await readState(tx)).tactics.find(t => t.id === row.target_tactic_id)!;
+      const state = await readState(tx);
+      const current = state.tactics.find(t => t.id === row.target_tactic_id)!;
       if (tacticVersion(current) !== row.expected_tactic_version) throw new TrustedApplicationError("Tactic changed; reject this obsolete suggestion or review a new source proposal before accepting.");
+      if (blockId) {
+        const blocks = state.blocks.filter(block => block.source_id === row.source_id);
+        blockId = quotedBlock(blocks, row.source_quote, blockId);
+        if (!blockId) {
+          throw new TrustedApplicationError("The source passage changed or is ambiguous. Rerun tactic extraction before accepting.");
+        }
+      }
     }
     let result_expansion_id: string | null = null, result_tactic_id: string | null = null;
     if (args.decision === "expand") {
@@ -156,11 +166,11 @@ export async function decideTacticSuggestion(args: {id: string; decision: "expan
       const [gap] = await tx.select().from(t.gaps).where(eq(t.gaps.id, row.gap_id)).for("update");
       if (!gap || gap.retired || gap.status === "excluded" || gap.parked_at) throw new TrustedApplicationError("Choose a live gap in this workspace before accepting.");
       result_expansion_id = (await acceptTacticExpansion({proposal_id: `s3:${row.id}`, tactic_id: row.target_tactic_id, gap_id: row.gap_id, scope: row.expansion, expected_tactic_version: row.expected_tactic_version, rationale, actor: args.actor}, tx)).id;
-      await attachTacticSource({ tactic_id: row.target_tactic_id, source_id: row.source_id, source_quote: row.source_quote, block_id: row.block_id }, tx);
+      await attachTacticSource({ tactic_id: row.target_tactic_id, source_id: row.source_id, source_quote: row.source_quote, block_id: blockId }, tx);
     } else if (args.decision === "separate") {
-      result_tactic_id = await insertLibraryTactic({...row.separate, description: `Separate source activity linked to ${row.target_tactic_id}.`, source_quote: row.source_quote, block_id: row.block_id, data_source: source.title,
+      result_tactic_id = await insertLibraryTactic({...row.separate, description: `Separate source activity linked to ${row.target_tactic_id}.`, source_quote: row.source_quote, block_id: blockId, data_source: source.title,
         lifecycle_stage: "extracted", intended_use: `Source ${row.source_id}; related tactic ${row.target_tactic_id}`, actor_name: args.actor.name, actor_function: args.actor.function, audit_action: "accept_source_separate", note: rationale}, tx);
-      await attachTacticSource({tactic_id: result_tactic_id, source_id: row.source_id, source_quote: row.source_quote, block_id: row.block_id}, tx);
+      await attachTacticSource({tactic_id: result_tactic_id, source_id: row.source_id, source_quote: row.source_quote, block_id: blockId}, tx);
     }
     const at = nowIso(), result: TacticSuggestion = {...row, status: args.decision === "expand" ? "expanded" : args.decision === "separate" ? "separate" : "rejected", result_expansion_id, result_tactic_id, updated_at: at, version: newId("TSV"), history: [...row.history, {action: args.decision, actor: args.actor, rationale, at, expansion: row.expansion, separate: row.separate, gap_id: row.gap_id}]};
     await save(tx, result); await appendAudit(args.actor.name, args.actor.function, "tactic_suggestion", row.id, args.decision, rationale, tx);

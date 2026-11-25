@@ -56,11 +56,11 @@ export function extractionSections(document: ParsedDocumentRecord): ExtractionSe
 
 const normalize = (value: string) => value.toLowerCase().replace(/\s+/g, " ").trim();
 
-/** Resolve the full quotation against the blocks actually shown for this candidate. */
-export function quotedBlock(section: ExtractionSection, quote: string, reportedId?: unknown): string | null {
+/** Resolve a full quotation to one block. A matching reported ID can disambiguate repeated text. */
+export function quotedBlock(blocks: readonly { id: string; text: string }[], quote: string, reportedId?: unknown): string | null {
   const needle = normalize(quote);
   if (!needle) return null;
-  const matches = section.blocks.filter(block => normalize(block.text).includes(needle));
+  const matches = blocks.filter(block => normalize(block.text).includes(needle));
   if (matches.length === 1) return matches[0].id;
   return matches.find(block => block.id === reportedId)?.id ?? null;
 }

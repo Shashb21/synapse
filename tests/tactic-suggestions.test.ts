@@ -6,7 +6,7 @@ import { db } from "@/lib/iegp/db";
 import * as t from "@/lib/iegp/schema";
 import { buildSeed } from "@/lib/iegp/seed";
 import { commitExtractedRecords, createProposedTactic, loadState, persistSourceAndBlocks, persistState } from "@/lib/iegp/store";
-import { reparseSourceBlocks } from "@/lib/iegp/source-blocks";
+import { deleteSourceBlock, mergeSourceBlocks, reparseSourceBlocks, splitSourceBlock } from "@/lib/iegp/source-blocks";
 import { tacticVersion } from "@/lib/iegp/tactic-expansions";
 import type { ExpansionScope } from "@/lib/iegp/types";
 import * as suggestions from "@/modules/stages/s3-tactic-extract/suggestions";
@@ -141,6 +141,61 @@ describe("S3 source matching", () => {
     expect(after.tactics.find(t => t.id === result.result_tactic_id)).toMatchObject({name: row.separate.name, status: "planned", source_quote: row.source_quote});
     expect(after.tactics.find(t => t.id === parentId)).toEqual(before.tactics.find(t => t.id === parentId));
   });
+  it.each(["separate", "expand"] as const)("relinks the quote after a source edit before accepting %s", async decision => {
+    const background = { heading: "Background", text: "Registry study background.", location: "1" };
+    const cited = { heading: "Results", text: sourceQuote, location: "2" };
+    const sections = decision === "separate"
+      ? [{ ...background, text: `${background.text} ${cited.text}` }]
+      : [background, cited];
+    const source = await persistSourceAndBlocks({
+      title: "Registry notes", source_type: "advisory_board", stakeholder_function: actor.function,
+      text: sections.map(section => section.text).join("\n\n"), sections,
+    });
+    sourceId = source.source_id;
+    const row = await proposal(source.blocks.at(-1)!.id);
+    let currentBlockId: string;
+    if (decision === "separate") {
+      const split = await splitSourceBlock({
+        block_id: row.block_id!, at_text: sourceQuote, rationale: "Split out the results", actor,
+      });
+      currentBlockId = split.second_id;
+    } else {
+      const merged = await mergeSourceBlocks({ block_id: source.blocks[0].id, rationale: "Join related text", actor });
+      currentBlockId = merged.block_id;
+      await suggestions.editTacticSuggestion({ id: row.id, gap_id: gapId, rationale: "Choose related gap", actor });
+    }
+
+    const result = await suggestions.decideTacticSuggestion({ id: row.id, decision, rationale: "Reviewed source evidence", actor });
+
+    const tacticId = result.result_tactic_id ?? parentId;
+    expect(await suggestions.listTacticSourceReferences(tacticId)).toContainEqual(
+      expect.objectContaining({ source_id: sourceId, source_quote: sourceQuote, block_id: currentBlockId }),
+    );
+    if (decision === "separate") {
+      expect((await loadState()).tactics.find(tactic => tactic.id === tacticId)?.block_id).toBe(currentBlockId);
+    }
+  });
+
+  it("keeps a suggestion pending when its cited quote was removed", async () => {
+    const sections = [
+      { heading: "Background", text: "Registry study background.", location: "1" },
+      { heading: "Results", text: sourceQuote, location: "2" },
+    ];
+    const source = await persistSourceAndBlocks({
+      title: "Registry notes", source_type: "advisory_board", stakeholder_function: actor.function,
+      text: sections.map(section => section.text).join("\n\n"), sections,
+    });
+    sourceId = source.source_id;
+    const row = await proposal(source.blocks[1].id);
+    await deleteSourceBlock({ block_id: row.block_id!, rationale: "Remove obsolete results", actor });
+    const before = await loadState();
+    await expect(suggestions.decideTacticSuggestion({
+      id: row.id, decision: "separate", rationale: "Reviewed source evidence", actor,
+    })).rejects.toThrow(/source passage.*rerun/i);
+    expect(await suggestions.listTacticSuggestions()).toContainEqual(expect.objectContaining({ id: row.id, status: "pending" }));
+    expect((await loadState()).tactics).toEqual(before.tactics);
+  });
+
   it("keeps ordinary creation working after actual separate-source acceptance",async()=>{
     const row=await proposal();
     const accepted=await suggestions.decideTacticSuggestion({id:row.id,decision:'separate',rationale:'Distinct source activity',actor});
