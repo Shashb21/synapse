@@ -1,8 +1,8 @@
 import postgres from "postgres";
-import {createHash} from "node:crypto";
+import { tacticVersion } from "../../src/lib/iegp/tactic-expansions";
+import type { Tactic } from "../../src/lib/iegp/types";
 import {freshWorkspace} from "../support/session";
 import {iegpAction} from "../support/synapse";
-const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a],[b]) => a.localeCompare(b)).map(([k,v]) => [k,canonical(v)])) : value;
 import { expect, test } from "@playwright/test";
 import {
   clickRunStage,
@@ -100,12 +100,12 @@ test.describe("S3 overlap source review", () => {
     try {
       const [workspace] = await pg`select schema_name from workspaces where id = ${ws.id}`;
       const schema = workspace!.schema_name as string;
-      const [parent] = await pg`select * from ${pg(`${schema}.tactics`)} where name='Reviewed parent registry'`;
+      const [parent] = await pg<Tactic[]>`select * from ${pg(`${schema}.tactics`)} where name='Reviewed parent registry'`;
       parent!.lock = {locked: true, actor_name: "Feature E2E", actor_function: "medical_affairs", locked_at: "2026-10-07T12:00:00.000Z", note: "Reviewed locked protocol"};
-      await pg`update ${pg(`${schema}.tactics`)} set lock=${pg.json(parent!.lock)} where id=${parent!.id}`;
+      await pg`update ${pg(`${schema}.tactics`)} set lock=${pg.json({...parent!.lock})} where id=${parent!.id}`;
       const [source] = await pg`select * from ${pg(`${schema}.sources`)} limit 1`;
       const [gap] = await pg`select * from ${pg(`${schema}.gaps`)} where name='Source expansion gap'`;
-      const version = createHash("sha256").update(JSON.stringify(canonical({...parent, source_quote: parent!.source_quote ?? "", custom_type: parent!.custom_type ?? null}))).digest("hex");
+      const version = tacticVersion(parent!);
       const scope = {name: "Source subgroup", evidence_question: "Added subgroup question", population: "Subgroup patients", outcomes: "Safety", geography: "", data_cut: "", analysis: "Post-hoc subgroup", instrument: "", study_design: "Retrospective analysis", gap_coverage: "Subgroup evidence", cost_effort: "Two analyst weeks", timing: "Next quarter", feasibility_risks: "Small subgroup", post_hoc: true, prospective_enrolment: false, protocol_amendment: false, start_date: null, evidence_available: null};
       for (const id of ["S3-BROWSER-EXPAND", "S3-BROWSER-SEPARATE", "S3-BROWSER-REJECT"]) {
         const separate = {name: `Separate ${id}`, type: "rwe_study", status: "planned", evidence_question: "Independent subgroup question"};

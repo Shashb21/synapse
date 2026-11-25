@@ -280,9 +280,12 @@ describe("KAN-74 S2 run across two documents", () => {
     const B1 = `${docB}-L001`;
     const B2 = `${docB}-L002`;
     const B3 = `${docB}-L003`;
+    const B4 = `${docB}-L004`;
+    const citedBlock = before.blocks.find(block => block.source_id === sourceB)!;
+    const groundedRepeat = { ...over75, name: "Over-75s in the cited section", source_quote: citedBlock.text, block_id: citedBlock.id };
     const ctx = context((call) => {
       if (call.purpose === `gap-proposer:${docA}`) return { gaps: [persistence, versusSoc] };
-      if (call.purpose === `gap-proposer:${docB}`) return { gaps: [{ ...persistence, name: "Persistence again" }, over75, { ...over75, name: "Over-75s again" }] };
+      if (call.purpose === `gap-proposer:${docB}`) return { gaps: [{ ...persistence, name: "Persistence again" }, over75, { ...over75, name: "Over-75s again" }, groundedRepeat] };
       if (call.purpose === "gap-critic") {
         const subjects = ((call.body?.candidates as { subject: string }[]) ?? []).map((row) => row.subject);
         return { critiques: subjects.map((subject) => ({ subject, verdict: "keep", confidence: 80, note: "holds" })) };
@@ -294,13 +297,14 @@ describe("KAN-74 S2 run across two documents", () => {
           { subject: B1, verdict: "accept", confidence: 80, reason: "repeats A1", match: "same", same_as_candidate: A1 },
           { subject: B2, verdict: "accept", confidence: 75, reason: "adds over-75s", match: "overlaps", match_gap_id: planGapId, ...OVERLAP },
           { subject: B3, verdict: "accept", confidence: 70, reason: "repeats B2", match: "same", same_as_candidate: B2 },
+          { subject: B4, verdict: "accept", confidence: 70, reason: "repeats B2 with a cited block", match: "same", same_as_candidate: B2 },
         ],
       };
     });
 
     const { output, summary } = await gapExtractModule.run(gapExtractModule.inputSchema.parse({ document_ids: [docA, docB] }), ctx);
 
-    expect(summary).toBe("5 of 5 gap candidates accepted: 1 new gap committed, 2 joined existing gaps, 1 overlap to review");
+    expect(summary).toBe("6 of 6 gap candidates accepted: 1 new gap committed, 2 joined existing gaps, 1 overlap to review");
     expect(output.committed_gap_ids).toHaveLength(1);
     expect(output.suggestion_ids).toHaveLength(1);
     expect(output.accepted.find((row) => row.id === B1)).toMatchObject({ match: "same", same_as_candidate: A1 });
@@ -317,12 +321,13 @@ describe("KAN-74 S2 run across two documents", () => {
     // A2 joined the validated plan gap, which now shows "New source added".
     expect(sourcesOn(planGapId)).toContain(sourceA);
     expect(state.gaps.find((row) => row.id === planGapId)!.new_source_at).toBeTruthy();
-    // B2 is a suggestion, and B3 (its repeat) rides along on it.
+    // A repeat without a verified block keeps its historical shape. A grounded repeat carries its citation.
     const suggestion = state.gap_suggestions.find((row) => row.id === output.suggestion_ids[0])!;
     expect(suggestion).toMatchObject({ gap_id: planGapId, status: "pending", source_id: sourceB, name: "Over-75s versus SoC" });
     expect(suggestion.candidate_row_id).toBeTruthy();
     expect(suggestion.extra_sources).toEqual([
       { source_id: sourceB, statement: over75.statement, source_quote: over75.source_quote },
+      { source_id: sourceB, statement: groundedRepeat.statement, source_quote: groundedRepeat.source_quote, block_id: citedBlock.id },
     ]);
     expect(state.gaps.some((row) => row.name === "Over-75s versus SoC")).toBe(false);
   });
