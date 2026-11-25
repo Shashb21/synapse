@@ -3,12 +3,14 @@ import { queueSourceComparison } from "@/lib/ingest/compare-source";
 import { desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
+import { inEvaluationIsolation } from "@/modules/kernel/evaluation-isolation";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { curatedS1Cases } from "@/modules/eval-gold";
 import { registerModule } from "@/modules/kernel/registry";
 import type { SynapseModule } from "@/modules/kernel/contracts";
 import { persistSourceAndBlocks } from "@/lib/iegp/store";
 import {
+  listCurrentSourceBlocks,
   listSourceBlocks,
   persistDroppedSourceUnits,
   recordLlmSourceStakeholder,
@@ -376,8 +378,9 @@ export async function listParsedDocuments(ids?: string[]): Promise<ParsedDocumen
 /** Load current editor blocks for extraction while retaining the selected parse IDs. */
 export async function listExtractionDocuments(ids?: string[]): Promise<ParsedDocumentRecord[]> {
   const documents: ParsedDocumentRecord[] = [];
+  const listBlocks = inEvaluationIsolation() ? listCurrentSourceBlocks : listSourceBlocks;
   for (const document of await listParsedDocuments(ids)) {
-    const blocks = (await listSourceBlocks(document.source_id)).map(({ id, source_id, heading, text, location }) =>
+    const blocks = (await listBlocks(document.source_id)).map(({ id, source_id, heading, text, location }) =>
       ({ id, source_id, heading, text, location }));
     if (blocks.length) documents.push({ ...document, blocks });
   }

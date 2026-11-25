@@ -11,6 +11,7 @@ import * as revisions from "@/modules/kernel/prompt-revisions";
 import * as registry from "@/modules/kernel/registry";
 import * as approvedRoutes from "@/modules/kernel/approved-evaluation-route";
 import * as workspaces from "@/modules/workspaces/store";
+import { runInWorkspace, scopedWorkspaceId } from "@/modules/workspaces/context";
 import * as observability from "@/modules/kernel/observability";
 import * as ai from "@/modules/kernel/ai-switch";
 import * as llm from "@/modules/kernel/llm";
@@ -20,6 +21,7 @@ import { evidenceHash } from "@/modules/kernel/decision-replay";
 import { evaluatePromptRevision, promotionEligibility } from "@/modules/kernel/prompt-revision-evals";
 import type { ResolvedRoute, SynapseModule } from "@/modules/kernel/contracts";
 import { inEvaluationIsolation } from "@/modules/kernel/evaluation-isolation";
+import { RETRY, type ProviderRequestBudget } from "@/modules/llm/provider";
 import { targetMetrics, executionLineage, lineageGroups } from "@/modules/kernel/revision-policy";
 const route: ResolvedRoute = {
   stage: "S8",
@@ -34,7 +36,7 @@ const route: ResolvedRoute = {
   reason: null,
 };
 const actor = { name: "Fictional owner", function: "medical_affairs" as const };
-function row(i: number): learning.DecisionExample {
+function row(i: number, modelRoute = route): learning.DecisionExample {
   const gap = {
     id: "gap-" + i,
     statement: "Independent panel question " + i,
@@ -57,7 +59,7 @@ function row(i: number): learning.DecisionExample {
     module_id: "fiction-stage",
     module_version: "1",
     prompt_version: "v1.0-baseline",
-    route,
+    route: modelRoute,
     input: { gap_ids: [gap.id] },
     facts: {
       axesConfig: { ...DEFAULT_AXES, updated_by: "fixture", updated_at: "2026-01-01" },
@@ -91,8 +93,8 @@ function row(i: number): learning.DecisionExample {
     run_id: snapshot.run_id,
     replay_input: snapshot,
     prompt_version: snapshot.prompt_version,
-    model: route.model,
-    provider_id: route.provider_id,
+    model: modelRoute.model,
+    provider_id: modelRoute.provider_id,
     priority_review_hash: frozenPriorityReviewHash(snapshot, gap.id),
     ai_input: { gap },
     ai_output: { band: "high" },
@@ -139,9 +141,9 @@ it("requires a changed human-authored target and reviewer identity", () => {
 
 const args = { workspace_id: "fiction", stage: "S8" as const, exclude_ids: [] };
 const approved = { route, module_id: "fiction-stage", module_version: "1", generation: 0, parent: "v1.0-baseline" };
-function fixture() {
-  const examples = [1, 2, 3, 4, 5].map(row);
-  const cohort = revisions.selectRevisionCohort(args, examples, approved);
+function fixture(modelRoute = route, requestBudget?: ProviderRequestBudget) {
+  const examples = [1, 2, 3, 4, 5].map((index) => row(index, modelRoute));
+  const cohort = revisions.selectRevisionCohort(args, examples, { ...approved, route: modelRoute });
   const revision = {
     id: "candidate",
     stage: "S8",
@@ -182,7 +184,7 @@ function fixture() {
             },
             llm: async ({ hints }) => {
               expect(hints).toBe("");
-              const output = await ctx.complete({ purpose: "band", system: "Assign a band", user: input.gap_ids[0] });
+              const output = await ctx.complete({ purpose: "band", system: "Assign a band", user: input.gap_ids[0], requestBudget });
               return [(output as { band: string }).band];
             },
           },
@@ -203,7 +205,7 @@ function fixture() {
   };
   vi.spyOn(ai, "assertAiEnabled").mockResolvedValue();
   vi.spyOn(llm, "isTestStub").mockReturnValue(false);
-  vi.spyOn(workspaces, "getWorkspace").mockResolvedValue({ id: "fiction", schema_name: "public" } as Awaited<
+  vi.spyOn(workspaces, "getWorkspace").mockResolvedValue({ id: "fiction", schema_name: "public", demo: true, demo_mode: false } as Awaited<
     ReturnType<typeof workspaces.getWorkspace>
   >);
   vi.spyOn(attempts, "claimRevisionBatch").mockResolvedValue({
@@ -219,15 +221,19 @@ function fixture() {
   vi.spyOn(revisions, "getPromptRevision").mockResolvedValue(revision);
   vi.spyOn(revisions, "getRevisionCohort").mockResolvedValue(cohort);
   vi.spyOn(revisions, "activeRevisionPointer").mockResolvedValue({ generation: 0, revision_id: null });
-  vi.spyOn(observability, "getRun").mockResolvedValue({
-    workspace_id: "fiction",
-    stage: "S8",
-    status: "ok",
-    module_id: "learning.prompt-revision",
-    input: { cohort_id: cohort.id, reservation_hash: evidenceHash(cohort.gold_reservation) },
-  } as observability.RunRecord);
+  vi.spyOn(observability, "getRun").mockImplementation(async () => {
+    expect(inEvaluationIsolation()).toBe(true);
+    expect(await scopedWorkspaceId()).toBe("fiction");
+    return {
+      workspace_id: "fiction",
+      stage: "S8",
+      status: "ok",
+      module_id: "learning.prompt-revision",
+      input: { cohort_id: cohort.id, reservation_hash: evidenceHash(cohort.gold_reservation) },
+    } as observability.RunRecord;
+  });
   vi.spyOn(registry, "activeModule").mockResolvedValue(stageModule as Awaited<ReturnType<typeof registry.activeModule>>);
-  vi.spyOn(approvedRoutes, "approvedEvaluationRoute").mockResolvedValue(route);
+  vi.spyOn(approvedRoutes, "approvedEvaluationRoute").mockResolvedValue(modelRoute);
   const read = vi.spyOn(learning, "similarExamples").mockRejectedValue(new Error("unexpected runtime retrieval"));
   const completion = vi.fn(async ({ system }: { system: string }) => ({
     band: system.includes(revision.instruction_text) ? "low" : "high",
@@ -241,8 +247,52 @@ function fixture() {
     evaluate: () => evaluatePromptRevision({ workspace_id: "fiction", actor, revision_id: revision.id }),
   };
 }
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
 describe("KAN-265 paired human-target replay", () => {
+  it("refuses all three revision actions using the authoritative demo flag even during demo recording", async () => {
+    const f = fixture();
+    vi.stubEnv("SYNAPSE_DEMO_RECORD", "1");
+    vi.mocked(workspaces.getWorkspace).mockResolvedValue({ id: "fiction", schema_name: "public", demo_mode: true } as workspaces.Workspace);
+    const propose = () => revisions.proposePromptRevision({ workspace_id: "fiction", stage: "S8", actor, exclude_ids: [] });
+    const approve = () => runInWorkspace({ workspace_id: "fiction", schema: "public" }, () =>
+      revisions.activatePromptRevision({ revision_id: f.revision.id, evaluation_id: "fixture", expected_active_id: null, actor }),
+    );
+    for (const action of [propose, f.evaluate, approve]) {
+      await expect(action()).rejects.toThrow(/workspace with live routing/);
+    }
+    expect(vi.mocked(approvedRoutes.approvedEvaluationRoute)).not.toHaveBeenCalled();
+    expect(vi.mocked(attempts.claimRevisionBatch)).not.toHaveBeenCalled();
+    expect(vi.mocked(observability.getRun)).not.toHaveBeenCalled();
+    expect(f.completion).not.toHaveBeenCalled();
+    expect(vi.mocked(db.sharedDb)).not.toHaveBeenCalled();
+  });
+  it.each([429, 503])("rechecks the authoritative workspace before a physical retry after HTTP %i", async (status) => {
+    const budget = { check: vi.fn(), consume: vi.fn() };
+    const f = fixture({ ...route, provider_id: "openai", model: "gpt-4.1" }, status === 429 ? budget : undefined);
+    vi.mocked(routing.completionFor).mockRestore();
+    const dataStore = vi.mocked(db.sharedDb)();
+    vi.mocked(db.sharedDb).mockReturnValue({ ...dataStore, execute: vi.fn().mockResolvedValue([]) } as unknown as ReturnType<typeof db.sharedDb>);
+    vi.stubEnv("OPENAI_API_KEY", "scripted-test-key");
+    vi.stubEnv("SYNAPSE_DEMO_RECORD", "1");
+    const transport = vi.fn<typeof fetch>(() => Promise.resolve(Response.json({
+      choices: [{ message: { content: '{"band":"high"}' } }],
+    }))).mockImplementationOnce(async () => Response.json({ error: { message: "Temporarily busy" } }, { status }));
+    vi.stubGlobal("fetch", transport);
+    const backoff = vi.spyOn(RETRY, "sleep").mockImplementation(async () => {
+      vi.mocked(workspaces.getWorkspace).mockResolvedValue({ id: "fiction", schema_name: "public", demo_mode: true } as workspaces.Workspace);
+    });
+    const evidence = await f.evaluate();
+    expect(backoff).toHaveBeenCalledOnce();
+    expect(transport).toHaveBeenCalledOnce();
+    expect(transport.mock.calls[0]?.[1]?.redirect).toBe("manual");
+    expect(budget.consume).toHaveBeenCalledTimes(status === 429 ? 1 : 0);
+    expect(evidence).toMatchObject({ eligible: false, comparable: false, observations: [] });
+    expect(evidence.failures).toEqual([expect.stringMatching(/workspace with live routing/)]);
+  });
   it("runs repeated isolated arms with the same frozen inputs and recomputes eligibility from observations", async () => {
     const f = fixture();
     const evidence = await f.evaluate();
@@ -346,7 +396,7 @@ describe("KAN-265 paired human-target replay", () => {
     },
   );
   it("reserves fresh cases and withholds earlier holdouts from training, including restaged copies", () => {
-    const rows = [1, 2, 3, 4, 5, 6, 7, 8].map(row);
+    const rows = [1, 2, 3, 4, 5, 6, 7, 8].map((index) => row(index));
     const old = { heldout: executionLineage(rows[0])!, training: executionLineage(rows[7])! };
     const next = revisions.selectRevisionCohort(args, rows, approved, old);
     expect(next.excluded_ids).toContain(rows[0].id);
@@ -355,7 +405,7 @@ describe("KAN-265 paired human-target replay", () => {
     expect(next.heldout_ids).toEqual([rows[6].id, rows[5].id, rows[4].id]);
   });
   it("connects a chain whose only shared input was a historical worked example", () => {
-    const [a, b, c] = [1, 2, 3].map(row);
+    const [a, b, c] = [1, 2, 3].map((index) => row(index));
     Object.assign(b.replay_input!, { examples: [{ id: a.id, scope: "this_plan", kind: "s8_band" }] });
     Object.assign(c.replay_input!, { examples: [{ id: b.id, scope: "this_plan", kind: "s8_band" }] });
     expect(lineageGroups([c, b, a])).toHaveLength(1);
@@ -369,7 +419,7 @@ describe("KAN-265 paired human-target replay", () => {
     }
   });
   it("follows frozen gap edits, need runs and normalized full source, keeping administrative entries separate", () => {
-    const [a, b] = [1, 2].map(row);
+    const [a, b] = [1, 2].map((index) => row(index));
     const state = (x: learning.DecisionExample) => (x.replay_input!.facts as { state: Record<string, unknown> }).state;
     expect(lineageGroups([a, b])).toHaveLength(2);
     const need = (x: learning.DecisionExample) => (state(x).needs as Record<string, unknown>[])[0];

@@ -225,6 +225,8 @@ export async function tracedCompletion(args: {
   maxAttempts?: number;
   requestBudget?: ProviderRequestBudget;
   beforeSend?: () => Promise<void>;
+  /** Provider dispatch hook. Runs for every HTTP request, even on retries. */
+  beforeRequest?: () => Promise<void>;
   /** Failed attempts still contribute reported usage or an explicitly unknown cost. */
   onFailure?: (attempt: Pick<LlmCallRecord, "usage" | "cost_usd" | "price_source">) => void;
 }): Promise<{ text: string; usage: LlmUsage | null; llm_call_id: string | null; cost_usd: number | null; price_source: string | null }> {
@@ -272,7 +274,12 @@ export async function tracedCompletion(args: {
           text = replayReply({ stage: args.stage, purpose: args.purpose, system: args.request.system, user: args.request.user });
         } else {
           await args.beforeSend?.();
-          text = await args.provider.complete(args.request, { api_key: args.api_key }, { requestBudget: args.requestBudget, maxAttempts: args.maxAttempts, onUsage: (reported) => (usage = reported) });
+          text = await args.provider.complete(args.request, { api_key: args.api_key }, {
+            requestBudget: args.requestBudget,
+            maxAttempts: args.maxAttempts,
+            onUsage: (reported) => (usage = reported),
+            ...(args.beforeRequest ? { beforeRequest: args.beforeRequest } : {}),
+          });
         }
       } catch (error) {
         usage = callUsage({ usage, status: "error", reply: null, system_prompt: args.request.system, user_prompt: args.request.user });

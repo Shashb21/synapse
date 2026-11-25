@@ -275,6 +275,8 @@ export type EvalHarness<I, O> = {
   variantInstruction?: (version: import("./prompt-versions").PromptVersionId) => string;
   /** Gold cases the stage scores itself against. */
   cases: (facts?: Record<string, unknown>) => Promise<EvalCase<I>[]>;
+  /** Attach gold only after checking the exact frozen input that will run. */
+  goldForCase?: (test: EvalCase<I>, facts: Record<string, unknown>) => EvalCase<I>["gold"];
   score: (args: { case: EvalCase<I>; output: O }) => EvalScore[];
   /** Stage-owned restricted gold context; preserve score semantics over this subject subset. */
   reserveGold?: (facts: Record<string, unknown>, subject_ids: string[]) => Promise<{

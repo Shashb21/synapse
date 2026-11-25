@@ -16,7 +16,7 @@ import { sectionOfStage } from "./ai-sections";
 import { DEFAULT_ROUTE_PROVIDER, findProvider } from "@/modules/llm/provider";
 import { STAGES } from "./contracts";
 import { recordSignal } from "./hillclimb";
-import { assertDiagnosticWorkspace, recordEvalRun, type EvalExecution } from "./evals";
+import { assertDiagnosticWorkspace, recordEvalRun, type EvalExecution, type EvalEvidenceIssue } from "./evals";
 import { assertEvaluationRoute, inEvaluationIsolation } from "./evaluation-isolation";
 import { evidenceHash } from "./decision-replay";
 import { routeIdentity } from "./revision-policy";
@@ -119,6 +119,7 @@ export type StageRunResult<O> = {
     prompt_hash: string | null;
     first_prompt_hash: string | null;
     transcript_hash: string | null;
+    evidence_issue?: EvalEvidenceIssue;
   };
 };
 
@@ -236,6 +237,8 @@ export async function runStage<O = unknown>(args: {
       }
     : ai ? await resolveRouteForRun(args.stage) : await aiOffRoute(args.stage);
   const requests: RequestIdentity[] = [];
+  const receipts = new Set<string>();
+  let retriedWithChangedSystem = false;
   let firstPrompt: string | null = null;
   recorder.note("route", route, route.degraded ? (route.reason ?? "degraded") : undefined);
 
@@ -246,7 +249,12 @@ export async function runStage<O = unknown>(args: {
     run: recorder,
     route,
     complete: ai
-      ? completionFor(route, recorder)
+      ? completionFor(route, recorder, diagnostic ? {
+        onReceipt({ attempt, id }) {
+          if (attempt > 1) retriedWithChangedSystem = true;
+          if (id) receipts.add(id);
+        },
+      } : undefined)
       : async () => {
           throw new AiDisabledError(stageLabel(args.stage));
         },
@@ -296,7 +304,16 @@ export async function runStage<O = unknown>(args: {
     }
     // Stage telemetry has no externally scored target. The harness scores the case separately.
     const evals = (result.evals ?? []).map(({ name, value, unit, detail }) => ({ name, value, unit, detail }));
-    const execution: EvalExecution = isTestStub() ? "synthetic" : recorder.steps().some(s => s.name.startsWith("llm:")) || requests.length ? "routed" : "mechanical";
+    const steps = recorder.steps();
+    const execution: EvalExecution = isTestStub() ? "synthetic" : steps.some(s => s.name.startsWith("llm:")) || requests.length ? "routed" : "mechanical";
+    let evidence_issue: EvalEvidenceIssue | undefined;
+    if (diagnostic && requests.length) {
+      if (retriedWithChangedSystem || steps.some((step) => step.name.endsWith(":invalid-json")))
+        evidence_issue = "changed_system_retry";
+      else if (receipts.size !== requests.length || steps.some((step) => step.name === "llm_call:unrecorded"))
+        evidence_issue = "missing_receipt";
+    }
+    const verifiedPrompt = requests.length > 0 && !evidence_issue;
     if (!diagnostic) await closeRun({
       recorder,
       status: "ok",
@@ -329,11 +346,12 @@ export async function runStage<O = unknown>(args: {
       module_version: implementation.manifest.version,
       ...(diagnostic ? { diagnostic: {
         execution, route_hash: requests.length ? routeIdentity(route) : null,
-        prompt_hash: requests.length ? evidenceHash(requests.map(r => r.design)) : null,
-        first_prompt_hash: firstPrompt,
-        transcript_hash: requests.length ? evidenceHash(requests.map(r => r.actual)) : null,
+        prompt_hash: verifiedPrompt ? evidenceHash(requests.map(r => r.design)) : null,
+        first_prompt_hash: verifiedPrompt ? firstPrompt : null,
+        transcript_hash: verifiedPrompt ? evidenceHash(requests.map(r => r.actual)) : null,
+        ...(evidence_issue ? { evidence_issue } : {}),
       } } : {}),
-      mode: runMode(parsedOutput.data, recorder.steps()),
+      mode: runMode(parsedOutput.data, steps),
       summary: result.summary,
       output: parsedOutput.data as O,
       evals,

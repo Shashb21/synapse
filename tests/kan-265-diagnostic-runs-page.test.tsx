@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import React from "react";
+import { z } from "zod";
 import { renderToStaticMarkup } from "react-dom/server";
 import RunsPage from "@/app/admin/runs/page";
 import { AiStatusProvider } from "@/components/platform/ai-status";
@@ -39,10 +40,14 @@ it("renders only supported sweeps with curated cases and describes the separate 
   const active = vi.spyOn(registry, "activeModule").mockImplementation(
     async (stage) =>
       ({
-        freeze: async () => ({}),
+        manifest: { stage },
+        inputSchema: z.object({ dry_run: z.literal(true) }),
+        freeze: async () => ({ verified: stage === "S2" }),
         evals: {
           variantInstruction: (version: string) => version,
-          cases: async () => (stage === "S2" ? [{ name: "curated", gold: { must_match: ["target"] } }] : []),
+          cases: async () => [{ name: "candidate", input: {} }],
+          goldForCase: (_test: unknown, facts: { verified: boolean }) =>
+            facts.verified ? { must_match: ["target"] } : undefined,
         },
       }) as unknown as SynapseModule<unknown, unknown>,
   );

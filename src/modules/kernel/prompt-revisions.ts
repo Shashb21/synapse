@@ -14,6 +14,8 @@ import { isTestStub } from "./llm";
 import { completionFor, routeConfigs, type RouteConfig } from "./routing";
 import { RunRecorder, openRun, closeRun } from "./observability";
 import { DEFAULT_SCHEMA, DEFAULT_WORKSPACE_ID, runInWorkspace, scopedWorkspaceId } from "@/modules/workspaces/context";
+import { currentSchemaName } from "@/lib/iegp/db";
+import { assertDiagnosticWorkspace, lockDiagnosticWorkspace } from "./evals";
 import { getWorkspace } from "@/modules/workspaces/store";
 
 import { evidenceHash, frozenReplayCase, type FrozenReplayCase } from "./decision-replay";
@@ -30,7 +32,7 @@ import {
   targetMetrics,
   type ReservedTarget,
 } from "./revision-policy";
-import { assertEvaluationRoute } from "./evaluation-isolation";
+import { assertEvaluationRoute, withEvaluationIsolation } from "./evaluation-isolation";
 import type { ResolvedRoute } from "./contracts";
 
 export const REVISION_STAGES = ["S2", "S3", "S4", "S6", "S8", "S9"] as const;
@@ -285,6 +287,7 @@ export async function proposePromptRevision(args: CohortArgs & { actor: Actor })
   if (!workspace && args.workspace_id !== DEFAULT_WORKSPACE_ID)
     throw new TrustedApplicationError("Learning workspace is unavailable.");
   return runInWorkspace({ workspace_id: args.workspace_id, schema: workspace?.schema_name ?? DEFAULT_SCHEMA }, async () => {
+    await withEvaluationIsolation(() => assertDiagnosticWorkspace(args.workspace_id));
     await assertAiEnabled("Prompt revision generation", sectionOfStage(args.stage) ?? undefined);
     const pointer = await activeRevisionPointer(args.workspace_id, args.stage);
     const parent = pointer.revision_id ?? "v1.0-baseline";
@@ -329,12 +332,14 @@ export async function proposePromptRevision(args: CohortArgs & { actor: Actor })
         targets: cohort.gold_reservation!.targets,
       },
     });
+    await assertDiagnosticWorkspace(args.workspace_id);
     await openRun(recorder);
     try {
       // No raw answers, customer metadata, example IDs, or held-out lessons enter the completion.
       const response = await completionFor(
         route,
         recorder,
+        { beforeRequest: () => assertDiagnosticWorkspace(args.workspace_id) },
       )({
         system:
           'Draft concise additional instructions for an evidence-planning stage using only general reviewer lessons. Preserve human decisions and require source-grounded evidence. Return JSON only: {"instruction_text":""}.',
@@ -365,6 +370,7 @@ export async function proposePromptRevision(args: CohortArgs & { actor: Actor })
         provider_id: route?.provider_id ?? null,
       };
       await sharedDb().transaction(async (tx) => {
+        await lockDiagnosticWorkspace(args.workspace_id, workspace?.schema_name ?? DEFAULT_SCHEMA, tx);
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtext(${"prompt-cohort:" + args.workspace_id + ":" + args.stage}))`,
         );
@@ -447,6 +453,10 @@ export async function revisionHistory(workspace_id:string) {
 export async function activatePromptRevision(args: {revision_id:string;evaluation_id:string;expected_active_id:string|null;actor:Actor}):Promise<PromptRevision> {
  const workspace_id=await scopedWorkspaceId();
  if(!workspace_id) throw new TrustedApplicationError('An authorised workspace is required.');
+ const workspaceSchema = await withEvaluationIsolation(async () => {
+  await assertDiagnosticWorkspace(workspace_id);
+  return currentSchemaName();
+ });
  const revision=await getPromptRevision(args.revision_id,workspace_id);
  if(!revision) throw new TrustedApplicationError('Unknown candidate in this workspace.');
  const {getRevisionEvaluation,promotionEligibility,validateReservedCohort,verifyGenerationReservation}=await import('./prompt-revision-evals');
@@ -457,7 +467,7 @@ export async function activatePromptRevision(args: {revision_id:string;evaluatio
     evaluation.case_hash!==evidenceHash(cohort.gold_reservation) || evidenceHash(evaluation.targets)!==evidenceHash(cohort.gold_reservation?.targets ?? []) ||
     evidenceHash(evaluation.gold_cases)!==evidenceHash(cohort.gold_reservation?.cases ?? [])) throw new TrustedApplicationError('Frozen cohort or target lineage changed. Generate a new candidate.');
  validateReservedCohort(cohort);
- await verifyGenerationReservation(revision,cohort);
+ await withEvaluationIsolation(() => verifyGenerationReservation(revision, cohort));
  const configuredRoute=(await routeConfigs({preserveStored:true})).find(row=>row.stage===revision.stage);
  const route=await approvedEvaluationRoute(revision.stage,configuredRoute);
  assertEvaluationRoute(route);
@@ -465,6 +475,7 @@ export async function activatePromptRevision(args: {revision_id:string;evaluatio
  const stageModule=await activeModule(revision.stage);
  if(stageModule.manifest.id!==evaluation.module_id||stageModule.manifest.version!==evaluation.module_version) throw new TrustedApplicationError('Stage implementation changed since evaluation.');
  await sharedDb().transaction(async tx=>{
+  await lockDiagnosticWorkspace(workspace_id, workspaceSchema, tx);
   await tx.execute(sql`insert into prompt_active_revisions(workspace_id,stage) values(${workspace_id},${revision.stage}) on conflict do nothing`);
   const rows=await tx.execute(sql`select * from prompt_active_revisions where workspace_id=${workspace_id} and stage=${revision.stage} for update`);
   const pointer=rows[0];

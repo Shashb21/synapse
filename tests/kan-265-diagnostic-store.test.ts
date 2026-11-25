@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { forgetSchemaBootstrap } from "@/lib/iegp/db";
 import "@/modules";
 import { createWorkspace } from "@/modules/workspaces/store";
 import { runInWorkspace } from "@/modules/workspaces/context";
@@ -10,7 +11,11 @@ import { listHistoricalObservations, recordPromptBaseline } from "@/modules/kern
 import { listDecisionExamples } from "@/modules/kernel/decision-examples";
 import { db, sharedDb } from "@/modules/kernel/db";
 import { runStage } from "@/modules/kernel/run";
-import { resetDemoSetup } from "@/lib/iegp/store";
+import { editSourceBlock, sourceBlockMeta, sourceDroppedUnits, sourceStakeholderMeta } from "@/lib/iegp/source-blocks";
+import { listExtractionDocuments } from "@/modules/stages/s1-parse/module";
+import { parsedDocuments } from "@/modules/stages/s1-parse/schema";
+import { withEvaluationIsolation } from "@/modules/kernel/evaluation-isolation";
+import { resetDemo, resetDemoSetup } from "@/lib/iegp/store";
 
 it("isolates actual extraction diagnostic and historical records from learning, live state and other workspaces", async () => {
   const work = await createWorkspace({
@@ -83,5 +88,90 @@ it("isolates actual extraction diagnostic and historical records from learning, 
       expect(await listHistoricalObservations()).toEqual([]);
       expect(await write({ ...lineage, workspace_id: other.id })).toBeNull();
     });
+  });
+}, 60_000);
+
+it("freezes current editor blocks for both extractors without pruning prior-generation rows", async () => {
+  const work = await createWorkspace({ name: "Diagnostic source edits", owner: "diagnostic-owner" });
+  const actor = { name: "Fixture owner", function: "medical_affairs" as const };
+  const identity = { actor, role: "medical_affairs" as const };
+  await runInWorkspace({ workspace_id: work.id, schema: work.schema_name }, async () => {
+    const state = await resetDemo();
+    const source = state.sources.find((row) => row.id === "SRC-INT-MED")!;
+    const blocks = state.blocks.filter((row) => row.source_id === source.id).sort((a, b) => a.id.localeCompare(b.id));
+    const [first, second] = blocks;
+    const documentId = "diagnostic-source-document";
+    const input = { document_ids: [documentId], dry_run: true };
+    await db().insert(parsedDocuments).values({
+      id: documentId,
+      file_id: "diagnostic-source-file",
+      source_id: source.id,
+      parser: "local",
+      parser_version: "test",
+      blocks,
+      quality: {},
+      parsed_at: source.ingested_at,
+      duration_ms: 0,
+    });
+    const modules = await Promise.all([activeModule("S2"), activeModule("S3")]);
+    for (const implementation of modules) {
+      const facts = await withEvaluationIsolation(() => implementation.freeze!(implementation.inputSchema.parse(input)));
+      const [test] = await implementation.evals!.cases();
+      expect(implementation.evals!.goldForCase!(test, facts)).toMatchObject({ source_id: source.id });
+    }
+
+    const edited = await editSourceBlock({
+      block_id: first.id,
+      text: `${first.text} Additional owner-reviewed content.`,
+      rationale: "Add an owner-reviewed clarification.",
+      actor,
+    });
+    await db().update(sourceBlockMeta).set({ position: 3 }).where(eq(sourceBlockMeta.block_id, first.id));
+    const source_generation = "prior-generation";
+    await db().insert(sourceBlockMeta).values({
+      block_id: second.id,
+      source_id: source.id,
+      origin: "human",
+      locked: true,
+      position: 10,
+      current_text: second.text,
+      source_generation,
+    });
+    await db().insert(sourceDroppedUnits).values({
+      id: "diagnostic-stale-unit", source_id: source.id, location: "fixture", reason: "prior parse",
+      text: "Previous source generation", created_at: "2026-01-01", source_generation,
+    });
+    await db().insert(sourceStakeholderMeta).values({ source_id: source.id, source_generation });
+    const staleRows = () => Promise.all([
+      db().select().from(sourceBlockMeta).where(eq(sourceBlockMeta.source_generation, source_generation)),
+      db().select().from(sourceDroppedUnits).where(eq(sourceDroppedUnits.source_generation, source_generation)),
+      db().select().from(sourceStakeholderMeta).where(eq(sourceStakeholderMeta.source_generation, source_generation)),
+    ]);
+    const before = await staleRows();
+    expect(before.map((rows) => rows.length)).toEqual([1, 1, 1]);
+    const legacyId = "diagnostic-legacy-priority";
+    const lock = { locked: true, actor_name: actor.name, actor_function: actor.function };
+    await db().execute(sql`insert into priorities (id, residual_id, suggested_score, suggested_band, band, reasons, lock)
+      values (${legacyId}, 'RES-PERSIST', 0, 'low', 'low', '[]'::jsonb, ${JSON.stringify(lock)}::jsonb)`);
+    const legacyMarker = async () => (await db().execute(sql`select carried_over_at from priorities where id = ${legacyId}`))[0]?.carried_over_at;
+    const placement = async () => (await db().execute(sql`select band from priority_placements where gap_id = 'GAP-PERSIST'`))[0]?.band;
+    forgetSchemaBootstrap(work.schema_name);
+    await withEvaluationIsolation(async () => {
+      for (const implementation of modules) {
+        const facts = await implementation.freeze!(implementation.inputSchema.parse(input));
+        expect(facts.documents).toMatchObject([{ id: documentId, blocks: [second, edited] }]);
+        const [test] = await implementation.evals!.cases();
+        expect(implementation.evals!.goldForCase!(test, facts)).toBeUndefined();
+        const run = await runOwnerDiagnostics(implementation, identity, work.id, false);
+        expect(run.variants[0]).toMatchObject({ passed: null, cases: 1 });
+        expect(await staleRows()).toEqual(before);
+      }
+      expect(await legacyMarker()).toBeNull();
+      expect(await placement()).toBeUndefined();
+    });
+    expect(await listExtractionDocuments([documentId])).toMatchObject([{ id: documentId, blocks: [second, edited] }]);
+    expect(await staleRows()).toEqual([[], [], []]);
+    expect(await legacyMarker()).toEqual(expect.any(String));
+    expect(await placement()).toBe("low");
   });
 }, 60_000);

@@ -1,7 +1,7 @@
 import type { Actor, EvalCase, EvalScore, StageId, SynapseModule } from "./contracts";
 import type { Role } from "@/modules/auth/roles";
 import { approvedEvaluationRoute } from "./approved-evaluation-route";
-import { compositeScore, recordPromptBaseline } from "./baselines";
+import { compositeScore, recordPromptBaseline, type ComparisonLineage } from "./baselines";
 import {
   aggregateCaseMetrics,
   assertDiagnosticWorkspace,
@@ -9,6 +9,7 @@ import {
   recordEvalRun,
   validScores,
   type EvalExecution,
+  type EvalEvidenceIssue,
 } from "./evals";
 import { withEvaluationIsolation } from "./evaluation-isolation";
 import { evidenceHash } from "./decision-replay";
@@ -47,6 +48,31 @@ function targetMetric(stage: StageId, test: EvalCase<unknown>) {
   return null;
 }
 
+async function prepareCases(module: SynapseModule<unknown, unknown>, sweep: boolean) {
+  const harness = module.evals;
+  if (!harness) return [];
+  const stage = module.manifest.stage;
+  const cases = await harness.cases();
+  const candidates = sweep && !harness.goldForCase ? cases.filter((test) => targetMetric(stage, test)) : cases;
+  const prepared = await Promise.all(
+    candidates.map(async (test) => {
+      if (!test.input || typeof test.input !== "object" || ("apply" in test.input && test.input.apply))
+        throw new TrustedApplicationError("The diagnostic case requests an unsupported operation.");
+      const input = { ...test.input, dry_run: true, persist: false };
+      const parsed = module.inputSchema.parse(input);
+      const facts = await module.freeze?.(parsed);
+      const checked = harness.goldForCase ? { ...test, gold: facts && harness.goldForCase(test, facts) } : test;
+      return { test: checked, input, facts };
+    }),
+  );
+  return sweep ? prepared.filter(({ test }) => targetMetric(stage, test)) : prepared;
+}
+
+function evidenceNote(issue?: EvalEvidenceIssue) {
+  if (issue === "missing_receipt") return "A model call has no recorded receipt";
+  if (issue === "changed_system_retry") return "A JSON retry changed the system prompt";
+}
+
 /** The owner run list offers only active implementations with genuinely distinct, scorable variants. */
 export async function availableDiagnosticSweeps(workspace_id: string): Promise<StageId[]> {
   if (isTestStub() || (await getWorkspace(workspace_id))?.demo_mode) return [];
@@ -64,7 +90,7 @@ export async function availableDiagnosticSweeps(workspace_id: string): Promise<S
             promptVersionsFor(stage).length
         )
           return [];
-        if (!(await harness.cases()).some((test) => targetMetric(stage, test))) return [];
+        if (!(await prepareCases(implementation, true)).length) return [];
         try {
           await approvedEvaluationRoute(stage);
           return [stage];
@@ -126,20 +152,10 @@ export async function runOwnerDiagnostics(
     if (sweep && (distinct.length < 2 || distinct.length !== versions.length))
       return result("Each registered variant must have a distinct prompt instruction.");
     if (sweep && isTestStub()) return result("Synthetic runs cannot compare model prompts.");
-    let cases = await harness.cases();
-    if (sweep) cases = cases.filter((c) => targetMetric(stage, c));
-    if (!cases.length)
-      return result(sweep ? "No curated targets are available to compare." : "No diagnostic cases are available.");
     if (sweep && !module.freeze) return result("The module cannot freeze the comparison inputs.");
-    const prepared = await Promise.all(
-      cases.map(async (test) => {
-        if (!test.input || typeof test.input !== "object" || ("apply" in test.input && test.input.apply))
-          throw new TrustedApplicationError("The diagnostic case requests an unsupported operation.");
-        const input = { ...test.input, dry_run: true, persist: false };
-        const parsed = module.inputSchema.parse(input);
-        return { test, input, facts: await module.freeze?.(parsed) };
-      }),
-    );
+    const prepared = await prepareCases(module, sweep);
+    if (!prepared.length)
+      return result(sweep ? "No curated targets are available to compare." : "No diagnostic cases are available.");
     const case_hash = evidenceHash(prepared);
     const section = sectionOfStage(stage);
     const ai = section ? await aiSectionEnabled(section) : await aiEnabled();
@@ -196,7 +212,10 @@ export async function runOwnerDiagnostics(
         previews.set(variant, approved);
       }
     }
+    const baselines: { lineage: ComparisonLineage; observation: VariantObservation }[] = [];
+    let incompleteSweep = false;
     for (const variant of distinct) {
+      let evidenceIssue: EvalEvidenceIssue | undefined;
       const observations: EvalScore[][] = [];
       const prompts: (string | null)[] = [];
       const firstPrompts: (string | null)[] = [];
@@ -205,11 +224,13 @@ export async function runOwnerDiagnostics(
       for (const [index, { test }] of prepared.entries()) {
         const run = await execute(variant, index, false);
         const actual = run.diagnostic!;
-        const raw = harness.score({ case: test, output: run.output });
+        evidenceIssue ??= actual.evidence_issue;
+        const checked = actual.evidence_issue ? { ...test, gold: undefined } : test;
+        const raw = harness.score({ case: checked, output: run.output });
         const target =
           actual.execution === "routed" && actual.prompt_hash && validScores(raw) ? targetMetric(stage, test) : null;
         const metrics = raw
-          .filter((s) => Number.isFinite(s.value))
+          .filter((s) => Number.isFinite(s.value) && !(actual.evidence_issue && s.name === "curated_must_match"))
           .map((s) => ({ ...s, target: s.name === target ? s.target : undefined }));
         observations.push(metrics);
         routes.add(actual.route_hash);
@@ -222,6 +243,7 @@ export async function runOwnerDiagnostics(
           run_id: run.run_id,
           metrics,
           lineage: { ...actual, case_hash, variant, case_name: test.name },
+          note: evidenceNote(actual.evidence_issue),
         });
       }
       const execution = executions.size === 1 ? [...executions][0] : "mixed";
@@ -234,38 +256,36 @@ export async function runOwnerDiagnostics(
         ...common,
         kind: sweep ? "sweep_summary" : "harness_summary",
         metrics,
-        lineage: { execution, route_hash, prompt_hash, case_hash, variant },
-        note: `${cases.length} diagnostic case(s)`,
+        lineage: { execution, route_hash, prompt_hash, case_hash, variant, ...(evidenceIssue ? { evidence_issue: evidenceIssue } : {}) },
+        note: [`${prepared.length} diagnostic case(s)`, evidenceNote(evidenceIssue)].filter(Boolean).join(". "),
       });
       const composite = compositeScore(metrics);
-      const historical_drift =
-        sweep && comparable && composite !== null
-          ? await recordPromptBaseline(
-              {
-                workspace_id,
-                stage,
-                module_id,
-                module_version,
-                route_hash,
-                case_hash,
-                prompt_hash: evidenceHash({ effective: prompt_hash, revision: selected }),
-              },
-              variant,
-              metrics,
-              group_id,
-            )
-          : null;
-      variants.push({
+      incompleteSweep ||= !!evidenceIssue;
+      const observation = {
         prompt_version: variant,
         metrics,
         composite,
-        historical_drift,
-        cases: cases.length,
+        historical_drift: null,
+        cases: prepared.length,
         passed: row.passed,
         eval_run_id: row.id,
         prompt_hash,
         first_prompt_hash: firstPrompts.every(Boolean) ? evidenceHash(firstPrompts) : null,
-      });
+      };
+      variants.push(observation);
+      if (sweep && comparable && composite !== null) {
+        baselines.push({
+          lineage: {
+            workspace_id, stage, module_id, module_version, route_hash, case_hash,
+            prompt_hash: evidenceHash({ effective: prompt_hash, revision: selected }),
+          },
+          observation,
+        });
+      }
+    }
+    if (sweep && incompleteSweep) return result("A model call lacks comparable request evidence.");
+    for (const { lineage, observation } of baselines) {
+      observation.historical_drift = await recordPromptBaseline(lineage, observation.prompt_version, observation.metrics, group_id);
     }
     return result();
   });

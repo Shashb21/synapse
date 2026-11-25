@@ -19,6 +19,7 @@ import { completionFor } from "./routing";
 import { getRun, RunRecorder } from "./observability";
 import { revisionCompletion, withPromptRevision } from "./prompt-variant";
 import { withLearningExclusions } from "./decision-examples";
+import { assertDiagnosticWorkspace } from "./evals";
 import { assertEvaluationRoute, withEvaluationIsolation } from "./evaluation-isolation";
 import {
   lineageResolver,
@@ -255,6 +256,7 @@ export async function executeFrozenStage(args: {
   actor: Actor;
   excluded_ids: string[];
   record_call?: (call: Omit<EvaluationCall, "arm" | "case_id">) => void;
+  before_request?: () => Promise<void>;
 }): Promise<unknown> {
   const { module, snapshot } = args;
   assertEvaluationRoute(args.route);
@@ -280,7 +282,7 @@ export async function executeFrozenStage(args: {
     input: snapshot.input,
   });
 
-  const complete = completionFor(args.route, recorder);
+  const complete = completionFor(args.route, recorder, { beforeRequest: args.before_request });
   const observed: typeof complete = async (call) => {
     args.record_call?.({
       purpose: call.purpose,
@@ -391,14 +393,15 @@ export async function evaluatePromptRevision(args: {
   workspace_id: string;
   actor: Actor;
 }): Promise<RevisionEvaluation> {
-  await ensurePlatformSchema();
-  const revision = await getPromptRevision(args.revision_id, args.workspace_id);
-  if (!revision) throw new Error("Unknown candidate in this workspace.");
-  if (!TARGET_STAGES.some((stage) => stage === revision.stage))
-    throw new TrustedApplicationError("This stage has no independently comparable human target.");
   const workspace = await getWorkspace(args.workspace_id);
   if (!workspace && args.workspace_id !== DEFAULT_WORKSPACE_ID) throw new Error("Unknown workspace.");
-  return runInWorkspace({ workspace_id: args.workspace_id, schema: workspace?.schema_name ?? DEFAULT_SCHEMA }, async () => {
+  const scope = { workspace_id: args.workspace_id, schema: workspace?.schema_name ?? DEFAULT_SCHEMA };
+  return runInWorkspace(scope, () => withEvaluationIsolation(async () => {
+    await assertDiagnosticWorkspace(args.workspace_id);
+    const revision = await getPromptRevision(args.revision_id, args.workspace_id);
+    if (!revision) throw new Error("Unknown candidate in this workspace.");
+    if (!TARGET_STAGES.some((stage) => stage === revision.stage))
+      throw new TrustedApplicationError("This stage has no independently comparable human target.");
     await assertAiEnabled("Prompt evaluation", sectionOfStage(revision.stage) ?? undefined);
     const cohort = await getRevisionCohort(revision.cohort_id, args.workspace_id);
     if (!cohort) throw new Error("Frozen candidate cohort is missing.");
@@ -430,6 +433,7 @@ export async function evaluatePromptRevision(args: {
       throw new TrustedApplicationError(
         "Use the approved primary model and distinct instructions on their original stage, parent and settings. Generate a new candidate if these changed.",
       );
+    await assertDiagnosticWorkspace(args.workspace_id);
     const claim = await claimRevisionBatch(args.workspace_id, revision.id);
     if ("bound" in claim) return claim.bound;
     const { attempt } = claim;
@@ -458,6 +462,7 @@ export async function evaluatePromptRevision(args: {
               actor: args.actor,
               excluded_ids: cohort.excluded_ids,
               record_call: (call) => calls.push({ ...call, arm, case_id: target.id, repeat }),
+              before_request: () => assertDiagnosticWorkspace(args.workspace_id),
             });
             if ((output as { mode?: string })?.mode !== "llm" || calls.length === before)
               throw new Error("No routed model judgement.");
@@ -503,7 +508,8 @@ export async function evaluatePromptRevision(args: {
       await sealRevisionBatch(attempt, { calls, observations, failures, interrupted, disqualified });
     try {
       const after = await activeRevisionPointer(args.workspace_id, revision.stage);
-      const finalRoute = await approvedEvaluationRoute(revision.stage).catch(() => null);
+      const liveWorkspace = await assertDiagnosticWorkspace(args.workspace_id).then(() => true, () => false);
+      const finalRoute = liveWorkspace ? await approvedEvaluationRoute(revision.stage).catch(() => null) : null;
       const finalModule = await activeModule(revision.stage);
       const evidence: RevisionEvaluation = {
         id: newId("pre"),
@@ -562,7 +568,7 @@ export async function evaluatePromptRevision(args: {
       await releaseSealedBatch(attempt).catch(() => undefined);
       throw error;
     }
-  });
+  }));
 }
 /** Workspace-bound immutable evaluation lookup. */
 export async function getRevisionEvaluation(id: string, workspace_id: string): Promise<RevisionEvaluation | null> {

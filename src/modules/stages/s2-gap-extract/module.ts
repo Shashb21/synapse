@@ -1,6 +1,5 @@
 import { quotedRepair, repairText, repairUserMessage, type RepairMessage } from "@/modules/kernel/repair-guidance";
 import { extractionSections, quotedBlock, reconcileSections, proposeSections, reviseSection, type ExtractionSection } from "../extraction-sections";
-import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
@@ -19,11 +18,11 @@ import { EVIDENCE_DOMAINS, type EvidenceDomain } from "@/lib/iegp/enums";
 import { addSuggestionSources, commitExtractedRecords, loadState } from "@/lib/iegp/store";
 import { validatedPlacementGapIds } from "@/modules/stages/s8-prioritization/module";
 import { extractCandidateGaps, isLiveGap } from "@/lib/iegp/engine";
-import { listExtractionDocuments, listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
+import { listExtractionDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
 import { GAP_CANDIDATES_DDL, GAP_BLOCK_DDL, gapCandidates } from "./schema";
 import { promptVariantInstruction } from "@/modules/kernel/prompt-versions";
 import { augmentSystemPrompt } from "@/modules/kernel/prompt-variant";
-import { curatedS2Cases } from "@/modules/eval-gold";
+import { extractionEvalCases } from "@/modules/eval-gold";
 import { scoreMustMatch } from "@/modules/eval-gold/types";
 import {
   GAP_CRITIC_SYSTEM,
@@ -956,19 +955,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
   },
   evals: {
     variantInstruction: promptVariantInstruction,
-    async cases(facts) {
-      if (facts) {
-        const documents = facts.documents as ParsedDocumentRecord[];
-        return documents.slice(0, 3).map(document => ({ name: document.source_id, input: { document_ids: [document.id], dry_run: true }, gold: sourcesForStage("S2").find(source => source.source_id === document.source_id) ? goldMetaForSource(sourcesForStage("S2").find(source => source.source_id === document.source_id)!) : undefined }));
-      }
-      const curated = await curatedS2Cases();
-      if (curated.length > 0) return curated;
-      const documents = await listParsedDocuments();
-      return documents.slice(0, 3).map((document) => ({
-        name: document.source_id,
-        input: { document_ids: [document.id], dry_run: true },
-      }));
-    },
+    ...extractionEvalCases("S2"),
     score({ case: testCase, output }) {
       const accepted = output.accepted.length;
       const total = accepted + output.rejected.length;

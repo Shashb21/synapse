@@ -318,7 +318,13 @@ export function canPrompt(route: ResolvedRoute): boolean {
 export type RawCompletionCall = { request: import("@/modules/llm/provider").LlmRequest; purpose: string; attempt: number; role?: import("./contracts").CompletionRole };
 export type RawCompletionExecutor = (call: RawCompletionCall) => Promise<string>;
 
-export function completionFor(route: ResolvedRoute, run: RunHandle, options?: { completeRaw?: RawCompletionExecutor }): JsonCompletion {
+type CompletionOptions = {
+  completeRaw?: RawCompletionExecutor;
+  beforeRequest?: () => Promise<void>;
+  onReceipt?: (receipt: { attempt: number; id: string | null }) => void;
+};
+
+export function completionFor(route: ResolvedRoute, run: RunHandle, options?: CompletionOptions): JsonCompletion {
   return async ({ system, user, purpose, maxTokens, role, requestBudget }) => {
     if (inEvaluationIsolation()) assertEvaluationRoute(route);
     if (!canPrompt(route)) {
@@ -340,20 +346,24 @@ export function completionFor(route: ResolvedRoute, run: RunHandle, options?: { 
           temperature: route.params.temperature,
           max_tokens: maxTokens ?? route.params.max_tokens,
         };
-      const text = options?.completeRaw ? await options.completeRaw({ request, purpose, attempt, role }) : (await tracedCompletion({
-        provider, request,
-        requestBudget,
-        api_key: api_key!,
-        run,
-        step: `llm:${purpose}`,
-        detail: `${route.provider_label} · ${route.model}`,
-        purpose,
-        attempt,
-        stage: route.stage,
-        workspace_id: run.workspace_id ?? null,
-      })).text;
+      const reply = options?.completeRaw
+        ? { text: await options.completeRaw({ request, purpose, attempt, role }), llm_call_id: null }
+        : await tracedCompletion({
+            provider, request,
+            requestBudget,
+            beforeRequest: options?.beforeRequest,
+            api_key: api_key!,
+            run,
+            step: `llm:${purpose}`,
+            detail: `${route.provider_label} · ${route.model}`,
+            purpose,
+            attempt,
+            stage: route.stage,
+            workspace_id: run.workspace_id ?? null,
+          });
+      options?.onReceipt?.({ attempt, id: reply.llm_call_id });
       try {
-        return extractJsonObject(text);
+        return extractJsonObject(reply.text);
       } catch (error) {
         invalid = error instanceof Error ? error.message : String(error);
         run.note(`llm:${purpose}:invalid-json`, { attempt, error: invalid });

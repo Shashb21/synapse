@@ -17,7 +17,7 @@ export type ComparisonLineage = {
   case_hash: string;
 };
 export function comparisonKey(lineage: ComparisonLineage) {
-  return evidenceHash({ protocol: 3, ...lineage });
+  return evidenceHash({ protocol: 4, ...lineage });
 }
 export function compositeScore(metrics: EvalScore[]): number | null {
   if (!validScores(metrics)) return null;

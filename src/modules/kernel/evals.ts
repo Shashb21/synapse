@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { currentSchemaName } from "@/lib/iegp/db";
 import { DEFAULT_WORKSPACE_ID, scopedWorkspaceId } from "@/modules/workspaces/context";
 import { getWorkspace } from "@/modules/workspaces/store";
@@ -11,12 +11,14 @@ import type { EvalScore, StageId } from "./contracts";
 const kinds = ["live_diagnostic", "harness_case", "harness_summary", "sweep_case", "sweep_summary"] as const;
 export type EvalKind = (typeof kinds)[number];
 export type EvalExecution = "routed" | "synthetic" | "mechanical" | "mixed";
+export type EvalEvidenceIssue = "missing_receipt" | "changed_system_retry";
 export type EvalLineage = {
   execution: EvalExecution;
   route_hash: string | null;
   prompt_hash: string | null;
   first_prompt_hash?: string | null;
   transcript_hash?: string | null;
+  evidence_issue?: EvalEvidenceIssue;
   case_hash: string | null;
   case_name?: string;
   variant?: string;
@@ -37,9 +39,17 @@ export async function assertDiagnosticWorkspace(expected: string) {
   if (
     !workspace ||
     workspace.id !== expected ||
-    workspace.schema_name !== (await currentSchemaName()) ||
-    workspace.demo_mode
+    workspace.demo_mode ||
+    workspace.schema_name !== (await currentSchemaName())
   )
+    throw new TrustedApplicationError("Select a workspace with live routing for diagnostics.");
+}
+
+/** Recheck the workspace row at commit and serialize against client-demo mode changes. */
+export async function lockDiagnosticWorkspace(expected: string, schema: string, tx: Pick<ReturnType<typeof sharedDb>, "execute">) {
+  const [workspace] = await tx.execute(sql`select schema_name, demo_mode from workspaces where id = ${expected} for share`);
+  if (!workspace && expected === DEFAULT_WORKSPACE_ID && schema === "public") return;
+  if (!workspace || workspace.demo_mode !== false || workspace.schema_name !== schema)
     throw new TrustedApplicationError("Select a workspace with live routing for diagnostics.");
 }
 
@@ -111,6 +121,7 @@ export async function recordEvalRun(args: {
     !!args.lineage.case_hash &&
     !!args.lineage.prompt_hash &&
     args.lineage.execution === "routed" &&
+    !args.lineage.evidence_issue &&
     validScores(args.metrics) &&
     args.metrics.some((s) => s.target !== undefined);
   const row = { ...args, id: newId("eval"), at: nowIso(), passed: assessed ? scoresPassed(args.metrics) : null };

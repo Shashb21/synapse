@@ -24,7 +24,9 @@ import * as routing from '@/modules/kernel/routing';
 import * as llm from '@/modules/kernel/llm';
 import * as store from '@/lib/iegp/store';
 import * as examples from '@/modules/kernel/decision-examples';
-import { createWorkspace } from '@/modules/workspaces/store';
+import { forgetSchemaBootstrap } from "@/lib/iegp/db";
+import { withEvaluationIsolation } from "@/modules/kernel/evaluation-isolation";
+import { createWorkspace, setWorkspaceDemoMode } from '@/modules/workspaces/store';
 import { runInWorkspace } from '@/modules/workspaces/context';
 import { runStage } from '@/modules/kernel/run';
 import { proposePromptRevision, getRevisionCohort, activatePromptRevision, rollbackPromptRevision, activeRevisionPointer, revisionHistory } from '@/modules/kernel/prompt-revisions';
@@ -118,7 +120,16 @@ describe('isolated full-stage evaluation and atomic promotion', () => {
         const f = await evaluationFixture();
         const calls = scriptedModel();
         await runInWorkspace({ workspace_id: f.ws.id, schema: f.ws.schema_name }, async () => {
+            const legacyPriority = "evaluation-legacy-priority";
+            const legacyResidual = "evaluation-legacy-residual";
+            await db().execute(sql`insert into residuals (id,gap_id,statement,domain,draft_rationale,lock)
+                values (${legacyResidual},${f.gap.id},'Legacy evidence','safety','','{}'::jsonb)`);
+            await db().execute(sql`insert into priorities (id,residual_id,suggested_score,suggested_band,band,reasons,lock)
+                values (${legacyPriority},${legacyResidual},0,'low','low','[]'::jsonb,'{"locked":true}'::jsonb)`);
+            await db().execute(sql`delete from priority_placements where gap_id=${f.gap.id}`);
+            const legacyMarker = async () => (await db().execute(sql`select carried_over_at from priorities where id=${legacyPriority}`))[0]?.carried_over_at;
             const before = await liveContents();
+            forgetSchemaBootstrap(f.ws.schema_name);
             await expect(runStage({ stage: 'S8', workspace_id: 'foreign', input: {}, actor, role: 'medical_affairs' })).rejects.toThrow('database scope');
             // Any hidden live reader would either leak post-decision facts or run schema/bootstrap writes.
             vi.spyOn(store, 'loadState').mockRejectedValue(new Error('live state reader forbidden during replay'));
@@ -129,13 +140,15 @@ describe('isolated full-stage evaluation and atomic promotion', () => {
             expect(result.candidate.replay_count).toBe(0);
             expect(result.candidate.combined).toBeGreaterThan(result.baseline.combined);
             expect(result.eligible).toBe(true);
-            expect(await liveContents()).toEqual(before);
+            expect(await withEvaluationIsolation(liveContents)).toEqual(before);
+            expect(await withEvaluationIsolation(legacyMarker)).toBeNull();
             expect(await activeRevisionPointer(f.ws.id, 'S8')).toEqual({ revision_id: null, generation: 0 });
             expect(calls.filter(c => c.purpose === 'priority-critic')).toHaveLength(54);
             expect(calls.some(c => c.system.includes('Candidate instruction'))).toBe(true);
             expect(result.allowed_example_ids.some(id => f.revision.heldout_ids.includes(id))).toBe(false);
             await expect(sharedDb().execute(sql `update prompt_revision_evaluations set evidence='{}' where id=${result.id}`)).rejects.toThrow();
             await expect(evaluatePromptRevision({ revision_id: f.revision.id, workspace_id: 'foreign', actor })).rejects.toThrow('Unknown');
+            expect(await legacyMarker()).toEqual(expect.any(String));
         });
     });
     it('allows only one concurrent approval, refuses stale evidence, then rollback restores live instructions', async () => {
@@ -162,6 +175,20 @@ describe('isolated full-stage evaluation and atomic promotion', () => {
             expect(audited[1].before).toMatchObject({ stage: 'S8', active_revision: null });
             expect(audited[1].after).toMatchObject({ stage: 'S8', active_revision: f.revision.id });
             expect(audited[0].after).toMatchObject({ active_revision: null });
+        });
+    });
+    it('revalidates demo mode at the approval transaction before touching the active pointer', async () => {
+        const f = await evaluationFixture();
+        await runInWorkspace({ workspace_id: f.ws.id, schema: f.ws.schema_name }, async () => {
+            const evaluation = await evaluatePromptRevision({ revision_id: f.revision.id, workspace_id: f.ws.id, actor });
+            expect(evaluation.eligible).toBe(true);
+            vi.mocked(routing.resolveRoute).mockImplementationOnce(async () => {
+                await setWorkspaceDemoMode(f.ws.id, true);
+                return route;
+            });
+            await expect(activatePromptRevision({ revision_id: f.revision.id, evaluation_id: evaluation.id, expected_active_id: null, actor })).rejects.toThrow(/workspace with live routing/);
+            expect(await activeRevisionPointer(f.ws.id, 'S8')).toEqual({ revision_id: null, generation: 0 });
+            expect(await revisionHistory(f.ws.id)).toEqual([]);
         });
     });
     it('refuses promotion after the evaluated stage manifest version changes', async () => {

@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
+import { buildSeed } from "@/lib/iegp/seed";
+import * as parser from "@/modules/stages/s1-parse/module";
 import { gapExtractModule } from "@/modules/stages/s2-gap-extract/module";
 import { tacticExtractModule } from "@/modules/stages/s3-tactic-extract/module";
 import { POST as harness } from "@/app/api/modules/evals/route";
@@ -22,12 +26,17 @@ import * as routing from "@/modules/kernel/routing";
 import * as llm from "@/modules/kernel/llm";
 import * as workspace from "@/modules/workspaces/store";
 import { runInWorkspace } from "@/modules/workspaces/context";
+import { availableDiagnosticSweeps } from "@/modules/kernel/hillclimb-loop";
 import { inEvaluationIsolation } from "@/modules/kernel/evaluation-isolation";
 import { saveReplaySnapshot } from "@/modules/kernel/decision-replay";
 import { similarExamples } from "@/modules/kernel/decision-examples";
 import type { JsonCompletion, SynapseModule } from "@/modules/kernel/contracts";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 function request(stage: string, workspace_id = "fiction") {
   return new Request("http://localhost/api/modules/evals", {
@@ -57,7 +66,12 @@ function setup() {
   vi.spyOn(data, "sharedDb").mockReturnValue({ insert } as unknown as ReturnType<typeof data.sharedDb>);
   vi.spyOn(revisions, "activeRevisionPointer").mockResolvedValue({ revision_id: null, generation: 0 });
   const provider = vi.fn<JsonCompletion>().mockResolvedValue({});
-  vi.spyOn(routing, "completionFor").mockReturnValue(provider);
+  let receipt = 0;
+  vi.spyOn(routing, "completionFor").mockImplementation((_route, _run, options) => async (call) => {
+    const reply = await provider(call);
+    options?.onReceipt?.({ attempt: 1, id: `scripted-receipt-${++receipt}` });
+    return reply;
+  });
   const open = vi.spyOn(traces, "openRun").mockResolvedValue();
   const close = vi.spyOn(traces, "closeRun").mockResolvedValue();
   const signal = vi.spyOn(signals, "recordSignal");
@@ -320,39 +334,28 @@ describe("owner diagnostics", () => {
     expect(signal).not.toHaveBeenCalled();
   });
   it.each([gapExtractModule, tacticExtractModule])(
-    "previews and dispatches the registered $manifest.stage proposer on the same frozen document",
+    "checks the exact curated facts before previewing the registered $manifest.stage proposer",
     async (original) => {
-      const { provider } = setup();
+      const { implementation: inactive, provider } = setup();
       const stage = original.manifest.stage;
-      const implementation = {
-        ...original,
-        freeze: async () => ({
-          documents: [
-            {
-              id: "fiction-doc",
-              file_id: "source",
-              source_id: "fiction-source",
-              blocks: [
-                { id: "block", heading: "Fictional source", text: "A fictional unresolved question about enrollment." },
-              ],
-            },
-          ],
-          state: { gaps: [], tactics: [], sources: [], needs: [] },
-        }),
-        evals: {
-          ...original.evals,
-          cases: async () => [
-            {
-              name: "fiction",
-              input: { document_ids: ["fiction-doc"] },
-              gold: { pack: "demo", source_id: "fiction-source", must_match: ["target"] },
-            },
-          ],
-        },
-      };
-      vi.mocked(registry.activeModule).mockResolvedValue(implementation as unknown as SynapseModule<unknown, unknown>);
+      const seed = buildSeed();
+      const source = seed.sources.find((row) => row.id === "SRC-INT-MED")!;
+      const blocks = seed.blocks.filter((row) => row.source_id === source.id);
+      const document = {
+        id: "fiction-doc",
+        file_id: "fiction-file",
+        source_id: source.id,
+        blocks,
+      } as parser.ParsedDocumentRecord;
+      const facts = { documents: [document], state: { gaps: [], tactics: [], sources: [source], needs: [] } };
+      const freeze = vi.fn(async () => facts);
+      vi.spyOn(parser, "listParsedDocuments").mockResolvedValue([document]);
+      const implementation = { ...original, freeze };
+      vi.mocked(registry.activeModule).mockImplementation(async (requested) =>
+        requested === stage ? (implementation as unknown as SynapseModule<unknown, unknown>) : inactive,
+      );
       vi.spyOn(llm, "isTestStub").mockReturnValue(false);
-      vi.spyOn(routes, "approvedEvaluationRoute").mockResolvedValue({
+      const route = vi.spyOn(routes, "approvedEvaluationRoute").mockResolvedValue({
         stage,
         provider_id: "fiction",
         model: "fiction",
@@ -364,7 +367,7 @@ describe("owner diagnostics", () => {
         fallbacks: [],
         reason: null,
       });
-      vi.spyOn(observations, "recordPromptBaseline").mockResolvedValue(null);
+      const history = vi.spyOn(observations, "recordPromptBaseline").mockResolvedValue(null);
       provider.mockImplementation(async (call) => {
         if (call.purpose.endsWith("proposer:fiction-doc")) {
           const malformed = { name: "Fictional candidate", domain: "generated-term", type: "generated-term" };
@@ -389,13 +392,110 @@ describe("owner diagnostics", () => {
       const body = await response.json();
       expect(response.ok, JSON.stringify(body)).toBe(true);
       expect(body.variants).toHaveLength(3);
+      expect(body.variants[0]).toMatchObject({ passed: false, composite: 0 });
       expect(body.champion).toBeNull();
+      expect(history).toHaveBeenCalledTimes(3);
       expect(provider.mock.calls.filter(([call]) => call.repairGuidance?.length)).toHaveLength(3);
       const sent = provider.mock.calls;
       const proposers = sent.filter(([r]) => r.purpose.endsWith("proposer:fiction-doc"));
       expect(proposers).toHaveLength(3);
       expect(new Set(proposers.map(([r]) => r.system)).size).toBe(3);
-      expect(proposers.every(([r]) => r.user.includes("A fictional unresolved question"))).toBe(true);
+      expect(proposers.every(([r]) => r.user.includes("KOLs need to know intracranial outcomes"))).toBe(true);
+      expect(await inScope(() => availableDiagnosticSweeps("fiction"))).toContain(stage);
+
+      const editedBlock = { ...blocks[0], text: `${blocks[0].text} An additional owner review question.` };
+      const edited = { ...facts, documents: [{ ...document, blocks: [editedBlock, ...blocks.slice(1)] }] };
+      const replaced = { ...facts, state: { ...facts.state, sources: [{ ...source, ingested_at: "2026-10-01" }] } };
+      const reordered = { ...facts, documents: [{ ...document, blocks: [...blocks].reverse() }] };
+      for (const changed of [edited, replaced, reordered]) {
+        freeze.mockResolvedValue(changed);
+        provider.mockClear();
+        route.mockClear();
+        history.mockClear();
+        expect(await inScope(() => availableDiagnosticSweeps("fiction"))).not.toContain(stage);
+        const rejected = await inScope(() => sweep(request(stage)));
+        expect(await rejected.json()).toMatchObject({ ok: true, variants: [], champion: null });
+        for (const spy of [route, provider, history]) expect(spy).not.toHaveBeenCalled();
+      }
+      freeze.mockResolvedValue(edited);
+      const diagnostic = await inScope(() => harness(request(stage)));
+      const descriptive = await diagnostic.json();
+      expect(descriptive).toMatchObject({ ok: true, cases: 1, passed: null, composite: null });
+      expect(descriptive.metrics.find(({ name }: { name: string }) => name === "curated_must_match")).not.toHaveProperty("target");
+      expect(provider.mock.calls.some(([call]) => call.user.includes("An additional owner review question"))).toBe(true);
+    },
+  );
+  it.each(["changed_system_retry", "missing_receipt"] as const)(
+    "withholds sweep ranking and baseline history if the last variant has %s",
+    async (issue) => {
+      const { implementation } = setup();
+      vi.mocked(routing.completionFor).mockRestore();
+      vi.stubEnv("OPENAI_API_KEY", "scripted-test-key");
+      vi.spyOn(llm, "isTestStub").mockReturnValue(false);
+      vi.spyOn(routes, "approvedEvaluationRoute").mockResolvedValue({
+        stage: "S2", provider_id: "openai", provider_label: "Fixture", model: "gpt-4.1",
+        auth: "api_key", connected: true, degraded: false, reason: null,
+        params: { temperature: 0, max_tokens: 20 }, fallbacks: [],
+      });
+      const history = vi.spyOn(observations, "recordPromptBaseline").mockResolvedValue(null);
+      implementation.manifest.stage = "S2";
+      implementation.outputSchema = z.object({ value: z.number() });
+      implementation.evals = {
+        variantInstruction: (variant) => variant,
+        cases: async () => [{ name: "fixture", input: {}, gold: { pack: "fixture", source_id: "fixture", must_match: ["target"] } }],
+        score: ({ output }) => [
+          { name: "curated_must_match", target: 0.5, value: (output as { value: number }).value },
+          { name: "observations", value: 1 },
+        ],
+      };
+      implementation.run = async (_input, ctx) => ({
+        output: await ctx.complete({ system: activePromptVersion(), user: "Fixture input", purpose: "test-proposer" }),
+        summary: "Diagnostic",
+      });
+      const systems: string[] = [];
+      const affected = "v1.2-hillclimb-hints";
+      const transport = vi.fn(async (_url, request: RequestInit) => {
+        const { messages } = JSON.parse(request.body as string) as { messages: { role: string; content: string }[] };
+        const system = messages.find((message) => message.role === "system")!.content;
+        systems.push(system);
+        const content = issue === "changed_system_retry" && system === affected ? "Invalid JSON" : JSON.stringify({ value: Number(system.startsWith(affected)) });
+        return Response.json({ choices: [{ message: { content } }] });
+      });
+      vi.stubGlobal("fetch", transport);
+      const dialect = new PgDialect();
+      const execute = vi.fn(async (query: SQL) => {
+        const { sql, params } = dialect.sqlToQuery(query);
+        if (issue === "missing_receipt" && sql.includes("insert into llm_calls") && params.includes(affected))
+          throw new Error("Scripted receipt write failure");
+        return [];
+      });
+      const dataStore = vi.mocked(data.sharedDb)();
+      vi.mocked(data.sharedDb).mockReturnValue({ ...dataStore, execute } as unknown as ReturnType<typeof data.sharedDb>);
+      const unrecorded = vi.spyOn(console, "error").mockImplementation(() => {});
+      const response = await inScope(() => sweep(request("S2")));
+      const body = await response.json();
+      expect(response.ok, JSON.stringify(body)).toBe(true);
+      expect(body).toMatchObject({ champion: null, reason: expect.stringMatching(/request evidence/) });
+      expect(body.variants.slice(0, 2).map(({ composite }: { composite: unknown }) => composite)).toEqual([0, 0]);
+      expect(body.variants[2]).toMatchObject({
+        prompt_version: affected, composite: null, passed: null, prompt_hash: null,
+        metrics: [{ name: "observations", value: 1 }],
+      });
+      expect(history).not.toHaveBeenCalled();
+      expect(systems.slice(0, 3)).toEqual(["v1.0-baseline", "v1.1-atomic", affected]);
+      if (issue === "changed_system_retry") {
+        expect(systems[3]).toContain("previous reply was not valid JSON");
+        expect(transport).toHaveBeenCalledTimes(4);
+        expect(unrecorded).not.toHaveBeenCalled();
+      } else {
+        expect(transport).toHaveBeenCalledTimes(3);
+        expect(unrecorded).toHaveBeenCalledOnce();
+      }
+      const inserts = vi.mocked(dataStore.insert);
+      const records = inserts.mock.results.map(({ value }) => vi.mocked(value.values).mock.calls[0][0]);
+      expect(records).toEqual(expect.arrayContaining([expect.objectContaining({
+        kind: "sweep_case", passed: null, lineage: expect.objectContaining({ evidence_issue: issue, transcript_hash: null }),
+      })]));
     },
   );
   it("treats parser thresholds on a same-name replacement file as descriptive", async () => {

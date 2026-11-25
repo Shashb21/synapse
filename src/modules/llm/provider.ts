@@ -44,9 +44,11 @@ export type ProviderRequestBudget = {
   consume(): void;
 };
 
-/** Optional observers of one call. The reply is still returned as plain text. */
+/** Optional controls and observers of one call. The reply is still returned as plain text. */
 export type LlmCallHooks = {
   requestBudget?: ProviderRequestBudget;
+  /** Revalidate authorization before each HTTP dispatch, including retries. */
+  beforeRequest?: () => Promise<void>;
   onUsage?: (usage: LlmUsage) => void;
   /** Per-call HTTP bound; omitted preserves ordinary provider retry policy. */
   maxAttempts?: number;
@@ -115,7 +117,9 @@ function requestedWait(res: Response, text: string): number | null {
 
 async function postJson(url: string, headers: Record<string, string>, body: unknown, target: CallTarget, hooks?: LlmCallHooks) {
   const maxAttempts = hooks?.maxAttempts ?? RETRY.attempts;
+  const controlRedirects = !!(hooks?.requestBudget || hooks?.beforeRequest);
   for (let attempt = 1; ; attempt += 1) {
+    if (hooks?.beforeRequest) await hooks.beforeRequest();
     // Time-limited (SYNAPSE_LLM_TIMEOUT_MS); a timeout is "unavailable" and not retried (KAN-20).
     hooks?.requestBudget?.consume();
     const { res, text } = await fetchProvider(
@@ -124,14 +128,14 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
         method: "POST",
         headers: { "content-type": "application/json", ...headers },
         body: JSON.stringify(body),
-        // An automatic redirect could resend the prompt without consuming an allowance.
-        ...(hooks?.requestBudget ? { redirect: "manual" as const } : {}),
+        // An automatic redirect would bypass dispatch authorization and accounting.
+        ...(controlRedirects ? { redirect: "manual" as const } : {}),
       },
       target,
     );
     if (res.ok) return JSON.parse(text) as Record<string, unknown>;
     // A typed, classified error instead of the raw body; the key never appears in it.
-    const redirected = hooks?.requestBudget && res.status >= 300 && res.status < 400;
+    const redirected = controlRedirects && res.status >= 300 && res.status < 400;
     const parsed = redirected ? { error_type: null, message: null } : parseProviderErrorBody(text);
     const error = new ProviderError({
       provider_id: target.provider_id,

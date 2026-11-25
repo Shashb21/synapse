@@ -1,6 +1,5 @@
 import { quotedRepair, repairUserMessage, type RepairMessage } from "@/modules/kernel/repair-guidance";
 import { extractionSections, quotedBlock, reconcileSections, proposeSections, reviseSection, type ExtractionSection } from "../extraction-sections";
-import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
 import { desc } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
@@ -16,7 +15,7 @@ import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import { NoRouteError } from "@/modules/llm/provider";
 import { promptVariantInstruction } from "@/modules/kernel/prompt-versions";
 import { augmentSystemPrompt } from "@/modules/kernel/prompt-variant";
-import { curatedS3Cases } from "@/modules/eval-gold";
+import { extractionEvalCases } from "@/modules/eval-gold";
 import { scoreMustMatch } from "@/modules/eval-gold/types";
 import type { EvalScore, ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
 import {
@@ -30,7 +29,7 @@ import { createTacticSuggestion, separateTacticOptionSchema } from "./suggestion
 import type { ExpansionScope, SeparateTacticOption, Tactic } from "@/lib/iegp/types";
 import { commitExtractedRecords, loadState } from "@/lib/iegp/store";
 import { extractCandidateTactics } from "@/lib/iegp/engine";
-import { listExtractionDocuments, listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
+import { listExtractionDocuments } from "@/modules/stages/s1-parse/module";
 import { TACTIC_CANDIDATES_DDL, TACTIC_BLOCK_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL, TACTIC_MATCHING_DDL, tacticCandidates } from "./schema";
 import { plural } from "@/lib/plural";
 
@@ -788,19 +787,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
   },
   evals: {
     variantInstruction: promptVariantInstruction,
-    async cases(facts) {
-      if (facts) {
-        const documents = facts.documents as ParsedDocumentRecord[];
-        return documents.slice(0, 3).map(document => ({ name: document.source_id, input: { document_ids: [document.id], dry_run: true }, gold: sourcesForStage("S3").find(source => source.source_id === document.source_id) ? goldMetaForSource(sourcesForStage("S3").find(source => source.source_id === document.source_id)!) : undefined }));
-      }
-      const curated = await curatedS3Cases();
-      if (curated.length > 0) return curated;
-      const documents = await listParsedDocuments();
-      return documents.slice(0, 3).map((document) => ({
-        name: document.source_id,
-        input: { document_ids: [document.id], dry_run: true },
-      }));
-    },
+    ...extractionEvalCases("S3"),
     score({ case: testCase, output }) {
       const accepted = output.accepted;
       const real = accepted.filter((candidate) => candidate.status !== "proposed").length;
