@@ -15,6 +15,7 @@ import { ensurePlatformSchema, wipePlatform } from "@/modules/kernel/db";
 import { runStage } from "@/modules/kernel/run";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { NoRouteError } from "@/modules/llm/provider";
+import { splitSourceBlock } from "@/lib/iegp/source-blocks";
 import { commitExtractedRecords, loadState, resetDemoSetup } from "@/lib/iegp/store";
 import { tacticExtractModule } from "@/modules/stages/s3-tactic-extract/module";
 
@@ -452,5 +453,32 @@ describe("S3 on the model path", () => {
     omitBlock = true;
     await run();
     expect((await listTacticSourceReferences(libraryId)).filter(r => r.source_quote === unique).map(r => r.block_id).sort()).toEqual(["later", "unique"]);
+  });
+
+  it("saves a tactic overlap with the current block after a source split", async () => {
+    const { listTacticSuggestions } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    const [document] = await db().select().from(parsedDocuments).where(eq(parsedDocuments.id, documentId));
+    const quote = "The fictional registry includes a subgroup analysis.";
+    const block = { id: "split-registry", source_id: document.source_id, heading: "Registry", location: "p. 1",
+      text: `Background about the registry.\n\n${quote}` };
+    await db().insert(tables.sourceBlocks).values(block);
+    await db().update(parsedDocuments).set({ blocks: [block] }).where(eq(parsedDocuments.id, documentId));
+    const split = await splitSourceBlock({ block_id: block.id, at_text: quote, rationale: "Separate background from the analysis", actor: ACTOR });
+
+    const { ctx } = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) return { tactics: [good({ source_quote: quote })] };
+      if (call.purpose === "tactic-critic") return keepAll(call);
+      return { decisions: idsOf(call, "decide").map(id => ({
+        id, verdict: "accept", match: "overlaps", target_tactic_id: libraryId, confidence: 85, reason: "Subgroup adds scope",
+        shared_scope: "Registry", new_scope: "Subgroup analysis", expansion: subgroupScope,
+        separate: { name: "Subgroup registry analysis", type: "registry", status: "ongoing", evidence_question: subgroupScope.evidence_question },
+      })) };
+    });
+    const { output } = await tacticExtractModule.run(input(false), ctx);
+
+    expect(output.accepted).toMatchObject([{ block_id: split.second_id, source_quote: quote }]);
+    expect((await listTacticSuggestions()).filter(row => row.source_quote === quote)).toMatchObject([
+      { block_id: split.second_id, document_id: documentId, status: "pending" },
+    ]);
   });
 });
