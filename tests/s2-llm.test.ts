@@ -19,7 +19,7 @@ import { wipePlatform } from "@/modules/kernel/db";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { NoRouteError } from "@/modules/llm/provider";
 import { isLiveGap } from "@/lib/iegp/engine";
-import { mergeSourceBlocks } from "@/lib/iegp/source-blocks";
+import { editSourceBlock, mergeSourceBlocks, reparseSourceBlocks } from "@/lib/iegp/source-blocks";
 import { commitExtractedRecords, createGap, loadState, persistSourceAndBlocks, resetDemoSetup } from "@/lib/iegp/store";
 import { listParsedDocuments } from "@/modules/stages/s1-parse/module";
 import { gapExtractModule } from "@/modules/stages/s2-gap-extract/module";
@@ -337,6 +337,15 @@ describe("S2 on the model path", () => {
       return { decisions: subjectsOf(call, "candidates").map(subject => ({ subject, verdict: "accept", match: "same", match_gap_id: planGapId, confidence: 90, reason: "Same gap" })) };
     });
     const run = () => gapExtractModule.run(input(false), ctx);
+    await reparseSourceBlocks({ source_id: document.source_id, sections: blocks });
+    expect((await loadState()).needs.find(n => n.id === need_ids[1])).toMatchObject({ block_id: null });
+    await run();
+    await reparseSourceBlocks({ source_id: document.source_id, sections: blocks });
+    await editSourceBlock({ block_id: "second", text: "Updated fictional passage.", rationale: "Revise passage", actor: ACTOR });
+    expect((await loadState()).needs.find(n => n.id === need_ids[1])).toMatchObject({
+      block_id: null, observed_block_ids: ["first", "second"],
+    });
+    await editSourceBlock({ block_id: "second", text: repeated, rationale: "Restore passage", actor: ACTOR });
     await run();
     await run();
     const state = await loadState();

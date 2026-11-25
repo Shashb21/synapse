@@ -307,6 +307,11 @@ function assessmentSourceEdit<A extends { source_id?: string; block_id?: string;
       const sourceText = squashText(blocks.map(block => block.text).join(" "));
       for (const need of before.needs.filter(need => need.source_id === sourceId)) {
         const quote = squashText(need.source_quote ?? "");
+        // A source edit cannot establish which occurrence a historical need cited.
+        if (!need.block_id && (need.observed_block_ids?.length || (quote &&
+          blocks.filter(block => containsQuote(block.text.toLowerCase(), quote.toLowerCase())).length > 1))) {
+          continue;
+        }
         const retained = need.source_basis_text ?? (preserveSupportingText && !quote
           ? before.blocks.find(block => block.id === need.block_id)?.text ?? null : null);
         const support = quote || (retained && sourceText.includes(squashText(retained)) ? squashText(retained) : "");
