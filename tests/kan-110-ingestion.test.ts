@@ -316,6 +316,28 @@ describe("KAN-110 ingestion checkpoints", () => {
     },
   );
 
+  it("publishes an expired attempt that still owns the job", async () => isolated(async (pg, schema) => {
+    const first = await advanceIngest({ ...args, files: [file] });
+    const original = parseModule.run;
+    const parse = vi.spyOn(parseModule, "run").mockImplementationOnce(async (input, ctx) => {
+      const draft = await original(input, ctx);
+      const expired = await pg.unsafe(`update "${schema}".ingestion_jobs
+        set checkpoint = jsonb_set(checkpoint, '{attempt,expires_at}', to_jsonb(clock_timestamp() - interval '1 second'))
+        where id = $1 and checkpoint ? 'attempt'
+        returning id`, [first.job_id]);
+      expect(expired).toHaveLength(1);
+      return draft;
+    });
+    try {
+      const next = await advanceIngest({ actor, role: args.role, job_id: first.job_id });
+      expect(next).toMatchObject({ job_id: first.job_id, completed: 2, stage: "S2" });
+      expect(await listParsedDocuments()).toHaveLength(1);
+      const [job] = await db().select().from(ingestionJobs);
+      expect(job.checkpoint).toMatchObject({ completed: 2 });
+      expect(job.checkpoint).not.toHaveProperty("attempt");
+    } finally { parse.mockRestore(); }
+  }));
+
   it("reclaims an expired attempt and discards the late worker's writes", async () => isolated(async (pg, schema) => {
     const first = await advanceIngest({ ...args, files: [...args.files] });
     const resume = () => advanceIngest({ actor, role: args.role, job_id: first.job_id });

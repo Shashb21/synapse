@@ -184,8 +184,9 @@ export async function advanceIngest(args: IngestArgs): Promise<IngestProgress> {
     const finish = async () => {
       const next = { ...state, completed: state.completed + 1 };
       delete next.attempt;
+      // Expiry allows another attempt to claim the job. The saved token still controls publication.
       const changed = await db().update(ingestionJobs).set({ checkpoint: next })
-        .where(sql`${owner} and (${ingestionJobs.checkpoint}->'attempt'->>'expires_at')::timestamptz > clock_timestamp()`).returning({ id: ingestionJobs.id });
+        .where(owner).returning({ id: ingestionJobs.id });
       if (!changed.length) throw busy();
       Object.assign(state, next);
     };
