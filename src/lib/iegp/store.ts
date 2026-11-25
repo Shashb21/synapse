@@ -3724,8 +3724,11 @@ export const addSuggestionSources = atomic(async function addSuggestionSources(
   if (!stored) throw new Error(`Suggestion ${suggestionId} not found. Nothing was saved.`);
   if (stored.status !== "pending") throw new TrustedApplicationError("Suggestion already decided. Rerun extraction to use the current review.");
   const extra = stored.extra_sources as GapSuggestionSource[];
-  const keyOf = (row: GapSuggestionSource) => sourceFindingKey(row.source_id, row.source_quote, row.domain ?? stored.domain, row.statement);
-  const keys = new Set([sourceFindingKey(stored.source_id, stored.source_quote, stored.domain, stored.statement), ...extra.map(keyOf)]);
+  const keyOf = (row: Omit<GapSuggestionSource, "domain"> & { domain?: string }) => JSON.stringify([
+    sourceFindingKey(row.source_id, row.source_quote, row.domain ?? stored.domain, row.statement),
+    row.provenance?.block_id ?? row.block_id ?? null,
+  ]);
+  const keys = new Set([keyOf(stored), ...extra.map(keyOf)]);
   const additions = sources.filter(row => {
     const key = keyOf(row);
     if (keys.has(key)) return false;

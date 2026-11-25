@@ -5,7 +5,7 @@ import { db, ensureCurrentSchemaTables, withWorkspaceTransaction } from "./db";
 import * as t from "./schema";
 import { ACTOR_FUNCTIONS, SOURCE_TYPES, type ActorFunction, type SourceType } from "./enums";
 import { appendAudit, persistSourceAndBlocks, loadState, lockAssessmentOwners, invalidateRelationshipAssessments } from "./store";
-import type { IegpState } from "./types";
+import type { GapSuggestionSource, IegpState } from "./types";
 import { recordEdit } from "@/modules/kernel/edit-records";
 import { moveTacticSourceCitations } from "@/modules/stages/s3-tactic-extract/suggestions";
 import { tacticSourceReferences, tacticSuggestions } from "@/modules/stages/s3-tactic-extract/schema";
@@ -781,9 +781,12 @@ export const reparseSourceBlocks = assessmentSourceEdit(async function reparseSo
       quote: tacticSourceReferences.source_quote,
     }).from(tacticSourceReferences).where(eq(tacticSourceReferences.source_id, args.source_id)));
   const gapCitations = state.gap_suggestions
-    .flatMap(suggestion => [suggestion, ...suggestion.extra_sources])
+    .flatMap<GapSuggestionSource>(suggestion => [suggestion, ...suggestion.extra_sources])
     .filter(citation => citation.source_id === args.source_id)
-    .map(citation => ({ blockId: citation.block_id, quote: citation.source_quote }));
+    .map(citation => ({
+      blockId: citation.provenance?.block_id ?? citation.block_id,
+      quote: citation.source_quote,
+    }));
   const blocksById = new Map(current.map(block => [block.id, block]));
   for (const { blockId, quote } of [...tacticCitations, ...gapCitations]) {
     const block = blockId ? blocksById.get(blockId) : undefined;

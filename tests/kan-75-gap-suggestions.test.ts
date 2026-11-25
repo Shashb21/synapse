@@ -119,7 +119,10 @@ it.each([
     }],
   });
   const suggestionId = result.suggestion_id_by_row["reparse-overlap"]!;
-  await addSuggestionSources(suggestionId, [repeat!]);
+  const { block_id, ...repeatSource } = repeat!;
+  await addSuggestionSources(suggestionId, [{
+    ...repeatSource, provenance: { block_id, requires_current_citation: true },
+  }]);
 
   for (const citation of citations) {
     const reparsed = await reparseSourceBlocks({
@@ -136,6 +139,47 @@ it.each([
   for (const { source_id, block_id, source_quote } of citations) {
     expect(needs).toContainEqual(expect.objectContaining({ source_id, block_id, source_quote }));
   }
+});
+
+it("keeps separate cited occurrences and deduplicates retries of the same occurrence", async () => {
+  const gapId = await newGap();
+  const quote = "The panel found no evidence for older patients.";
+  const source = await persistSourceAndBlocks({
+    title: "Two panel sessions", source_type: "advisory_board", stakeholder_function: ACTOR.function,
+    text: quote, sections: [
+      { heading: "First", text: quote, location: "1" },
+      { heading: "Second", text: quote, location: "2" },
+    ],
+  });
+  const [primary, repeat] = source.blocks;
+  const statement = OVERLAP.split_statement;
+  const { suggestion_id_by_row } = await commitExtractedRecords({
+    source_id: source.source_id, title: "Two panel sessions", stakeholder_function: ACTOR.function,
+    ...who, needs: [], gaps: [], tactics: [],
+    overlaps: [{
+      id: "repeated-quote", gap_id: gapId, run_id: "repeated-quote-run",
+      block_id: primary!.id, name: OVERLAP.split_name,
+      statement, domain: "comparative_effectiveness", source_quote: quote, ...OVERLAP,
+    }],
+  });
+  const suggestionId = suggestion_id_by_row["repeated-quote"]!;
+  const citation = { source_id: source.source_id, statement, source_quote: quote };
+  const secondCitation = {
+    ...citation, provenance: { block_id: repeat!.id, requires_current_citation: true },
+  };
+  await addSuggestionSources(suggestionId, [
+    { ...citation, provenance: { block_id: primary!.id } },
+    secondCitation, { ...citation, block_id: repeat!.id },
+  ]);
+  await addSuggestionSources(suggestionId, [secondCitation]);
+  expect((await loadState()).gap_suggestions.find(row => row.id === suggestionId)?.extra_sources)
+    .toEqual([secondCitation]);
+
+  await acceptGapSplitSuggestion({ suggestion_id: suggestionId, rationale: "Reviewed both sessions", ...who });
+  const citedBlocks = (await loadState()).needs
+    .filter(need => need.source_id === source.source_id && need.source_quote === quote)
+    .map(need => need.block_id);
+  expect(new Set(citedBlocks)).toEqual(new Set([primary!.id, repeat!.id]));
 });
 
 it.each([
