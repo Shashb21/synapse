@@ -524,6 +524,8 @@ function iegpStatements(): string[] {
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS metadata jsonb NOT NULL DEFAULT '{}'::jsonb",
     "ALTER TABLE tactics ADD COLUMN IF NOT EXISTS custom_type jsonb",
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS number integer",
+    "ALTER TABLE tactics ADD COLUMN IF NOT EXISTS block_id text",
+    "ALTER TABLE gap_suggestions ADD COLUMN IF NOT EXISTS block_id text",
     "ALTER TABLE tactics ADD COLUMN IF NOT EXISTS source_quote text NOT NULL DEFAULT ''",
     "ALTER TABLE needs ALTER COLUMN confidence DROP NOT NULL",
     // KAN-74/75: a new source on a validated gap, and gaps split from a shared question.
@@ -539,6 +541,7 @@ function iegpStatements(): string[] {
     "ALTER TABLE needs ADD COLUMN IF NOT EXISTS run_id text",
     "ALTER TABLE needs ADD COLUMN IF NOT EXISTS candidate_row_id text",
     "ALTER TABLE needs ADD COLUMN IF NOT EXISTS block_id text",
+    "ALTER TABLE needs ADD COLUMN IF NOT EXISTS observed_block_ids jsonb",
     "ALTER TABLE needs ADD COLUMN IF NOT EXISTS source_basis_text text",
     "ALTER TABLE gap_versions ADD COLUMN IF NOT EXISTS snapshot jsonb",
     // KAN-15: per-prefix id counters that only move up, so ids are never reissued.

@@ -4,7 +4,7 @@ import { sharedDb } from "./db";
 import { newId } from "./ids";
 import { estimateCallCost, usageFromMessages } from "@/modules/llm/cost";
 import { redactSecrets } from "@/modules/llm/provider-error";
-import { PROVIDERS, type LlmProvider, type LlmRequest, type LlmUsage } from "@/modules/llm/provider";
+import { PROVIDERS, type LlmProvider, type LlmRequest, type ProviderRequestBudget, type LlmUsage } from "@/modules/llm/provider";
 import type { RunHandle } from "./contracts";
 import { providerApiKey } from "@/modules/llm/api-keys";
 import { isDemoReplayProvider } from "@/lib/demo/replay-provider";
@@ -223,6 +223,7 @@ export async function tracedCompletion(args: {
   workspace_id: string | null;
   /** Optional single-send execution policy; ordinary callers retain provider defaults. */
   maxAttempts?: number;
+  requestBudget?: ProviderRequestBudget;
   beforeSend?: () => Promise<void>;
   /** Failed attempts still contribute reported usage or an explicitly unknown cost. */
   onFailure?: (attempt: Pick<LlmCallRecord, "usage" | "cost_usd" | "price_source">) => void;
@@ -261,6 +262,8 @@ export async function tracedCompletion(args: {
           return null;
         }
       };
+      // A local refusal before the first send belongs in the run trace only.
+      if (!isDemoReplayProvider(args.provider.id)) args.requestBudget?.check();
       let text: string;
       try {
         if (isDemoReplayProvider(args.provider.id)) {
@@ -270,6 +273,7 @@ export async function tracedCompletion(args: {
         } else {
           await args.beforeSend?.();
           text = await args.provider.complete(args.request, { api_key: args.api_key }, {
+            requestBudget: args.requestBudget,
             maxAttempts: args.maxAttempts,
             beforeRetry: args.beforeSend,
             onUsage: (reported) => (usage = reported),

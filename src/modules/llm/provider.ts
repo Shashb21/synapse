@@ -38,8 +38,15 @@ export type LlmUsage = {
   reasoning_tokens: number | null;
 };
 
+/** A shared allowance for outbound HTTP requests, including retries. */
+export type ProviderRequestBudget = {
+  check(lastFailure?: Pick<ProviderError, "kind" | "status">): void;
+  consume(): void;
+};
+
 /** Optional observers of one call. The reply is still returned as plain text. */
 export type LlmCallHooks = {
+  requestBudget?: ProviderRequestBudget;
   onUsage?: (usage: LlmUsage) => void;
   /** Per-call HTTP bound; omitted preserves ordinary provider retry policy. */
   maxAttempts?: number;
@@ -112,14 +119,22 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
   const maxAttempts = hooks?.maxAttempts ?? RETRY.attempts;
   for (let attempt = 1; ; attempt += 1) {
     // Time-limited (SYNAPSE_LLM_TIMEOUT_MS); a timeout is "unavailable" and not retried (KAN-20).
+    hooks?.requestBudget?.consume();
     const { res, text } = await fetchProvider(
       url,
-      { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) },
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify(body),
+        // An automatic redirect could resend the prompt without consuming an allowance.
+        ...(hooks?.requestBudget ? { redirect: "manual" as const } : {}),
+      },
       target,
     );
     if (res.ok) return JSON.parse(text) as Record<string, unknown>;
     // A typed, classified error instead of the raw body; the key never appears in it.
-    const parsed = parseProviderErrorBody(text);
+    const redirected = hooks?.requestBudget && res.status >= 300 && res.status < 400;
+    const parsed = redirected ? { error_type: null, message: null } : parseProviderErrorBody(text);
     const error = new ProviderError({
       provider_id: target.provider_id,
       provider_name: target.provider_name,
@@ -136,6 +151,8 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
     const transient =
       (error.kind === "rate_limit" && !error.info.daily_quota) || res.status === 503 || (res.status === 404 && !text.trim());
     if (!transient || attempt >= maxAttempts) throw error;
+    // When a retry cannot be sent, retain only the safe classification from the paid attempt.
+    hooks?.requestBudget?.check({ kind: error.kind, status: error.status });
     const wait = requestedWait(res, text) ?? RETRY.base_ms * 2 ** (attempt - 1);
     await RETRY.sleep(Math.min(wait, RETRY.max_wait_ms));
     await hooks?.beforeRetry?.();

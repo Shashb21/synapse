@@ -30,6 +30,7 @@ import type {
 import { normalizeCustomType, readCustomType, type CustomTacticType } from "./custom-tactic-type";
 import { tacticDateError, tacticDateOrderError, type TacticDateField } from "./tactic-dates";
 import type { ExtractedGap, ExtractedTactic } from "./engine";
+import { quotedBlock } from "@/modules/stages/extraction-sections";
 import type {
   ActorFunction,
   CatchUpReason,
@@ -64,6 +65,7 @@ import {
   gapsReadyForPrioritize,
   isLiveGap,
   persistedResidualGaps,
+  reconcileHistoricalCitation,
   requireOverrideReason,
   splitSourceIntoBlocks,
   tacticEligibleForMapping,
@@ -975,7 +977,7 @@ export const editNeed = atomic(async function editNeed(args: {
     .set({
       ...(statement !== undefined ? { statement } : {}),
       ...(quote !== undefined ? { source_quote: quote } : {}),
-      ...(citationChanged ? { source_basis_text: null, block_id: citedBlock?.id ?? null } : {}),
+      ...(citationChanged ? { source_basis_text: null, observed_block_ids: null, block_id: citedBlock?.id ?? null } : {}),
       lock: makeLock(args.actor_name, args.actor_function, rationale),
     })
     .where(eq(t.needs.id, args.need_id));
@@ -1998,6 +2000,7 @@ function optionalCatchUpReason(value?: string | null): CatchUpReason | undefined
 }
 
 type LibraryTacticDraft = {
+  block_id?: string | null;
   name: string;
   type: IegpState["tactics"][0]["type"];
   description: string;
@@ -2101,6 +2104,7 @@ export async function insertLibraryTactic(args: LibraryTacticDraft, transaction?
     data_source: args.data_source?.trim() ?? "",
     study_design: args.study_design?.trim() ?? "",
     source_quote: args.source_quote?.trim() ?? "",
+    block_id: args.block_id,
     lifecycle_stage: args.lifecycle_stage,
     status: args.status,
     review_status: "accepted",
@@ -2195,6 +2199,8 @@ async function createProposedTacticChange(args: {
 
 /** Gaps catch-up create. Rejects `proposed` — ideation is Tactics after Prioritize. */
 async function recordMissedTacticChange(args: {
+  source_id?: string;
+  block_id?: string | null;
   name: string;
   type: IegpState["tactics"][0]["type"];
   description?: string;
@@ -2245,12 +2251,17 @@ async function recordMissedTacticChange(args: {
     data_source: args.data_source?.trim() ?? "",
     study_design: args.study_design,
     source_quote: args.source_quote,
+    block_id: args.block_id,
     custom_type: args.custom_type,
     actor_name: args.actor_name,
     actor_function: args.actor_function,
     audit_action: "record_missed",
     note: reasonLabel,
   });
+  if (args.source_id && args.source_quote?.trim()) {
+    const { attachTacticSource } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    await attachTacticSource({ tactic_id: id, source_id: args.source_id, source_quote: args.source_quote, block_id: args.block_id });
+  }
   if (args.gap_id) {
     await assignTacticToGap({
       gap_id: args.gap_id,
@@ -3332,6 +3343,7 @@ export type CandidateNeedRow = {
  * suggestion for a person, never a gap, until someone accepts a merge or a split.
  */
 export type OverlapRow = {
+  block_id?: string | null;
   /** The candidate's id in this run. */
   id: string;
   gap_id: string;
@@ -3392,6 +3404,10 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
   /** Validated gaps a new source joined; they now show "New source added". */
   flagged_gap_ids: string[];
 }> {
+  if (args.tactics.some(tactic => tactic.block_id && tactic.source_quote?.trim())) {
+    // Source editors take this lock before assessment or tactic writes too.
+    await db().select({ id: t.sources.id }).from(t.sources).where(eq(t.sources.id, args.source_id)).for("update");
+  }
   const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [...args.gaps.flatMap(g => g.duplicate_of ? [g.duplicate_of] : []), ...args.needs.flatMap(n => n.gap_id ? [n.gap_id] : [])] });
   const state = await loadState();
   const sourceId = args.source_id;
@@ -3470,14 +3486,20 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
   // A gap holds each source sentence once: re-running extraction on a document, or two
   // candidates quoting the same sentence, must not attach it again (KAN-74).
   // Older rows kept only the first 280 characters of a quote, so compare on those.
-  const quoteKey = (gapId: string, quote: string) =>
-    `${gapId}|${sourceId}|${quote.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 280)}`;
-  const attached = new Set(
-    state.need_gap_links.flatMap((link) => {
-      const need = state.needs.find((row) => row.id === link.need_id);
-      return need && need.source_id === sourceId ? [quoteKey(link.gap_id, need.source_quote ?? need.statement)] : [];
-    }),
-  );
+  const quoteKey = (gapId: string, quote: string, blockId?: string | null) =>
+    JSON.stringify([gapId, sourceId, blockId ?? null, quote.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 280)]);
+  const attached = new Set<string>();
+  const historical = new Map<string, IegpState["needs"][number]>();
+  const sourceBlocks = state.blocks.filter(block => block.source_id === sourceId);
+  const sourceNeeds = new Map(state.needs.filter(need => need.source_id === sourceId).map(need => [need.id, need]));
+  for (const link of state.need_gap_links) {
+    const need = sourceNeeds.get(link.need_id);
+    if (!need) continue;
+    const key = quoteKey(link.gap_id, need.source_quote ?? need.statement, need.block_id);
+    attached.add(key);
+    attached.add(quoteKey(link.gap_id, need.source_quote ?? need.statement));
+    if (!need.block_id) historical.set(key, need);
+  }
 
   const addNeed = async (args2: {
     gapId: string;
@@ -3486,9 +3508,24 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
     domain: EvidenceDomain;
     provenance?: NeedProvenance;
   }) => {
-    const key = quoteKey(args2.gapId, args2.quote || args2.statement);
+    const quote = args2.quote || args2.statement;
+    const blockId = args2.provenance?.block_id;
+    const key = quoteKey(args2.gapId, quote, blockId);
+    const legacyKey = quoteKey(args2.gapId, quote);
     if (attached.has(key)) return;
     attached.add(key);
+    attached.add(legacyKey);
+    const legacy = historical.get(legacyKey);
+    if (blockId && legacy && (!legacy.block_id || legacy.block_id === blockId)) {
+      if (!legacy.block_id) {
+        const update = reconcileHistoricalCitation(sourceBlocks, legacy.source_quote || legacy.statement, blockId, legacy.observed_block_ids);
+        if (update) {
+          await db().update(t.needs).set(update).where(eq(t.needs.id, legacy.id));
+          Object.assign(legacy, update);
+        }
+      }
+      return;
+    }
     const needId = await allocateId("NEED", needIds);
     needIds.push(needId);
     createdNeedIds.push(needId);
@@ -3562,6 +3599,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
       statement: overlap.statement,
       domain: overlap.domain,
       source_quote: overlap.source_quote,
+      block_id: overlap.block_id,
       shared_part: overlap.shared_part,
       new_part: overlap.new_part,
       merged_name: overlap.merged_name,
@@ -3585,7 +3623,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
   for (const tac of args.tactics) {
     if (tac.duplicate_of) {
       const { attachTacticSource } = await import("@/modules/stages/s3-tactic-extract/suggestions");
-      if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tac.duplicate_of, source_id: sourceId, source_quote: tac.source_quote});
+      if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tac.duplicate_of, source_id: sourceId, source_quote: tac.source_quote, block_id: tac.block_id});
       skippedTacticIds.push(tac.id);
       continue;
     }
@@ -3616,9 +3654,10 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
       intended_use: `Extracted from ${sourceId}`,
       lock: unlocked(),
       source_quote: (tac.source_quote ?? "").trim(),
+      block_id: tac.block_id,
     });
     const { attachTacticSource } = await import("@/modules/stages/s3-tactic-extract/suggestions");
-    if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tacticId, source_id: sourceId, source_quote: tac.source_quote});
+    if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tacticId, source_id: sourceId, source_quote: tac.source_quote, block_id: tac.block_id});
   }
 
   await appendAudit(
@@ -3699,11 +3738,38 @@ async function closeSuggestion(
 }
 
 /** Every source a suggestion carries: its own candidate first, then repeats. */
-function suggestionSources(suggestion: GapSuggestion): GapSuggestionSource[] {
+function suggestionSources(suggestion: GapSuggestion): [GapSuggestionSource, ...GapSuggestionSource[]] {
   return [
-    { source_id: suggestion.source_id, statement: suggestion.statement, source_quote: suggestion.source_quote },
+    { source_id: suggestion.source_id, statement: suggestion.statement, source_quote: suggestion.source_quote, block_id: suggestion.block_id },
     ...suggestion.extra_sources,
   ];
+}
+
+/** Lock cited sources, the assessment gap and then the suggestion, in writer order. */
+async function lockGapSuggestionCitations(id: string) {
+  const { suggestion, gap } = await pendingSuggestion(id);
+  const citedSourceIds = new Set(suggestionSources(suggestion).filter(source => source.block_id).map(source => source.source_id));
+  for (const sourceId of [...citedSourceIds].sort()) {
+    await db().select({ id: t.sources.id }).from(t.sources).where(eq(t.sources.id, sourceId)).for("update");
+  }
+  const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [gap.id] });
+  await db().select({ id: t.gapSuggestions.id }).from(t.gapSuggestions)
+    .where(eq(t.gapSuggestions.id, id)).for("update");
+  const current = await pendingSuggestion(id);
+  const [primary, ...extraSources] = suggestionSources(current.suggestion);
+  if (current.gap.id !== gap.id || [primary, ...extraSources].some(source => source.block_id && !citedSourceIds.has(source.source_id))) {
+    throw new TrustedApplicationError("This suggestion changed while you were reviewing it. Refresh and review it again.");
+  }
+  const currentCitation = (source: GapSuggestionSource): GapSuggestionSource => {
+    if (!source.block_id) return source;
+    const blocks = current.state.blocks.filter(block => block.source_id === source.source_id);
+    const blockId = quotedBlock(blocks, source.source_quote, source.block_id);
+    if (!blockId) {
+      throw new TrustedApplicationError("The source passage changed or is ambiguous. Rerun gap extraction before accepting.");
+    }
+    return { ...source, block_id: blockId };
+  };
+  return { ...current, primary: currentCitation(primary), extraSources: extraSources.map(currentCitation), assessmentGapIds };
 }
 
 /**
@@ -3717,10 +3783,7 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
   args: SuggestionDecision & { name?: string; statement?: string },
 ): Promise<{ gap_id: string }> {
   const rationale = requireRationale(args.rationale);
-  const pending = await pendingSuggestion(args.suggestion_id);
-  const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [pending.gap.id] });
-  const { suggestion, gap } = await pendingSuggestion(args.suggestion_id);
-  const before = await loadState();
+  const { suggestion, gap, primary, extraSources, assessmentGapIds, state: before } = await lockGapSuggestionCitations(args.suggestion_id);
   const name = (args.name ?? suggestion.merged_name).trim();
   const statement = (args.statement ?? suggestion.merged_statement).trim();
   if (!name) throw new TrustedApplicationError("Give the merged gap a name.");
@@ -3764,7 +3827,7 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
       actor_function: args.actor_function,
     });
   }
-  for (const [index, source] of suggestionSources(suggestion).entries()) {
+  for (const [index, source] of [primary, ...extraSources].entries()) {
     await insertNeedForGap({
       gapId: gap.id,
       sourceId: source.source_id,
@@ -3773,7 +3836,7 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
       role: "supporting",
       actor_function: args.actor_function,
       // The suggestion's own candidate is the first source; repeats came from the same run.
-      provenance: { run_id: suggestion.run_id, candidate_row_id: index === 0 ? suggestion.candidate_row_id : null },
+      provenance: { run_id: suggestion.run_id, block_id: source.block_id, candidate_row_id: index === 0 ? suggestion.candidate_row_id : null },
     });
   }
   await closeSuggestion(suggestion.id, "merged", { ...args, rationale });
@@ -3804,10 +3867,7 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
   args: SuggestionDecision & { name?: string; statement?: string },
 ): Promise<{ gap_id: string; new_gap_id: string }> {
   const rationale = requireRationale(args.rationale);
-  const pending = await pendingSuggestion(args.suggestion_id);
-  const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [pending.gap.id] });
-  const { suggestion, gap } = await pendingSuggestion(args.suggestion_id);
-  const before = await loadState();
+  const { suggestion, gap, primary, extraSources, assessmentGapIds, state: before } = await lockGapSuggestionCitations(args.suggestion_id);
   const name = (args.name ?? suggestion.split_name).trim();
   const statement = (args.statement ?? suggestion.split_statement).trim();
   if (!name) throw new TrustedApplicationError("Give the new gap a name.");
@@ -3827,9 +3887,9 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
     settings: gap.settings,
     metadata: gap.metadata,
     origin_gap_id: gap.id,
-    need_provenance: { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id },
+    need_provenance: { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id, block_id: primary.block_id },
   });
-  for (const source of suggestion.extra_sources) {
+  for (const source of extraSources) {
     await insertNeedForGap({
       gapId: newGapId,
       sourceId: source.source_id,
@@ -3837,7 +3897,7 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
       sourceQuote: source.source_quote,
       role: "supporting",
       actor_function: args.actor_function,
-      provenance: { run_id: suggestion.run_id },
+      provenance: { run_id: suggestion.run_id, block_id: source.block_id },
     });
   }
   await insertNeedForGap({
@@ -3847,7 +3907,7 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
     sourceQuote: suggestion.source_quote,
     role: "supporting",
     actor_function: args.actor_function,
-    provenance: { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id },
+    provenance: { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id, block_id: primary.block_id },
   });
   await linkRelatedGaps(gap.id, newGapId);
   await closeSuggestion(suggestion.id, "split", { ...args, rationale, result_gap_id: newGapId });
@@ -3884,8 +3944,10 @@ async function linkRelatedGaps(a: string, b: string) {
 }
 
 /** Rejects an overlap: nothing changes in the plan, and the suggestion stays on record. */
-export async function rejectGapSuggestion(args: SuggestionDecision): Promise<GapSuggestion> {
+export const rejectGapSuggestion = atomic(async function rejectGapSuggestion(args: SuggestionDecision): Promise<GapSuggestion> {
   const rationale = requireRationale(args.rationale);
+  await db().select({ id: t.gapSuggestions.id }).from(t.gapSuggestions)
+    .where(eq(t.gapSuggestions.id, args.suggestion_id)).for("update");
   const state = await loadState();
   const suggestion = state.gap_suggestions.find((row) => row.id === args.suggestion_id);
   if (!suggestion) throw new TrustedApplicationError("Suggestion not found.", "not_found", 404);
@@ -3905,7 +3967,7 @@ export async function rejectGapSuggestion(args: SuggestionDecision): Promise<Gap
     signal_kind: "user_rejected_proposal",
   });
   return suggestion;
-}
+});
 
 /** A person has looked at the source that joined a validated gap (KAN-74). */
 export async function clearNewSourceFlag(args: {
