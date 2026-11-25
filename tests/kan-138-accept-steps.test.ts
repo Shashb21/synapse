@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { acceptDemoStep, demoStepFor } from "@/lib/demo/accept-steps";
+import { acceptDemoIdeation, acceptDemoStep, demoStepFor, loadDemoIdeationReview } from "@/lib/demo/accept-steps";
 
 /** KAN-138: "Accept all as in demo" makes the calls a presenter's clicks would. */
 
@@ -28,13 +28,14 @@ function stubServer(pending: unknown[], replies: Record<string, unknown> = {}) {
       if (url === "/api/demo/pending") return Response.json(pending[Math.min(reads++, pending.length - 1)]);
       const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
       calls.push({ url, body });
-      return Response.json(replies[String(body?.stage ?? body?.action)] ?? { ok: true });
+      return Response.json(replies[String(body?.stage ?? body?.action ?? url)] ?? { ok: true });
     }),
   );
   return calls;
 }
 
 const base = {
+  workspace_id: "velmara-workspace",
   gaps: { partial: [], unvalidated: [], wizard_complete: true, tactics_unlocked: true },
   prioritize: { suggested: [] },
   ideation: { proposed: [] },
@@ -102,15 +103,16 @@ describe("accepting a step", () => {
     });
     expect(calls[1]!.body).toMatchObject({ action: "unlock_tactics" });
 
-    calls = stubServer([{ ...base, ideation: { proposed: [{ id: "IDEA-1", version: "proposal-version" }] } }]);
-    expect(await acceptDemoStep("ideation")).toBe(1);
+    calls = stubServer(
+      [{ ...base, ideation: { proposed: [{ id: "IDEA-1", name: "Study idea", version: "proposal-version" }] } }],
+      { "/api/demo/ideation-approvals": { ok: true, accepted: 1 } },
+    );
+    expect(await acceptDemoIdeation(await loadDemoIdeationReview())).toBe(1);
     expect(calls).toEqual([{
-      url: "/api/plan",
+      url: "/api/demo/ideation-approvals",
       body: {
-        action: "decide_proposal",
-        id: "IDEA-1",
-        expected_version: "proposal-version",
-        decision: "accept",
+        workspace_id: "velmara-workspace",
+        proposals: [{ id: "IDEA-1", expected_version: "proposal-version" }],
         rationale: "Accepted as in the demo",
       },
     }]);
@@ -129,6 +131,6 @@ describe("accepting a step", () => {
           : Response.json({ safe_error: true, request_outcome: "rejected", error: "Proposal IDEA-1 was already decided." }, { status: 409 }),
       ),
     );
-    await expect(acceptDemoStep("ideation")).rejects.toThrow("Proposal IDEA-1 was already decided.");
+    await expect(acceptDemoIdeation(await loadDemoIdeationReview())).rejects.toThrow("Proposal IDEA-1 was already decided.");
   });
 });

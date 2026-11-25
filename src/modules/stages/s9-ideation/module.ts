@@ -3,10 +3,12 @@ import { buildIdeationGapBrief, ideationAcceptanceBasis, type IdeationGapBrief }
 import { ideationRecommendationSchema, ideationGapOutcomeSchema, type IdeationGapOutcome, type IdeationRecommendation } from "./recommendation-contract";
 import { relationshipVersion } from "@/lib/iegp/relationship-version";
 import { matchesSuppliedJudgementRecords, inspectJudgementReferences, inspectSuppliedJudgementReferences, judgementReferenceSchema, recordedJudgementReferences, suppliedJudgementRecords, suppliedJudgementRecordSchema, type JudgementReference } from "@/lib/iegp/judgement-references";
-import { withRelationshipChange } from "@/lib/iegp/relationship-change";
+import { lockRelationships, withRelationshipChange } from "@/lib/iegp/relationship-change";
 import { createHash } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, DrizzleQueryError, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
+import { allowsDemoExecution, type DemoExecution } from "@/lib/demo/mode";
+import { withWorkspaceTransaction } from "@/lib/iegp/db";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import * as t from "@/modules/kernel/schema";
 import * as core from "@/lib/iegp/schema";
@@ -27,12 +29,12 @@ import {
   type EvidenceDomain,
   type TacticType,
 } from "@/lib/iegp/enums";
-import { appendAudit, reuseTacticForGap, insertLibraryTactic, loadState, readState, syncComputedGapStatuses } from "@/lib/iegp/store";
+import { appendAudit, requireTacticReuse, reuseTacticForGap, insertLibraryTactic, loadState, readState, syncComputedGapStatuses } from "@/lib/iegp/store";
 import { prioritizationContextFromState } from "@/lib/iegp/planning-context";
 import { displayedGapStatus, isLiveGap, emptyDimensions, unlocked } from "@/lib/iegp/engine";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 import { plural } from "@/lib/plural";
-import { acceptTacticExpansion, expansionScopeSchema, modelExpansionScope, tacticVersion, type ExpansionTransaction } from "@/lib/iegp/tactic-expansions";
+import { acceptTacticExpansion, checkTacticExpansionAcceptance, expansionScopeSchema, modelExpansionScope, tacticVersion, type ExpansionTransaction } from "@/lib/iegp/tactic-expansions";
 import type { ExpansionScope, IegpState, Tactic } from "@/lib/iegp/types";
 import { captureProposalDecision } from "@/lib/iegp/learning-capture";
 
@@ -1455,11 +1457,15 @@ function validateExpansion(parent: Tactic | undefined, scope: ExpansionScope, co
 async function eligibleGap(id: string, tx?: ExpansionTransaction) {
     const state = tx ? await readState(tx) : await loadState();
     const placements = tx ? await tx.select().from(t.priorityPlacements).where(eq(t.priorityPlacements.gap_id, id)).for("update") : await listPlacements();
+    requireEligibleIdeationGap(state, placements as Parameters<typeof ideationAcceptanceBasis>[2], id);
+    return state;
+}
+
+function requireEligibleIdeationGap(state: IegpState, placements: Parameters<typeof ideationAcceptanceBasis>[2], id: string) {
     const gap = state.gaps.find(g => g.id === id);
-    if (!gap || !isLiveGap(gap) || displayedGapStatus(gap) !== "validated_open" || !ideationBandOrder(placements as Parameters<typeof ideationBandOrder>[0]).has(id)) {
+    if (!gap || !isLiveGap(gap) || displayedGapStatus(gap) !== "validated_open" || !ideationBandOrder(placements).has(id)) {
         throw new TrustedApplicationError("Ideation requires an open gap with human-validated High priority.");
     }
-    return state;
 }
 
 function proposalVersion(row: ProposalRow): string {
@@ -1473,18 +1479,25 @@ function requireProposalVersion(row: ProposalRow, expected?: string) {
 }
 
 /** Validate the original supplied records; never reconstruct missing model provenance. */
-async function optionSupport(row: ProposalRow, tx: ExpansionTransaction): Promise<JudgementReference[]> {
-  const { meta } = splitDesign(row.design);
+function optionSupportContext(meta: DesignMeta) {
   const records = meta.supplied_records ?? [];
   const references = meta.supporting_references ?? [];
   if (!records.length || !inspectSuppliedJudgementReferences(records, references).length) throw new TrustedApplicationError("Supporting references or the original supplied context are missing. Make an explicit manual judgement with a reason instead.");
-  for (const [kind, table] of [["objective", core.objectives], ["source", core.sources], ["gap", core.gaps]] as const) {
-    for (const id of [...new Set(records.filter(record => record.entity_type === kind).map(record => record.entity_id))].sort()) await tx.select({ id: table.id }).from(table).where(eq(table.id, id)).for("update");
-  }
-  const state = await readState(tx);
+  return { records, references };
+}
+
+function validateOptionSupport(row: ProposalRow, { records, references }: ReturnType<typeof optionSupportContext>, state: IegpState): JudgementReference[] {
   if (!inspectJudgementReferences(state, [row.gap_id], references).length) throw new TrustedApplicationError("Supporting references are missing, inaccessible or unrelated to this option. Make a manual judgement with a reason instead.");
   if (!matchesSuppliedJudgementRecords(state, [row.gap_id], records)) throw new TrustedApplicationError("Model option context changed. Regenerate it or make a manual judgement with a reason.");
   return references;
+}
+
+async function optionSupport(row: ProposalRow, meta: DesignMeta, tx: ExpansionTransaction): Promise<JudgementReference[]> {
+  const support = optionSupportContext(meta);
+  for (const [kind, table] of [["objective", core.objectives], ["source", core.sources], ["gap", core.gaps]] as const) {
+    for (const id of [...new Set(support.records.filter(record => record.entity_type === kind).map(record => record.entity_id))].sort()) await tx.select({ id: table.id }).from(table).where(eq(table.id, id)).for("update");
+  }
+  return validateOptionSupport(row, support, await readState(tx));
 }
 
 /** Apply edits without refreshing the immutable reviewed parent or original AI baseline. */
@@ -1634,22 +1647,112 @@ export async function addIdeationProposal(args: {
   return recordById(id);
 }
 
+type IdeationDecision = {
+  id: string;
+  decision: "accept" | "reject";
+  expected_version?: string;
+  judgement_origin?: "model" | "manual";
+  reviewed_context_basis?: string;
+  rationale: string;
+  actor: Actor;
+  workspace_id?: string;
+  fields?: ProposalFields;
+};
+
+type PreparedAcceptance = { renewedBasis?: string } & (
+  | { kind: "reuse"; tactic_id: string }
+  | { kind: "expansion"; tactic_id: string; scope: ExpansionScope; expected_tactic_version: string }
+  | { kind: "new"; design: StoredDesign }
+);
+
+function assertPendingProposal(row: ProposalRow, expected?: string) {
+  requireProposalVersion(row, expected);
+  if (row.status !== "proposed") {
+    throw new TrustedApplicationError(row.status === "accepted"
+      ? "This idea was already accepted. Open the linked tactic to make further changes."
+      : "This idea was already decided. Refresh the idea list before making another decision.");
+  }
+}
+
+/** Shared acceptance checks for single decisions and one-snapshot demo decisions. */
+function prepareIdeationAcceptance(
+  proposal: ProposalRow, meta: DesignMeta, state: IegpState, placements: Parameters<typeof ideationAcceptanceBasis>[2],
+  review: Pick<IdeationDecision, "judgement_origin" | "reviewed_context_basis">,
+): PreparedAcceptance {
+  const target = state.tactics.find(tactic => tactic.id === proposal.target_tactic_id);
+  if (proposal.proposal_kind !== "new" && !target) throw new TrustedApplicationError("Proposal target not found in this workspace.", "not_found", 404);
+  const currentBasis = ideationAcceptanceBasis(state, proposal.gap_id, placements);
+  const renewedBasis = meta.supporting_context_basis && meta.supporting_context_basis !== currentBasis ? currentBasis : undefined;
+  if (renewedBasis && (review.judgement_origin !== "manual" || review.reviewed_context_basis !== currentBasis)) {
+    throw new TrustedApplicationError("Ideation context changed; this proposal is stale. Review the current requirements, coverage, priority and tactic lifecycle, then submit its current review token with a manual judgement.");
+  }
+
+  const { design } = splitDesign(proposal.design);
+  if (proposal.proposal_kind === "reuse") {
+    assertReuseDesign({ ...proposal, design }, target);
+    requireTacticReuse(state, proposal.gap_id, target!.id);
+    return { kind: "reuse", tactic_id: target!.id, renewedBasis };
+  }
+  if (proposal.proposal_kind === "expansion") {
+    const parent = proposal.reviewed_parent as Tactic | null;
+    if (!parent || parent.id !== proposal.target_tactic_id) throw new TrustedApplicationError("Reviewed expansion target snapshot is unavailable.");
+    if (design.duration_months === null || design.duration_months <= 0 || design.readout_lag_months === null || design.readout_lag_months < 0) {
+      throw new TrustedApplicationError("Expansion requires valid numeric duration and readout lag.");
+    }
+    const scope = expansionScopeSchema.parse(proposal.expansion_scope);
+    assertExpansionDesign({ ...proposal, design }, scope);
+    const acceptedScope = expansionScopeSchema.parse({ ...scope, type: proposal.type, comparator: design.comparator, data_source: design.data_source });
+    validateExpansion(target, scope, proposal.comparative_rationale);
+    const expected_tactic_version = tacticVersion(renewedBasis ? target! : parent);
+    checkTacticExpansionAcceptance(state, { proposal_id: proposal.id, tactic_id: parent.id, gap_id: proposal.gap_id, expected_tactic_version }, acceptedScope);
+    return { kind: "expansion", tactic_id: parent.id, scope: acceptedScope, expected_tactic_version, renewedBasis };
+  }
+  if (!proposal.name.trim()) throw new TrustedApplicationError("Tactic name is required.");
+  if (!proposal.evidence_question.trim()) throw new TrustedApplicationError("Evidence question is required.");
+  if (!TACTIC_TYPES.includes(proposal.type as TacticType)) throw new TrustedApplicationError("Tactic type is required.");
+  return { kind: "new", design, renewedBasis };
+}
+
+async function applyIdeationDecision(
+  args: Pick<IdeationDecision, "actor" | "decision" | "judgement_origin" | "rationale" | "workspace_id">, proposal: ProposalRow,
+  originalMeta: DesignMeta, state: IegpState, prepared: PreparedAcceptance | undefined,
+  references: JudgementReference[], tx: ExpansionTransaction,
+) {
+  const { rationale, actor, workspace_id } = args;
+  let tactic_id: string | null = null;
+  let expansion_id: string | null = null;
+  if (prepared?.renewedBasis) {
+    proposal.design = { ...(proposal.design as Record<string, unknown>), renewed_review: { basis: prepared.renewedBasis, actor: actor.name, at: nowIso(), rationale } };
+    await recordEdit({ workspace_id, stage: "S9", entity_type: "ideation_proposal", entity_id: proposal.id, field: "renewed_context_review", action: "validate", before: originalMeta.supporting_context_basis!, after: prepared.renewedBasis, rationale, actor }, tx);
+  }
+  if (prepared?.kind === "reuse") {
+    tactic_id = prepared.tactic_id;
+    await reuseTacticForGap({ tactic_id, gap_id: proposal.gap_id, actor_name: actor.name, actor_function: actor.function, rationale }, tx);
+  } else if (prepared?.kind === "expansion") {
+    const child = await acceptTacticExpansion({
+      proposal_id: proposal.id, tactic_id: prepared.tactic_id, gap_id: proposal.gap_id, scope: prepared.scope,
+      expected_tactic_version: prepared.expected_tactic_version, rationale, actor,
+    }, tx);
+    tactic_id = child.tactic_id;
+    expansion_id = child.id;
+  } else if (prepared?.kind === "new") {
+    const { design } = prepared;
+    tactic_id = await insertLibraryTactic({ name: proposal.name, type: proposal.type as TacticType, description: `Ideated for ${proposal.gap_id}. ${proposal.rationale}`, evidence_question: proposal.evidence_question, population: design.population, intervention: state.asset.name, comparator: design.comparator, outcomes: design.outcomes, study_design: design.study_design, data_source: design.data_source, geography: state.asset.geography, owner: actor.name, function: actor.function, residual_ids: [], status: "proposed", lifecycle_stage: "proposed", actor_name: actor.name, actor_function: actor.function, audit_action: "create_proposed", audit_reason: rationale }, tx);
+    await tx.insert(core.coverages).values({ id: newId("COV"), gap_id: proposal.gap_id, tactic_id, dimensions: emptyDimensions(), overall: "unassessed", overall_rationale: rationale, overall_lock: unlocked(), stale: false, needs_review: false });
+    await syncComputedGapStatuses(proposal.gap_id, undefined, tx);
+  }
+  const status = args.decision === "accept" ? "accepted" : "rejected";
+  await tx.update(t.ideationProposals).set({ design: { ...(proposal.design as Record<string, unknown>), write_version: newId("IPV") }, status, decided_by: actor.name, decided_at: nowIso(), decision_rationale: rationale, tactic_id, expansion_id }).where(eq(t.ideationProposals.id, proposal.id));
+  const edit = await recordEdit({ workspace_id, stage: "S9", entity_type: "ideation_proposal", entity_id: proposal.id, field: args.judgement_origin === "manual" ? "manual_status" : references.length ? "supported_model_status" : "status", references, reference_gap_ids: [proposal.gap_id], action: args.decision, before: "proposed", after: status, rationale, actor }, tx);
+  return { tactic_id, expansion_id, edit };
+}
+
 /**
  * The S9 human gate: create a new proposed tactic or a proposed child scope
  * on its reviewed parent, atomically with the source decision. `fields` lets the person accept an edited version in one step;
  * the edit is audited before the decision.
  */
-export async function decideIdeationProposal(args: {
-    id: string;
-    decision: "accept" | "reject";
-    expected_version?: string;
-    judgement_origin?: "model" | "manual";
-    reviewed_context_basis?: string;
-    rationale: string;
-    actor: Actor;
-    workspace_id?: string;
-    fields?: ProposalFields;
-}): Promise<{
+export async function decideIdeationProposal(args: IdeationDecision): Promise<{
     tactic_id: string | null;
     expansion_id: string | null;
 }> {
@@ -1657,63 +1760,28 @@ export async function decideIdeationProposal(args: {
     const rationale = requireRationale(args.rationale);
     const result = await withRelationshipChange({ actor_name: args.actor.name, actor_function: args.actor.function, rationale }, () => db().transaction(async (tx) => {
         const [pending] = await tx.select().from(t.ideationProposals).where(eq(t.ideationProposals.id, args.id)).for("update");
-        if (!pending)
-            throw new Error(`Unknown proposal ${args.id}`);
-        requireProposalVersion(pending, args.expected_version);
-        if (pending.status !== "proposed")
-            throw new TrustedApplicationError(pending.status === "accepted" ? "This idea was already accepted. Open the linked tactic to make further changes." : "This idea was already decided. Refresh the idea list before making another decision.");
+        if (!pending) throw new Error(`Unknown proposal ${args.id}`);
+        assertPendingProposal(pending, args.expected_version);
         const originalMeta = splitDesign(pending.design).meta;
         const original = originalMeta.original_ai;
         // Match the relationship owner's scientific lock order: tactic, then supplied context.
-        if (args.decision === "accept" && pending.proposal_kind !== "new" && pending.target_tactic_id)
+        if (args.decision === "accept" && pending.proposal_kind !== "new" && pending.target_tactic_id) {
             await tx.select().from(core.tactics).where(eq(core.tactics.id, pending.target_tactic_id)).for("update");
-        const manual = args.judgement_origin === "manual";
-        const references = args.decision === "accept" && originalMeta.origin !== "human" && !manual ? await optionSupport(pending, tx) : [];
+        }
+        const references = args.decision === "accept" && originalMeta.origin !== "human" && args.judgement_origin !== "manual" ? await optionSupport(pending, originalMeta, tx) : [];
         const proposal = args.decision === "accept" && args.fields ? await editPending(pending, args.fields, rationale, args.actor, args.workspace_id, tx) : pending;
-        let tactic_id: string | null = null, expansion_id: string | null = null;
-        let state = await readState(tx);
+        let state: IegpState;
+        let prepared: PreparedAcceptance | undefined;
         if (args.decision === "accept") {
             await tx.select().from(core.gaps).where(eq(core.gaps.id, proposal.gap_id)).for("update");
             state = await eligibleGap(proposal.gap_id, tx);
-            if (proposal.proposal_kind !== "new" && !state.tactics.some(tactic => tactic.id === proposal.target_tactic_id)) throw new TrustedApplicationError("Proposal target not found in this workspace.", "not_found", 404);
             const placements = await tx.select().from(t.priorityPlacements).for("update");
-            const currentBasis = ideationAcceptanceBasis(state, proposal.gap_id, placements as Parameters<typeof ideationAcceptanceBasis>[2]);
-            const stale = originalMeta.supporting_context_basis && originalMeta.supporting_context_basis !== currentBasis;
-            if (stale && (!manual || args.reviewed_context_basis !== currentBasis)) throw new TrustedApplicationError("Ideation context changed; this proposal is stale. Review the current requirements, coverage, priority and tactic lifecycle, then submit its current review token with a manual judgement.");
-            if (stale) {
-              proposal.design = { ...(proposal.design as Record<string, unknown>), renewed_review: { basis: currentBasis, actor: args.actor.name, at: nowIso(), rationale } };
-              await recordEdit({workspace_id: args.workspace_id, stage: "S9", entity_type: "ideation_proposal", entity_id: proposal.id, field: "renewed_context_review", action: "validate", before: originalMeta.supporting_context_basis!, after: currentBasis, rationale, actor: args.actor}, tx);
-            }
-            if (proposal.proposal_kind === "reuse") {
-                assertReuseDesign({...proposal, design: splitDesign(proposal.design).design}, state.tactics.find(tactic => tactic.id === proposal.target_tactic_id));
-                tactic_id = proposal.target_tactic_id!;
-                await reuseTacticForGap({tactic_id, gap_id: proposal.gap_id, actor_name: args.actor.name, actor_function: args.actor.function, rationale}, tx);
-            }
-            else if (proposal.proposal_kind === "expansion") {
-                const parent = proposal.reviewed_parent as Tactic | null;
-                if (!parent || parent.id !== proposal.target_tactic_id)
-                    throw new TrustedApplicationError("Reviewed expansion target snapshot is unavailable.");
-                const timing = splitDesign(proposal.design).design;
-                if (timing.duration_months === null || timing.duration_months <= 0 || timing.readout_lag_months === null || timing.readout_lag_months < 0)
-                    throw new TrustedApplicationError("Expansion requires valid numeric duration and readout lag.");
-                const scope = expansionScopeSchema.parse(proposal.expansion_scope);
-                assertExpansionDesign({...proposal, design: timing}, scope);
-                const acceptedScope = {...scope, type: proposal.type as TacticType, comparator: timing.comparator, data_source: timing.data_source};
-                validateExpansion(state.tactics.find(t => t.id === proposal.target_tactic_id), scope, proposal.comparative_rationale);
-                const child = await acceptTacticExpansion({ proposal_id: proposal.id, tactic_id: parent.id, gap_id: proposal.gap_id, scope: acceptedScope, expected_tactic_version: tacticVersion(stale ? state.tactics.find(tactic => tactic.id === parent.id)! : parent), rationale, actor: args.actor }, tx);
-                tactic_id = child.tactic_id;
-                expansion_id = child.id;
-            }
-            else {
-                const { design } = splitDesign(proposal.design);
-                tactic_id = await insertLibraryTactic({ name: proposal.name, type: proposal.type as TacticType, description: `Ideated for ${proposal.gap_id}. ${proposal.rationale}`, evidence_question: proposal.evidence_question, population: design.population, intervention: state.asset.name, comparator: design.comparator, outcomes: design.outcomes, study_design: design.study_design, data_source: design.data_source, geography: state.asset.geography, owner: args.actor.name, function: args.actor.function, residual_ids: [], status: "proposed", lifecycle_stage: "proposed", actor_name: args.actor.name, actor_function: args.actor.function, audit_action: "create_proposed", audit_reason: rationale }, tx);
-                await tx.insert(core.coverages).values({ id: newId("COV"), gap_id: proposal.gap_id, tactic_id, dimensions: emptyDimensions(), overall: "unassessed", overall_rationale: rationale, overall_lock: unlocked(), stale: false, needs_review: false });
-                await syncComputedGapStatuses(proposal.gap_id, undefined, tx);
-            }
+            prepared = prepareIdeationAcceptance(proposal, originalMeta, state, placements as Parameters<typeof ideationAcceptanceBasis>[2], args);
+        } else {
+            state = await readState(tx);
         }
-        await tx.update(t.ideationProposals).set({ design: { ...(proposal.design as Record<string, unknown>), write_version: newId("IPV") }, status: args.decision === "accept" ? "accepted" : "rejected", decided_by: args.actor.name, decided_at: nowIso(), decision_rationale: rationale, tactic_id, expansion_id }).where(eq(t.ideationProposals.id, args.id));
-        const edit = await recordEdit({ workspace_id: args.workspace_id, stage: "S9", entity_type: "ideation_proposal", entity_id: args.id, field: manual ? "manual_status" : references.length ? "supported_model_status" : "status", references, reference_gap_ids: [proposal.gap_id], action: args.decision, before: "proposed", after: args.decision === "accept" ? "accepted" : "rejected", rationale, actor: args.actor }, tx);
-        return { tactic_id, expansion_id, proposal, originalMeta, original, edit, gap: state.gaps.find(g => g.id === proposal.gap_id) };
+        const applied = await applyIdeationDecision({ ...args, rationale }, proposal, originalMeta, state, prepared, references, tx);
+        return { ...applied, proposal, originalMeta, original, gap: state.gaps.find(g => g.id === proposal.gap_id) };
     }));
     // Shared learning storage runs after the workspace commit, never while its connection is held.
     if (result.originalMeta.origin !== "human" && !result.original)
@@ -1721,6 +1789,126 @@ export async function decideIdeationProposal(args: {
     if (result.originalMeta.origin !== "human" && result.original)
         await captureProposalDecision({ proposal: { id: result.proposal.id, ...result.original, slot_id: result.originalMeta.slot_id }, capture_key: result.edit.id, run_id: result.originalMeta.run_id, actor: args.actor, gap: result.gap ? { name: result.gap.name, statement: result.gap.statement } : null, decision: args.decision, final: args.decision === "accept" ? { name: result.proposal.name, type: result.proposal.type, evidence_question: result.proposal.evidence_question, rationale: result.proposal.rationale, design: splitDesign(result.proposal.design).design, recommendation: splitDesign(result.proposal.design).meta.recommendation, supporting_context_basis: splitDesign(result.proposal.design).meta.supporting_context_basis, proposal_kind: result.proposal.proposal_kind as "new" | "expansion" | "reuse", comparative_rationale: result.proposal.comparative_rationale, ...(result.proposal.proposal_kind !== "new" ? { target_tactic_id: result.proposal.target_tactic_id, expansion_scope: result.proposal.expansion_scope } : {}) } : null, rationale, workspace_id: args.workspace_id });
     return { tactic_id: result.tactic_id, expansion_id: result.expansion_id };
+}
+
+type DemoIdeationSelection = { id: string; expected_version: string };
+
+function demoIdeationError(message: string, code: "selection" | "context" | "busy" | "conflict") {
+  return new TrustedApplicationError(message, `demo_ideation_${code}`, code === "context" ? 403 : 409);
+}
+
+function assertCompatibleDemoIdeas(items: { proposal: ProposalRow; prepared: PreparedAcceptance }[]) {
+  const newDesigns = new Set<string>();
+  const expansionScopes = new Set<string>();
+  const reusedRelationships = new Set<string>();
+  const expandedRelationships = new Set<string>();
+  const conflict = () => demoIdeationError("The selection includes overlapping ideas. Review the ideas individually before accepting them.", "conflict");
+  const scientificKey = (fields: (string | boolean | undefined)[]) => JSON.stringify(fields.map(value =>
+    typeof value === "string" ? value.toLowerCase().trim().replace(/\s+/g, " ") : value ?? ""));
+
+  for (const { proposal, prepared } of items) {
+    if (prepared.kind === "new") {
+      const { population, comparator, outcomes, data_source, study_design } = prepared.design;
+      const key = scientificKey([proposal.type, proposal.evidence_question, population, comparator, outcomes, data_source, study_design]);
+      if (newDesigns.has(key)) throw conflict();
+      newDesigns.add(key);
+      continue;
+    }
+    const relationship = JSON.stringify([proposal.gap_id, prepared.tactic_id]);
+    if (reusedRelationships.has(relationship)) throw conflict();
+    if (prepared.kind === "reuse") {
+      if (expandedRelationships.has(relationship)) throw conflict();
+      reusedRelationships.add(relationship);
+      continue;
+    }
+    const scope = prepared.scope;
+    const key = JSON.stringify([prepared.tactic_id, scientificKey([
+      scope.type, scope.evidence_question, scope.population, scope.comparator, scope.outcomes, scope.geography,
+      scope.data_cut, scope.analysis, scope.instrument, scope.study_design, scope.data_source,
+      scope.post_hoc, scope.prospective_enrolment, scope.protocol_amendment,
+    ])]);
+    if (expansionScopes.has(key)) throw conflict();
+    expansionScopes.add(key);
+    expandedRelationships.add(relationship);
+  }
+}
+
+/**
+ * The presenter explicitly selected this set of opening versions. Validate them
+ * against one scientific snapshot before any selected idea can change that basis.
+ */
+export async function acceptDemoIdeationProposals(args: {
+  workspace_id: string;
+  demo: DemoExecution | undefined;
+  proposals: DemoIdeationSelection[];
+  rationale: string;
+  actor: Actor;
+}): Promise<number> {
+  const contextError = () => demoIdeationError("Only the Velmara client demo has this approval shortcut.", "context");
+  if (!args.demo || !(await allowsDemoExecution(args.demo, args.workspace_id))) throw contextError();
+  const rationale = requireRationale(args.rationale);
+  const versions = new Map(args.proposals.map(({ id, expected_version }) => [id, expected_version]));
+  if (!versions.size || versions.size !== args.proposals.length) {
+    throw demoIdeationError("Select each idea only once before accepting the demo ideas.", "selection");
+  }
+  if (args.proposals.some(({ id, expected_version }) => !id || !expected_version)) {
+    throw demoIdeationError("An opening proposal version is missing. Open the demo ideas again.", "selection");
+  }
+
+  await ensurePlatformSchema();
+  const changer = { actor_name: args.actor.name, actor_function: args.actor.function, rationale };
+  return withWorkspaceTransaction(async () => {
+    await lockRelationships();
+    try {
+      // Context hashes depend on the whole library and on newly linked or inserted
+      // records. Lock this workspace's input tables, including their membership,
+      // while leaving ordinary reads available. NOWAIT avoids lock-order cycles
+      // with the independent Setup, Priority and scientific owners.
+      await db().execute(sql`LOCK TABLE assets, gaps, tactics, tactic_expansions, objectives, sources,
+        source_blocks, needs, need_gap_links, coverages, mapping_suggestions, priority_placements, ideation_proposals
+        IN EXCLUSIVE MODE NOWAIT`);
+      // The platform owner can turn replay off. Hold only this workspace's row,
+      // following the same domain-then-workspace order as the demo reset.
+      const active = await db().execute(sql`SELECT id FROM public.workspaces
+        WHERE id = ${args.workspace_id} AND demo AND demo_mode FOR SHARE NOWAIT`);
+      if (!active.length) throw contextError();
+    } catch (error) {
+      const cause = error instanceof DrizzleQueryError ? error.cause : error;
+      if (cause instanceof Error && "code" in cause && cause.code === "55P03") {
+        throw demoIdeationError("Workspace changes are being saved. Open the demo ideas again once the changes finish.", "busy");
+      }
+      throw error;
+    }
+
+    const [state, placements, rows] = await Promise.all([
+      readState(),
+      db().select().from(t.priorityPlacements),
+      db().select().from(t.ideationProposals).where(inArray(t.ideationProposals.id, [...versions.keys()])),
+    ]);
+    if (!state.asset) throw contextError();
+    const byId = new Map(rows.map(row => [row.id, row]));
+    const items = [...versions].map(([id, version]) => {
+      const proposal = byId.get(id);
+      if (!proposal) throw demoIdeationError("A selected idea is no longer available. Open the demo ideas again.", "selection");
+      assertPendingProposal(proposal, version);
+      const meta = splitDesign(proposal.design).meta;
+      if (!meta.supporting_context_basis || !["new", "expansion", "reuse"].includes(proposal.proposal_kind)) {
+        throw demoIdeationError("A selected idea has no current review context. Review it individually on the Ideation page.", "selection");
+      }
+      const references = meta.origin === "human" ? [] : validateOptionSupport(proposal, optionSupportContext(meta), state);
+      requireEligibleIdeationGap(state, placements as Parameters<typeof ideationAcceptanceBasis>[2], proposal.gap_id);
+      return { proposal, meta, references, prepared: prepareIdeationAcceptance(proposal, meta, state, placements as Parameters<typeof ideationAcceptanceBasis>[2], {}) };
+    });
+    assertCompatibleDemoIdeas(items);
+
+    return withRelationshipChange(changer, () => db().transaction(async tx => {
+      for (const { proposal, meta, references, prepared } of items) {
+        await applyIdeationDecision({ decision: "accept", rationale, actor: args.actor, workspace_id: args.workspace_id },
+          proposal, meta, state, prepared, references, tx);
+      }
+      return items.length;
+    }));
+  });
 }
 
 /**

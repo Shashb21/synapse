@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { acceptDemoStep } from "@/lib/demo/accept-steps";
+import { acceptDemoIdeation, acceptDemoStep, loadDemoIdeationReview } from "@/lib/demo/accept-steps";
 
 const json = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), {
   status, headers: { "content-type": "application/json" },
@@ -18,7 +18,8 @@ describe("KAN-263 customer demo approval sequence", () => {
         unvalidated: ["GAP-003"], wizard_complete: false, tactics_unlocked: false,
       },
       prioritize: { suggested: [{ gap_id: "GAP-003", band: "high", version: "placement-snapshot" }] },
-      ideation: { proposed: [{ id: "PROP-003", version: "proposal-snapshot" }] },
+      ideation: { proposed: [{ id: "PROP-003", name: "Comparative study", version: "proposal-snapshot" }] },
+      workspace_id: "velmara-workspace",
       timeline: { dependencies: [{ id: "ACT-TAC-004", upstream_id: "ACT-TAC-003" }], estimates: true },
     };
     const fetch = vi.fn(async (path: string, options?: RequestInit) => {
@@ -31,13 +32,14 @@ describe("KAN-263 customer demo approval sequence", () => {
         } } });
       }
       if (path === "/api/modules") return json({ execution_source: "demo_replay", output: { mode: "llm", proposal: null } });
+      if (path === "/api/demo/ideation-approvals") return json({ ok: true, accepted: 1 });
       return json({ ok: true });
     });
     vi.stubGlobal("fetch", fetch);
 
     await expect(acceptDemoStep("gaps")).resolves.toBe(3);
     await expect(acceptDemoStep("prioritize")).resolves.toBe(1);
-    await expect(acceptDemoStep("ideation")).resolves.toBe(1);
+    await expect(acceptDemoIdeation(await loadDemoIdeationReview())).resolves.toBe(1);
     await expect(acceptDemoStep("timeline")).resolves.toBe(2);
 
     const requests = fetch.mock.calls
@@ -52,7 +54,7 @@ describe("KAN-263 customer demo approval sequence", () => {
       ["/api/iegp", expect.objectContaining({ action: "complete_wizard" })],
       ["/api/plan", expect.objectContaining({ action: "accept_priority_suggestion", gap_id: "GAP-003", expected_version: "placement-snapshot", reason: "Accepted as in the demo" })],
       ["/api/iegp", expect.objectContaining({ action: "unlock_tactics" })],
-      ["/api/plan", expect.objectContaining({ action: "decide_proposal", id: "PROP-003", expected_version: "proposal-snapshot" })],
+      ["/api/demo/ideation-approvals", { workspace_id: "velmara-workspace", proposals: [{ id: "PROP-003", expected_version: "proposal-snapshot" }], rationale: "Accepted as in the demo" }],
       ["/api/plan", expect.objectContaining({ action: "review_dependency", id: "ACT-TAC-004", upstream_id: "ACT-TAC-003" })],
       ["/api/plan", expect.objectContaining({ action: "accept_estimates" })],
     ]);
@@ -67,12 +69,41 @@ describe("KAN-263 customer demo approval sequence", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
-  it("does not write any S9 decisions when two proposals need a shared freshness check", async () => {
-    const fetch = vi.fn().mockResolvedValueOnce(json({ ideation: { proposed: [
-      { id: "PROP-001", version: "first-review" }, { id: "PROP-002", version: "second-review" },
-    ] } })).mockImplementation(() => Promise.resolve(json({ ok: true })));
+  it("submits the displayed selections and opening versions together without fetching them again", async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(json({
+      workspace_id: "velmara-workspace",
+      ideation: { proposed: [
+        { id: "PROP-001", name: "First study", version: "first-review" },
+        { id: "PROP-002", name: "Second study", version: "second-review" },
+      ] },
+    })).mockResolvedValueOnce(json({ ok: true, accepted: 2 }));
     vi.stubGlobal("fetch", fetch);
-    await expect(acceptDemoStep("ideation")).rejects.toThrow(/Review and accept each idea/);
+
+    const review = await loadDemoIdeationReview();
+    expect(review.proposals.map(proposal => proposal.name)).toEqual(["First study", "Second study"]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await expect(acceptDemoIdeation(review)).resolves.toBe(2);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch.mock.calls[1][0]).toBe("/api/demo/ideation-approvals");
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({
+      workspace_id: "velmara-workspace",
+      proposals: [
+        { id: "PROP-001", expected_version: "first-review" },
+        { id: "PROP-002", expected_version: "second-review" },
+      ],
+      rationale: "Accepted as in the demo",
+    });
+  });
+
+  it("shows a rejected batch response without advancing or resubmitting the ideas", async () => {
+    const message = "Workspace changes are being saved. Open the demo ideas again once the changes finish.";
+    const fetch = vi.fn().mockResolvedValueOnce(json({ safe_error: true, request_outcome: "rejected", error: message }, 409));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(acceptDemoIdeation({ workspace_id: "velmara-workspace", proposals: [
+      { id: "PROP-001", name: "First study", version: "first-review" },
+      { id: "PROP-002", name: "Second study", version: "second-review" },
+    ] })).rejects.toMatchObject({ message, outcome: "rejected", status: 409 });
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 });

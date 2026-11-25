@@ -15,13 +15,13 @@ export const dynamic = "force-dynamic";
 
 /**
  * What each walkthrough step still waits on, for "Accept all as in demo"
- * (KAN-138). Client-demo workspaces only: the shortcut then makes the same
- * calls a presenter's clicks would.
+ * (KAN-138). The presenter reviews the opening proposal versions before
+ * saving the Ideation decisions.
  */
 export async function GET() {
   try {
-    await requireCustomerContext();
-    if (!(await isDemoModeWorkspace())) {
+    const { workspace } = await requireCustomerContext();
+    if (!workspace || !(await isDemoModeWorkspace(workspace.id))) {
       return NextResponse.json({ safe_error: true, error: "Only a client-demo workspace has demo shortcuts.", code: "not_demo" }, { status: 403 });
     }
     const [state, placements, proposals, timeline] = await Promise.all([
@@ -33,6 +33,7 @@ export async function GET() {
     const live = state.gaps.filter(isLiveGap);
     return NextResponse.json(
       {
+        workspace_id: workspace.id,
         gaps: {
           partial: live
             .filter((gap) => displayedGapStatus(gap) === "validated_partial")
@@ -48,7 +49,7 @@ export async function GET() {
             .filter((p) => !p.validated && p.suggested_band && live.some((gap) => gap.id === p.gap_id))
             .map((p) => ({ gap_id: p.gap_id, band: p.suggested_band, version: p.version })),
         },
-        ideation: { proposed: proposals.filter((p) => p.status === "proposed").map((p) => ({ id: p.id, version: p.version })) },
+        ideation: { proposed: proposals.filter((p) => p.status === "proposed").map(({ id, name, version }) => ({ id, name, version })) },
         timeline: {
           dependencies: timeline.activities.flatMap((activity) =>
             (activity.meta.proposed_dependencies ?? []).map((dep) => ({ id: activity.id, upstream_id: dep.id })),

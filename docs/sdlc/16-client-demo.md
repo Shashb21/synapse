@@ -15,7 +15,7 @@ A platform owner can enable **Client demo mode** for a workspace dedicated to th
 | Upload | Upload | Choose **Ingest this file** for each document, in pack order. |
 | Evidence inventory | Gaps | Review the gaps and choose **Accept all as in demo**. The shortcut requests each partial split and keeps the gap open if the split judge returns no proposal. |
 | Prioritization | Prioritization Matrix | Generate priority bands and choose **Accept all as in demo** to validate them and open ideation. |
-| Ideation | Ideation | Choose **Generate ideas for these gaps**. Use **Accept all as in demo** for a single current idea, or review each idea separately when there are several. |
+| Ideation | Ideation | Choose **Generate ideas for these gaps**. Choose **Accept all as in demo**, review the list, then choose **Accept ideas**. The selected ideas and their decision history save together. If an idea has changed or the list includes overlapping proposals, reopen the list or review the ideas individually. |
 | Timeline | Gantt Timeline | Rebuild from the displayed Velmara start date, **19 October 2026**, then choose **Accept all as in demo** for dependencies and date estimates. |
 
 The current compatibility manifest supports exact parsing and classification for all seven approved files and the first file's gap and tactic extraction cycles. The full walkthrough still needs compatible fixture entries, starting with current mapping. A missed step shows recovery instructions and leaves existing checkpoints available. If a reset and the approved files still give a miss, contact the Synapse administrator for a fixture update.
