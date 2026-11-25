@@ -438,7 +438,7 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
   inputSchema,
   outputSchema,
   async run(input, ctx) {
-    const anchor = timelineAnchor(input.anchor, Boolean(ctx.route.demo));
+    const anchor = timelineAnchor(input.anchor, Boolean(ctx.route?.demo));
     const [state, placements, overrides, designs] = await Promise.all([
       loadState(),
       listPlacements(),

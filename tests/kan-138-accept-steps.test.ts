@@ -87,15 +87,33 @@ describe("accepting a step", () => {
 
   it("prioritize, ideation and timeline accept what the AI suggested", async () => {
     let calls = stubServer([
-      { ...base, gaps: { ...base.gaps, tactics_unlocked: false }, prioritize: { suggested: [{ gap_id: "GAP-001", band: "high" }] } },
+      { ...base, gaps: { ...base.gaps, tactics_unlocked: false }, prioritize: { suggested: [{ gap_id: "GAP-001", band: "high", version: "placement-version" }] } },
     ]);
     await acceptDemoStep("prioritize");
-    expect(calls[0]!.body).toMatchObject({ action: "validate_band", gap_id: "GAP-001", band: "high" });
+    expect(calls[0]).toEqual({
+      url: "/api/plan",
+      body: {
+        action: "accept_priority_suggestion",
+        gap_id: "GAP-001",
+        band: "high",
+        expected_version: "placement-version",
+        reason: "Accepted as in the demo",
+      },
+    });
     expect(calls[1]!.body).toMatchObject({ action: "unlock_tactics" });
 
-    calls = stubServer([{ ...base, ideation: { proposed: ["IDEA-1", "IDEA-2"] } }]);
-    expect(await acceptDemoStep("ideation")).toBe(2);
-    expect(calls.map((c) => c.body?.decision)).toEqual(["accept", "accept"]);
+    calls = stubServer([{ ...base, ideation: { proposed: [{ id: "IDEA-1", version: "proposal-version" }] } }]);
+    expect(await acceptDemoStep("ideation")).toBe(1);
+    expect(calls).toEqual([{
+      url: "/api/plan",
+      body: {
+        action: "decide_proposal",
+        id: "IDEA-1",
+        expected_version: "proposal-version",
+        decision: "accept",
+        rationale: "Accepted as in the demo",
+      },
+    }]);
 
     calls = stubServer([{ ...base, timeline: { dependencies: [{ id: "ACT-TAC-005", upstream_id: "ACT-TAC-002" }], estimates: true } }]);
     expect(await acceptDemoStep("timeline")).toBe(2);
@@ -107,7 +125,7 @@ describe("accepting a step", () => {
       "fetch",
       vi.fn(async (url: string) =>
         url === "/api/demo/pending"
-          ? Response.json({ ...base, ideation: { proposed: ["IDEA-1"] } })
+          ? Response.json({ ...base, ideation: { proposed: [{ id: "IDEA-1", version: "proposal-version" }] } })
           : Response.json({ safe_error: true, request_outcome: "rejected", error: "Proposal IDEA-1 was already decided." }, { status: 409 }),
       ),
     );
