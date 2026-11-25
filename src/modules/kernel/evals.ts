@@ -47,7 +47,7 @@ export async function assertDiagnosticWorkspace(expected: string) {
 
 /** Recheck the workspace row at commit and serialize against client-demo mode changes. */
 export async function lockDiagnosticWorkspace(expected: string, schema: string, tx: Pick<ReturnType<typeof sharedDb>, "execute">) {
-  const [workspace] = await tx.execute(sql`select schema_name, demo_mode from workspaces where id = ${expected} for share`);
+  const [workspace] = await tx.execute(sql`select schema_name, demo_mode from public.workspaces where id = ${expected} for share`);
   if (!workspace && expected === DEFAULT_WORKSPACE_ID && schema === "public") return;
   if (!workspace || workspace.demo_mode !== false || workspace.schema_name !== schema)
     throw new TrustedApplicationError("Select a workspace with live routing for diagnostics.");

@@ -12,6 +12,7 @@ import { stageErrorResponse } from "@/app/api/modules/ai-off";
 import { readJsonBody } from "@/modules/auth/api-guard";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 const revisionId = z.string().regex(/^prv_[a-zA-Z0-9_-]+$/);
 const proposalSchema = z.discriminatedUnion("action", [

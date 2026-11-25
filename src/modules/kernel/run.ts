@@ -1,3 +1,4 @@
+/** Execute a kernel stage and record its workspace result. */
 import { compareParsedSources } from "@/lib/ingest/compare-source";
 import { diagnosticRequestIdentity, DiagnosticPreview, withinDiagnosticBudget, type RequestIdentity } from "./diagnostic-requests";
 import type { ProviderRequestBudget } from "@/modules/llm/provider";
@@ -8,7 +9,7 @@ import { scopedWorkspaceId } from "@/modules/workspaces/context";
 import { activeRevisionPointer, getPromptRevision } from "./prompt-revisions";
 import { activePromptVersion, scopedPromptRevision, revisionCompletion } from "./prompt-variant";
 import { db, ensurePlatformSchema } from "./db";
-import { RunRecorder, closeRun, openRun } from "./observability";
+import { RunRecorder, closeRun, openRun, withRunningRun } from "./observability";
 import { activeModule } from "./registry";
 import { completionFor, resolveRoute, routeConfig, stageLabel } from "./routing";
 import { AI_OFF_MESSAGE, AiDisabledError, aiEnabled, aiSectionEnabled, platformAiEnabled } from "./ai-switch";
@@ -16,11 +17,11 @@ import { sectionOfStage } from "./ai-sections";
 import { DEFAULT_ROUTE_PROVIDER, findProvider } from "@/modules/llm/provider";
 import { STAGES } from "./contracts";
 import { recordSignal } from "./hillclimb";
-import { assertDiagnosticWorkspace, recordEvalRun, type EvalExecution, type EvalEvidenceIssue } from "./evals";
+import { assertDiagnosticWorkspace, recordEvalRun, type EvalExecution, type EvalEvidenceIssue, type EvalLineage } from "./evals";
 import { assertEvaluationRoute, inEvaluationIsolation } from "./evaluation-isolation";
 import { evidenceHash } from "./decision-replay";
 import { routeIdentity } from "./revision-policy";
-import type { Actor, EvalScore, ModuleContext, ResolvedRoute, StageId } from "./contracts";
+import type { Actor, EvalScore, HillclimbSignalDraft, ModuleContext, ResolvedRoute, StageId } from "./contracts";
 import { assertCan, type Capability, type Role } from "@/modules/auth/roles";
 import { isTestStub } from "./llm";
 import { tagStageError, TrustedApplicationError } from "./stage-errors";
@@ -166,6 +167,8 @@ export async function runStage<O = unknown>(args: {
    * It never overrides the platform master switch: with AI off for the platform, no model runs.
    */
   force_ai?: boolean;
+  /** The ingestion checkpoint owner runs this write after its outer rollback. */
+  deferFailureRecord?: (persist: () => Promise<void>) => void;
 }): Promise<StageRunResult<O>> {
   assertCan(args.role, CAPABILITY_BY_STAGE[args.stage]);
   const scopedWorkspace = await scopedWorkspaceId() ?? DEFAULT_WORKSPACE;
@@ -214,54 +217,69 @@ export async function runStage<O = unknown>(args: {
   // Live pages use module_runs as their latest stage output. Diagnostics own a separate case record.
   if (!diagnostic) await openRun(recorder);
 
-  // A contract violation is itself observable, so the run is already open here.
-  const parsedInput = implementation.inputSchema.safeParse(args.input);
-  if (!parsedInput.success) {
-    const message = `${implementation.manifest.id} rejected its input: ${parsedInput.error.issues
-      .map((issue) => `${issue.path.join(".") || "(root)"} ${issue.message}`)
-      .join("; ")}`;
-    if (!diagnostic) await closeRun({ recorder, status: "error", error: message });
-    // Schema diagnostics stay in the run record. Public guidance never reflects input.
-    const needsRationale = args.stage === "S5" && parsedInput.error.issues.some(issue => issue.path[0] === "rationale");
-    throw new TrustedApplicationError(needsRationale
-      ? "Enter a rationale with at least 3 characters, then try again."
-      : "Check the required fields and their values, then try again.");
-  }
-  recorder.note("input:accepted", implementation.traceInput ? implementation.traceInput(parsedInput.data) : parsedInput.data);
+  let route: ResolvedRoute | null = null;
+  let inputDiagnostic: string | null = null;
+  let liveLineage: Pick<EvalLineage, "execution" | "route_hash"> = { execution: "mechanical", route_hash: null };
+  let signals: HillclimbSignalDraft[] = [];
+  const ingestStage = ["S0", "S1", "S2", "S3", "S4"].includes(args.stage);
+  const ownsParseCommit = args.stage === "S1" && !inWorkspaceTransaction();
 
-  const route: ResolvedRoute = diagnostic
-    ? diagnostic.route ?? {
-        stage: args.stage, provider_id: "none", provider_label: isTestStub() ? "Test stub" : "Mechanical",
-        model: "", auth: "none", connected: false, params: { temperature: 0, max_tokens: 0 },
-        fallbacks: [], degraded: false, reason: "No diagnostic model calls.",
-      }
-    : ai ? await resolveRouteForRun(args.stage) : await aiOffRoute(args.stage);
-  const requests: RequestIdentity[] = [];
-  const receipts = new Set<string>();
-  let retriedWithChangedSystem = false;
-  let firstPrompt: string | null = null;
-  recorder.note("route", route, route.degraded ? (route.reason ?? "degraded") : undefined);
+  const execute = async (assertLive?: () => Promise<void>): Promise<StageRunResult<O>> => {
+    // A contract violation is itself observable, so the run is already open here.
+    const parsedInput = implementation.inputSchema.safeParse(args.input);
+    if (!parsedInput.success) {
+      inputDiagnostic = `${implementation.manifest.id} rejected its input: ${parsedInput.error.issues
+        .map((issue) => `${issue.path.join(".") || "(root)"} ${issue.message}`)
+        .join("; ")}`;
+      // Schema diagnostics stay in the run record. Public guidance never reflects input.
+      const needsRationale = args.stage === "S5" && parsedInput.error.issues.some(issue => issue.path[0] === "rationale");
+      throw new TrustedApplicationError(needsRationale
+        ? "Enter a rationale with at least 3 characters, then try again."
+        : "Check the required fields and their values, then try again.");
+    }
+    recorder.note("input:accepted", implementation.traceInput ? implementation.traceInput(parsedInput.data) : parsedInput.data);
 
-  const ctx: ModuleContext = {
-    workspace_id,
-    actor: args.actor,
-    role: args.role,
-    run: recorder,
-    route,
-    complete: ai
-      ? completionFor(route, recorder, diagnostic ? {
-        onReceipt({ attempt, id }) {
-          if (attempt > 1) retriedWithChangedSystem = true;
-          if (id) receipts.add(id);
-        },
-      } : undefined)
-      : async () => {
-          throw new AiDisabledError(stageLabel(args.stage));
-        },
-    ai,
-  };
+    const resolvedRoute: ResolvedRoute = diagnostic
+      ? diagnostic.route ?? {
+          stage: args.stage, provider_id: "none", provider_label: isTestStub() ? "Test stub" : "Mechanical",
+          model: "", auth: "none", connected: false, params: { temperature: 0, max_tokens: 0 },
+          fallbacks: [], degraded: false, reason: "No diagnostic model calls.",
+        }
+      : ai ? await resolveRouteForRun(args.stage) : await aiOffRoute(args.stage);
+    route = resolvedRoute;
+    const requests: RequestIdentity[] = [];
+    const receipts = new Set<string>();
+    let retriedWithChangedSystem = false;
+    let firstPrompt: string | null = null;
+    recorder.note("route", resolvedRoute, resolvedRoute.degraded ? (resolvedRoute.reason ?? "degraded") : undefined);
 
-  const execute = async (): Promise<StageRunResult<O>> => {
+    const ctx: ModuleContext = {
+      workspace_id,
+      actor: args.actor,
+      role: args.role,
+      run: recorder,
+      route: resolvedRoute,
+      complete: ai
+        ? completionFor(resolvedRoute, recorder, diagnostic ? {
+          onReceipt({ attempt, id }) {
+            if (attempt > 1) retriedWithChangedSystem = true;
+            if (id) receipts.add(id);
+          },
+        } : { beforeSend: assertLive })
+        : async () => {
+            throw new AiDisabledError(stageLabel(args.stage));
+          },
+      ai,
+    };
+
+    if (ingestStage && !diagnostic?.facts) {
+      // The pipeline already holds this lock. Transaction locks are reentrant
+      // on that connection, and a nested stage runs in its own savepoint.
+      const schema = await currentSchemaName();
+      const locked = await db().execute(sql`select pg_try_advisory_xact_lock(hashtextextended(${`ingest:${schema}`}, 0)) as locked`);
+      if (!locked[0]?.locked) throw new ApiGuardError(409, "ingest_busy", "An ingestion step or clear is still running. Wait for it to finish, then retry.");
+    }
+
     let selected = scopedPromptRevision();
     if (!selected) {
       const pointer = await activeRevisionPointer(workspace_id, args.stage);
@@ -272,7 +290,7 @@ export async function runStage<O = unknown>(args: {
       const complete = ctx.complete;
       ctx.complete = async call => {
         if (isTestStub() || !diagnostic.route) throw new TrustedApplicationError("A synthetic diagnostic cannot call a provider.");
-        const id = diagnosticRequestIdentity(call, route, ctx.execution_policy, requests.length === 0);
+        const id = diagnosticRequestIdentity(call, resolvedRoute, ctx.execution_policy, requests.length === 0);
         if (diagnostic.preview) throw new DiagnosticPreview(id);
         if (!requests.length) {
           if (diagnostic.approved_first && diagnostic.approved_first.actual !== id.actual) {
@@ -322,22 +340,10 @@ export async function runStage<O = unknown>(args: {
       route,
       evals,
     });
-    if (!diagnostic && evals.length > 0) {
-      await recordEvalRun({
-        workspace_id, kind: "live_diagnostic", lineage: {
-          execution, route_hash: execution === "routed" ? routeIdentity(route) : null, prompt_hash: null, case_hash: null,
-        },
-        stage: args.stage,
-        module_id: implementation.manifest.id,
-        module_version: implementation.manifest.version,
-        run_id: recorder.id,
-        metrics: evals,
-        note: result.summary,
-      });
-    }
-    for (const signal of diagnostic ? [] : result.signals ?? []) {
-      // Provenance (KAN-90): the run that produced it, on behalf of whom.
-      await recordSignal({ actor_name: args.actor.name, ...signal, source_run_id: signal.source_run_id ?? recorder.id });
+    if (!diagnostic) {
+      signals = result.signals ?? [];
+      liveLineage = { execution, route_hash: execution === "routed" ? routeIdentity(resolvedRoute) : null };
+      if (ingestStage) await recordFollowUps(evals, result.summary, liveLineage);
     }
     return {
       run_id: recorder.id,
@@ -345,7 +351,7 @@ export async function runStage<O = unknown>(args: {
       module_id: implementation.manifest.id,
       module_version: implementation.manifest.version,
       ...(diagnostic ? { diagnostic: {
-        execution, route_hash: requests.length ? routeIdentity(route) : null,
+        execution, route_hash: requests.length ? routeIdentity(resolvedRoute) : null,
         prompt_hash: verifiedPrompt ? evidenceHash(requests.map(r => r.design)) : null,
         first_prompt_hash: verifiedPrompt ? firstPrompt : null,
         transcript_hash: verifiedPrompt ? evidenceHash(requests.map(r => r.actual)) : null,
@@ -358,33 +364,95 @@ export async function runStage<O = unknown>(args: {
     };
   };
 
-  const ownsParseCommit = args.stage === "S1" && !inWorkspaceTransaction();
-  const isDryRun = Boolean(args.input && typeof args.input === "object" && "dry_run" in args.input && args.input.dry_run === true);
-  try {
-    if (!diagnostic?.facts && ["S0", "S1", "S2", "S3", "S4"].includes(args.stage)) {
-      // Freeze facts and every live ingestion write share clear's lock. The
-      // pipeline already owns this lock: transaction locks are reentrant on
-      // that connection, and nesting here creates a savepoint, not a new owner.
-      const schema = await currentSchemaName();
-      const result = await withWorkspaceTransaction(async () => {
-        const locked = await db().execute(sql`select pg_try_advisory_xact_lock(hashtextextended(${`ingest:${schema}`}, 0)) as locked`);
-        if (!locked[0]?.locked) throw new ApiGuardError(409, "ingest_busy", "An ingestion step or clear is still running. Wait for it to finish, then retry.");
-        return execute();
+  async function recordFollowUps(evals: EvalScore[], summary: string, result: Pick<EvalLineage, "execution" | "route_hash">) {
+    if (evals.length > 0) {
+      await recordEvalRun({
+        workspace_id, kind: "live_diagnostic", lineage: {
+          execution: result.execution, route_hash: result.route_hash, prompt_hash: null, case_hash: null,
+        },
+        stage: args.stage,
+        module_id: implementation.manifest.id,
+        module_version: implementation.manifest.version,
+        run_id: recorder.id,
+        metrics: evals,
+        note: summary,
       });
-      // S1 owns this commit only for direct runs; the pipeline owns its outer commit.
-      if (ownsParseCommit && !isDryRun) {
-        const output = result.output as { documents?: { source_id: string }[] };
-        await compareParsedSources((output.documents ?? []).map(doc => doc.source_id), args.actor);
-      }
-      return result;
     }
-    return await execute();
+    for (const signal of signals) {
+      // Provenance (KAN-90): the run that produced it, on behalf of whom.
+      await recordSignal({ actor_name: args.actor.name, ...signal, source_run_id: signal.source_run_id ?? recorder.id });
+    }
+  }
+
+  if (diagnostic) {
+    try {
+      return ingestStage && !diagnostic.facts
+        ? await withWorkspaceTransaction(() => execute())
+        : await execute();
+    } catch (error) {
+      tagStageError(error, args.stage);
+      throw error;
+    }
+  }
+
+  const closeFailedRun = (error: unknown) => {
+    const message = inputDiagnostic ?? (error instanceof Error ? error.message : String(error));
+    return closeRun({ recorder, status: "error", error: message, route });
+  };
+  let stageFailure: { error: unknown } | undefined;
+  let outcome: { result: StageRunResult<O> } | { error: unknown };
+  try {
+    outcome = await withRunningRun(recorder, async assertLive => {
+      // Ingestion owns the surrounding checkpoint and its failure write. For
+      // standalone work, roll back only the stage savepoint before finalizing.
+      if (args.deferFailureRecord) return { result: await execute(assertLive) };
+      try {
+        return { result: await withWorkspaceTransaction(() => execute(assertLive)) };
+      } catch (error) {
+        stageFailure = { error };
+        await closeFailedRun(error);
+        return stageFailure;
+      }
+    });
+  } catch (transactionError) {
+    const error = stageFailure ? stageFailure.error : transactionError;
+    const persist = async () => {
+      try {
+        if (args.deferFailureRecord) {
+          // The checkpoint rollback also removed the running row. Restore it
+          // with the original ID and write the terminal state in one commit.
+          await withWorkspaceTransaction(async () => {
+            await openRun(recorder);
+            await closeFailedRun(error);
+          });
+        } else {
+          await closeFailedRun(error);
+        }
+      } catch {
+        // A database failure while closing must not replace the stage's error.
+        console.error("Could not finalize failed module run", { run_id: recorder.id, stage: args.stage });
+      }
+    };
+    if (args.deferFailureRecord) args.deferFailureRecord(persist);
+    else await persist();
+    outcome = { error };
+  }
+  if ("error" in outcome) {
+    tagStageError(outcome.error, args.stage);
+    throw outcome.error;
+  }
+  const { result } = outcome;
+
+  try {
+    if (!ingestStage) await recordFollowUps(result.evals, result.summary, liveLineage);
+    // Direct S1 runs own their commit; pipeline S1 is compared after its checkpoint commits.
+    const isDryRun = Boolean(args.input && typeof args.input === "object" && "dry_run" in args.input && args.input.dry_run === true);
+    if (ownsParseCommit && !isDryRun) {
+      const output = result.output as { documents?: { source_id: string }[] };
+      await compareParsedSources((output.documents ?? []).map(doc => doc.source_id), args.actor);
+    }
+    return result;
   } catch (error) {
-    // Standalone failures roll back current state before persisting their run
-    // error. An outer pipeline transaction still owns its checkpoint and trace.
-    const message = error instanceof Error ? error.message : String(error);
-    if (!diagnostic) await closeRun({ recorder, status: "error", error: message, route });
-    // So the response can say which step failed (and offer to re-run mapping, KAN-68).
     tagStageError(error, args.stage);
     throw error;
   }

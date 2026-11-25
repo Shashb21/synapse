@@ -320,6 +320,7 @@ export type RawCompletionExecutor = (call: RawCompletionCall) => Promise<string>
 
 type CompletionOptions = {
   completeRaw?: RawCompletionExecutor;
+  beforeSend?: () => Promise<void>;
   beforeRequest?: () => Promise<void>;
   onReceipt?: (receipt: { attempt: number; id: string | null }) => void;
 };
@@ -351,6 +352,7 @@ export function completionFor(route: ResolvedRoute, run: RunHandle, options?: Co
         : await tracedCompletion({
             provider, request,
             requestBudget,
+            beforeSend: options?.beforeSend,
             beforeRequest: options?.beforeRequest,
             api_key: api_key!,
             run,

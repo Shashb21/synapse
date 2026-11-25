@@ -28,6 +28,7 @@ import { routeConfig } from "@/modules/kernel/routing";
 import { recordAudit } from "@/modules/kernel/audit";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 /**

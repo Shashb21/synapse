@@ -277,6 +277,7 @@ export async function tracedCompletion(args: {
           text = await args.provider.complete(args.request, { api_key: args.api_key }, {
             requestBudget: args.requestBudget,
             maxAttempts: args.maxAttempts,
+            beforeRetry: args.beforeSend,
             onUsage: (reported) => (usage = reported),
             ...(args.beforeRequest ? { beforeRequest: args.beforeRequest } : {}),
           });

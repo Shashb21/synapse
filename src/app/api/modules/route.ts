@@ -9,6 +9,7 @@ import { readJsonBody, requireCustomerContext } from "@/modules/auth/api-guard";
 import { ownerGate } from "@/modules/auth/owner";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 /** Lab observability (wiring, runs, health, routes): owner only. */

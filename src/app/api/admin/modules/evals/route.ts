@@ -3,6 +3,7 @@ import { POST as runEvals } from "@/app/api/modules/evals/route";
 import { inSelectedDiagnosticWorkspace } from "../_shared";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 /** A stage's eval harness, run from the owner console in the workspace the page showed. Owner only. */

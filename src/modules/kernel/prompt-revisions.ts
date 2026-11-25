@@ -4,15 +4,16 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Actor, StageId, EvalCase } from "./contracts";
 import { listDecisionExamples, scrubLesson, workspaceEntityNames, type DecisionExample } from "./decision-examples";
-import { ensurePlatformSchema, sharedDb } from "./db";
+import { db, ensurePlatformSchema, sharedDb } from "./db";
 import * as tables from "./schema";
 import { newId, nowIso } from "./ids";
-import { recordAudit } from "./audit";
+import { recordAudit, recordAuditVia } from "./audit";
 import { assertAiEnabled } from "./ai-switch";
 import { sectionOfStage } from "./ai-sections";
 import { isTestStub } from "./llm";
 import { completionFor, routeConfigs, type RouteConfig } from "./routing";
-import { RunRecorder, openRun, closeRun } from "./observability";
+import { RunRecorder, openRun } from "./observability";
+import { recordLearningRun } from "./learning-run";
 import { DEFAULT_SCHEMA, DEFAULT_WORKSPACE_ID, runInWorkspace, scopedWorkspaceId } from "@/modules/workspaces/context";
 import { currentSchemaName } from "@/lib/iegp/db";
 import { assertDiagnosticWorkspace, lockDiagnosticWorkspace } from "./evals";
@@ -334,12 +335,12 @@ export async function proposePromptRevision(args: CohortArgs & { actor: Actor })
     });
     await assertDiagnosticWorkspace(args.workspace_id);
     await openRun(recorder);
-    try {
+    return recordLearningRun(recorder, route, async assertLive => {
       // No raw answers, customer metadata, example IDs, or held-out lessons enter the completion.
       const response = await completionFor(
         route,
         recorder,
-        { beforeRequest: () => assertDiagnosticWorkspace(args.workspace_id) },
+        { beforeSend: assertLive, beforeRequest: () => assertDiagnosticWorkspace(args.workspace_id) },
       )({
         system:
           'Draft concise additional instructions for an evidence-planning stage using only general reviewer lessons. Preserve human decisions and require source-grounded evidence. Return JSON only: {"instruction_text":""}.',
@@ -369,59 +370,48 @@ export async function proposePromptRevision(args: CohortArgs & { actor: Actor })
         model: route?.model ?? null,
         provider_id: route?.provider_id ?? null,
       };
-      await sharedDb().transaction(async (tx) => {
-        await lockDiagnosticWorkspace(args.workspace_id, workspace?.schema_name ?? DEFAULT_SCHEMA, tx);
-        await tx.execute(
-          sql`select pg_advisory_xact_lock(hashtext(${"prompt-cohort:" + args.workspace_id + ":" + args.stage}))`,
+      const writer = db();
+      await lockDiagnosticWorkspace(args.workspace_id, workspace?.schema_name ?? DEFAULT_SCHEMA, writer);
+      await writer.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${"prompt-cohort:" + args.workspace_id + ":" + args.stage}))`,
+      );
+      const current = await writer.execute(sql`select id from public.prompt_revisions
+        where workspace_id = ${args.workspace_id} and stage = ${args.stage}`);
+      if (evidenceHash(current.map((row) => row.id).sort()) !== evidenceHash(previousCandidates))
+        throw new TrustedApplicationError(
+          "Another candidate reserved evidence during generation. Generate again using fresh cases.",
         );
-        const current = await tx
-          .select({ id: tables.promptRevisions.id })
-          .from(tables.promptRevisions)
-          .where(
-            and(eq(tables.promptRevisions.workspace_id, args.workspace_id), eq(tables.promptRevisions.stage, args.stage)),
-          );
-        if (evidenceHash(current.map((row) => row.id).sort()) !== evidenceHash(previousCandidates))
-          throw new TrustedApplicationError(
-            "Another candidate reserved evidence during generation. Generate again using fresh cases.",
-          );
-        await tx.insert(tables.promptRevisionCohorts).values(cohort);
-        await tx.insert(tables.promptRevisions).values(revision);
-        await recordAudit(
-          {
-            category: "config",
-            action: "prompt.generate",
-            entity_type: "prompt_revision",
-            entity_id: revision.id,
-            workspace_id: args.workspace_id,
-            after: {
-              stage: revision.stage,
-              parent_revision: parent,
-              state: revision.state,
-              instruction_text: revision.instruction_text,
-            },
-            run_id: recorder.id,
-            meta: { training_count: revision.training_ids.length, heldout_count: revision.heldout_ids.length },
-          },
-          { tx },
-        );
+      await writer.execute(sql`insert into public.prompt_revision_cohorts
+        (id, workspace_id, stage, created_at, training_ids, heldout_ids, excluded_ids,
+         examples, replay_exclusions, gold_reservation)
+        values (${cohort.id}, ${cohort.workspace_id}, ${cohort.stage}, ${cohort.created_at},
+         ${JSON.stringify(cohort.training_ids)}::jsonb, ${JSON.stringify(cohort.heldout_ids)}::jsonb,
+         ${JSON.stringify(cohort.excluded_ids)}::jsonb, ${JSON.stringify(cohort.examples)}::jsonb,
+         ${JSON.stringify(cohort.replay_exclusions)}::jsonb, ${JSON.stringify(cohort.gold_reservation)}::jsonb)`);
+      await writer.execute(sql`insert into public.prompt_revisions
+        (id, workspace_id, stage, parent_revision, instruction_text, creator, created_at, state,
+         cohort_id, training_ids, heldout_ids, excluded_ids, generation_run_id, model, provider_id)
+        values (${revision.id}, ${revision.workspace_id}, ${revision.stage}, ${parent}, ${revision.instruction_text},
+         ${JSON.stringify(args.actor)}::jsonb, ${revision.created_at}, ${revision.state}, ${cohort.id},
+         ${JSON.stringify(revision.training_ids)}::jsonb, ${JSON.stringify(cohort.heldout_ids)}::jsonb,
+         ${JSON.stringify(cohort.excluded_ids)}::jsonb, ${recorder.id}, ${revision.model}, ${revision.provider_id})`);
+      await recordAuditVia(writer, {
+        category: "config",
+        action: "prompt.generate",
+        entity_type: "prompt_revision",
+        entity_id: revision.id,
+        workspace_id: args.workspace_id,
+        after: {
+          stage: revision.stage,
+          parent_revision: parent,
+          state: revision.state,
+          instruction_text: revision.instruction_text,
+        },
+        run_id: recorder.id,
+        meta: { training_count: revision.training_ids.length, heldout_count: revision.heldout_ids.length },
       });
-      await closeRun({
-        recorder,
-        status: "ok",
-        route: route ?? undefined,
-        output: { revision_id: revision.id, state: revision.state },
-      });
-      return revision;
-    } catch (error) {
-      await closeRun({
-        recorder,
-        status: "error",
-        route: route ?? undefined,
-        output: {},
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw error;
-    }
+      return { value: revision, output: { revision_id: revision.id, state: revision.state } };
+    });
   });
 }
 
