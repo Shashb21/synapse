@@ -5,10 +5,11 @@ import { newId } from "./ids";
 import { estimateCallCost, usageFromMessages } from "@/modules/llm/cost";
 import { redactSecrets } from "@/modules/llm/provider-error";
 import { PROVIDERS, type LlmProvider, type LlmRequest, type ProviderRequestBudget, type LlmUsage } from "@/modules/llm/provider";
-import type { RunHandle } from "./contracts";
+import type { RunHandle, StageId } from "./contracts";
 import { providerApiKey } from "@/modules/llm/api-keys";
-import { isDemoReplayProvider } from "@/lib/demo/replay-provider";
-import { replayDelayMs, replayReply } from "@/lib/demo/replay";
+import { isDemoReplayProvider, VELMARA_DEMO_FIXTURE } from "@/lib/demo/replay-provider";
+import { DemoReplayMissError, replayDelayMs, replayReply } from "@/lib/demo/replay";
+import { allowsDemoExecution, type DemoExecution } from "@/lib/demo/mode";
 
 /**
  * Every model call, kept whole (KAN-91): the prompts (secrets redacted), the
@@ -45,6 +46,8 @@ export type LlmCallRecord = {
   cost_usd: number | null;
   price_source: string | null;
   latency_ms: number;
+  demo_fixture?: string | null;
+  demo_recording_id?: string | null;
 };
 
 export const LLM_CALLS_DDL = [
@@ -56,6 +59,8 @@ export const LLM_CALLS_DDL = [
     status text NOT NULL, error text, usage jsonb, cost_usd numeric, price_source text,
     latency_ms integer NOT NULL
   )`,
+  `ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS demo_fixture text`,
+  `ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS demo_recording_id text`,
   `CREATE INDEX IF NOT EXISTS llm_calls_run ON llm_calls(run_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS llm_calls_workspace_stage ON llm_calls(workspace_id, stage)`,
 ];
@@ -117,19 +122,17 @@ export async function recordLlmCall(input: Omit<LlmCallRecord, "id" | "created_a
   await ensureLlmCallsTable();
   const id = newId("llm");
   const usage = callUsage(input);
-  const { cost_usd, price_source } = usage
-    ? estimateCallCost({ provider_id: input.provider_id, model: input.model, usage })
-    : { cost_usd: null, price_source: null };
+  const { cost_usd, price_source } = callPricing(input.provider_id, input.model, usage);
   const json = (value: unknown) => (value === null || value === undefined ? sql`null` : sql`${JSON.stringify(value)}::jsonb`);
   await sharedDb().execute(sql`insert into llm_calls
     (id, workspace_id, run_id, stage, step, purpose, attempt, provider_id, model, params, system_prompt,
-     user_prompt, reply, status, error, usage, cost_usd, price_source, latency_ms)
+     user_prompt, reply, status, error, usage, cost_usd, price_source, latency_ms, demo_fixture, demo_recording_id)
     values (${id}, ${input.workspace_id}, ${input.run_id}, ${input.stage}, ${input.step}, ${input.purpose},
      ${input.attempt}, ${input.provider_id}, ${input.model}, ${json(input.params)},
      ${redactPromptSecrets(input.system_prompt)}, ${redactPromptSecrets(input.user_prompt)},
      ${input.reply === null ? null : redactPromptSecrets(input.reply)}, ${input.status},
      ${input.error === null ? null : redactPromptSecrets(input.error)}, ${json(usage)}, ${cost_usd},
-     ${price_source}, ${Math.max(0, Math.round(input.latency_ms))})`);
+     ${price_source}, ${Math.max(0, Math.round(input.latency_ms))}, ${input.demo_fixture ?? null}, ${input.demo_recording_id ?? null})`);
   return id;
 }
 
@@ -221,6 +224,7 @@ export async function tracedCompletion(args: {
   attempt: number;
   stage: string | null;
   workspace_id: string | null;
+  demo?: DemoExecution;
   /** Optional single-send execution policy; ordinary callers retain provider defaults. */
   maxAttempts?: number;
   requestBudget?: ProviderRequestBudget;
@@ -233,8 +237,12 @@ export async function tracedCompletion(args: {
     async () => {
       let usage: LlmUsage | null = null;
       const began = Date.now();
+      const replay = isDemoReplayProvider(args.provider.id);
+      let approvedDemo = false;
       const record = async (reply: string | null, error: string | null) => {
         try {
+          const recordingId = approvedDemo && args.demo?.mode === "record" && reply !== null &&
+            [args.request.system, args.request.user, reply].every(value => redactPromptSecrets(value) === value) ? args.demo.recording_id : null;
           return await recordLlmCall({
             workspace_id: args.workspace_id,
             run_id: args.run.id,
@@ -255,6 +263,8 @@ export async function tracedCompletion(args: {
             error,
             usage,
             latency_ms: Date.now() - began,
+            demo_fixture: (approvedDemo && replay) || recordingId ? VELMARA_DEMO_FIXTURE : null,
+            demo_recording_id: recordingId,
           });
         } catch (failure) {
           console.error("[llm_calls] could not record a call", args.step, failure);
@@ -263,14 +273,16 @@ export async function tracedCompletion(args: {
         }
       };
       // A local refusal before the first send belongs in the run trace only.
-      if (!isDemoReplayProvider(args.provider.id)) args.requestBudget?.check();
+      if (!replay) args.requestBudget?.check();
       let text: string;
       try {
-        if (isDemoReplayProvider(args.provider.id)) {
-          // Client demo (KAN-138): the recorded run's answer, after a short "thinking" pause. No model is called.
+        approvedDemo = args.demo ? await allowsDemoExecution(args.demo, args.workspace_id) : false;
+        if (replay) {
+          if (!approvedDemo || args.demo?.mode !== "replay") throw new DemoReplayMissError();
+          text = replayReply({ stage: args.stage as StageId | null, purpose: args.purpose, system: args.request.system, user: args.request.user });
           await new Promise((resolve) => setTimeout(resolve, replayDelayMs()));
-          text = replayReply({ stage: args.stage, purpose: args.purpose, system: args.request.system, user: args.request.user });
         } else {
+          if (args.demo && (!approvedDemo || args.demo.mode !== "record")) throw new DemoReplayMissError();
           await args.beforeSend?.();
           text = await args.provider.complete(args.request, { api_key: args.api_key }, { requestBudget: args.requestBudget, maxAttempts: args.maxAttempts, onUsage: (reported) => (usage = reported) });
         }
@@ -279,9 +291,7 @@ export async function tracedCompletion(args: {
         const id = await record(null, error instanceof Error ? error.message : String(error));
         // The trace step names the failed call too (observability.ts reads this).
         if (id && error && typeof error === "object") Object.assign(error, { llm_call_id: id });
-        const pricing = usage
-          ? estimateCallCost({ provider_id: args.provider.id, model: args.request.model, usage })
-          : { cost_usd: null, price_source: null };
+        const pricing = callPricing(args.provider.id, args.request.model, usage);
         try {
           args.onFailure?.({ usage, ...pricing });
         } finally {
@@ -293,10 +303,15 @@ export async function tracedCompletion(args: {
       const latency_ms = Date.now() - began;
       const llm_call_id = await record(text, null);
       const known = usage as LlmUsage | null;
-      const { cost_usd, price_source } = known ? estimateCallCost({ provider_id: args.provider.id, model: args.request.model, usage: known }) : { cost_usd: null, price_source: null };
+      const { cost_usd, price_source } = callPricing(args.provider.id, args.request.model, known);
       return { llm_call_id, usage: known, cost_usd, price_source, latency_ms, reply: text };
     },
     args.detail,
   );
   return { text: traced.reply, usage: traced.usage, llm_call_id: traced.llm_call_id, cost_usd: traced.cost_usd, price_source: traced.price_source };
+}
+
+function callPricing(providerId: string, model: string, usage: LlmUsage | null) {
+  if (isDemoReplayProvider(providerId)) return { cost_usd: 0, price_source: "recorded demo" };
+  return usage ? estimateCallCost({ provider_id: providerId, model, usage }) : { cost_usd: null, price_source: null };
 }

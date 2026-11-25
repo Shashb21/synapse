@@ -17,6 +17,8 @@ import { aiSections, assertAiEnabled } from "@/modules/kernel/ai-switch";
 import { sectionOfStage, type AiSections } from "@/modules/kernel/ai-sections";
 import { runStage } from "@/modules/kernel/run";
 import { isTestStub } from "@/modules/kernel/llm";
+import type { DemoExecution } from "@/lib/demo/mode";
+import { DemoReplayMissError } from "@/lib/demo/replay";
 import { resolveRoute } from "@/modules/kernel/routing";
 import { NoRouteError } from "@/modules/llm/provider";
 import type { Actor, StageId } from "@/modules/kernel/contracts";
@@ -48,7 +50,7 @@ export type IngestResult = {
  * Checks model routes before a new upload is saved. Runtime failures remain
  * recoverable at the last completed stage; nothing falls back to rules.
  */
-async function requireLlmStages(sections: AiSections): Promise<void> {
+async function requireLlmStages(sections: AiSections, demo?: DemoExecution): Promise<void> {
   // The admin switch first: with ingestion off nothing is ingested; gaps and tactics are added by hand.
   await assertAiEnabled("Ingest", "ingestion");
   if (isTestStub()) return;
@@ -57,8 +59,9 @@ async function requireLlmStages(sections: AiSections): Promise<void> {
     const section = sectionOfStage(stage);
     if (section && !sections[section]) continue;
     try {
-      await resolveRoute(stage);
+      await resolveRoute(stage, undefined, demo);
     } catch (error) {
+      if (demo?.mode === "replay") throw error;
       const reason = customerErrorMessage(error);
       throw new NoRouteError(
         `Ingest runs gap extraction (S2), tactic extraction (S3) and mapping (S4) on an LLM, and ${stage} has no connected model: ${reason}`,
@@ -73,6 +76,7 @@ type Checkpoint = {
   completed: number;
   file_ids: string[];
   document_ids: string[];
+  execution_source?: "demo_replay";
   result: IngestResult;
 };
 
@@ -82,6 +86,7 @@ export type IngestProgress = {
   stage: StageId | null;
   completed: number;
   total: number;
+  execution_source?: "demo_replay";
 };
 
 type IngestArgs = {
@@ -90,6 +95,7 @@ type IngestArgs = {
   actor: Actor;
   role: Role;
   job_id?: string;
+  demo?: DemoExecution;
 };
 
 /** Run or resume one ingestion stage, atomically saving its output and checkpoint. */
@@ -119,7 +125,7 @@ export async function advanceIngest(args: IngestArgs): Promise<IngestProgress> {
   await ensurePlatformSchema([INGESTION_JOBS_DDL]);
   const schema = await currentSchemaName();
   let comparisonSources: string[] = [];
-  const progress = await withWorkspaceTransaction(async () => {
+  const outcome = await withWorkspaceTransaction(async () => {
     // A transaction lock is released even if a worker dies. No expiring lease can
     // let a slow model call overlap with a retry. Scope includes the workspace.
     const locked = await db().execute(sql`
@@ -136,7 +142,7 @@ export async function advanceIngest(args: IngestArgs): Promise<IngestProgress> {
       state = saved.checkpoint as Checkpoint;
     } else {
       const sections = await aiSections();
-      await requireLlmStages(sections);
+      await requireLlmStages(sections, args.demo);
       state = {
         request_key,
         stages: [
@@ -152,7 +158,12 @@ export async function advanceIngest(args: IngestArgs): Promise<IngestProgress> {
       };
     }
     const stage = state.stages[state.completed];
-    const run = <O>(input: unknown) => runStage<O>({ stage, input, actor: args.actor, role: args.role });
+    let execution_source: IngestProgress["execution_source"];
+    const run = async <O>(input: unknown) => {
+      const result = await runStage<O>({ stage, input, actor: args.actor, role: args.role, demo: args.demo });
+      execution_source = result.execution_source;
+      return result;
+    };
     try {
       if (stage === "S0") {
         const upload = await run<{ files: { id: string }[] }>({ files, demo_ids, reuse_existing: true });
@@ -185,25 +196,32 @@ export async function advanceIngest(args: IngestArgs): Promise<IngestProgress> {
       }
     } catch (error) {
       if (stage) tagStageError(error, stage);
+      // runStage rolled its domain writes back to its savepoint. Commit the failed
+      // run trace with the previous checkpoint, then return the original API error.
+      if (error instanceof DemoReplayMissError) return { failure: error } as const;
       throw error;
     }
     if (stage) {
       state.completed++;
+      if (execution_source) state.execution_source = execution_source;
       await db().insert(ingestionJobs)
         .values({ id: job_id, checkpoint: state })
         .onConflictDoUpdate({ target: ingestionJobs.id, set: { checkpoint: state } });
     }
-    return {
+    const progress: IngestProgress = {
       job_id,
       done: state.completed === state.stages.length,
       stage: state.stages[state.completed] ?? null,
       completed: state.completed,
       total: state.stages.length,
+      ...(state.execution_source ? { execution_source: state.execution_source } : {}),
     };
+    return { progress } as const;
   });
+  if ("failure" in outcome) throw outcome.failure;
   // Comparison failure cannot roll back a successfully committed parse checkpoint.
-  await compareParsedSources(comparisonSources, args.actor);
-  return progress;
+  if (!args.demo) await compareParsedSources(comparisonSources, args.actor);
+  return outcome.progress;
 }
 
 /** Compatibility entry point for callers that need the complete pipeline result. */

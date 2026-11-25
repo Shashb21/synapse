@@ -8,6 +8,7 @@ import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 import { listIdeationProposals } from "@/modules/stages/s9-ideation/module";
 import { timelineModel } from "@/modules/stages/s10-timeline/module";
 import { planIssues } from "@/modules/stages/s10-timeline/plan-checks";
+import { gapResolutionVersion } from "@/lib/iegp/relationship-version";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,7 +36,7 @@ export async function GET() {
         gaps: {
           partial: live
             .filter((gap) => displayedGapStatus(gap) === "validated_partial")
-            .map((gap) => ({ id: gap.id, name: gap.name, statement: gap.statement })),
+            .map((gap) => ({ id: gap.id, name: gap.name, statement: gap.statement, resolution: gapResolutionVersion(state, gap.id) })),
           unvalidated: live
             .filter((gap) => !gap.human_validated && ["validated_open", "validated_addressed"].includes(displayedGapStatus(gap)))
             .map((gap) => gap.id),
@@ -45,9 +46,9 @@ export async function GET() {
         prioritize: {
           suggested: placements
             .filter((p) => !p.validated && p.suggested_band && live.some((gap) => gap.id === p.gap_id))
-            .map((p) => ({ gap_id: p.gap_id, band: p.suggested_band })),
+            .map((p) => ({ gap_id: p.gap_id, band: p.suggested_band, version: p.version })),
         },
-        ideation: { proposed: proposals.filter((p) => p.status === "proposed").map((p) => p.id) },
+        ideation: { proposed: proposals.filter((p) => p.status === "proposed").map((p) => ({ id: p.id, version: p.version })) },
         timeline: {
           dependencies: timeline.activities.flatMap((activity) =>
             (activity.meta.proposed_dependencies ?? []).map((dep) => ({ id: activity.id, upstream_id: dep.id })),

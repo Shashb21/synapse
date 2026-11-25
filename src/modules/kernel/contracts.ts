@@ -213,6 +213,7 @@ export type ResolvedRoute = {
   /** True when the route fell back because the preferred provider is unusable. */
   degraded: boolean;
   reason: string | null;
+  demo?: import("@/lib/demo/mode").DemoExecution;
 };
 
 export type CompletionRole = "proposer" | "critic" | "reviser" | "internal_judge";

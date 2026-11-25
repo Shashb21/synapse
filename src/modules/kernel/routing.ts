@@ -9,7 +9,8 @@ import { nowIso } from "./ids";
 import { STAGES, STAGE_IDS, type JsonCompletion, type ResolvedRoute, type RunHandle, type StageId } from "./contracts";
 import { extractJsonObject } from "@/lib/llm/anthropic";
 import { tracedCompletion } from "./llm-calls";
-import { replaysDemo } from "@/lib/demo/mode";
+import { allowsDemoExecution, type DemoExecution } from "@/lib/demo/mode";
+import { DemoReplayMissError } from "@/lib/demo/replay";
 import { DEMO_REPLAY_PROVIDER, isDemoReplayProvider } from "@/lib/demo/replay-provider";
 import { missingKeyReason, providerApiKey, providerConfigured } from "@/modules/llm/api-keys";
 import {
@@ -231,24 +232,24 @@ const KEY_PROMPT =
   "Set the provider's API key in the server environment (.env.local or your host's settings), then retry.";
 
 /**
- * Turns the control-panel configuration into the route a run will actually use.
- * Every resolved route is an LLM whose API key is set; there is no offline fallback.
+ * Resolve the configured live route or the explicitly authorized Velmara replay.
  */
-export async function resolveRoute(stage: StageId, frozenConfig?: RouteConfig): Promise<ResolvedRoute> {
+export async function resolveRoute(stage: StageId, frozenConfig?: RouteConfig, demo?: DemoExecution): Promise<ResolvedRoute> {
+  if (demo && !(await allowsDemoExecution(demo, demo.workspace_id))) throw new DemoReplayMissError();
   const config = frozenConfig ?? await routeConfig(stage);
-  // A client-demo workspace answers from the recorded run, whatever the routing says (KAN-138).
-  if (await replaysDemo()) {
+  if (demo?.mode === "replay") {
     return {
       stage,
       provider_id: DEMO_REPLAY_PROVIDER.id,
       provider_label: DEMO_REPLAY_PROVIDER.label,
       model: DEMO_REPLAY_PROVIDER.default_model,
-      auth: "api_key",
+      auth: "none",
       connected: true,
       params: config.params,
       fallbacks: [],
       degraded: false,
       reason: null,
+      demo,
     };
   }
   const { selected, rejected } = selectCredentialRoute(config, PROVIDERS.map(provider => ({
@@ -272,6 +273,7 @@ export async function resolveRoute(stage: StageId, frozenConfig?: RouteConfig): 
       fallbacks: config.fallbacks,
       degraded: selected.fallback,
       reason: reasons.length ? reasons.join("; ") : null,
+      ...(demo ? { demo } : {}),
     };
   }
   throw new NoRouteError(
@@ -308,9 +310,9 @@ export async function setDefaultProvider(args: {
   return out;
 }
 
-/** True when a stage may prompt a model on this route. */
+/** True when a stage may request a completion on this route. */
 export function canPrompt(route: ResolvedRoute): boolean {
-  return route.auth === "api_key" && route.connected;
+  return route.connected && (isDemoReplayProvider(route.provider_id) ? route.demo?.mode === "replay" : route.auth === "api_key");
 }
 
 /** Builds the JSON completion the module receives, bound to route + run trace. */
@@ -319,14 +321,15 @@ export type RawCompletionExecutor = (call: RawCompletionCall) => Promise<string>
 
 export function completionFor(route: ResolvedRoute, run: RunHandle, options?: { completeRaw?: RawCompletionExecutor }): JsonCompletion {
   return async ({ system, user, purpose, maxTokens, role, requestBudget }) => {
+    const replay = isDemoReplayProvider(route.provider_id);
+    if (replay && (route.demo?.mode !== "replay" || options?.completeRaw)) throw new DemoReplayMissError();
     if (!canPrompt(route)) {
       throw new NoRouteError(`${route.provider_label} cannot serve ${purpose}. ${KEY_PROMPT}`);
     }
-    const replay = isDemoReplayProvider(route.provider_id);
     const provider = replay ? DEMO_REPLAY_PROVIDER : findProvider(route.provider_id)!;
     // Read at call time and handed straight to the provider; never logged or traced.
-    const api_key = options?.completeRaw ? "" : replay ? DEMO_REPLAY_PROVIDER.id : providerApiKey(route.provider_id);
-    if (!options?.completeRaw && !api_key) throw new NoRouteError(`${missingKeyReason(provider)}. ${KEY_PROMPT}`);
+    const api_key = options?.completeRaw || replay ? "" : providerApiKey(route.provider_id);
+    if (!options?.completeRaw && !replay && !api_key) throw new NoRouteError(`${missingKeyReason(provider)}. ${KEY_PROMPT}`);
     let invalid: string | null = null;
     for (let attempt = 1; attempt <= JSON_REPLY_ATTEMPTS; attempt += 1) {
       // Every call is kept whole in llm_calls; the trace step names it (KAN-91).
@@ -349,6 +352,7 @@ export function completionFor(route: ResolvedRoute, run: RunHandle, options?: { 
         attempt,
         stage: route.stage,
         workspace_id: run.workspace_id ?? null,
+        demo: route.demo,
       })).text;
       try {
         return extractJsonObject(text);

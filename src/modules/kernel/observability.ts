@@ -1,5 +1,6 @@
 import { HISTORICAL_FAILURE_MESSAGE, projectFailureDiagnostics, projectRunSteps } from "./failure-presentation";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { DEMO_REPLAY_PROVIDER } from "@/lib/demo/replay-provider";
 import { db, ensurePlatformSchema } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "./ids";
@@ -198,6 +199,20 @@ export async function getRun(id: string): Promise<RunRecord | null> {
   await ensurePlatformSchema();
   const rows = await db().select().from(t.moduleRuns).where(eq(t.moduleRuns.id, id)).limit(1);
   return rows[0] ? toRecord(rows[0]) : null;
+}
+
+/** Check the recorded origins of already-saved suggestions in the current workspace. */
+export async function hasCompletedDemoReplay(stage: StageId, runIds: string[]): Promise<boolean> {
+  if (!runIds.length) return false;
+  await ensurePlatformSchema();
+  const rows = await db().select({ id: t.moduleRuns.id }).from(t.moduleRuns).where(and(
+    inArray(t.moduleRuns.id, runIds),
+    eq(t.moduleRuns.stage, stage),
+    eq(t.moduleRuns.status, "ok"),
+    sql`${t.moduleRuns.route}->>'provider_id' = ${DEMO_REPLAY_PROVIDER.id}`,
+    sql`exists (select 1 from jsonb_array_elements(${t.moduleRuns.steps}) as steps(value) where value->>'name' like 'llm:%')`,
+  )).limit(1);
+  return rows.length > 0;
 }
 
 export type StageHealth = {

@@ -101,14 +101,15 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
         source_type: String(data.get("source_type") ?? ""),
         stakeholder_function: String(data.get("stakeholder_function") ?? ""),
       }, setProgress, ingestRequest.current.signal);
-    const json = res.json as { error?: string; stage?: string };
+    const { json } = res;
     setPending(false);
     if (!res.ok) {
       setError(json.error ?? "Could not read the source. Try again.");
       setMappingFailed(json.stage === "S4");
       return;
     }
-    setDone(`Processed “${title.trim()}”. Review its results on Evidence Inventory.`);
+    const source = json.execution_source === "demo_replay" ? " Includes recorded Velmara steps." : "";
+    setDone(`Processed “${title.trim()}”.${source} Review its results on Evidence Inventory.`);
     setTitle("");
     setText("");
     clearFile();

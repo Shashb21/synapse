@@ -55,6 +55,8 @@ describe("KAN-122 controlled recommendation contract",()=>{
     expect(proposer.body.gaps[0].brief.requirements.unknown_dimensions).toContain("comparator");
     expect(calls.find(call=>call.purpose==="ideation-critic")!.body.tactics[0]).toMatchObject({recommendation,gap:{brief:{priority:{rationale:"Blocks decision"}}}});
     expect(calls.find(call=>call.purpose==="ideation-judge")!.body.gaps[0].brief.mapped_tactics[0].coverage.overall).toBe("partial");
+    // KAN-263: the write precondition stays with the proposal, across all model roles.
+    expect(JSON.stringify(calls)).not.toContain("supporting_context_basis");
   });
 
   it("allows fewer useful candidates than frozen slots instead of filling a route quota", async () => {

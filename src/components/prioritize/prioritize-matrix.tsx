@@ -93,8 +93,8 @@ async function runPrioritization(args: {
   yAxis: string;
   setting: string;
   onlyMissing: boolean;
-}): Promise<{ ok: boolean; error?: string; summary?: string; mode?: string }> {
-  const res = await postJson("/api/modules", {
+}): Promise<{ ok: boolean; error?: string; summary?: string; replayed?: boolean }> {
+  const res = await postJson<{ summary?: string; execution_source?: "demo_replay" }>("/api/modules", {
       stage: "S8",
       input: {
         gap_ids: args.gapIds,
@@ -106,8 +106,15 @@ async function runPrioritization(args: {
       actor_name: args.identity.actor_name,
       actor_function: args.identity.actor_function,
     });
-  const json = res.json as { error?: string; summary?: string; mode?: string };
-  return res.ok ? { ok: true, summary: json.summary, mode: json.mode } : { ok: false, error: json.error ?? "Prioritization failed" };
+  const { json } = res;
+  return res.ok
+    ? { ok: true, summary: json.summary, replayed: json.execution_source === "demo_replay" }
+    : { ok: false, error: json.error ?? "Prioritization failed" };
+}
+
+function priorityRunSummary(result: { summary?: string; replayed?: boolean }) {
+  if (result.replayed) return result.summary ? `${result.summary} · Recorded Velmara demo` : "Recorded Velmara demo";
+  return result.summary;
 }
 
 async function saveAxes(scope: string, xAxis: string, yAxis: string): Promise<string | null> {
@@ -401,6 +408,7 @@ export function PrioritizeMatrix({
       refresh(() => {
         setBusy(null);
         if (!result.ok) setMessage({ text: result.error ?? "Could not place the new gaps.", error: true });
+        else if (result.replayed) setMessage({ text: priorityRunSummary(result)!, error: false });
       });
     });
   }, [ai, unplaced, mayPrioritize, identity, xAxis.id, yAxis.id, scope, refresh]);
@@ -556,7 +564,10 @@ export function PrioritizeMatrix({
     refresh(() => {
       setBusy(null);
       if (!result.ok) showError(result.error ?? "Re-suggest failed");
-      else setMessage(result.summary ? { text: result.summary, error: false } : null);
+      else {
+        const text = priorityRunSummary(result);
+        setMessage(text ? { text, error: false } : null);
+      }
     });
   }
 
@@ -582,6 +593,7 @@ export function PrioritizeMatrix({
         onlyMissing: true,
       });
       if (!result.ok) showError(`Axes saved, but gap suggestions could not finish. Review the matrix and continue with manual placement. ${result.error ?? "Check current placements before running suggestions again."}`);
+      else if (result.replayed) setMessage({ text: priorityRunSummary(result)!, error: false });
     }
     refresh(() => setBusy(null));
   }

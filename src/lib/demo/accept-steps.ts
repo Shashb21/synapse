@@ -18,9 +18,9 @@ export const DEMO_STEP_LABELS: Record<DemoStep, string> = {
 const NOTE = "Accepted as in the demo";
 
 type Pending = {
-  gaps: { partial: { id: string; name: string; statement: string }[]; unvalidated: string[]; wizard_complete: boolean; tactics_unlocked: boolean };
-  prioritize: { suggested: { gap_id: string; band: string }[] };
-  ideation: { proposed: string[] };
+  gaps: { partial: { id: string; name: string; statement: string; resolution: string }[]; unvalidated: string[]; wizard_complete: boolean; tactics_unlocked: boolean };
+  prioritize: { suggested: { gap_id: string; band: string; version: string }[] };
+  ideation: { proposed: { id: string; version: string }[] };
   timeline: { dependencies: { id: string; upstream_id: string }[]; estimates: boolean };
 };
 
@@ -30,6 +30,7 @@ type SplitProposal = {
   open_name: string;
   open_statement?: string;
   addressed_tactic_ids: string[];
+  expected_resolution?: string;
 };
 
 /** The walkthrough step a page belongs to, or null where there is nothing to accept. */
@@ -71,7 +72,7 @@ export async function acceptDemoStep(step: DemoStep, onProgress: (line: string) 
       if (!proposal) {
         // The model's judge found no split that holds up: keep the gap whole, as Open.
         onProgress(`Keeping ${gap_id} as Open…`);
-        await post("/api/iegp", { action: "rewrite_partial_gap", gap_id, name: gap.name, statement: gap.statement, status: "validated_open", note: NOTE });
+        await post("/api/iegp", { action: "rewrite_partial_gap", gap_id, expected_resolution: gap.resolution, name: gap.name, statement: gap.statement, status: "validated_open", note: NOTE });
         done += 1;
         continue;
       }
@@ -79,6 +80,7 @@ export async function acceptDemoStep(step: DemoStep, onProgress: (line: string) 
         action: "split_partial_gap",
         ...(output?.mode === "llm" && typeof run.run_id === "string" ? { originating_run_id: run.run_id } : {}),
         parent_gap_id: gap_id,
+        expected_resolution: proposal.expected_resolution ?? gap.resolution,
         addressed_name: proposal.addressed_name,
         open_name: proposal.open_name,
         ...(proposal.addressed_statement?.trim() ? { addressed_statement: proposal.addressed_statement.trim() } : {}),
@@ -100,9 +102,9 @@ export async function acceptDemoStep(step: DemoStep, onProgress: (line: string) 
   }
   const now = await pending();
   if (step === "prioritize") {
-    for (const { gap_id, band } of now.prioritize.suggested) {
+    for (const { gap_id, band, version } of now.prioritize.suggested) {
       onProgress(`Validating ${gap_id} as ${band}…`);
-      await post("/api/plan", { action: "validate_band", gap_id, band, rationale: NOTE });
+      await post("/api/plan", { action: "accept_priority_suggestion", gap_id, band, expected_version: version, reason: NOTE });
       done += 1;
     }
     // Every Open gap banded: tactic ideation opens.
@@ -110,12 +112,14 @@ export async function acceptDemoStep(step: DemoStep, onProgress: (line: string) 
     return done;
   }
   if (step === "ideation") {
-    for (const id of now.ideation.proposed) {
-      onProgress(`Accepting ${id}…`);
-      await post("/api/plan", { action: "decide_proposal", id, decision: "accept", rationale: NOTE });
-      done += 1;
+    const [proposal, ...others] = now.ideation.proposed;
+    if (!proposal) return 0;
+    if (others.length) {
+      throw new Error("Accepting an idea can change the evidence available to the other ideas. Review and accept each idea separately on the Ideation page.");
     }
-    return done;
+    onProgress(`Accepting ${proposal.id}…`);
+    await post("/api/plan", { action: "decide_proposal", id: proposal.id, expected_version: proposal.version, decision: "accept", rationale: NOTE });
+    return 1;
   }
   for (const dep of now.timeline.dependencies) {
     onProgress(`Accepting a dependency of ${dep.id}…`);

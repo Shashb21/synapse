@@ -18,6 +18,7 @@ import { can } from "@/modules/auth/roles";
 import { sessionContext } from "@/modules/auth/session";
 import { ALL_SETTINGS_SCOPE, loadAxes, loadScopeAxes } from "@/modules/stages/s8-prioritization/axes";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
+import { hasCompletedDemoReplay } from "@/modules/kernel/observability";
 
 function scopeHref(scope: string) {
   return `/?place=plan&setting=${encodeURIComponent(scope)}`;
@@ -130,6 +131,8 @@ export async function PrioritizePlace({
       at: placement?.at ?? null,
     };
   });
+  const suggestionRuns = [...new Set(cards.flatMap(card => card.run_id && card.suggested_band && card.suggested_rationale ? [card.run_id] : []))];
+  const replayedSuggestions = await hasCompletedDemoReplay("S8", suggestionRuns);
 
   return (
     <>
@@ -180,6 +183,9 @@ export async function PrioritizePlace({
               {allCounts.validated} of {allCounts.open} Open gaps with priority validated across all settings
             </p>
             <p className="text-[12px] text-muted-foreground">Priority applies across all settings</p>
+            {replayedSuggestions ? (
+              <p role="status" className="text-[12px] text-muted-foreground">Recorded Velmara demo suggestions</p>
+            ) : null}
             {scope !== ALL_SETTINGS_SCOPE ? (
               <p className="text-[12px] text-muted-foreground">
                 In {scopeLabel}: {validatedIn(scopeGaps)} of {scopeGaps.length} priorities validated.

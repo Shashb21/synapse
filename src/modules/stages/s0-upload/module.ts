@@ -189,7 +189,7 @@ export const uploadModule: SynapseModule<UploadInput, UploadOutput> = {
     ];
     // Client demo mode (KAN-138) runs on the seven demo documents only: anything else is
     // refused before it is stored, and a matching upload takes the document's own details.
-    if (await isDemoModeWorkspace(ctx.workspace_id)) {
+    if (ctx.route?.demo || await isDemoModeWorkspace(ctx.workspace_id)) {
       for (const [index, file] of requested.entries()) {
         const text = file.content_base64 ? Buffer.from(file.content_base64, "base64").toString("utf8") : (file.text ?? "");
         const match = clientDemoFileFor(text);

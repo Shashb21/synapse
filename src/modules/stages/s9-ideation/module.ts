@@ -459,10 +459,10 @@ function parseTactic(raw: Record<string, unknown>, library: LibraryTactic[], sup
   };
 }
 
-type PromptGap = IdeationGap & {
+type PromptGap = Omit<IdeationGap, "supporting_context_basis"> & {
   supporting_records?: ReturnType<typeof suppliedJudgementRecords>;
   /** Tactics the critic asked to have revised, with its objection. */
-  revise?: { id: string; previous: Omit<Proposal, "score" | "critic_note" | "judge_note" | "rank">; objection: string }[];
+  revise?: { id: string; previous: Omit<Proposal, "score" | "critic_note" | "judge_note" | "rank" | "supporting_context_basis">; objection: string }[];
   /** What was wrong with the model's last answer for this gap. */
   problems?: string[];
   /** Stable anonymous output positions assigned before generation; contain no human answers. */
@@ -527,7 +527,6 @@ type Decision = { references: JudgementReference[]; verdict: "accept" | "reject"
 const promptTactic = (proposal: Proposal) => ({
   references: proposal.references,
   recommendation: proposal.recommendation,
-  supporting_context_basis: proposal.supporting_context_basis,
   id: proposal.id,
   gap_id: proposal.gap_id,
   name: proposal.name,
@@ -537,6 +536,8 @@ const promptTactic = (proposal: Proposal) => ({
   design: proposal.design,
   proposal_kind: proposal.proposal_kind, target_tactic_id: proposal.target_tactic_id, expansion_scope: proposal.expansion_scope, comparative_rationale: proposal.comparative_rationale,
 });
+const promptGap = ({ id, name, statement, domain, brief }: IdeationGap): Omit<IdeationGap, "supporting_context_basis"> =>
+  ({ id, name, statement, domain, brief });
 
 export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
   manifest: {
@@ -613,7 +614,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
             perGap: input.per_gap,
             library,
             round: 1,
-            gaps: missing.map((id) => ({ ...gapById.get(id)!, supporting_records: supportFor(id), problems: problems.get(id), proposal_slots: proposal_slots?.[id] })),
+            gaps: missing.map((id) => ({ ...promptGap(gapById.get(id)!), supporting_records: supportFor(id), problems: problems.get(id), proposal_slots: proposal_slots?.[id] })),
           });
           const found = new Map<string, Proposal[]>();
           const bad = new Map<string, string[]>();
@@ -675,7 +676,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
             library,
             round,
             gaps: [...new Set(targets.map((proposal) => proposal.gap_id))].map((gapId) => ({
-              ...gapById.get(gapId)!,
+              ...promptGap(gapById.get(gapId)!),
               supporting_records: supportFor(gapId),
               revise: targets
                 .filter((proposal) => proposal.gap_id === gapId)
@@ -735,7 +736,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
                 max_per_gap: input.per_gap,
                 library,
                 gaps: missing.map((gapId) => ({
-                  ...gapById.get(gapId)!,
+                  ...promptGap(gapById.get(gapId)!),
                   supporting_records: supportFor(gapId),
                   problem: problems.get(gapId),
                   candidates: candidates
@@ -841,7 +842,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
                   tactics: missing.map((id) => {
                     const proposal = byId.get(id)!;
                     const gap = gapById.get(proposal.gap_id)!;
-                    return { ...promptTactic(proposal), gap: { ...gap, supporting_records: supportFor(gap.id) } };
+                    return { ...promptTactic(proposal), gap: { ...promptGap(gap), supporting_records: supportFor(gap.id) } };
                   }),
                 }),
                 purpose: "ideation-critic",

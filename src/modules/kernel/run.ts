@@ -20,14 +20,17 @@ import { assertCan, type Capability, type Role } from "@/modules/auth/roles";
 import { isTestStub } from "./llm";
 import { tagStageError, TrustedApplicationError } from "./stage-errors";
 import type { RunStep } from "./contracts";
+import type { DemoExecution } from "@/lib/demo/mode";
+import { DemoReplayMissError } from "@/lib/demo/replay";
 
 export const DEFAULT_WORKSPACE = "default";
 
 /** Agentic stages require a connected LLM; mechanical stages may run without one. */
-export async function resolveRouteForRun(stage: StageId) {
+export async function resolveRouteForRun(stage: StageId, demo?: DemoExecution) {
   // Test stub only: modules swap the model for labelled local output, so the
   // route is marked connected without a real provider behind it.
   if (isTestStub()) {
+    if (demo) throw new DemoReplayMissError();
     const preferred = await routeConfig(stage);
     const provider =
       findProvider(preferred.provider_id) ?? findProvider(DEFAULT_ROUTE_PROVIDER)!;
@@ -45,9 +48,9 @@ export async function resolveRouteForRun(stage: StageId) {
     };
   }
   try {
-    return await resolveRoute(stage);
+    return await resolveRoute(stage, undefined, demo);
   } catch (error) {
-    if (STAGES[stage].kind === "agentic") throw error;
+    if (demo || STAGES[stage].kind === "agentic") throw error;
     const preferred = await routeConfig(stage);
     const provider =
       findProvider(preferred.provider_id) ?? findProvider(DEFAULT_ROUTE_PROVIDER)!;
@@ -103,6 +106,7 @@ export type StageRunResult<O> = {
   module_id: string;
   module_version: string;
   mode: "llm" | "deterministic";
+  execution_source?: "demo_replay";
   summary: string;
   output: O;
   evals: EvalScore[];
@@ -134,6 +138,8 @@ export async function runStage<O = unknown>(args: {
   actor: Actor;
   role: Role;
   workspace_id?: string;
+  /** Set by customer walkthrough entry points after workspace membership is verified. */
+  demo?: DemoExecution;
   /**
    * Admin AI harness only (KAN-54): run the stage's AI whatever the customer-facing
    * switches say, so a section can be tried before it is turned on. Needs a routed model.
@@ -186,7 +192,16 @@ export async function runStage<O = unknown>(args: {
   }
   recorder.note("input:accepted", implementation.traceInput ? implementation.traceInput(parsedInput.data) : parsedInput.data);
 
-  const route = ai ? await resolveRouteForRun(args.stage) : await aiOffRoute(args.stage);
+  const isDryRun = Boolean(args.input && typeof args.input === "object" && "dry_run" in args.input && args.input.dry_run === true);
+  let route: ResolvedRoute;
+  try {
+    if (args.demo && (args.force_ai || isDryRun)) throw new DemoReplayMissError();
+    route = ai ? await resolveRouteForRun(args.stage, args.demo) : await aiOffRoute(args.stage);
+  } catch (error) {
+    await closeRun({ recorder, status: "error", error: error instanceof Error ? error.message : String(error) });
+    tagStageError(error, args.stage);
+    throw error;
+  }
   recorder.note("route", route, route.degraded ? (route.reason ?? "degraded") : undefined);
 
   const ctx: ModuleContext = {
@@ -252,6 +267,8 @@ export async function runStage<O = unknown>(args: {
       module_id: implementation.manifest.id,
       module_version: implementation.manifest.version,
       mode: runMode(parsedOutput.data, recorder.steps()),
+      ...(route.demo?.mode === "replay" && recorder.steps().some(step => step.name.startsWith("llm:"))
+        ? { execution_source: "demo_replay" as const } : {}),
       summary: result.summary,
       output: parsedOutput.data as O,
       evals,
@@ -259,7 +276,6 @@ export async function runStage<O = unknown>(args: {
   };
 
   const ownsParseCommit = args.stage === "S1" && !inWorkspaceTransaction();
-  const isDryRun = Boolean(args.input && typeof args.input === "object" && "dry_run" in args.input && args.input.dry_run === true);
   try {
     if (["S0", "S1", "S2", "S3", "S4"].includes(args.stage)) {
       // Freeze facts and every live ingestion write share clear's lock. The
@@ -272,7 +288,7 @@ export async function runStage<O = unknown>(args: {
         return execute();
       });
       // S1 owns this commit only for direct runs; the pipeline owns its outer commit.
-      if (ownsParseCommit && !isDryRun) {
+      if (ownsParseCommit && !isDryRun && !route.demo) {
         const output = result.output as { documents?: { source_id: string }[] };
         await compareParsedSources((output.documents ?? []).map(doc => doc.source_id), args.actor);
       }

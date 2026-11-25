@@ -125,7 +125,7 @@ async function workedExamplesFor(ctx: ModuleContext, stage: StageId, learning: L
   }
   // A client-demo workspace (KAN-138) never shows other plans' decisions: its prompts stay
   // the recorded ones, and no other workspace's lessons can end up in the recording.
-  if (await isDemoModeWorkspace(ctx.workspace_id)) {
+  if (ctx.route?.demo || await isDemoModeWorkspace(ctx.workspace_id)) {
     ctx.run.note("learning:worked-examples", { used: [], reason: "client demo mode" });
     return "";
   }

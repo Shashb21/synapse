@@ -51,6 +51,31 @@ it("provides a visible file label focus treatment for the native input", () => {
   expect(input.labels?.[0]?.className).toContain("peer-focus-visible:ring-2");
 });
 
+it.each([true, false])("reports completed source ingestion with accurate cumulative replay provenance (%s)", async (replayed) => {
+  vi.stubGlobal("fetch", vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({
+      job_id: "a".repeat(64), done: false, stage: "S2", completed: 2, total: 3,
+      ...(replayed ? { execution_source: "demo_replay" } : {}),
+    })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({
+      job_id: "a".repeat(64), done: true, stage: null, completed: 3, total: 3,
+    }))));
+  act(() => root.render(createElement(AddSourceForm)));
+  const form = host.querySelector("form")!;
+  const title = form.querySelector<HTMLInputElement>('[name="title"]')!;
+  const source = form.querySelector<HTMLTextAreaElement>('[name="text"]')!;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(title, "Fictional notes");
+    title.dispatchEvent(new Event("input", { bubbles: true }));
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(source, "Fictional notes text");
+    source.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(host.querySelector('[role="status"]')?.textContent).toBe(
+    `Processed “Fictional notes”.${replayed ? " Includes recorded Velmara steps." : ""} Review its results on Evidence Inventory.`,
+  );
+});
+
 it("marks required fields and associates the failed field with the displayed error", async () => {
   const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
   act(() => root.render(createElement(ActionDialog, {endpoint: "/unused", payload: {}, label: "Edit", open: true, trigger: null, identity: {signed_in: true, actor_name: "Reviewer", actor_function: "medical_affairs"}, fields: [{name: "name", label: "Activity name", required: true}, {name: "notes", label: "Notes", type: "textarea", required: true}, {name: "choice", label: "Choice", type: "select", required: true, options: [{value: "yes", label: "Yes"}]}]})));

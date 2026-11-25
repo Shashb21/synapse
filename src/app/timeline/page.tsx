@@ -14,6 +14,8 @@ import { planFingerprint } from "@/modules/stages/s10-timeline/plan-fingerprint"
 import { planIssues } from "@/modules/stages/s10-timeline/plan-checks";
 import type { TimelineModel } from "@/modules/stages/s10-timeline/build";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
+import { isDemoModeWorkspace } from "@/lib/demo/mode";
+import { VELMARA_DEMO_ANCHOR } from "@/lib/demo/calendar";
 
 export const dynamic = "force-dynamic";
 
@@ -46,8 +48,9 @@ function savedModel(snapshot: NonNullable<Awaited<ReturnType<typeof latestPlan>>
 
 export default async function TimelinePage({ searchParams }: { searchParams: Promise<{ version?: string }> }) {
   const { version } = await searchParams;
+  const demoAnchor = await isDemoModeWorkspace() ? VELMARA_DEMO_ANCHOR : undefined;
   const [liveModel, plan, history, identity, state, placements, gapBlockers, proposals] = await Promise.all([
-    timelineModel(),
+    timelineModel(demoAnchor),
     latestPlan(),
     planHistory(20),
     sessionContext(),
@@ -106,6 +109,7 @@ export default async function TimelinePage({ searchParams }: { searchParams: Pro
         acceptedContexts={saved ? saved.snapshot.accepted_ideation_context ?? [] : acceptedIdeationContexts(proposals)}
         view={view}
         today={today}
+        demoAnchor={demoAnchor}
         identity={{
           signed_in: identity.signed_in,
           actor_name: identity.actor.name,
