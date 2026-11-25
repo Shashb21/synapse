@@ -109,7 +109,7 @@ export function GapPriorityActions({ gap, xAxis, yAxis, setting, identity, mayPr
         <ActionDialog onOpenChange={(open) => { if (open) setSaved(null); }} protectUnsavedChanges
           endpoint="/api/plan"
           onSuccess={confirmed}
-          payload={{ action: "validate_band", gap_id: gap.gap_id, band, expected_version: gap.version ?? null, expected_context_version: gap.context_version ?? null }}
+          payload={{ action: "validate_band", gap_id: gap.gap_id, ...matrix, band, expected_version: gap.version ?? null, expected_context_version: gap.context_version ?? null }}
           label={gap.needs_review ? "Review changed context and revalidate priority" : gap.validated ? "Review or change validated priority" : ai && (gap.run_id || gap.suggested_rationale) && !gap.human_band ? "Make manual judgement" : "Validate priority"}
           title={`Validate ${BAND_LABELS[band]} priority for ${gap.gap_name}`}
           description="Make an explicit manual judgement across all settings and record your own reason. Supporting references are not required for a manual judgement, including when you retain the same band and scores."

@@ -461,3 +461,21 @@ describe("KAN-265 paired human-target replay", () => {
     ).toThrow("three independent");
   });
 });
+
+describe("candidate training lessons", () => {
+  const aliceFirst = { ...row(0), id: "alice-first", actor_principal: "alice", lesson: "Prioritize actionable evidence for imminent decisions." };
+  const bobFirst = { ...aliceFirst, id: "bob-first", actor_principal: "bob", lesson: "Weigh the consequences of a delayed decision." };
+  const aliceSecond = { ...row(1), id: "alice-second", actor_principal: "alice", lesson: "Check whether existing evidence addresses the question." };
+
+  it("reassigns a lineage when only one of its reviewers can also cover a second lineage", () => {
+    const examples = [aliceFirst, bobFirst, aliceSecond];
+    const selected = revisions.selectTrainingLessons({ examples, training_ids: examples.map(example => example.id) }, []);
+    expect(selected.map(lesson => lesson.id)).toEqual([bobFirst.id, aliceSecond.id]);
+  });
+
+  it("requires different scrubbed lesson text as well as different reviewers", () => {
+    const examples = [aliceFirst, { ...bobFirst, lesson: aliceSecond.lesson }, aliceSecond];
+    expect(() => revisions.selectTrainingLessons({ examples, training_ids: examples.map(example => example.id) }, []))
+      .toThrow(/at least two identified reviewers/);
+  });
+});

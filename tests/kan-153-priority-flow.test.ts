@@ -87,8 +87,11 @@ it("hides mutation controls from a view-only role", () => {
 });
 
 it("confirms an existing draft with a reason and reports confirmation", async () => {
-  actions();
-  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
+  act(() => root.render(createElement(GapPriorityActions, {
+    gap, setting: "1L", xAxis: axes[0], yAxis: axes[1], identity, mayPrioritize: true,
+  })));
+  const send = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+  vi.stubGlobal("fetch", send);
   await click("Validate priority");
   const form = document.querySelector("form")!;
   await act(async () => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
@@ -96,6 +99,9 @@ it("confirms an existing draft with a reason and reports confirmation", async ()
   expect(router.refresh).not.toHaveBeenCalled();
   (form.querySelector('[name="reason"]') as HTMLTextAreaElement).value = "Reviewed all settings";
   await act(async () => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(JSON.parse(String(send.mock.calls[0]?.[1]?.body))).toMatchObject({
+    action: "validate_band", x_axis: "impact", y_axis: "urgency", displayed_axes: axes, setting: "1L",
+  });
   expect(host.querySelector('[role="status"]')?.textContent).toBe("Priority validated across all settings.");
 });
 it("clears the previous success when a later save fails", async () => {

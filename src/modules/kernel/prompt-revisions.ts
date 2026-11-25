@@ -223,6 +223,58 @@ export async function getRevisionCohort(id: string, workspace_id: string): Promi
   return row ? (row as RevisionCohort) : null;
 }
 
+/** Select scrubbed lessons from different lineages, reviewers and lesson texts. */
+export function selectTrainingLessons(
+  cohort: Pick<RevisionCohort, "examples" | "training_ids">,
+  entities: string[],
+): { id: string; lesson: string }[] {
+  const training = new Set(cohort.training_ids);
+  const candidates = lineageGroups(cohort.examples).flatMap((group, lineage) =>
+    group.flatMap((example) => {
+      const reviewer = example.actor_principal?.trim().toLowerCase();
+      if (!training.has(example.id) || !reviewer || !example.lesson) return [];
+      const lesson = scrubLesson(
+        example.lesson,
+        [
+          JSON.stringify(example.ai_input),
+          JSON.stringify(example.ai_output),
+          JSON.stringify(example.final ?? {}),
+          example.rationale ?? "",
+        ],
+        entities,
+      );
+      const text = lesson?.trim().toLowerCase();
+      return lesson && text ? [{ id: example.id, lineage, reviewer, lesson, text }] : [];
+    }),
+  );
+
+  type Candidate = (typeof candidates)[number];
+  const compatible = (a: Candidate, b: Candidate) =>
+    a.lineage !== b.lineage && a.reviewer !== b.reviewer && a.text !== b.text;
+  const fill = (seed: Candidate[] = []) => {
+    const selected = [...seed];
+    for (const candidate of candidates) {
+      if (selected.every((other) => compatible(candidate, other))) selected.push(candidate);
+    }
+    return selected;
+  };
+
+  const firstPass = fill();
+  if (firstPass.length >= REVISION_PROTOCOL.minimum_reviewers) return firstPass;
+
+  // The protocol requires two reviewers. Check compatible pairs before rejecting,
+  // including pairs where both choices differ from the first pass.
+  for (const [index, candidate] of candidates.entries()) {
+    for (let next = index + 1; next < candidates.length; next++) {
+      const alternative = candidates[next]!;
+      if (compatible(candidate, alternative)) return fill([candidate, alternative]);
+    }
+  }
+  throw new TrustedApplicationError(
+    "Collect distinct validated disagreement lessons from at least two identified reviewers on independent training cases outside the holdout.",
+  );
+}
+
 /** Generate another version; no generation outcome changes a live prompt pointer. */
 export async function proposePromptRevision(args: CohortArgs & { actor: Actor }): Promise<PromptRevision> {
   if (!TARGET_STAGES.some((stage) => stage === args.stage))
@@ -257,36 +309,7 @@ export async function proposePromptRevision(args: CohortArgs & { actor: Actor })
     });
     const entities = await workspaceEntityNames();
     if (!entities.length) throw new TrustedApplicationError("Learning entity context is empty.");
-    const training = new Set(cohort.training_ids);
-    const lessons: { id: string; lesson: string }[] = [];
-    const reviewers = new Set<string>(),
-      texts = new Set<string>();
-    for (const group of lineageGroups(cohort.examples)) {
-      for (const example of group) {
-        const reviewer = example.actor_principal?.trim().toLowerCase();
-        if (!training.has(example.id) || !reviewer || reviewers.has(reviewer) || !example.lesson) continue;
-        const lesson = scrubLesson(
-          example.lesson,
-          [
-            JSON.stringify(example.ai_input),
-            JSON.stringify(example.ai_output),
-            JSON.stringify(example.final ?? {}),
-            example.rationale ?? "",
-          ],
-          entities,
-        );
-        const text = lesson?.trim().toLowerCase();
-        if (!lesson || !text || texts.has(text)) continue;
-        lessons.push({ id: example.id, lesson });
-        reviewers.add(reviewer);
-        texts.add(text);
-        break;
-      }
-    }
-    if (reviewers.size < REVISION_PROTOCOL.minimum_reviewers)
-      throw new TrustedApplicationError(
-        "Collect distinct validated disagreement lessons from at least two identified reviewers on independent training cases outside the holdout.",
-      );
+    const lessons = selectTrainingLessons(cohort, entities);
     cohort.training_ids = lessons.map((item) => item.id);
     if (isTestStub()) throw new TrustedApplicationError("Use a connected primary model to generate a production candidate.");
     const recorder = new RunRecorder({
