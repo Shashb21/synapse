@@ -106,6 +106,8 @@ export type EvidenceNeed = {
   run_id?: string | null;
   candidate_row_id?: string | null;
   block_id?: string | null;
+  /** Verified occurrences of an older quote whose original block is ambiguous. */
+  observed_block_ids?: string[] | null;
 };
 
 export type GapStatusOverride = {
@@ -214,7 +216,8 @@ export type GapConfirmer = {
 export type GapSuggestionStatus = "pending" | "merged" | "split" | "rejected";
 
 /** A source sentence waiting on a suggestion: it follows the suggestion's outcome. */
-export type GapSuggestionSource = { source_id: string; statement: string; source_quote: string };
+export type GapSuggestionSource = {
+  block_id?: string | null; source_id: string; statement: string; source_quote: string };
 
 /**
  * A candidate gap the S2 judge found to overlap an existing gap (KAN-74): part of
@@ -222,6 +225,7 @@ export type GapSuggestionSource = { source_id: string; statement: string; source
  * the merged wording, accepts the split, or rejects it (KAN-75).
  */
 export type GapSuggestion = {
+  block_id?: string | null;
   id: string;
   gap_id: string;
   run_id: string;
@@ -327,6 +331,7 @@ export type BreakoutGroupGap = {
 };
 
 export type Tactic = {
+  block_id?: string | null;
   id: string;
   name: string;
   type: TacticType;
@@ -539,6 +544,7 @@ export type IegpState = {
 
 /** Source-owned overlap proposal; model baseline and human edits are retained separately. */
 export type TacticSuggestion = {
+  block_id?: string | null;
   id: string; version: string; run_id: string; document_id: string; source_id: string; source_quote: string;
   target_tactic_id: string; expected_tactic_version: string; reviewed_parent: Tactic;
   shared_scope: string; new_scope: string; expansion: ExpansionScope; original_expansion: ExpansionScope;

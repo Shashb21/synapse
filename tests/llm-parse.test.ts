@@ -275,7 +275,7 @@ describe("LLM structuring", () => {
 
   it("takes every block, kind and heading from the model and records dropped noise", async () => {
     const { ask, calls } = scripted((call) => ({ units: idsOf(call).map(good) }));
-    const { blocks, dropped } = await structureWithLlm({ filename: "deck.pptx", units, ask });
+    const { blocks, dropped, dropped_units } = await structureWithLlm({ filename: "deck.pptx", units, ask });
 
     expect(calls).toHaveLength(1);
     expect(blocks.map((block) => [block.kind, block.text])).toEqual([
@@ -285,6 +285,11 @@ describe("LLM structuring", () => {
     ]);
     expect(blocks[2]).toMatchObject({ heading: "Comparative evidence.", location: { ref: "Slide 2" } });
     expect(dropped).toEqual([{ location: "Slide 3", reason: "Confidentiality footer and page number." }]);
+    expect(dropped_units).toEqual([{
+      location: "Slide 3",
+      reason: "Confidentiality footer and page number.",
+      text: "Confidential - page 3",
+    }]);
   });
 
   it("re-asks for a unit whose block is not a verbatim span, or that was left out", async () => {
@@ -319,6 +324,89 @@ describe("LLM structuring", () => {
     await expect(structureWithLlm({ filename: "deck.pptx", units, ask })).rejects.toThrow(
       /did not return a complete parse for Slide 2/,
     );
+  });
+
+  it.each([
+    { scenario: "omits the final qualification", texts: ["Data are available.", "Adults only."] },
+    { scenario: "omits the leading sentence", texts: ["Adults only.", "Follow-up is pending."] },
+    { scenario: "omits a middle sentence", texts: ["Data are available.", "Follow-up is pending."] },
+    { scenario: "reorders sentences", texts: ["Adults only.", "Data are available.", "Follow-up is pending."] },
+    {
+      scenario: "repeats a sentence beyond its source occurrences",
+      texts: ["Data are available.", "Adults only.", "Adults only.", "Follow-up is pending."],
+    },
+  ])("re-asks only for the unit when the model $scenario", async ({ texts }) => {
+    const completeText = "Data are available. Adults only. Follow-up is pending.";
+    const { ask, calls } = scripted(() =>
+      calls.length === 1
+        ? {
+            units: [
+              good("u1"),
+              { unit: "u2", blocks: texts.map((text) => ({ text, kind: "paragraph", heading: null })) },
+              good("u3"),
+            ],
+          }
+        : {
+            units: [{
+              unit: "u2",
+              blocks: [{ text: completeText, kind: "paragraph", heading: null }],
+            }],
+          },
+    );
+    const sourceUnits = [
+      units[0]!,
+      { location: { kind: "slide" as const, ref: "Slide 2" }, text: completeText },
+      units[2]!,
+    ];
+
+    const { blocks } = await structureWithLlm({ filename: "deck.pptx", units: sourceUnits, ask });
+
+    expect(calls.map(idsOf)).toEqual([["u1", "u2", "u3"], ["u2"]]);
+    expect(blocks.filter((block) => block.location.ref === "Slide 2").map((block) => block.text)).toEqual([completeText]);
+  });
+
+  it("accepts complete verbatim splits across whitespace and within words, including actual repeated text", async () => {
+    const { ask, calls } = scripted(() => ({
+      units: [{
+        unit: "u1",
+        blocks: ["Data are avail", "able.", "Adults\tonly.", "Adults only."].map((text) => ({
+          text,
+          kind: "paragraph",
+          heading: null,
+        })),
+      }],
+    }));
+
+    const { blocks } = await structureWithLlm({
+      filename: "report.txt",
+      units: [{ location: { kind: "page", ref: "p.1" }, text: "  Data are available.\n\nAdults only.   Adults only.  " }],
+      ask,
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(blocks.map((block) => block.text)).toEqual(["Data are avail", "able.", "Adults\tonly.", "Adults only."]);
+  });
+
+  it("fails before stakeholder classification when the model repeatedly returns only a prefix with a drop reason", async () => {
+    const { ask, calls } = scripted((call) =>
+      call.purpose === "parse-stakeholder"
+        ? { stakeholder_function: "market_access", rationale: "Evidence plan." }
+        : {
+            units: [{
+              unit: "u1",
+              blocks: [{ text: "Data are available.", kind: "paragraph", heading: null }],
+              dropped_reason: "Footer.",
+            }],
+          },
+    );
+
+    await expect(parseWithLlm({
+      filename: "report.txt",
+      buffer: Buffer.from("Data are available. Adults only."),
+      mime: "text/plain",
+      ask,
+    })).rejects.toThrow(/did not return a complete parse for p\.1 \(u1\)/);
+    expect(calls.map((call) => call.purpose)).toEqual(["parse-structure:1", "parse-structure:1", "parse-structure:1"]);
   });
 
   it("an emptied unit must say why it was dropped", async () => {
