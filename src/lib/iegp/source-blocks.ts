@@ -7,6 +7,8 @@ import { ACTOR_FUNCTIONS, SOURCE_TYPES, type ActorFunction, type SourceType } fr
 import { appendAudit, persistSourceAndBlocks, loadState, lockAssessmentOwners, invalidateRelationshipAssessments } from "./store";
 import type { IegpState } from "./types";
 import { recordEdit } from "@/modules/kernel/edit-records";
+import { moveTacticSourceCitations } from "@/modules/stages/s3-tactic-extract/suggestions";
+import { tacticSourceReferences, tacticSuggestions } from "@/modules/stages/s3-tactic-extract/schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { Actor } from "@/modules/kernel/contracts";
 import {
@@ -159,9 +161,12 @@ async function quotesFor(source_id: string): Promise<QuoteDependent[]> {
 
 /** Blocks of one source in reading order, with human/model provenance and citing needs. */
 export async function listSourceBlocks(source_id: string): Promise<SourceBlockView[]> {
-  await pruneStale(source_id);
-  const [blocks, metas, quotes] = await Promise.all([rawBlocks(source_id), metasFor(source_id), quotesFor(source_id)]);
-  const metaById = new Map(metas.map((m) => [m.block_id, m]));
+  await ensureSourceBlocksSchema();
+  const [blocks, metas, quotes, generation] = await Promise.all([
+    rawBlocks(source_id), metasFor(source_id), quotesFor(source_id), generationOf(source_id),
+  ]);
+  const metaById = new Map(metas.filter((meta) => generation && meta.source_generation === generation)
+    .map((meta) => [meta.block_id, meta]));
   return blocks
     .map((block) => {
       const meta = metaById.get(block.id);
@@ -305,11 +310,17 @@ function assessmentSourceEdit<A extends { source_id?: string; block_id?: string;
       const sourceText = squashText(blocks.map(block => block.text).join(" "));
       for (const need of before.needs.filter(need => need.source_id === sourceId)) {
         const quote = squashText(need.source_quote ?? "");
+        // A source edit cannot establish which occurrence a historical need cited.
+        if (!need.block_id && (need.observed_block_ids?.length || (quote &&
+          blocks.filter(block => containsQuote(block.text.toLowerCase(), quote.toLowerCase())).length > 1))) {
+          continue;
+        }
         const retained = need.source_basis_text ?? (preserveSupportingText && !quote
           ? before.blocks.find(block => block.id === need.block_id)?.text ?? null : null);
         const support = quote || (retained && sourceText.includes(squashText(retained)) ? squashText(retained) : "");
         let blockId = need.block_id ?? null;
-        if (support) {
+        const currentBlock = blocks.find(block => block.id === blockId);
+        if (support && (!currentBlock || !containsQuote(currentBlock.text, support))) {
           const start = sourceText.indexOf(support);
           let offset = 0;
           blockId = blocks.find(block => {
@@ -318,7 +329,7 @@ function assessmentSourceEdit<A extends { source_id?: string; block_id?: string;
             offset = end + 1;
             return containsStart;
           })?.id ?? null;
-        } else if (!blocks.some(block => block.id === blockId)) blockId = null;
+        } else if (!currentBlock) blockId = null;
         await db().update(t.needs).set({ block_id: blockId,
           source_basis_text: !quote && support ? retained : null }).where(eq(t.needs.id, need.id));
       }
@@ -453,6 +464,7 @@ export const splitSourceBlock = assessmentSourceEdit(async function splitSourceB
   const secondRow: BlockRow = { ...toBlock(block), id: nextHumanId(block.source_id), text: second };
   await db().update(t.sourceBlocks).set({ text: first }).where(eq(t.sourceBlocks.id, block.id));
   await db().insert(t.sourceBlocks).values(secondRow);
+  await moveTacticSourceCitations(block.source_id, block, [{ id: block.id, text: first }, secondRow]);
   await markHuman({ block: toBlock(block), current_text: first, position: block.position, actor: args.actor });
   await markHuman({ block: secondRow, current_text: second, origin: "human", position: positionAfter(blocks, at), actor: args.actor });
   await logEdit({
@@ -476,6 +488,7 @@ export const mergeSourceBlocks = assessmentSourceEdit(async function mergeSource
   const merged = `${block.text}\n\n${next.text}`;
   await db().update(t.sourceBlocks).set({ text: merged }).where(eq(t.sourceBlocks.id, block.id));
   await db().delete(t.sourceBlocks).where(eq(t.sourceBlocks.id, next.id));
+  await moveTacticSourceCitations(block.source_id, next, [{ id: block.id, text: merged }]);
   await markHuman({ block: toBlock(block), current_text: merged, position: block.position, actor: args.actor });
   await markHuman({ block: toBlock(next), current_text: next.text, position: next.position, deleted: true, actor: args.actor });
   await logEdit({
@@ -745,19 +758,44 @@ export type ReparseResult = {
 
 /**
  * Re-parse into an existing source. Human blocks (locked meta) stay exactly as
- * they are; model blocks that a need quotes stay so no quote breaks; every
- * other model block is replaced. New model blocks whose text a kept block, a
- * human edit's original, or a human deletion already covers are skipped.
+ * they are. Model blocks cited by needs, source reviews, gap and tactic
+ * suggestions, or tactic source references keep their IDs and text. New model
+ * blocks are skipped when their text is already covered by a kept block, the
+ * original text of a human edit, or a human deletion.
  */
 export const reparseSourceBlocks = assessmentSourceEdit(async function reparseSourceBlocks(args: {
   source_id: string;
   sections: { heading: string; text: string; location: string }[];
 }): Promise<ReparseResult> {
   await requireSourceRow(args.source_id);
+  await pruneStale(args.source_id);
   const current = await listSourceBlocks(args.source_id);
   const metas = await metasFor(args.source_id);
   const quotes = await quotesFor(args.source_id);
-  const citedReviews = (await loadState()).source_reviews?.filter(review => review.source_id === args.source_id) ?? [];
+  const state = await loadState();
+  const citedBlockIds = new Set(state.source_reviews
+    ?.filter(review => review.source_id === args.source_id)
+    .map(review => review.block_id));
+  const tacticCitations = await db().select({
+    blockId: sql<string | null>`${tacticSuggestions.payload}->>'block_id'`,
+    quote: sql<string | null>`${tacticSuggestions.payload}->>'source_quote'`,
+  }).from(tacticSuggestions).where(eq(tacticSuggestions.source_id, args.source_id))
+    .unionAll(db().select({
+      blockId: tacticSourceReferences.block_id,
+      quote: tacticSourceReferences.source_quote,
+    }).from(tacticSourceReferences).where(eq(tacticSourceReferences.source_id, args.source_id)));
+  const gapCitations = state.gap_suggestions
+    .flatMap(suggestion => [suggestion, ...suggestion.extra_sources])
+    .filter(citation => citation.source_id === args.source_id)
+    .map(citation => ({ blockId: citation.block_id, quote: citation.source_quote }));
+  const blocksById = new Map(current.map(block => [block.id, block]));
+  for (const { blockId, quote } of [...tacticCitations, ...gapCitations]) {
+    const block = blockId ? blocksById.get(blockId) : undefined;
+    // Older reparses may have reused a block ID for an unrelated passage.
+    if (block && quote?.trim() && containsQuote(block.text.toLowerCase(), quote.toLowerCase())) {
+      citedBlockIds.add(block.id);
+    }
+  }
   const kept: SourceBlockView[] = [];
   const replaced: string[] = [];
   let kept_human = 0;
@@ -766,7 +804,7 @@ export const reparseSourceBlocks = assessmentSourceEdit(async function reparseSo
     if (block.human) {
       kept.push(block);
       kept_human += 1;
-    } else if (quotes.some((q) => containsQuote(block.text, q.quote)) || citedReviews.some(review => review.block_id === block.id)) {
+    } else if (quotes.some((q) => containsQuote(block.text, q.quote)) || citedBlockIds.has(block.id)) {
       kept.push(block);
       kept_cited += 1;
     } else replaced.push(block.id);
