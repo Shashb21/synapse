@@ -91,6 +91,7 @@ export const needs = pgTable("needs", {
   run_id: text("run_id"),
   candidate_row_id: text("candidate_row_id"),
   block_id: text("block_id"),
+  observed_block_ids: jsonb("observed_block_ids").$type<string[]>(),
 });
 
 export const gaps = pgTable("gaps", {
@@ -200,6 +201,7 @@ export const breakoutGroupGaps = pgTable(
 );
 
 export const tactics = pgTable("tactics", {
+  block_id: text("block_id"),
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   type: text("type").notNull(),

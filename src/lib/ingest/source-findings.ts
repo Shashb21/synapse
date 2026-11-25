@@ -40,6 +40,12 @@ export function currentSourceFindingKey(key: string, fallbackActivity?: string):
   return sourceFindingKey(source, quote, kind, question, activity ?? fallbackActivity);
 }
 
+/** Compare findings only within the passage they cite, without changing stored semantic keys. */
+export function scopeSourceFinding(key: string, blockId?: string | null): string {
+  const parts = findingParts(key);
+  return parts && blockId ? JSON.stringify([JSON.stringify([parts[0], blockId]), ...parts.slice(1).filter(part => part !== undefined)]) : key;
+}
+
 type ActivityLabels = (key: string) => Iterable<string>;
 
 /** Use words documented in the citation, excluding generic study labels and articles. */

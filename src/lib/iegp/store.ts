@@ -67,6 +67,7 @@ import {
   gapsReadyForPrioritize,
   isLiveGap,
   persistedResidualGaps,
+  reconcileHistoricalCitation,
   requireOverrideReason,
   splitSourceIntoBlocks,
   tacticEligibleForMapping,
@@ -978,7 +979,7 @@ export const editNeed = atomic(async function editNeed(args: {
     .set({
       ...(statement !== undefined ? { statement } : {}),
       ...(quote !== undefined ? { source_quote: quote } : {}),
-      ...(citationChanged ? { source_basis_text: null, block_id: citedBlock?.id ?? null } : {}),
+      ...(citationChanged ? { source_basis_text: null, observed_block_ids: null, block_id: citedBlock?.id ?? null } : {}),
       lock: makeLock(args.actor_name, args.actor_function, rationale),
     })
     .where(eq(t.needs.id, args.need_id));
@@ -2001,6 +2002,7 @@ function optionalCatchUpReason(value?: string | null): CatchUpReason | undefined
 }
 
 type LibraryTacticDraft = {
+  block_id?: string | null;
   name: string;
   type: IegpState["tactics"][0]["type"];
   description: string;
@@ -2104,6 +2106,7 @@ export async function insertLibraryTactic(args: LibraryTacticDraft, transaction?
     data_source: args.data_source?.trim() ?? "",
     study_design: args.study_design?.trim() ?? "",
     source_quote: args.source_quote?.trim() ?? "",
+    block_id: args.block_id,
     lifecycle_stage: args.lifecycle_stage,
     status: args.status,
     review_status: "accepted",
@@ -2198,6 +2201,8 @@ async function createProposedTacticChange(args: {
 
 /** Gaps catch-up create. Rejects `proposed` — ideation is Tactics after Prioritize. */
 async function recordMissedTacticChange(args: {
+  source_id?: string;
+  block_id?: string | null;
   name: string;
   type: IegpState["tactics"][0]["type"];
   description?: string;
@@ -2248,12 +2253,17 @@ async function recordMissedTacticChange(args: {
     data_source: args.data_source?.trim() ?? "",
     study_design: args.study_design,
     source_quote: args.source_quote,
+    block_id: args.block_id,
     custom_type: args.custom_type,
     actor_name: args.actor_name,
     actor_function: args.actor_function,
     audit_action: "record_missed",
     note: reasonLabel,
   });
+  if (args.source_id && args.source_quote?.trim()) {
+    const { attachTacticSource } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    await attachTacticSource({ tactic_id: id, source_id: args.source_id, source_quote: args.source_quote, block_id: args.block_id });
+  }
   if (args.gap_id) {
     await assignTacticToGap({
       gap_id: args.gap_id,
@@ -3414,6 +3424,10 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
   /** Validated gaps a new source joined; they now show "New source added". */
   flagged_gap_ids: string[];
 }> {
+  if (args.tactics.some(tactic => tactic.block_id && tactic.source_quote?.trim())) {
+    // Source editors take this lock before assessment or tactic writes too.
+    await db().select({ id: t.sources.id }).from(t.sources).where(eq(t.sources.id, args.source_id)).for("update");
+  }
   const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [...args.gaps.flatMap(g => g.duplicate_of ? [g.duplicate_of] : []), ...args.needs.flatMap(n => n.gap_id ? [n.gap_id] : [])] });
   const state = await loadState();
   const sourceId = args.source_id;
@@ -3489,15 +3503,26 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
     state.gaps.filter((g) => g.human_validated || validatedPriority.has(g.id)).map((g) => g.id),
   );
 
-  // Match the full passage and question, since a single passage can support distinct findings.
-  const evidenceKey = (gapId: string, quote: string, domain: string, statement: string) =>
-    JSON.stringify([gapId, sourceFindingKey(sourceId, quote, domain, statement)]);
-  const attached = new Set(
-    state.need_gap_links.flatMap((link) => {
-      const need = state.needs.find((row) => row.id === link.need_id);
-      return need && need.source_id === sourceId ? [evidenceKey(link.gap_id, need.source_quote ?? need.statement, need.domain, need.statement)] : [];
-    }),
-  );
+  // The same passage can support different questions and appear in different blocks.
+  const evidenceKey = (gapId: string, quote: string, domain: string, statement: string, blockId?: string | null) =>
+    JSON.stringify([gapId, sourceFindingKey(sourceId, quote, domain, statement), blockId ?? null]);
+  const normalizedEvidenceQuote = (quote: string) => quote.toLowerCase().replace(/\s+/g, " ").trim();
+  const attached = new Set<string>();
+  const historical = new Map<string, IegpState["needs"][number]>();
+  const historicalScoped = new Set<string>();
+  const sourceBlocks = state.blocks.filter(block => block.source_id === sourceId);
+  const sourceNeeds = new Map(state.needs.filter(need => need.source_id === sourceId).map(need => [need.id, need]));
+  for (const link of state.need_gap_links) {
+    const need = sourceNeeds.get(link.need_id);
+    if (!need) continue;
+    const key = evidenceKey(link.gap_id, need.source_quote ?? need.statement, need.domain, need.statement, need.block_id);
+    attached.add(key);
+    if (!need.candidate_row_id) {
+      const legacyKey = JSON.stringify([link.gap_id, normalizedEvidenceQuote(need.source_quote ?? need.statement)]);
+      if (need.block_id) historicalScoped.add(legacyKey);
+      else historical.set(legacyKey, need);
+    }
+  }
 
   const addNeed = async (args2: {
     gapId: string;
@@ -3506,9 +3531,27 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
     domain: EvidenceDomain;
     provenance?: NeedProvenance;
   }) => {
-    const key = evidenceKey(args2.gapId, args2.quote || args2.statement, args2.domain, args2.statement);
+    const quote = args2.quote || args2.statement;
+    const blockId = args2.provenance?.block_id;
+    const key = evidenceKey(args2.gapId, quote, args2.domain, args2.statement, blockId);
+    const legacyKey = JSON.stringify([args2.gapId, normalizedEvidenceQuote(quote)]);
     if (attached.has(key)) return;
+    // An unscoped repeat cannot add evidence when the finding already cites a block.
+    if (!blockId && (historicalScoped.has(legacyKey) || sourceBlocks.some(block =>
+      attached.has(evidenceKey(args2.gapId, quote, args2.domain, args2.statement, block.id)),
+    ))) return;
     attached.add(key);
+    const legacy = historical.get(legacyKey);
+    if (blockId && legacy && (!legacy.block_id || legacy.block_id === blockId)) {
+      if (!legacy.block_id) {
+        const update = reconcileHistoricalCitation(sourceBlocks, legacy.source_quote || legacy.statement, blockId, legacy.observed_block_ids);
+        if (update) {
+          await db().update(t.needs).set(update).where(eq(t.needs.id, legacy.id));
+          Object.assign(legacy, update);
+        }
+      }
+      return;
+    }
     const needId = await allocateId("NEED", needIds);
     needIds.push(needId);
     createdNeedIds.push(needId);
@@ -3607,7 +3650,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
   for (const tac of args.tactics) {
     if (tac.duplicate_of) {
       const { attachTacticSource } = await import("@/modules/stages/s3-tactic-extract/suggestions");
-      if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tac.duplicate_of, source_id: sourceId, source_quote: tac.source_quote, finding_key: tac.finding_key ?? sourceFindingKey(sourceId, tac.source_quote, tac.type, tac.evidence_question)});
+      if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tac.duplicate_of, source_id: sourceId, source_quote: tac.source_quote, block_id: tac.block_id, finding_key: tac.finding_key ?? sourceFindingKey(sourceId, tac.source_quote, tac.type, tac.evidence_question, tac.name)});
       skippedTacticIds.push(tac.id);
       continue;
     }
@@ -3638,9 +3681,10 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
       intended_use: `Extracted from ${sourceId}`,
       lock: unlocked(),
       source_quote: (tac.source_quote ?? "").trim(),
+      block_id: tac.block_id,
     });
     const { attachTacticSource } = await import("@/modules/stages/s3-tactic-extract/suggestions");
-    if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tacticId, source_id: sourceId, source_quote: tac.source_quote, finding_key: tac.finding_key ?? sourceFindingKey(sourceId, tac.source_quote, tac.type, tac.evidence_question)});
+    if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tacticId, source_id: sourceId, source_quote: tac.source_quote, block_id: tac.block_id, finding_key: tac.finding_key ?? sourceFindingKey(sourceId, tac.source_quote, tac.type, tac.evidence_question, tac.name)});
   }
 
   await appendAudit(
@@ -3744,10 +3788,10 @@ async function currentSuggestionSources(suggestion: GapSuggestion) {
   await db().select({ id: t.sources.id }).from(t.sources).where(inArray(t.sources.id, sourceIds)).orderBy(t.sources.id).for("update");
   const blocks = await db().select().from(t.sourceBlocks).where(inArray(t.sourceBlocks.source_id, sourceIds));
   return sources.map(source => {
-    const provenance = source.provenance ?? { run_id: suggestion.run_id };
+    const provenance = source.provenance ?? { run_id: suggestion.run_id, block_id: source.block_id };
     const block_id = supportingBlockId(blocks.filter(block => block.source_id === source.source_id), source.source_quote, provenance.block_id);
     if ((provenance.requires_current_citation || provenance.block_id) && !block_id) {
-      throw new TrustedApplicationError("The cited passage no longer resolves to a single source block. Review the current source before accepting.");
+      throw new TrustedApplicationError("The source passage changed or is ambiguous. Review the current source before accepting.");
     }
     return { ...source, provenance: { ...provenance, block_id } };
   });

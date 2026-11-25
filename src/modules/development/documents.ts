@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/iegp/db";
 import {
+  createParseRequestBudget,
   extractRawUnits,
   parseLimitError,
   parseWithLlm,
@@ -14,6 +15,7 @@ import {
 } from "@/lib/ingest/upload-formats";
 import { withAdminWorkspace } from "@/modules/workspaces/admin-context";
 import { aiSections } from "@/modules/kernel/ai-switch";
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { isTestStub } from "@/modules/kernel/llm";
 import { completionFor, resolveRoute } from "@/modules/kernel/routing";
 import { NoRouteError } from "@/modules/llm/provider";
@@ -234,9 +236,11 @@ async function parserCompletion() {
       "ai_disabled",
       "AI ingestion is turned off. Enable ingestion in /admin/control before parsing a private document or PDF reference.",
     );
+  const requestBudget = createParseRequestBudget();
   const run_id = `development-parse-${randomUUID()}`;
   if (isTestStub())
     return {
+      requestBudget,
       ask: async () => ({}),
       parser: {
         name: "llm-test-stub",
@@ -257,6 +261,7 @@ async function parserCompletion() {
     });
     return {
       ask,
+      requestBudget,
       parser: {
         name: "llm",
         version: "2.0.0",
@@ -298,8 +303,8 @@ async function parseFile(
       "empty_document",
       "This document contains no readable text. Upload a text-based file.",
     );
-  // Bound mechanical extraction here. parseWithLlm enforces the exact chunk/call
-  // budget before dispatch; the test-only local representation makes no calls.
+  // Bound mechanical extraction here. The live parser checks planned and actual
+  // requests. The test-only local representation makes no calls.
   const error = parseLimitError(filename, units.length, 0);
   if (error) throw new DevelopmentError(422, "parse_limit", error);
   if (isTestStub())
@@ -312,9 +317,11 @@ async function parseFile(
       })),
     };
   try {
-    return (await parseWithLlm({ filename, buffer, mime, ask: completion.ask }))
+    return (await parseWithLlm({ filename, buffer, mime, ask: completion.ask, requestBudget: completion.requestBudget }))
       .document;
-  } catch {
+  } catch (error) {
+    if (error instanceof TrustedApplicationError && error.code === "parse_limit")
+      throw new DevelopmentError(error.status, error.code, error.message);
     throw new DevelopmentError(
       422,
       "parse_failed",
@@ -452,8 +459,11 @@ export async function prepareReference(
           document,
         }),
         purpose: "development-reference-expectations",
+        requestBudget: completion.requestBudget,
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof TrustedApplicationError && error.code === "parse_limit")
+        throw new DevelopmentError(error.status, error.code, error.message);
       throw new DevelopmentError(
         422,
         "reference_parse_failed",

@@ -106,6 +106,8 @@ export type EvidenceNeed = {
   run_id?: string | null;
   candidate_row_id?: string | null;
   block_id?: string | null;
+  /** Verified occurrences of an older quote whose original block is ambiguous. */
+  observed_block_ids?: string[] | null;
 };
 
 export type GapStatusOverride = {
@@ -222,6 +224,7 @@ export type NeedProvenance = {
   requires_current_citation?: boolean;
 };
 export type GapSuggestionSource = {
+  block_id?: string | null;
   source_id: string;
   statement: string;
   source_quote: string;
@@ -342,6 +345,7 @@ export type BreakoutGroupGap = {
 };
 
 export type Tactic = {
+  block_id?: string | null;
   id: string;
   name: string;
   type: TacticType;
@@ -554,6 +558,7 @@ export type IegpState = {
 
 /** Source-owned overlap proposal; model baseline and human edits are retained separately. */
 export type TacticSuggestion = {
+  block_id?: string | null;
   id: string; version: string; run_id: string; document_id: string; source_id: string; source_quote: string;
   finding_key?: string;
   target_tactic_id: string; expected_tactic_version: string; reviewed_parent: Tactic;

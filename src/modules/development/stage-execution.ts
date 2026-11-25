@@ -100,15 +100,26 @@ function sourceState(sources: readonly DevelopmentDocument[], documents: ParsedD
   return state;
 }
 
+const normalizeQuote = (value: string) => value.toLowerCase().replace(/\s+/g, ' ').trim();
+
 /** Verify real extraction fields and verbatim source citations before they become dependencies. */
 function extractionCandidates(section: DevelopmentSection, rows: unknown[], documents: ParsedDocumentRecord[]): Record<string, unknown>[] {
   return rows.map(raw => {
     const candidate = (section === 'gap_extraction' ? gapCandidate : tacticCandidate).parse(raw);
     const document = documents.find(document => document.id === candidate.document_id && document.source_id === candidate.source_id);
-    const normalize = (value: string) => value.toLowerCase().replace(/\s+/g, ' ').trim();
-    if (!document || !normalize(document.blocks.map(block => block.text).join(' ')).includes(normalize(candidate.source_quote))) throw new DevelopmentError(422, 'invalid_citation', 'Every extraction must quote its supplied source document.');
+    if (!document || !normalizeQuote(document.blocks.map(block => block.text).join(' ')).includes(normalizeQuote(candidate.source_quote))) throw new DevelopmentError(422, 'invalid_citation', 'Every extraction must quote its supplied source document.');
     return candidate;
   });
+}
+
+/** Resolve a stage citation against the blocks in this experiment's own source snapshot. */
+function localBlockId(state: IegpState, row: { source_id: string; source_quote: string; block_id?: unknown }): string | null {
+  if (row.block_id !== undefined && typeof row.block_id !== 'string') return null;
+  const id = row.block_id === undefined ? undefined : `${row.source_id}:${row.block_id}`;
+  const quote = normalizeQuote(row.source_quote);
+  const matches = state.blocks.filter(block => block.source_id === row.source_id
+    && (id === undefined || block.id === id) && normalizeQuote(block.text).includes(quote));
+  return matches.length === 1 ? matches[0].id : null;
 }
 
 /** Project model proposals into local domain types. Candidate state never asserts human acceptance. */
@@ -117,12 +128,12 @@ function projectExtraction(state: IegpState, section: DevelopmentSection, candid
     const row = gapCandidate.parse(raw);
     const needId = `${row.id}:need`;
     state.gaps.push({ id: row.id, name: row.name, statement: row.statement, domain: row.domain, objective_id: '', status: 'candidate', exclusion_reason: null, exclusion_note: null, status_lock: unlocked(), parent_gap_id: null, computed_status: null, status_override: null, retired: false, human_validated: false, parked_at: null, parked_reason: null, settings: [], metadata: { stakeholders: [], geography: '', regional_nuances: '', notes: '' }, number: index + 1 });
-    state.needs.push({ id: needId, statement: row.statement, domain: row.domain, stakeholder: 'evidence_lead', objective_id: '', decision_supported: '', geography: '', population: '', intervention: '', comparator: '', outcome: '', timing: '', source_id: row.source_id, source_quote: row.source_quote, confidence: null, status: 'candidate', status_lock: unlocked(), run_id: traceId, candidate_row_id: row.id, block_id: state.blocks.find(block => block.source_id === row.source_id && block.text.includes(row.source_quote))?.id ?? null });
+    state.needs.push({ id: needId, statement: row.statement, domain: row.domain, stakeholder: 'evidence_lead', objective_id: '', decision_supported: '', geography: '', population: '', intervention: '', comparator: '', outcome: '', timing: '', source_id: row.source_id, source_quote: row.source_quote, confidence: null, status: 'candidate', status_lock: unlocked(), run_id: traceId, candidate_row_id: row.id, block_id: localBlockId(state, row) });
     state.need_gap_links.push({ gap_id: row.id, need_id: needId, role: 'primary' });
   });
   else candidates.forEach(raw => {
     const row = tacticCandidate.parse(raw);
-    state.tactics.push({ id: row.id, name: row.name, type: row.type, description: '', evidence_question: row.evidence_question, population: '', intervention: '', comparator: '', outcomes: '', geography: '', data_source: '', study_design: '', lifecycle_stage: '', status: row.status, review_status: 'candidate', start_date: null, evidence_available: null, owner: '', function: 'evidence_lead', budget: null, intended_use: '', lock: unlocked(), source_quote: row.source_quote });
+    state.tactics.push({ id: row.id, name: row.name, type: row.type, description: '', evidence_question: row.evidence_question, population: '', intervention: '', comparator: '', outcomes: '', geography: '', data_source: '', study_design: '', lifecycle_stage: '', status: row.status, review_status: 'candidate', start_date: null, evidence_available: null, owner: '', function: 'evidence_lead', budget: null, intended_use: '', lock: unlocked(), source_quote: row.source_quote, block_id: localBlockId(state, row) });
   });
 }
 
