@@ -141,7 +141,7 @@ duration_months is how long the tactic runs from start to last data in; readout_
 
 Propose at most candidates_per_gap distinct useful candidates per gap; fewer or none may be appropriate. If no credible option or no timely option exists, return gap_outcomes with gap_id, status (no_credible_option or no_timely_option), and explanation. Preserve the evidence deadline; identify useful longer-term options separately. Fill in every field for returned candidates.
 
-When a gap carries revise requests, answer each one: return that tactic with its id, revised to meet the objection, or set "withdraw":true with a reason when it cannot be rescued.
+When a gap carries revise requests, answer each one: return that tactic with its id, revised to meet the objection, or set "withdraw":true with a reason when it cannot be rescued. If there is no credible or timely option after withdrawal, include one gap_outcomes entry for that gap.
 
 Return JSON only: {"tactics":[{"id":"","gap_id":"","name":"","type":"","evidence_question":"","rationale":"","proposal_kind":"new","target_tactic_id":null,"expansion_scope":null,"comparative_rationale":"","contract_version":2,"recommendation":${RECOMMENDATION_EXAMPLE},${REFERENCE_EXAMPLE},${DESIGN_FIELDS},"withdraw":false,"withdraw_reason":""}],"gap_outcomes":[{"gap_id":"","status":"no_credible_option","explanation":""}]}`;
 
@@ -718,6 +718,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
       const dropped = new Set(critiques.filter((critique) => critique.verdict === "drop").map((c) => c.subject));
       const byId = new Map(previous.map((proposal) => [proposal.id, proposal]));
       const problems = new Map<string, string>();
+      const revisionOutcomes = new Map<string, IdeationGapOutcome>();
       const answers = await completeAll<Proposal | "withdrawn">({
         ids: [...objections.keys()].filter((id) => byId.has(id)),
         what: "revision",
@@ -761,17 +762,38 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
               if ("problem" in parsed) problems.set(id, parsed.problem);
               else done.set(id, { ...before, ...parsed.tactic });
             }
+            const outcomes = response && typeof response === "object" && "gap_outcomes" in response ? response.gap_outcomes : undefined;
+            if (outcomes === undefined || (Array.isArray(outcomes) && !outcomes.length)) continue;
+            const outcomeProblems = new Map<string, string>();
+            const rows = modelRows({
+              payload: response, field: "gap_outcomes", idField: "gap_id", ids: asked.map(gap => gap.id), problems: outcomeProblems, report,
+            });
+            for (const [gapId, raw] of rows) {
+              const parsed = ideationGapOutcomeSchema.safeParse({ ...raw, gap_id: gapId });
+              if (parsed.success) {
+                if (parsed.data.status !== "options" && !revisionOutcomes.has(gapId)) revisionOutcomes.set(gapId, parsed.data);
+              } else outcomeProblems.set(gapId, "Return a valid gap outcome status and explanation.");
+            }
+            for (const [id, problem] of outcomeProblems) report({ field: "gap_outcomes", id, problem });
           }
           return done;
         },
       });
       // A tactic the critic dropped, or the proposer withdrew, leaves the dialogue.
-      return previous.flatMap((proposal) => {
+      const next = previous.flatMap((proposal) => {
         if (dropped.has(proposal.id)) return [];
         const answer = answers.get(proposal.id);
         if (answer === "withdrawn") return [];
         return [answer ?? proposal];
       });
+      const remaining = new Set(next.map(proposal => proposal.gap_id));
+      for (const [id, answer] of answers) {
+        if (answer !== "withdrawn") continue;
+        const gapId = byId.get(id)!.gap_id;
+        const revisionOutcome = revisionOutcomes.get(gapId);
+        if (revisionOutcome && !remaining.has(gapId)) gapOutcomes.set(gapId, revisionOutcome);
+      }
+      return next;
     };
 
     /** Judge individual candidates and gap outcomes without replacing completed decisions. */

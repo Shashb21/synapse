@@ -509,6 +509,71 @@ describe("S9 on the model path", () => {
     expect(output.rejected.map(row => row.name)).toEqual(["Repaired"]);
   });
 
+  it("preserves a deadline outcome across partial retries when the final candidates are withdrawn", async () => {
+    const [gapId, otherId] = ids as [string, string];
+    const deadline = { gap_id: gapId, status: "no_timely_option", explanation: "Claims and registry readouts both fall after the evidence deadline." };
+    const otherOutcome = { gap_id: otherId, status: "no_credible_option", explanation: "No design can answer the separate comparative question." };
+    const { ctx, calls } = context(call => {
+      if (call.purpose === "ideation-critic") {
+        return { reviews: keepAll(call).reviews.map(row => ({ ...row, verdict: "revise", note: "The proposed readout misses the evidence deadline." })) };
+      }
+      if (call.purpose === "ideation-judge") return judgeFirst(call, 1);
+      const [gap] = gapsOf(call);
+      if (!gap!.revise?.length) {
+        if (gap!.id === otherId) return { tactics: [], gap_outcomes: [otherOutcome] };
+        return { tactics: [tactic(gapId, "Late claims study"), tactic(gapId, "Late registry")] };
+      }
+      const withdrawal = { id: gap!.revise[0]!.id, gap_id: gapId, withdraw: true, withdraw_reason: "Readout cannot move before the deadline." };
+      return gap!.revise.length === 2
+        ? { tactics: [withdrawal], gap_outcomes: [deadline] }
+        : { tactics: [withdrawal], gap_outcomes: [
+          { ...deadline, explanation: "Conflicting explanation supplied during the tactic repair." },
+          { ...deadline, gap_id: otherId, explanation: "Unrequested change to another gap." },
+        ] };
+    });
+
+    const { output } = await ideationModule.run(input(2), ctx);
+
+    const revisions = calls.filter(call => call.purpose === "ideation-proposer" && gapsOf(call)[0]!.revise?.length);
+    expect(revisions.map(call => gapsOf(call)[0]!.revise!.map(row => row.id))).toEqual([
+      [`${gapId}:proposal:1`, `${gapId}:proposal:2`],
+      [`${gapId}:proposal:2`],
+    ]);
+    expect(calls.some(call => call.purpose === "ideation-judge")).toBe(false);
+    expect(output.proposals).toEqual([]);
+    expect(output.gap_outcomes).toEqual(expect.arrayContaining([deadline, otherOutcome]));
+  });
+
+  it("ignores an outcome for a different gap when accepting the final withdrawal", async () => {
+    const [gapId, otherId] = ids as [string, string];
+    const { ctx, calls } = context(call => {
+      if (call.purpose === "ideation-critic") {
+        return { reviews: keepAll(call).reviews.map(row => ({ ...row, verdict: "revise", note: "Validate the comparator data availability." })) };
+      }
+      if (call.purpose === "ideation-judge") return judgeFirst(call, 1);
+      const [gap] = gapsOf(call);
+      if (!gap!.revise?.length) return { tactics: [tactic(gap!.id, "Feasibility study")] };
+      return {
+        tactics: [{ id: gap!.revise[0]!.id, gap_id: gap!.id, withdraw: true, withdraw_reason: "No matching comparator records are available." }],
+        gap_outcomes: gap!.id === gapId
+          ? [{ gap_id: otherId, status: "no_timely_option", explanation: "Unrequested deadline judgement for a different gap." }]
+          : [],
+      };
+    });
+
+    const { output } = await ideationModule.run(input(), ctx);
+
+    const revisions = calls.filter(call => call.purpose === "ideation-proposer" && gapsOf(call)[0]!.revise?.length);
+    expect(revisions).toHaveLength(2);
+    expect(revisions[0]!.body.exchange).toBe(revisions[1]!.body.exchange);
+    expect(revisions.map(call => gapsOf(call).map(gap => gap.id))).toEqual(expect.arrayContaining([[gapId], [otherId]]));
+    expect(output.proposals).toEqual([]);
+    expect(output.gap_outcomes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ gap_id: gapId, status: "no_credible_option" }),
+      expect.objectContaining({ gap_id: otherId, status: "no_credible_option" }),
+    ]));
+  });
+
   it.each(["candidate decision", "gap outcome"])("includes completed decisions when repairing a missing %s", async (missing) => {
     const gapId = ids[0]!;
     const conditional = "The deadline can be met if claims access is confirmed by March.";

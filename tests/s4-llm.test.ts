@@ -410,10 +410,16 @@ describe("S4 on the model path", () => {
     expect(runs[1]).toEqual(runs[0]);
     for (const calls of runs) {
       const judged = calls.filter(call => call.purpose === "mapping-table-judge");
-      const retained = judged.flatMap(call => (
-        call.body.rows as { gap: { id: string }; mappings: { tactic_id: string }[] }[]
-      ).filter(row => row.gap.id === gapId).flatMap(row => row.mappings.map(mapping => mapping.tactic_id)));
-      expect(retained).toEqual([first.id]);
+      const judgedFragments = judged.flatMap(call => (
+        call.body.rows as { gap: { id: string }; mapping_status: string; mappings: { tactic_id: string }[] }[]
+      ).filter(row => row.gap.id === gapId));
+      expect(judgedFragments.map(row => ({
+        status: row.mapping_status,
+        mappings: row.mappings.map(mapping => mapping.tactic_id),
+      }))).toEqual([
+        { status: "partially_addressed", mappings: [first.id] },
+        { status: "open", mappings: [] },
+      ]);
     }
   });
 
@@ -498,6 +504,12 @@ describe("S4 on the model path", () => {
       tactics: [{ id: first.id }, { id: second.id }],
       rows: [{ gap: { id: gapId }, mapping_status: status, mappings: [{ tactic_id: first.id }, { tactic_id: second.id }] }],
     });
+    const fragmentReviews = calls.filter(call => call.body.partial_row &&
+      (call.purpose === "mapping-table-critic" || call.purpose === "mapping-table-judge"));
+    expect(new Set(fragmentReviews.map(call => call.purpose))).toEqual(new Set(["mapping-table-critic", "mapping-table-judge"]));
+    for (const call of fragmentReviews) {
+      expect(call.body.rows).toEqual([expect.objectContaining({ mapping_status: "partially_addressed" })]);
+    }
   });
 
   it.each(["absent", "same batch", "separate batch"] as const)(
@@ -557,6 +569,18 @@ describe("S4 on the model path", () => {
       expect(output.accepted[0]).toMatchObject({ mapping_status: "addressed", tactic_ids: [first.id, second.id] });
       expect(output.accepted[0]!.mappings.filter(mapping => mapping.review_only).map(mapping => mapping.tactic_id))
         .toEqual(placement === "absent" ? [] : [stale.id]);
+      if (placement === "separate batch") {
+        const staleReviews = calls.filter(call =>
+          (call.purpose === "mapping-table-critic" || call.purpose === "mapping-table-judge") &&
+          (call.body.tactics as { id: string }[]).some(tactic => tactic.id === stale.id));
+        expect(new Set(staleReviews.map(call => call.purpose))).toEqual(new Set(["mapping-table-critic", "mapping-table-judge"]));
+        for (const call of staleReviews) {
+          expect(call.body.rows).toEqual([expect.objectContaining({
+            mapping_status: "open",
+            mappings: [expect.objectContaining({ tactic_id: stale.id, coverage: "full", review_only: true })],
+          })]);
+        }
+      }
     },
   );
 

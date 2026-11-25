@@ -441,6 +441,7 @@ type Shared = {
   gapById: Map<string, Gap>;
   tactics: TacticRow[];
   tacticBatch: Map<string, number>;
+  fragmentAssessments: Map<string, Pick<Row, "mapping_status" | "confidence" | "rationale">[]>;
   hints: string;
   /** Pairs a person rejected or removed. */
   blocked: Set<string>;
@@ -560,6 +561,15 @@ async function completeProposals(
     const selectedIds = new Set(selected.map(mapping => mapping.tactic_id));
     const excluded = ranked.filter(mapping => !selectedIds.has(mapping.tactic_id));
     if (excluded.length) shared.ctx.run.note("mapping:limit", { gap_id: id, assessed_but_above_limit: excluded.map(mapping => mapping.tactic_id) });
+    shared.fragmentAssessments.set(id, rows.map(fragment => {
+      const retained = fragment.mappings.filter(mapping => selectedIds.has(mapping.tactic_id));
+      const sustainsClosure = retained.length === fragment.tactic_ids.length || retained.some(mapping => mapping.coverage === "full");
+      const mapping_status = retained.length === 0 ? "open"
+        : fragment.mapping_status === "addressed" && sustainsClosure ? "addressed" : "partially_addressed";
+      const rationale = mapping_status === fragment.mapping_status ? fragment.rationale
+        : ["The mapping limit excluded ordinary mappings that contributed to this fragment's original status."];
+      return { mapping_status, confidence: fragment.confidence, rationale };
+    }));
     const mappings = rows.flatMap(row => row.mappings).filter(mapping => !newAssignment(mapping) || selectedIds.has(mapping.tactic_id));
     const bearing = mappings.filter(newAssignment);
     const addressed = bearing.some(mapping => mapping.coverage === "full") || rows.some(row =>
@@ -654,16 +664,13 @@ async function completeReviews<T>(
   const byId = new Map(rows.map(row => [row.gap_id, row]));
   const parts = new Map(rows.map(row => [row.gap_id, [] as T[]]));
   const partial = shared.tactics.length > MAX_PAIRS_PER_PROMPT;
-  const combinedIds = new Set(partial ? rows.filter(row => combinedCoverageFor(shared, row)).map(row => row.gap_id) : []);
   for (const slice of matrixSlices([...byId.keys()], shared.tactics)) {
     const targetIds = new Set(slice.tactics.map(tactic => tactic.id));
     const sliced = new Map(slice.ids.map(id => {
       const row = byId.get(id)!;
-      // The joint rationale precedes the original per-slice reasons when both exist.
-      const index = slice.index + (combinedIds.has(id) ? 1 : 0);
       return [id, partial ? {
         ...row,
-        rationale: row.rationale.slice(index, index + 1),
+        ...shared.fragmentAssessments.get(id)![slice.index]!,
         mappings: row.mappings.filter(mapping => targetIds.has(mapping.tactic_id)),
         review: row.review && { ...row.review, mappings: row.review.mappings.filter(mapping => targetIds.has(mapping.tactic_id)) },
       } : row];
@@ -838,7 +845,7 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
     }
     const orderedTactics = [...tactics].sort((a, b) => compareIds(a.id, b.id));
     const tacticBatch = new Map(orderedTactics.map((tactic, index) => [tactic.id, Math.floor(index / MAX_PAIRS_PER_PROMPT)]));
-    const shared: Shared = { ctx, state, input, gapById, tactics: orderedTactics, tacticBatch, hints: "", blocked: blockedPairs(state), stale, rejections: new Map() };
+    const shared: Shared = { ctx, state, input, gapById, tactics: orderedTactics, tacticBatch, fragmentAssessments: new Map(), hints: "", blocked: blockedPairs(state), stale, rejections: new Map() };
     const reviewByGap = new Map<string, Review>();
     const judgeVerdicts = new Map<string, JudgeVerdict>();
 
