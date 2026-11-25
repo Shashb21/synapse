@@ -364,6 +364,44 @@ describe("concurrent gap suggestion source and decision", () => {
     return { pid, release, done };
   }
 
+  it("preserves both extra citations when separate sources are split concurrently", async () => {
+    const suggestionId = await overlapOn(await newGap());
+    const background = "The panel reviewed the literature.";
+    const citations = await Promise.all([repeatQuote, "The panel found no data for older adults."].map(async quote => {
+      const source = await sourceFixture(quote, [`${background} ${quote}`]);
+      return {
+        source_id: source.source_id, block_id: source.blocks[0]!.id,
+        source_quote: quote, statement: OVERLAP.split_statement,
+      };
+    }));
+    await addSuggestionSources(suggestionId, citations);
+
+    const split = (citation: typeof citations[number]) => splitSourceBlock({
+      block_id: citation.block_id, at_text: citation.source_quote, rationale: "Separate evidence", actor: ACTOR,
+    });
+    const first = citations[0]!;
+    const second = citations[1]!;
+    const held = await holdWrite(() => split(first));
+    const concurrent = split(second);
+    let secondBlockId: string;
+    try {
+      await waitForBlocker(held.pid);
+    } finally {
+      held.release();
+      await held.done;
+      secondBlockId = (await concurrent).second_id;
+    }
+
+    const { gap_suggestions, blocks } = await loadState();
+    const suggestion = gap_suggestions.find(row => row.id === suggestionId);
+    const firstBlock = blocks.find(block => block.source_id === first.source_id && block.text === first.source_quote);
+    expect(firstBlock?.id).toBeDefined();
+    expect(suggestion?.extra_sources).toMatchObject([
+      { source_id: first.source_id, block_id: firstBlock!.id, source_quote: first.source_quote },
+      { source_id: second.source_id, block_id: secondBlockId, source_quote: second.source_quote },
+    ]);
+  });
+
   it("attaches a repeat committed while acceptance waits on the append", async () => {
     const gapId = await newGap();
     const suggestionId = await overlapOn(gapId);

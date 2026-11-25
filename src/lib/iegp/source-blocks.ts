@@ -538,7 +538,16 @@ async function moveSplitOrMergedCitations(
     const citation = movedCitation(tactic.source_quote ?? "");
     if (citation) await d.update(t.tactics).set(citation).where(eq(t.tactics.id, tactic.id));
   }
-  const suggestions = await d.select().from(t.gapSuggestions).where(eq(t.gapSuggestions.status, "pending"));
+  // Edits to different sources can share a suggestion. Lock its current row
+  // before reading the array, in the same source-first order as decisions.
+  const extraCitation = JSON.stringify([{ source_id: sourceId, block_id: original.id }]);
+  const suggestions = await d.select().from(t.gapSuggestions).where(and(
+    eq(t.gapSuggestions.status, "pending"),
+    or(
+      and(eq(t.gapSuggestions.source_id, sourceId), eq(t.gapSuggestions.block_id, original.id)),
+      sql`${t.gapSuggestions.extra_sources} @> ${extraCitation}::jsonb`,
+    ),
+  )).orderBy(t.gapSuggestions.id).for("update");
   for (const suggestion of suggestions) {
     const primary = suggestion.source_id === sourceId && suggestion.block_id === original.id
       ? movedCitation(suggestion.source_quote)
