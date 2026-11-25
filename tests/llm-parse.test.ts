@@ -97,6 +97,7 @@ describe("LLM structuring", () => {
     expect(parts).toEqual([`${"same ".repeat(2_399)}sameX`, "Y"]);
     expect(result.blocks.map((block) => block.text).join("")).toBe(text);
     expect(result.blocks.every((block) => block.location.ref === "p.1")).toBe(true);
+    expect(result.split_units).toEqual({ 0: { index: 0, text }, 1: { index: 0, text } });
   });
 
   it("does not split a UTF-16 surrogate pair and preserves accepted and dropped order", async () => {

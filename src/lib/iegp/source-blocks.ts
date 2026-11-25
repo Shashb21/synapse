@@ -772,7 +772,7 @@ export type ReparseResult = {
  */
 export const reparseSourceBlocks = assessmentSourceEdit(async function reparseSourceBlocks(args: {
   source_id: string;
-  sections: { heading: string; text: string; location: string }[];
+  sections: { heading: string; text: string; location: string; split_unit?: { index: number; text: string } }[];
 }): Promise<ReparseResult> {
   await requireSourceRow(args.source_id);
   const current = await listSourceBlocks(args.source_id);
@@ -830,12 +830,26 @@ export const reparseSourceBlocks = assessmentSourceEdit(async function reparseSo
     if (meta.original_text && squashText(meta.original_text) !== squashText(meta.current_text)) cover(meta.original_text);
     if (meta.deleted) cover(meta.current_text);
   }
+  // Reconcile a legacy whole block before checking individual new slices.
+  // Consume its text once per raw occurrence, even when the model dropped part of it.
+  const matchedSplitUnits = new Map<number, boolean>();
+  for (const { split_unit } of args.sections) {
+    if (!split_unit || matchedSplitUnits.has(split_unit.index)) continue;
+    const key = squashText(split_unit.text);
+    const remaining = covered.get(key) ?? 0;
+    matchedSplitUnits.set(split_unit.index, remaining > 0);
+    if (remaining > 0) covered.set(key, remaining - 1);
+  }
   const usedIds = new Set([...kept.map((b) => b.id), ...metas.map((m) => m.block_id)]);
   let ordinal = Math.max(0, ...[...usedIds].map(idOrdinal).filter((n) => n < 1_000_000));
   let skipped_duplicates = 0;
   let inserted = 0;
   for (const [index, section] of args.sections.entries()) {
     if (!section.text.trim()) continue;
+    if (section.split_unit && matchedSplitUnits.get(section.split_unit.index)) {
+      skipped_duplicates += 1;
+      continue;
+    }
     const key = squashText(section.text);
     const remaining = covered.get(key) ?? 0;
     if (remaining > 0) {

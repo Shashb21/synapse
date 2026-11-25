@@ -21,6 +21,10 @@ export type RawUnit = {
   preserveBoundaryWhitespace?: boolean;
 };
 
+/** One pre-split raw unit occurrence, local to this parse. */
+type SplitUnit = { index: number; text: string };
+type ParseUnit = RawUnit & { split_unit?: SplitUnit };
+
 type Ask = JsonCompletion;
 
 const BLOCK_KINDS = [
@@ -158,11 +162,12 @@ function materializeSplitBlocks(unit: RawUnit, blocks: UnitAnswer["blocks"]): st
 }
 
 /** Split oversized extracted units without changing their source text or location. */
-function splitOversizedUnits(units: RawUnit[]): RawUnit[] {
-  return units.flatMap((unit) => {
+function splitOversizedUnits(units: RawUnit[]): ParseUnit[] {
+  return units.flatMap((unit, index) => {
     if (unit.text.length <= CHUNK_CHARS) return [unit];
 
-    const parts: RawUnit[] = [];
+    const parts: ParseUnit[] = [];
+    const split_unit = { index, text: unit.text };
     let start = 0;
     while (start < unit.text.length) {
       let end = Math.min(start + CHUNK_CHARS, unit.text.length);
@@ -182,6 +187,7 @@ function splitOversizedUnits(units: RawUnit[]): RawUnit[] {
         location: unit.location,
         text: unit.text.slice(start, end),
         preserveBoundaryWhitespace: true,
+        split_unit,
       });
       start = end;
     }
@@ -292,6 +298,7 @@ export async function structureWithLlm(args: {
   dropped: { location: string; reason: string }[];
   /** The same dropped units with their raw text, so a human can restore one as a block. */
   dropped_units: DroppedUnit[];
+  split_units: Partial<Record<number, SplitUnit>>;
 }> {
   const entries = splitOversizedUnits(args.units).map((unit, index) => ({ id: `u${index + 1}`, unit }));
   const groups = chunk(entries);
@@ -339,6 +346,7 @@ export async function structureWithLlm(args: {
   const blocks: Omit<ParsedBlock, "id">[] = [];
   const dropped: { location: string; reason: string }[] = [];
   const dropped_units: DroppedUnit[] = [];
+  const split_units: Partial<Record<number, SplitUnit>> = {};
   for (const entry of entries) {
     const answer = answers.get(entry.id)!;
     if (answer.dropped_reason && answer.blocks.length === 0) {
@@ -350,10 +358,13 @@ export async function structureWithLlm(args: {
         ...(entry.unit.preserveBoundaryWhitespace ? { occurrence_id: entry.id } : {}),
       });
     }
-    for (const block of answer.blocks) blocks.push({ ...block, location: entry.unit.location });
+    for (const block of answer.blocks) {
+      if (entry.unit.split_unit) split_units[blocks.length] = entry.unit.split_unit;
+      blocks.push({ ...block, location: entry.unit.location });
+    }
   }
   if (blocks.length === 0) throw new Error(`The model found no content blocks in ${args.filename}.`);
-  return { blocks, dropped, dropped_units };
+  return { blocks, dropped, dropped_units, split_units };
 }
 
 const STAKEHOLDER_SYSTEM = `You read the opening of a pharma evidence-planning document and say which stakeholder function it comes from or speaks for.
@@ -407,13 +418,14 @@ export async function parseWithLlm(args: {
   document: ParsedDocument;
   dropped: { location: string; reason: string }[];
   dropped_units: DroppedUnit[];
+  split_units: Partial<Record<number, SplitUnit>>;
   stakeholder_rationale: string;
 }> {
   const mime = args.mime || mimeForFilename(args.filename);
   const units = await extractRawUnits({ filename: args.filename, buffer: args.buffer, mime });
   const requestBudget = args.requestBudget ?? createParseRequestBudget();
   const ask: Ask = (request) => args.ask({ ...request, requestBudget });
-  const { blocks, dropped, dropped_units } = await structureWithLlm({ filename: args.filename, units, includeStakeholder: true, ask });
+  const { blocks, dropped, dropped_units, split_units } = await structureWithLlm({ filename: args.filename, units, includeStakeholder: true, ask });
   const stakeholder = await classifyStakeholder({ filename: args.filename, blocks, ask });
   const id = hashId("DOC", `${args.filename}:${args.buffer.length}`);
   const numbered = blocks.map((block, index) => ({ ...block, id: `${id}-B${String(index + 1).padStart(2, "0")}` }));
@@ -431,6 +443,7 @@ export async function parseWithLlm(args: {
     },
     dropped,
     dropped_units,
+    split_units,
     stakeholder_rationale: stakeholder.rationale,
   };
 }

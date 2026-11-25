@@ -246,6 +246,33 @@ describe("S1 re-parse preserves duplicate occurrences", () => {
     await resetDemoSetup();
   }, 60_000);
 
+  it.each(["edited", "deleted"] as const)("preserves a legacy %s block when its raw unit is split", async (decision) => {
+    const first = "Original evidence. ".repeat(700);
+    const second = "Additional observations. ".repeat(300);
+    const text = first + second;
+    const { source_id, blocks } = await persistSourceAndBlocks({
+      title: "Oversized legacy evidence", source_type: "stakeholder_interview",
+      stakeholder_function: "medical_affairs", text,
+      sections: [{ heading: "Evidence", text, location: "p.1" }],
+    });
+    const block_id = blocks[0]!.id;
+    const corrected = "Reviewed evidence replaces the original observations.";
+    if (decision === "edited") {
+      await editSourceBlock({ block_id, text: corrected, rationale: "Correct the source", actor: ACTOR });
+    } else {
+      await deleteSourceBlock({ block_id, rationale: "Remove duplicate evidence", actor: ACTOR });
+    }
+
+    const slices = (index: number) => [first, second].map((text) => ({
+      heading: "Evidence", text, location: "p.1", split_unit: { index, text: first + second },
+    }));
+    const identicalIndependentOccurrence = decision === "edited" ? slices(1) : [];
+    const result = await reparseSourceBlocks({ source_id, sections: [...slices(0), ...identicalIndependentOccurrence] });
+    expect(result.skipped_duplicates).toBe(2);
+    expect(result.inserted).toBe(identicalIndependentOccurrence.length);
+    expect(result.blocks.map(block => block.text)).toEqual(decision === "edited" ? [corrected, first, second] : []);
+  });
+
   it("keeps one new peer when one identical block occurrence is human-retained", async () => {
     const repeated = "Repeated evidence.";
     const { source_id, blocks } = await persistSourceAndBlocks({
