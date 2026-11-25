@@ -10,6 +10,7 @@ import { providerApiKey } from "@/modules/llm/api-keys";
 import { isDemoReplayProvider, VELMARA_DEMO_FIXTURE } from "@/lib/demo/replay-provider";
 import { DemoReplayMissError, replayDelayMs, replayReply } from "@/lib/demo/replay";
 import { allowsDemoExecution, type DemoExecution } from "@/lib/demo/mode";
+import { DemoRecordingWriteError } from "./stage-errors";
 
 /**
  * Every model call, kept whole (KAN-91): the prompts (secrets redacted), the
@@ -209,8 +210,8 @@ export async function llmTotalsByStage(workspace_id: string): Promise<Record<str
  * One traced model call (KAN-91): asks the provider inside the run's trace step,
  * stores the whole call in llm_calls (also when the provider fails), and gives
  * the step the call's id, usage, cost and latency. Returns the reply text, as
- * the provider contract always has. A call that cannot be stored is noted on the
- * run, never lost silently, and does not throw away a reply already paid for.
+ * the provider contract always has. A failed insert is noted on the run.
+ * A demo recording requires a saved call before its reply can be used.
  */
 export async function tracedCompletion(args: {
   provider: LlmProvider;
@@ -302,6 +303,7 @@ export async function tracedCompletion(args: {
       usage = callUsage({ usage, status: "ok", reply: text, system_prompt: args.request.system, user_prompt: args.request.user });
       const latency_ms = Date.now() - began;
       const llm_call_id = await record(text, null);
+      if (llm_call_id === null && approvedDemo && args.demo?.mode === "record") throw new DemoRecordingWriteError();
       const known = usage as LlmUsage | null;
       const { cost_usd, price_source } = callPricing(args.provider.id, args.request.model, known);
       return { llm_call_id, usage: known, cost_usd, price_source, latency_ms, reply: text };

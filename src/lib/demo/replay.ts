@@ -43,9 +43,10 @@ const kindOf = (id: string) => id.match(/^[A-Za-z]+/)?.[0];
 const digest = (text: string) => createHash("sha256").update(text).digest("hex");
 const literal = (text: string) => digest(JSON.stringify(["literal", text]));
 
-function identity(request: ReplayRequest & { stage: StageId }): Omit<RecordedCall, "stage" | "reply"> {
+function identity(request: ReplayRequest & { stage: StageId }) {
   const ids: string[] = [];
   const slots = new Map<string, number>();
+  const candidateIds = new Set<string>();
   function slot(id: string): [string, number] {
     let position = slots.get(id);
     if (position === undefined) {
@@ -71,8 +72,9 @@ function identity(request: ReplayRequest & { stage: StageId }): Omit<RecordedCal
     if (user && typeof user === "object" && JSON.stringify(user) === request.user) {
       const references: [(string | number)[], string, [string, number], string][] = [];
       const content = mapReplayIds(request.stage, "request", user, (value, path) => {
-        const reference = mutableReference(value);
+        const reference = mutableReference(request.stage, "request", value, path);
         if (!reference) return value;
+        if (reference.candidate) candidateIds.add(value);
         references.push([path, reference.prefix, slot(reference.id), reference.suffix]);
         return null;
       });
@@ -80,16 +82,21 @@ function identity(request: ReplayRequest & { stage: StageId }): Omit<RecordedCal
       if (references.length) user_hash = digest(JSON.stringify(["json", content, references]));
     }
   }
-  return { purpose_hash, system_hash: literal(request.system), user_hash, ids };
+  return { fingerprints: { purpose_hash, system_hash: literal(request.system), user_hash, ids }, candidateIds };
 }
 
-function mappedReply(stage: StageId, raw: string, replacements: Map<string, string>): unknown {
-  return mapReplayIds(stage, "reply", extractJsonObject(raw), value => {
-    const reference = mutableReference(value);
+function mappedReply(stage: StageId, raw: string, replacements: Map<string, string>, candidateIds?: ReadonlySet<string>): unknown {
+  return mapReplayIds(stage, "reply", extractJsonObject(raw), (value, path) => {
+    const reference = mutableReference(stage, "reply", value, path);
     if (!reference) return value;
     const next = replacements.get(reference.id);
     if (!next) throw new Error("A recorded reply refers to an application ID outside its request.");
-    return reference.prefix + next + reference.suffix;
+    const rebound = reference.prefix + next + reference.suffix;
+    if (candidateIds && reference.candidate && (reference.candidate === "later" || candidateIds.size > 0) &&
+        !candidateIds.has(rebound)) {
+      throw new Error("A recorded reply refers to an extraction candidate outside its request.");
+    }
+    return rebound;
   });
 }
 
@@ -119,7 +126,7 @@ export function replayReply(call: ReplayRequest, recording: Recording = RECORDIN
       recording.fixture !== VELMARA_DEMO_FIXTURE || !Array.isArray(recording.calls)) {
     throw new DemoReplayMissError();
   }
-  const current = identity({ ...call, stage: call.stage });
+  const { fingerprints: current, candidateIds } = identity({ ...call, stage: call.stage });
   const key = recordedCallKey({ stage: call.stage, ...current });
   const matches = recording.calls.filter(recorded => recorded && recordedCallKey(recorded) === key);
   const recorded = matches.length === 1 ? matches[0] : null;
@@ -133,15 +140,15 @@ export function replayReply(call: ReplayRequest, recording: Recording = RECORDIN
   if (typeof rawReply !== "string") throw new DemoReplayMissError();
   const replacements = new Map(recorded.ids.map((id, i) => [id, current.ids[i]!]));
   try {
-    return JSON.stringify(mappedReply(call.stage, rawReply, replacements));
+    return JSON.stringify(mappedReply(call.stage, rawReply, replacements, candidateIds));
   } catch {
     throw new DemoReplayMissError();
   }
 }
 
 export function recordedCallFrom(row: { stage: StageId; purpose: string; system_prompt: string; user_prompt: string; reply: string }): ExportedCall {
-  const fingerprints = identity({ stage: row.stage, purpose: row.purpose, system: row.system_prompt, user: row.user_prompt });
-  mappedReply(row.stage, row.reply, new Map(fingerprints.ids.map(id => [id, id])));
+  const { fingerprints, candidateIds } = identity({ stage: row.stage, purpose: row.purpose, system: row.system_prompt, user: row.user_prompt });
+  mappedReply(row.stage, row.reply, new Map(fingerprints.ids.map(id => [id, id])), candidateIds);
   return {
     stage: row.stage,
     ...fingerprints,
@@ -153,6 +160,7 @@ export function recordedCallFrom(row: { stage: StageId; purpose: string; system_
 export function sameRecordedReply(first: ExportedCall, second: ExportedCall): boolean {
   if (recordedCallKey(first) !== recordedCallKey(second) || !requestIdsMatch(first.ids, second.ids)) return false;
   const replacements = new Map(first.ids.map((id, i) => [id, second.ids[i]!]));
+  // Both replies have passed request-scope validation in recordedCallFrom.
   return isDeepStrictEqual(mappedReply(first.stage, first.reply, replacements), extractJsonObject(second.reply));
 }
 

@@ -18,7 +18,9 @@ A platform owner can enable **Client demo mode** for a workspace dedicated to th
 | Ideation | Ideation | Choose **Generate ideas for these gaps**. Choose **Accept all as in demo**, review the list, then choose **Accept ideas**. The selected ideas and their decision history save together. If an idea has changed or the list includes overlapping proposals, reopen the list or review the ideas individually. |
 | Timeline | Gantt Timeline | Rebuild from the displayed Velmara start date, **19 October 2026**, then choose **Accept all as in demo** for dependencies and date estimates. |
 
-The current compatibility manifest supports exact parsing and classification for all seven approved files and the first file's gap and tactic extraction cycles. The full walkthrough still needs compatible fixture entries, starting with current mapping. A missed step shows recovery instructions and leaves existing checkpoints available. If a reset and the approved files still give a miss, contact the Synapse administrator for a fixture update.
+The compatibility manifest supports exact parsing and classification for all seven approved files. Current gap and tactic extraction send sectioned text with block IDs. The retained historical extraction replies apply to the earlier requests and cannot answer the current ones. The upload walkthrough stops at the first gap extraction. A full walkthrough requires approved recording entries for S2–S10.
+
+A missed step shows recovery instructions and leaves existing checkpoints available. If a reset and the approved files still give a miss, contact the Synapse administrator for a fixture update.
 
 ## Matching and trace
 
@@ -28,7 +30,7 @@ Replay appears as **Recorded Velmara demo** in stage results and as `demo-replay
 
 ## Refreshing the fixture
 
-The historical October 2026 run contains 354 Claude calls in `src/lib/demo/recording.json`. `src/lib/demo/recording-replay.json` binds compatible replies to current requests and pins reused historical replies by digest. The seventh file has a curated parse repair for 18 verbatim bullet markers required by the current source-coverage checks.
+The historical October 2026 run contains 354 Claude calls in `src/lib/demo/recording.json`. `src/lib/demo/recording-replay.json` binds compatible replies to current requests and pins reused historical replies by digest. The seventh file has a curated parse repair for 18 verbatim bullet markers required by the current source-coverage checks. The current S2 and S3 demo prompts use block handles based on each document's block order. Extraction checks the quote in its source section before saving the workspace block ID. A new recording must use these prompts to replay after a reset.
 
 A new recording uses a dedicated workspace with approved fictional data, an authorized provider route, a fresh recording UUID and UTC start and end times.
 

@@ -62,8 +62,32 @@ export function mapReplayIds(stage: StageId, direction: Direction, value: unknow
 const BASE = String.raw`(?:GAP|NEED|SRC|TAC|COV|RES|OBJ|BLK|EXP|ACT|IDEA|PROP|SUG)-\d{3,}|[A-Za-z]{1,8}_\d{8}T\d{6}_\d{4,5}_[a-z0-9]{4}`;
 export const WHOLE_ID = new RegExp(`^(?:${BASE})$`);
 const REFERENCE = new RegExp(`^(ACT-EXP-|ACT-|/gaps/|/sources/)?(${BASE})(-L(?:T)?[0-9]+|:proposal:[1-9][0-9]*)?$`);
+const EXTRACTION_CANDIDATE = new RegExp(`^(${BASE})(-(L|LT)(?:[0-9]{3,}(-W(?:[2-9]|[1-9][0-9]+))|[0-9]+))?$`);
 
-export function mutableReference(value: string): { prefix: string; id: string; suffix: string } | null {
+const extractionCandidatePaths = {
+  S2: {
+    kind: "L",
+    request: ["candidates.*.id", "candidates.*.subject"],
+    reply: ["gaps.*.id", "critiques.*.subject", "decisions.*.subject", "decisions.*.same_as_candidate"],
+  },
+  S3: {
+    kind: "LT",
+    request: ["rows.*.id", "candidates.*.id", "batch.*.id", "decide.*.id"],
+    reply: ["tactics.*.id", "reviews.*.id", "decisions.*.id", "decisions.*.duplicate_of"],
+  },
+};
+
+type MutableReference = { prefix: string; id: string; suffix: string; candidate?: "first" | "later" };
+
+export function mutableReference(stage: StageId, direction: Direction, value: string, path: Path): MutableReference | null {
+  if (stage === "S2" || stage === "S3") {
+    const candidate = EXTRACTION_CANDIDATE.exec(value);
+    const allowed = extractionCandidatePaths[stage];
+    if (candidate && candidate[1]!.startsWith("DOC_") && (direction === "reply" || candidate[3] === allowed.kind) &&
+        allowed[direction].includes(path.map(part => typeof part === "number" ? "*" : part).join("."))) {
+      return { prefix: "", id: candidate[1]!, suffix: candidate[2] ?? "", candidate: candidate[4] ? "later" : "first" };
+    }
+  }
   const match = REFERENCE.exec(value);
   if (!match) return null;
   const [, prefix = "", id, suffix = ""] = match;

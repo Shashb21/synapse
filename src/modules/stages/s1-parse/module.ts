@@ -1,4 +1,4 @@
-import { customerErrorMessage } from "@/modules/kernel/stage-errors";
+import { customerErrorMessage, DemoRecordingWriteError } from "@/modules/kernel/stage-errors";
 import { DemoReplayMissError } from "@/lib/demo/replay";
 import { queueSourceComparison } from "@/lib/ingest/compare-source";
 import { desc, eq, inArray } from "drizzle-orm";
@@ -10,6 +10,7 @@ import { registerModule } from "@/modules/kernel/registry";
 import type { SynapseModule } from "@/modules/kernel/contracts";
 import { persistSourceAndBlocks } from "@/lib/iegp/store";
 import {
+  listSourceBlocks,
   persistDroppedSourceUnits,
   recordLlmSourceStakeholder,
   reparseSourceBlocks,
@@ -241,9 +242,8 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
         documents.push({ id, file_id, source_id, parser: parsed.parser, blocks: blocks.length, quality });
         ctx.run.note(`parsed:${file_id}`, quality, `${blocks.length} block(s) → ${source_id}`);
       } catch (error) {
-        // A provider error (billing, key, rate limit, outage) fails every file the same
-        // way: stop the stage so the run fails and the cause reaches the person (KAN-68).
-        if (error instanceof ProviderError || error instanceof DemoReplayMissError) throw error;
+        // Provider and demo infrastructure failures stop the entire stage.
+        if (error instanceof ProviderError || error instanceof DemoReplayMissError || error instanceof DemoRecordingWriteError) throw error;
         const reason = customerErrorMessage(error);
         await markFileFailed({ id: file_id, note: reason });
         failures.push({ file_id, reason });
@@ -371,6 +371,17 @@ export async function listParsedDocuments(ids?: string[]): Promise<ParsedDocumen
   }
   const rows = await db().select().from(parsedDocuments).orderBy(desc(parsedDocuments.parsed_at));
   return rows.map(toRecord);
+}
+
+/** Load current editor blocks for extraction while retaining the selected parse IDs. */
+export async function listExtractionDocuments(ids?: string[]): Promise<ParsedDocumentRecord[]> {
+  const documents: ParsedDocumentRecord[] = [];
+  for (const document of await listParsedDocuments(ids)) {
+    const blocks = (await listSourceBlocks(document.source_id)).map(({ id, source_id, heading, text, location }) =>
+      ({ id, source_id, heading, text, location }));
+    if (blocks.length) documents.push({ ...document, blocks });
+  }
+  return documents;
 }
 
 export async function parsedDocument(id: string): Promise<ParsedDocumentRecord | null> {

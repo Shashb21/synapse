@@ -58,6 +58,17 @@ export class TrustedApplicationError extends Error {
   }
 }
 
+export class DemoRecordingWriteError extends TrustedApplicationError {
+  constructor() {
+    super(
+      "Synapse could not save this model call for the Velmara demo recording. Check the trace database, reset the demo and start a new recording with a fresh recording ID.",
+      "demo_recording_write_failed",
+      503,
+    );
+    this.name = "DemoRecordingWriteError";
+  }
+}
+
 /** Unknown failures require translation for every audience, including owners. */
 export function isAdminOnlyError(error: unknown): boolean {
   return !(error instanceof TrustedApplicationError);
