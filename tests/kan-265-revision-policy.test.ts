@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { inEvaluationIsolation, withEvaluationIsolation } from "@/modules/kernel/evaluation-isolation";
 import { recordDecisionExample, similarExamples, type DecisionExample } from "@/modules/kernel/decision-examples";
 import { lineageGroups, targetMetrics, subjectFingerprint } from "@/modules/kernel/revision-policy";
@@ -32,6 +32,19 @@ describe("KAN-265 independent evaluation", () => {
       expect(await similarExamples({ stage: "S8", text: "fiction", workspace_id: "fiction" })).toEqual([]);
       expect(await recordDecisionExample(example)).toBeNull();
     });
+    expect(inEvaluationIsolation()).toBe(false);
+  });
+  it("shares evaluation isolation across independently loaded route modules", async () => {
+    vi.resetModules();
+    const diagnosticRoute = await import("@/modules/kernel/evaluation-isolation");
+    expect(diagnosticRoute.inEvaluationIsolation).not.toBe(inEvaluationIsolation);
+
+    const diagnostic = diagnosticRoute.withEvaluationIsolation(async () => {
+      await Promise.resolve();
+      expect(inEvaluationIsolation()).toBe(true);
+    });
+    expect(inEvaluationIsolation()).toBe(false);
+    await diagnostic;
     expect(inEvaluationIsolation()).toBe(false);
   });
   it("connects a restaged subject to its original run through normalized content", () => {

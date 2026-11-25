@@ -1,14 +1,20 @@
+/** Keeps diagnostics isolated from live workspace writes and learning. */
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { ResolvedRoute } from "./contracts";
 import { isDemoReplayProvider } from "@/lib/demo/replay-provider";
 import { TrustedApplicationError } from "./stage-errors";
 
-const isolated = new AsyncLocalStorage<boolean>();
+// Next.js can load separate copies of this module while sharing the cached
+// database router. Every copy must read isolation from the same async scope.
+const globalScope = globalThis as typeof globalThis & { __synapseEvaluationIsolation?: AsyncLocalStorage<boolean> };
+const isolated = (globalScope.__synapseEvaluationIsolation ??= new AsyncLocalStorage<boolean>());
 
+/** Run a diagnostic with isolation active for its asynchronous work. */
 export function withEvaluationIsolation<T>(fn: () => Promise<T>): Promise<T> {
   return isolated.run(true, fn);
 }
 
+/** Whether the current asynchronous work belongs to a diagnostic. */
 export function inEvaluationIsolation(): boolean {
   return isolated.getStore() === true;
 }
