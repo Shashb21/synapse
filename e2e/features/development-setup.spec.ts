@@ -525,7 +525,10 @@ test("KAN-264 reuses the paid upload authorization after a lost response until t
   await expect(page.getByText(/Retrying this upload reuses its authorization/)).toBeVisible();
 
   await page.reload();
-  await page.getByRole("button", { name, exact: true }).click();
+  const savedDraft = page.getByRole("button", { name: `Open ${name}`, exact: true });
+  await savedDraft.click();
+  await expect(savedDraft).toHaveAttribute("aria-current", "true");
+  await expect(page.getByLabel("Experiment name", { exact: true })).toHaveValue(name);
   await chooseUpload();
   await upload.click();
   await expect(page.getByText(/This upload authorization was already used/)).toBeVisible();
