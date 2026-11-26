@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { isDemoModeWorkspace } from "@/lib/demo/mode";
 import { clientDemoFileFor, DEMO_UPLOAD_REFUSED } from "@/lib/demo/client-files";
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import { nowIso } from "@/modules/kernel/ids";
@@ -276,9 +276,23 @@ export async function listSourceFiles(): Promise<SourceFileRecord[]> {
   return rows.map(withoutContent);
 }
 
-export async function sourceFileContent(id: string): Promise<{ record: SourceFileRecord; buffer: Buffer } | null> {
+// Changes to either metadata or payload create a different PostgreSQL tuple version.
+const fileVersion = sql<string>`ctid::text || ':' || xmin::text`;
+
+/** Capture file identities and versions without fetching any uploaded payloads. */
+export async function sourceFileVersions(ids?: string[]) {
+  if (ids?.length === 0) return [];
   await ensurePlatformSchema([SOURCE_FILES_DDL]);
-  const rows = await db().select().from(sourceFiles).where(eq(sourceFiles.id, id)).limit(1);
+  return db().select({ id: sourceFiles.id, version: fileVersion }).from(sourceFiles)
+    .where(ids ? inArray(sourceFiles.id, ids) : undefined).orderBy(desc(sourceFiles.uploaded_at));
+}
+
+/** Read one file only if it still matches the optional snapshot version. */
+export async function sourceFileContent(id: string, expectedVersion?: string): Promise<{ record: SourceFileRecord; buffer: Buffer } | null> {
+  await ensurePlatformSchema([SOURCE_FILES_DDL]);
+  const rows = await db().select().from(sourceFiles).where(and(
+    eq(sourceFiles.id, id), expectedVersion === undefined ? undefined : eq(fileVersion, expectedVersion),
+  )).limit(1);
   const row = rows[0];
   if (!row) return null;
   return { record: withoutContent(row), buffer: Buffer.from(row.content_base64, "base64") };
@@ -297,7 +311,7 @@ export async function markFileFailed(args: { id: string; note: string }) {
 
 export async function unparsedFileIds(): Promise<string[]> {
   await ensurePlatformSchema([SOURCE_FILES_DDL]);
-  const rows = await db().select().from(sourceFiles).where(eq(sourceFiles.status, "uploaded"));
+  const rows = await db().select({ id: sourceFiles.id }).from(sourceFiles).where(eq(sourceFiles.status, "uploaded"));
   return rows.map((row) => row.id);
 }
 

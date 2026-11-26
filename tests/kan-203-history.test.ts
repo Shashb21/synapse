@@ -113,7 +113,7 @@ it('discards a credential echoed by the provider while retaining a failed receip
     const experiment = await createExperiment('Credential echo', null, 'owner');
     const parsed = { blocks: [{ id: 'b', text: 'Evidence.', heading: 'Evidence', location: '1' }] };
     await updateExperiment(experiment.id, 1, { document: { id: `${experiment.id}-source`, experiment_id: experiment.id, role: 'source', compatibility: 'compatible', filename: 'source.txt', sha256: sha256('Evidence.'), parsed_sha256: sha256(canonicalParsedJson(parsed)), parsed_at: '2026-10-30T00:00:00Z', parser: { name: 'test', version: '1', model: null, prompt: null }, parsed } as never, content_base64: 'RXZpZGVuY2Uu' });
-    const execution = await startExecution(experiment.id, { revision: 2, target: 'gap_extraction', config: (await import('@/modules/development/execution-schema')).executionConfigSchema.parse({ mode: 'single_pass' }), prerequisites: {}, cost_controls: { allowance_usd: 100, unknown_acknowledged: true } });
+    const execution = await startExecution(experiment.id, { revision: 2, target: 'gap_extraction', config: (await import('@/modules/development/execution-schema')).executionConfigSchema.parse({ mode: 'single_pass', stages: { gap_extraction: { route: { model: 'grok-3' } } } }), prerequisites: {}, cost_controls: { allowance_usd: 100, unknown_acknowledged: true } });
     await progressExecution(execution.id);
     const saved = await getExecution(experiment.id, execution.id);
     expect(saved.calls[0].status).toBe('failed');

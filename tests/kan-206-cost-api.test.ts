@@ -19,7 +19,7 @@ import { startEvaluationSchema } from '@/modules/development/evaluation-schema';
 import { getEvaluation } from '@/modules/development/evaluation-store';
 import { applyCostAction, getCostAccount, reserveCost, settleCost } from '@/modules/development/cost-store';
 import * as costStore from '@/modules/development/cost-store';
-import { rawCallBound } from '@/modules/development/cost';
+import { developmentUsageCost, rawCallBound } from '@/modules/development/cost';
 import * as costEvidence from '@/modules/development/cost';
 import { GET, POST } from '@/app/api/admin/development/[id]/executions/[executionId]/costs/route';
 import { POST as estimate } from '@/app/api/admin/development/[id]/cost-estimate/route';
@@ -27,7 +27,7 @@ import * as owner from '@/modules/auth/owner';
 import * as llm from '@/modules/kernel/llm';
 import { xaiGrok } from '@/modules/llm/provider';
 import type { DevelopmentDocument } from '@/modules/development/schema';
-const controls = { allowance_usd: 1, unknown_acknowledged: true };
+const controls = { allowance_usd: 10, unknown_acknowledged: true };
 const request = (value: unknown) => new Request('http://localhost', { method: 'POST', body: JSON.stringify(value) });
 const context = (experimentId: string, executionId: string) => ({ params: Promise.resolve({ id: experimentId, executionId }) });
 const quote = 'Comparative effectiveness remains unknown.';
@@ -39,12 +39,14 @@ async function fixture(cost_controls: typeof controls | null = controls, target:
   const execution = await startExecution(e.id, { revision: 2, target, config: executionConfigSchema.parse({ mode: 'single_pass' }), prerequisites: {}, cost_controls: cost_controls ?? undefined });
   return { e, execution };
 }
+const originalXaiModel = xaiGrok.default_model;
 beforeEach(() => {
+  xaiGrok.default_model = 'grok-3'; // Documented non-reasoning redirect with a funded text ceiling.
   vi.stubEnv('SYNAPSE_DEVELOPMENT_DELIVERY', 'github_actions'); vi.stubEnv('CRON_SECRET', 'isolated-test-worker-secret-long-enough'); vi.stubEnv('XAI_API_KEY', 'test-key-never-send');
   vi.spyOn(llm, 'isTestStub').mockReturnValue(false);
   vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Paid network forbidden.'));
 });
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+afterEach(() => { xaiGrok.default_model = originalXaiModel; vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 it('authorizes before decoding, rejects foreign execution IDs and client actors, previews every category', async () => {
   const { e, execution } = await fixture();
   expect((await GET(request({}), context('foreign', execution.id))).status).toBe(404);
@@ -55,7 +57,7 @@ it('authorizes before decoding, rejects foreign execution IDs and client actors,
   expect((await POST(new Request('http://localhost', { method: 'POST', body: 'invalid' }), context(e.id, execution.id))).status).toBe(403);
 });
 it('atomically shares one allowance across simultaneous generation/evaluation reservations and audits explicit resume', async () => {
-  const { e, execution } = await fixture();
+  const { e, execution } = await fixture({ ...controls, allowance_usd: 1 });
   const bound = { ...rawCallBound('openai', { model: 'gpt-4.1', system: '', user: '', temperature: 0, max_tokens: 1 }), cost_usd: 0.75 };
   const results = await Promise.allSettled([reserveCost(execution.id, `${execution.id}-g`, 'generation', bound), reserveCost(execution.id, `${execution.id}-e`, 'evaluation', bound)]);
   expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(1);
@@ -74,6 +76,7 @@ it('pauses at the real raw-call boundary and resumes the identical queued reques
   const { e, execution } = await fixture({ allowance_usd: 1, unknown_acknowledged: false });
   const send = vi.spyOn(xaiGrok, 'complete').mockImplementation(async (_request, _auth, hooks) => {
     expect(hooks?.maxAttempts).toBe(1);
+    hooks?.onUsage?.({ cost_in_usd_ticks: 3_750_000, input_tokens: 100, output_tokens: 100, total_tokens: 200, reasoning_tokens: null });
     return JSON.stringify({ gaps: [{ name: 'Comparative evidence', statement: quote, domain: 'comparative_effectiveness', source_quote: quote }] });
   });
   await progressExecution(execution.id);
@@ -81,7 +84,7 @@ it('pauses at the real raw-call boundary and resumes the identical queued reques
   expect(send).not.toHaveBeenCalled(); expect(paused.cost?.paused).toBe(true); expect(paused.calls[0].status).toBe('queued');
   const savedRequest = paused.calls[0].request;
   expect(await progressExecution(execution.id)).toEqual({ processed: false });
-  await applyCostAction(e.id, execution.id, { action: 'acknowledge_unknown' }, 'owner');
+  await applyCostAction(e.id, execution.id, { action: 'increase', amount_usd: 5 }, 'owner');
   expect((await getCostAccount(e.id, execution.id))?.paused).toBe(true);
   await applyCostAction(e.id, execution.id, { action: 'resume' }, 'owner');
   await progressExecution(execution.id); await progressExecution(execution.id);
@@ -96,12 +99,15 @@ it('pauses at the real raw-call boundary and resumes the identical queued reques
   expect((await getExecution(e.id, execution.id)).sections).toEqual(finished.sections);
 });
 it('preserves completed Run All sections while real generation and evaluation workers share the last allowance', async () => {
-  // Synthetic verified bounds exercise the known-price branch; real adapters remain explicitly unknown.
+  // Keep the historical narrow-allowance fixture. KAN-264 exercises real caps separately.
   const originalBound = costEvidence.rawCallBound;
   vi.spyOn(costEvidence, 'rawCallBound').mockImplementation((provider, raw) => ({ ...originalBound(provider, raw), cost_usd: 0.75 }));
-  vi.spyOn(costEvidence, 'developmentUsageCost').mockReturnValue({ cost_usd: 0.75, price: null, reason: null });
-  const { e, execution } = await fixture(controls, 'all');
-  const send = vi.spyOn(xaiGrok, 'complete').mockImplementation(async raw => {
+  const { e, execution } = await fixture({ ...controls, allowance_usd: 1 }, 'all');
+  const gate = Promise.withResolvers<void>();
+  let competing = false;
+  const send = vi.spyOn(xaiGrok, 'complete').mockImplementation(async (raw, _auth, hooks) => {
+    if (competing) await gate.promise;
+    hooks?.onUsage?.({ cost_in_usd_ticks: 7_500_000_000, input_tokens: 200_000, output_tokens: 50_000, total_tokens: 250_000, reasoning_tokens: null });
     if (raw.system.includes('independent provisional evaluator')) return JSON.stringify({ criteria: [], matches: [], unmatched_output_ids: [], unmatched_reference_ids: [] });
     return JSON.stringify({ gaps: [{ name: 'Comparative evidence', statement: quote, domain: 'comparative_effectiveness', source_quote: quote }], tactics: [] });
   });
@@ -118,15 +124,19 @@ it('preserves completed Run All sections while real generation and evaluation wo
   expect(await progressEvaluation(evaluation.id)).toEqual({ processed: false });
   await applyCostAction(e.id, execution.id, { action: 'increase', amount_usd: 0.5 }, 'owner');
   await applyCostAction(e.id, execution.id, { action: 'resume' }, 'owner');
-  await Promise.all([progressExecution(execution.id), progressEvaluation(evaluation.id)]);
-  const competing = await getExecution(e.id, execution.id);
+  competing = true;
+  const simultaneous = [progressExecution(execution.id), progressEvaluation(evaluation.id)];
+  try { await Promise.race(simultaneous); }
+  finally { gate.resolve(); }
+  await Promise.all(simultaneous);
+  const resumed = await getExecution(e.id, execution.id);
   const assessed = await getEvaluation(e.id, evaluation.id);
   expect(send).toHaveBeenCalledTimes(2);
-  expect(competing.cost?.paused).toBe(true);
-  expect(competing.cost!.reservations.filter(r => r.status === 'active').reduce((sum, r) => sum + (r.bound_usd ?? 0), 0) + (competing.cost?.generation_usage_usd ?? 0) + (competing.cost?.evaluation_usage_usd ?? 0)).toBe(1.5);
-  expect(competing.sections[0]).toEqual(paused.sections[0]);
-  expect(competing.calls.find(call => call.id === queued.id)?.request).toEqual(queued.request);
-  expect([competing.calls.find(call => call.id === queued.id)?.status, assessed.status].filter(status => status === 'queued')).toHaveLength(1);
+  expect(resumed.cost?.paused).toBe(true);
+  expect(resumed.cost!.reservations.filter(r => r.status === 'active').reduce((sum, r) => sum + (r.bound_usd ?? 0), 0) + (resumed.cost?.generation_usage_usd ?? 0) + (resumed.cost?.evaluation_usage_usd ?? 0)).toBe(1.5);
+  expect(resumed.sections[0]).toEqual(paused.sections[0]);
+  expect(resumed.calls.find(call => call.id === queued.id)?.request).toEqual(queued.request);
+  expect([resumed.calls.find(call => call.id === queued.id)?.status, assessed.status].filter(status => status === 'queued')).toHaveLength(1);
   // Funding does not resume implicitly; only the losing, saved call may dispatch after explicit resume.
   await applyCostAction(e.id, execution.id, { action: 'increase', amount_usd: 1 }, 'owner');
   expect((await getCostAccount(e.id, execution.id))?.paused).toBe(true);
@@ -150,40 +160,41 @@ it('defaults missing controls to no sends and requires finite corrections with a
 });
 it('retains uncertain reservations, settles only saved evidence, and never resumes uncertain sends', async () => {
   const { e, execution } = await fixture();
-  const bound = rawCallBound('openai', { model: 'gpt-4.1', system: '', user: '', temperature: 0, max_tokens: 1 });
-  await reserveCost(execution.id, `${execution.id}-unknown`, 'generation', bound);
+  const legacy = `${execution.id}-historical`;
+  await sharedDb().execute(sql`insert into development_cost_reservations(call_id,execution_id,kind,bound_evidence,status) values(${legacy},${execution.id},'generation','{"cost_usd":null}'::jsonb,'active')`);
   expect((await getCostAccount(e.id, execution.id))?.unknown_active_reservations).toBe(1);
-  await settleCost(execution.id, `${execution.id}-unknown`, { cost_usd: null, price: null, reason: 'Missing provider counts.' });
+  await settleCost(execution.id, legacy, { cost_usd: null, price: null, reason: 'Missing provider counts.' });
   expect((await getCostAccount(e.id, execution.id))?.unknown_usage_calls).toBe(1);
+  await settleCost(execution.id, legacy, developmentUsageCost('openai', 'gpt-4.1', { source: 'provider', cached_input_tokens: 0, input_tokens: 1000, output_tokens: 1000, total_tokens: 2000, reasoning_tokens: null }));
   const send = vi.spyOn(xaiGrok, 'complete').mockRejectedValue(new Error('Connection lost after dispatch.'));
   await progressExecution(execution.id);
-  expect(send).toHaveBeenCalledOnce(); expect((await getCostAccount(e.id, execution.id))?.unknown_active_reservations).toBe(1);
+  expect(send).toHaveBeenCalledOnce();
+  expect((await getCostAccount(e.id, execution.id))?.reservations.find(r => r.call_id !== legacy)).toMatchObject({ status: 'active', bound_usd: 3.14, usage_cost: { cost_usd: null } });
   await progressExecution(execution.id); expect(send).toHaveBeenCalledOnce();
   await expect(applyCostAction(e.id, execution.id, { action: 'resume' }, 'owner')).rejects.toMatchObject({ code: 'uncertain_call' });
 });
 it('separates exact known generation/evaluation usage, price provenance and reported corrections', async () => {
   const { e, execution } = await fixture();
   const bound = rawCallBound('openai', { model: 'gpt-4.1', system: '', user: '', temperature: 0, max_tokens: 1 });
-  const { developmentUsageCost } = await import('@/modules/development/cost');
-  const usage = developmentUsageCost('openai', 'gpt-4.1', { source: 'provider', input_tokens: 1000, output_tokens: 1000, total_tokens: 2000, reasoning_tokens: null });
+  const usage = developmentUsageCost('openai', 'gpt-4.1', { source: 'provider', cached_input_tokens: 0, input_tokens: 1000, output_tokens: 1000, total_tokens: 2000, reasoning_tokens: null });
   for (const kind of ['generation', 'evaluation'] as const) {
     const call = `${execution.id}-${kind}`;
     await reserveCost(execution.id, call, kind, bound); await settleCost(execution.id, call, usage);
   }
   const account = await getCostAccount(e.id, execution.id);
   expect(account?.generation_usage_usd).toBe(0.01); expect(account?.evaluation_usage_usd).toBe(0.01);
-  expect(account?.reservations[0].usage_cost?.price).toMatchObject({ model: 'gpt-4.1', updated_at: '2026-09-23' });
+  expect(account?.reservations[0].usage_cost?.price).toMatchObject({ model: 'gpt-4.1', updated_at: '2026-11-25' });
   expect(account?.reported_total).toBeNull(); expect(account?.estimate.total_usd).toBeNull();
   await expect(settleCost(execution.id, 'invalid', { cost_usd: Infinity, price: null, reason: null })).rejects.toMatchObject({ code: 'invalid_usage_cost' });
   await expect(reserveCost(execution.id, 'invalid', 'generation', { ...bound, cost_usd: -1 })).rejects.toMatchObject({ code: 'invalid_bound' });
 });
-it('requires unknown acknowledgment even with override and audits authenticated API actions', async () => {
+it('audits owner decisions while refusing unknown costs even with an override', async () => {
   const { e, execution } = await fixture({ allowance_usd: 0, unknown_acknowledged: false });
-  await expect(applyCostAction(e.id, execution.id, { action: 'resume' }, 'owner')).rejects.toMatchObject({ code: 'cost_paused' });
   await applyCostAction(e.id, execution.id, { action: 'override', enabled: true }, 'owner');
+  await applyCostAction(e.id, execution.id, { action: 'acknowledge_unknown' }, 'owner');
   await applyCostAction(e.id, execution.id, { action: 'resume' }, 'owner');
-  const bound = rawCallBound('openai', { model: 'gpt-4.1', system: '', user: '', temperature: 0, max_tokens: 1 });
-  await expect(reserveCost(execution.id, 'not-authorized', 'generation', bound)).rejects.toMatchObject({ code: 'cost_paused' });
+  const bound = rawCallBound('openai', { model: 'gpt-experiment-unknown', system: '', user: '', temperature: 0, max_tokens: 1 });
+  await expect(reserveCost(execution.id, 'not-authorized', 'generation', bound)).rejects.toMatchObject({ code: 'unverified_route_cost' });
   const access = await owner.ownerAccess();
   vi.spyOn(owner, 'ownerAccess').mockResolvedValue({ ...access, owner: true, email: 'verified@example.test' });
   const response = await POST(request({ action: 'acknowledge_unknown' }), context(e.id, execution.id));
@@ -206,7 +217,7 @@ it.each(['code identity', 'AI switch', 'worker lease'] as const)('does not let s
   const send = vi.spyOn(xaiGrok, 'complete').mockResolvedValue('{}');
   await progressExecution(execution.id);
   expect((await getCostAccount(e.id, execution.id))?.paused).toBe(true);
-  await applyCostAction(e.id, execution.id, { action: 'acknowledge_unknown' }, 'owner');
+  await applyCostAction(e.id, execution.id, { action: 'increase', amount_usd: 3 }, 'owner');
   await applyCostAction(e.id, execution.id, { action: 'resume' }, 'owner');
   if (safety === 'code identity') vi.spyOn(executionSafety, 'executionCodeIdentity').mockReturnValue('different-deployed-code');
   if (safety === 'AI switch') await setAiSection({ section: 'gap_extraction', enabled: false, actor_name: 'test' });
@@ -228,7 +239,9 @@ it.each(['code identity', 'AI switch', 'worker lease'] as const)('does not let s
   }
 });
 it.each(['generation', 'evaluation'] as const)('preserves an unsent %s reservation when another worker pauses the shared account', async kind => {
-  const { e, execution } = await fixture();
+  const originalBound = costEvidence.rawCallBound;
+  vi.spyOn(costEvidence, 'rawCallBound').mockImplementation((provider, raw) => ({ ...originalBound(provider, raw), cost_usd: 0.75 }));
+  const { e, execution } = await fixture({ ...controls, allowance_usd: kind === 'generation' ? 1 : 1.75 });
   const send = vi.spyOn(xaiGrok, 'complete').mockResolvedValue(JSON.stringify({ gaps: [{ name: 'Comparative evidence', statement: quote, domain: 'comparative_effectiveness', source_quote: quote }] }));
   let evaluationId: string | undefined;
   if (kind === 'evaluation') {
@@ -239,8 +252,6 @@ it.each(['generation', 'evaluation'] as const)('preserves an unsent %s reservati
     send.mockResolvedValue(JSON.stringify({ criteria: evaluation.manifest.criteria.map(c => ({ criterion_id: c.id, score: 3, reason: 'Supported.' })), matches: [], unmatched_output_ids: [], unmatched_reference_ids: [] }));
     send.mockClear();
   }
-  const originalBound = costEvidence.rawCallBound;
-  vi.spyOn(costEvidence, 'rawCallBound').mockImplementation((provider, raw) => ({ ...originalBound(provider, raw), cost_usd: 0.75 }));
   const originalReserve = costStore.reserveCost;
   let callId = '';
   const reserve = vi.spyOn(costStore, 'reserveCost').mockImplementationOnce(async (executionId, id, callKind, bound) => {
@@ -248,7 +259,7 @@ it.each(['generation', 'evaluation'] as const)('preserves an unsent %s reservati
     await originalReserve(executionId, id, callKind, bound);
     // Recover a committed pre-send reservation after a competing worker exhausts the shared allowance.
     await expect(originalReserve(executionId, `${id}-competing`, callKind === 'generation' ? 'evaluation' : 'generation', bound)).rejects.toMatchObject({ code: 'cost_paused' });
-    await expect(originalReserve(executionId, id, callKind, { ...bound, cost_usd: 0.5 })).rejects.toMatchObject({ code: 'reservation_conflict' });
+    await expect(originalReserve(executionId, id, callKind, { ...bound, cost_usd: 0.5 })).rejects.toMatchObject({ code: 'cost_paused' });
     await originalReserve(executionId, id, callKind, bound);
   });
   const progress = () => kind === 'generation' ? progressExecution(execution.id) : progressEvaluation(evaluationId!);
@@ -289,13 +300,12 @@ it.each((['generation', 'evaluation'] as const).flatMap(kind => [false, true].fl
     send.mockResolvedValue(JSON.stringify({ criteria: evaluation.manifest.criteria.map(c => ({ criterion_id: c.id, score: 3, reason: 'Supported.' })), matches: [], unmatched_output_ids: [], unmatched_reference_ids: [] }));
     send.mockClear();
   }
-  if (failedSend) send.mockImplementation(async (_request, _auth, hooks) => {
-    hooks?.onUsage?.({ source: 'provider', input_tokens: 10, output_tokens: 4, total_tokens: 14, reasoning_tokens: null });
-    throw new Error('Saved provider failure.');
+  const reply = send.getMockImplementation()!;
+  send.mockImplementation(async (request, auth, hooks) => {
+    hooks?.onUsage?.({ source: 'provider', cost_in_usd_ticks: 2_000_000_000, input_tokens: 100_000, output_tokens: 30_000, total_tokens: 130_000, reasoning_tokens: null });
+    if (failedSend) throw new Error('Saved provider failure.');
+    return reply(request, auth, hooks);
   });
-  const originalBound = costEvidence.rawCallBound;
-  const bound = vi.spyOn(costEvidence, 'rawCallBound').mockImplementation((provider, raw) => ({ ...originalBound(provider, raw), cost_usd: 0.75 }));
-  const usage = vi.spyOn(costEvidence, 'developmentUsageCost').mockReturnValue({ cost_usd: 0.2, price: null, reason: null });
   const settlement = vi.spyOn(costStore, 'settleCost').mockRejectedValueOnce(new Error('Transient ledger unavailable.'));
   const release = interrupted ? (kind === 'generation'
     ? vi.spyOn(executionStore, 'releaseExecution').mockRejectedValue(new Error('Simulated process interruption.'))
@@ -309,7 +319,7 @@ it.each((['generation', 'evaluation'] as const).flatMap(kind => [false, true].fl
   expect(send).toHaveBeenCalledOnce();
   expect(saved.status).toBe(kind === 'evaluation' ? 'received' : failedSend ? 'failed' : 'succeeded');
   expect(saved.receipt !== null).toBe(!failedSend);
-  if (failedSend) expect(saved.failure_accounting?.usage).toMatchObject({ source: 'provider', input_tokens: 10, output_tokens: 4 });
+  if (failedSend) expect(saved.failure_accounting?.usage).toMatchObject({ source: 'provider', input_tokens: 100_000, output_tokens: 30_000 });
   const reservations = (await getCostAccount(e.id, execution.id))!.reservations.filter(r => r.kind === kind);
   expect(reservations).toHaveLength(1);
   expect(reservations[0]).toMatchObject({ status: 'active', usage_cost: null });
@@ -340,5 +350,5 @@ it.each((['generation', 'evaluation'] as const).flatMap(kind => [false, true].fl
   expect(await getCostAccount(e.id, execution.id)).toEqual(account);
   expect(send).toHaveBeenCalledOnce();
   if (failedSend) await expect(applyCostAction(e.id, execution.id, { action: 'resume' }, 'owner')).rejects.toMatchObject({ code: 'uncertain_call' });
-  settlement.mockRestore(); bound.mockRestore(); usage.mockRestore(); send.mockRestore();
+  settlement.mockRestore(); send.mockRestore();
 });

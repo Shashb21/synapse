@@ -7,8 +7,9 @@ import {
   planState,
   firstOpenGap,
   planAction,
+  preparePrioritizationInventory,
   runStage,
-  seedMapped,
+  seedPrioritizable,
   validateBandHigh,
 } from "../support/synapse";
 import { freshWorkspace } from "../support/session";
@@ -22,7 +23,7 @@ test.describe("Tactic Ideation place", () => {
   let low: { gap_id: string; name: string } | null = null;
 
   test.beforeAll(async ({ request }) => {
-    await seedMapped(request);
+    await seedPrioritizable(request);
     await runStage(request, "S8");
     high = await firstOpenGap(request);
     await validateBandHigh(request, high.gap_id, "Blocks the EU5 submission, so it is High");
@@ -254,6 +255,7 @@ test.describe("Retained tactic discovery (KAN-137)", () => {
     // Priority editing serves Open gaps. Reopen through the existing relationship editor first.
     const currentLink = (await request.get(`/api/gaps/${gapId}`).then(response => response.json())).coverages.find((row: { tactic_id: string }) => row.tactic_id === tacticId)!;
     await iegpAction(request, { action: "lock_overall", coverage_id: currentLink.id, ...await coverageOpeningTokens(request, tacticId, currentLink.id), overall: "not_relevant", rationale: "Review shows this cohort does not cover the remaining comparison" });
+    await iegpAction(request, { action: "validate_gap", gap_id: gapId, note: "Confirmed the revised Open evidence assessment" });
     for (const band of ["medium", "low"] as const) {
       await planAction(request, { action: "set_placement", gap_id: gapId, band, validate: true, rationale: `Review the ${band} priority after initial planning`, reason: "Evidence planning priorities have changed" });
       await page.reload();
@@ -328,6 +330,7 @@ test.describe("Retained tactic discovery (KAN-137)", () => {
     page.setDefaultTimeout(15_000);
     const added = await iegpAction(request, { action: "create_gap", name: "Renewed review comparison", statement: "Short-term evidence is missing", domain: "comparative_effectiveness", settings: "1L, 2L" });
     const reviewedId = String(added.id);
+    await preparePrioritizationInventory(request);
     await validateBandHigh(request, reviewedId, "The comparison still affects the committee decision");
     await planAction(request, { action: "add_proposal", gap_id: reviewedId, name: "Existing review option", type: "rwe_study", evidence_question: "What is comparative survival?", rationale: "Keep the earlier option available during review" });
     await page.goto(`/gaps/${reviewedId}`);
@@ -371,6 +374,7 @@ test.describe("Retained tactic discovery (KAN-137)", () => {
     const group = page.locator("section").filter({ has: page.getByRole("link", { name: "Renewed review comparison", exact: true }) }).first();
     await expect(group).toContainText("Existing options and planned work");
     await expect(group.getByRole("button", { name: "Add idea by hand", exact: true })).toHaveCount(0);
+    await iegpAction(request, { action: "validate_gap", gap_id: reviewedId, note: "Confirmed the revised evidence need" });
     await validateBandHigh(request, reviewedId, "Reviewed the changed context and retained High");
     await page.goto("/?place=tactics");
     const active = await openIdeationCard(page, reviewedId);

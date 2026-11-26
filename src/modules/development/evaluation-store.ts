@@ -1,6 +1,6 @@
 /** Durable independent evaluator jobs with immutable manifests, receipts and terminal results. */
 import { randomUUID } from 'node:crypto';
-import { getCostAccount, type CostAccountSummary } from './cost-store';
+import { getCostAccount, requireCostDispatch, type CostAccountSummary } from './cost-store';
 import { sql } from 'drizzle-orm';
 import { sharedDb } from '@/lib/iegp/db';
 import { DevelopmentError, type DevelopmentDocument, type DevelopmentSection } from './schema';
@@ -75,9 +75,14 @@ export async function requireEvaluationClaim(id: string, token: string): Promise
   if (!rows[0]) throw new DevelopmentError(409, 'claim_lost', 'Evaluation worker ownership expired; do not resend.');
 }
 /** Only one worker can commit a sending marker for this evaluation. */
-export async function beginEvaluationSend(id: string, token: string): Promise<void> {
-  const rows = await sharedDb().execute(sql`update development_evaluations set status='sending',sending_at=now() where id=${id} and status='running' and claim_token=${token} and claim_until>now() returning id`);
-  if (!rows[0]) throw new DevelopmentError(409, 'dispatch_conflict', 'This evaluation cannot be dispatched again.');
+export async function beginEvaluationSend(id: string, token: string, executionId: string): Promise<void> {
+  await sharedDb().transaction(async tx => {
+    await requireCostDispatch(tx, executionId, id, 'evaluation');
+    const rows = await tx.execute(sql`update development_evaluations set status='sending',sending_at=now()
+      where id=${id} and manifest->>'execution_id'=${executionId} and status='running' and sending_at is null
+      and claim_token=${token} and claim_until>clock_timestamp() returning id`);
+    if (!rows[0]) throw new DevelopmentError(409, 'dispatch_conflict', 'This evaluation cannot be dispatched again.');
+  });
 }
 /** Persist raw receipt and accounting separately from reply parsing or result publication. */
 export async function settleEvaluationReceipt(id: string, token: string, receipt: CallReceipt | null, error: string | null = null, failure: ExecutionCall['failure_accounting'] = null): Promise<void> {

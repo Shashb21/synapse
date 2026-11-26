@@ -236,6 +236,22 @@ describe("KAN-111 selective clear", () => {
     const deniedRuns = runs.filter(run => !previousRunIds.has(run.id));
     expect(deniedRuns).toEqual([{ id: expect.any(String), stage, status: "error", error: expect.stringContaining("still running") }]);
   }));
+  it("rolls back mapping candidates when saving an accepted assessment fails", async () => isolated(async (pg, schema) => {
+    const who = { actor_name: actor.name, actor_function: actor.function };
+    const gap_id = await createGap({ statement: "Comparative evidence is missing", ...who });
+    const tactic_id = await recordMissedTactic({ name: "Comparative evidence study", type: "registry",
+      status: "planned", evidence_question: "Comparative evidence is missing", ...who });
+    await pg.unsafe(`alter table "${schema}".coverages add constraint fixture_failure check (false) not valid`);
+    const response = await modulePost(new Request("http://localhost/api/modules", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ stage: "S4", input: { gap_ids: [gap_id], tactic_ids: [tactic_id] } }),
+    }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: expect.stringContaining("Could not save the relationship") });
+    expect(await db().execute(sql`select id from mapping_candidates`)).toEqual([]);
+    expect(await db().execute(sql`select id from coverages`)).toEqual([]);
+    expect(await db().execute(sql`select status from module_runs where stage = 'S4'`)).toEqual([{ status: "error" }]);
+  }));
   it("rolls back standalone stage writes and preserves the failed run record", async () => isolated(async () => {
     await ingest();
     const before = await loadState();
@@ -244,17 +260,18 @@ describe("KAN-111 selective clear", () => {
       await original(input, ctx);
       throw new Error("standalone failure after mapping writes");
     });
+    const diagnostic = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const response = await modulePost(new Request("http://localhost/api/modules", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ stage: "S4", input: {} }) }));
       expect(response.status).toBe(400);
-    } finally { spy.mockRestore(); }
+      expect(diagnostic.mock.calls).toEqual([["API action failed", { category: "unexpected", stage: "S4" }]]);
+    } finally { spy.mockRestore(); diagnostic.mockRestore(); }
     expect(await loadState()).toEqual(before);
     expect(await db().execute(sql`select * from mapping_candidates`)).toEqual([]);
     expect(await db().execute(sql`select status, error from module_runs where stage = 'S4' and status = 'error'`)).toEqual([{ status: "error", error: "standalone failure after mapping writes" }]);
   }));
-  it("coordinates a real standalone S4 API run with clear after its workspace snapshot is read", async () => isolated(async () => {
+  it("allows clear during S4 computation and prevents publication from the cleared snapshot", async () => isolated(async () => {
     await ingest();
-    const before = await loadState();
     const who = { actor_name: actor.name, actor_function: actor.function };
     const manualGap = await createGap({ statement: "Comparative evidence is missing", ...who });
     const manualTactic = await recordMissedTactic({ name: "Comparative evidence study", type: "registry", status: "planned", evidence_question: "Comparative evidence is missing", ...who });
@@ -284,22 +301,15 @@ describe("KAN-111 selective clear", () => {
       resume();
       try { result = await running; } finally { spy.mockRestore(); }
     }
-    expect(cleared?.status).toBe(409);
-    expect(await cleared!.json()).toMatchObject({ code: "ingest_busy" });
-    expect(result!.status).toBe(200);
-    const candidates = await db().execute(sql`select gap_id, tactic_id from mapping_candidates`);
-    expect(candidates.some(c => c.gap_id === manualGap && c.tactic_id === manualTactic)).toBe(true);
-    expect(candidates.some(c => c.gap_id === before.gaps[0].id)).toBe(true);
-    const mapped = (await loadState()).coverages.find(c => c.gap_id === manualGap && c.tactic_id === manualTactic)!;
-    expect(mapped).toBeDefined();
-    expect((await loadState()).gaps.find(g => g.id === manualGap)?.status).toBe("validated_partial");
-    await clearIngestedFiles();
+    expect(cleared?.status).toBe(200);
+    expect(result!.status).toBe(409);
+    expect(await result!.json()).toMatchObject({ code: "stage_inputs_changed" });
     expect(await db().execute(sql`select * from mapping_candidates`)).toEqual([]);
     const after = await loadState();
     expect(after.sources).toEqual([]);
     expect(after.gaps.map(g => g.id)).toEqual([manualGap]);
     expect(after.tactics.map(t => t.id)).toEqual([manualTactic]);
-    expect(after.coverages.map(c => c.id)).not.toContain(mapped.id);
+    expect(after.coverages).toEqual([]);
     expect(after.gaps.find(g => g.id === manualGap)?.status).toBe("validated_open");
   }));
   it.each(["dimension", "overall", "confirm", "accept", "save", "confirm-noop", "save-noop"])("retains the exact S4 relationship after explicit human %s", async action => isolated(async () => {

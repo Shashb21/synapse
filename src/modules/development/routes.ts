@@ -1,6 +1,6 @@
 /** Frozen experiment role routes, resolved without reading or mutating shared routing. */
 import { findProvider, providerServes, NoRouteError } from '@/modules/llm/provider';
-import { providerConfigured } from '@/modules/llm/api-keys';
+import { approvedProviderFallbacks, providerConfigured } from '@/modules/llm/api-keys';
 import type { CompletionRole, ResolvedRoute } from '@/modules/kernel/contracts';
 import { EXECUTION_ROLES, SECTION_STAGES, type ExecutionConfig, type ExecutionRoute } from './execution-schema';
 import type { DevelopmentSection } from './schema';
@@ -8,7 +8,8 @@ export type FrozenRoute = { requested: ExecutionRoute; actual: ResolvedRoute; ac
 export type FrozenRoutes = Record<DevelopmentSection, Partial<Record<CompletionRole, FrozenRoute>>>;
 /** Resolve only explicitly permitted credential fallbacks and retain both route identities. */
 export function freezeRoute(section: DevelopmentSection, requested: ExecutionRoute): FrozenRoute {
-  for (const id of [requested.provider_id, ...requested.fallbacks]) {
+  const approved = approvedProviderFallbacks(requested.provider_id);
+  for (const id of [requested.provider_id, ...requested.fallbacks.filter(id => approved.includes(id))]) {
     const provider = findProvider(id);
     if (!provider || provider.auth !== 'api_key' || !providerConfigured(provider)) continue;
     const model = id === requested.provider_id ? requested.model : provider.default_model;
@@ -17,6 +18,12 @@ export function freezeRoute(section: DevelopmentSection, requested: ExecutionRou
     return { requested: structuredClone(requested), actual, actual_temperature: provider.sendsTemperature?.(model) === false ? null : requested.temperature };
   }
   throw new NoRouteError('Configure credentials for the requested provider or an explicitly permitted fallback.');
+}
+/** A queued experiment can outlive the deployment approval in force when it was frozen. */
+export function frozenRouteAllowed(route: FrozenRoute): boolean {
+  const primary = route.requested.provider_id;
+  return primary === route.actual.provider_id ||
+    (route.requested.fallbacks.includes(route.actual.provider_id) && approvedProviderFallbacks(primary).includes(route.actual.provider_id));
 }
 /** Freeze active generation roles; the evaluator is configuration only and never dispatched. */
 export function freezeRoutes(config: ExecutionConfig, sections: DevelopmentSection[]): FrozenRoutes {

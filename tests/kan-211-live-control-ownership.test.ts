@@ -93,14 +93,20 @@ it.each([
   expect(await sharedDb().execute(sql`select * from accuracy_routing_config order by call_kind, agent_role`)).toEqual(accuracy);
 });
 
-it('fails closed for unavailable credentials, and only uses an explicitly saved backup without changing saved configuration', async () => {
+it('fails closed for unavailable credentials, and requires both approval and a saved backup without changing saved configuration', async () => {
   expect((await control()).status).toBe(200);
   vi.stubEnv('XAI_API_KEY', '');
+  vi.stubEnv('SYNAPSE_APPROVED_FALLBACK_PAIRS', 'xai-grok>openai');
   const before = await routeConfig('S2');
   await expect(resolveRouteForRun('S2')).rejects.toThrow('XAI_API_KEY');
   expect(await routeConfig('S2')).toEqual(before);
   expect((await control({ fallbacks: ['openai'] })).status).toBe(200);
   const backedUp = await routeConfig('S2');
+  vi.stubEnv('SYNAPSE_APPROVED_FALLBACK_PAIRS', '');
+  await expect(resolveRouteForRun('S2')).rejects.toThrow('XAI_API_KEY');
+  expect(await routeConfig('S2')).toEqual(backedUp);
+
+  vi.stubEnv('SYNAPSE_APPROVED_FALLBACK_PAIRS', 'xai-grok>openai');
   expect(await resolveRouteForRun('S2')).toMatchObject({ provider_id: 'openai', degraded: true });
   expect(await routeConfig('S2')).toEqual(backedUp);
   expect(globalThis.fetch).not.toHaveBeenCalled();

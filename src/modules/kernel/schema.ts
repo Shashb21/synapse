@@ -161,6 +161,8 @@ export const priorityPlacements = pgTable("priority_placements", {
   actor_name: text("actor_name"),
   actor_function: text("actor_function"),
   at: text("at").notNull(),
+  human_axes: jsonb("human_axes").$type<string[]>().notNull().default([]),
+  human_band: boolean("human_band").notNull().default(false),
 });
 
 export const ideationProposals = pgTable("ideation_proposals", {

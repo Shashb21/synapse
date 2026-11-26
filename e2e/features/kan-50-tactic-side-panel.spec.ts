@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { expect, test, type Page } from "@playwright/test";
 import { freshWorkspace } from "../support/session";
-import { firstOpenGap, iegpAction, runStage, seedMapped, validateBandHigh } from "../support/synapse";
+import { firstOpenGap, iegpAction, runStage, seedPrioritizable, validateBandHigh } from "../support/synapse";
 import { openIdeationCard } from "../support/ideation";
 
 test.describe.configure({ mode: "serial" });
@@ -13,7 +13,7 @@ test.describe("tactic side panel", () => {
   freshWorkspace({
     name: "KAN-50",
     seed: async (request) => {
-      await seedMapped(request);
+      await seedPrioritizable(request);
       await runStage(request, "S8");
       const gap = await firstOpenGap(request);
       gapId = gap.gap_id;
