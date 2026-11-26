@@ -50,6 +50,8 @@ export function DevelopmentSetup() {
   const [associations, setAssociations] = useState<string[]>([]);
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [pdf, setPdf] = useState<File | null>(null);
+  const [preparationAmount, setPreparationAmount] = useState("0");
+  const [failedPreparation, setFailedPreparation] = useState<"source" | "pdf" | null>(null);
   const [structured, setStructured] = useState<File | null>(null);
   const [busy, setBusy] = useState(true);
   const [message, setMessage] = useState("Loading experiments…");
@@ -189,6 +191,8 @@ export function DevelopmentSetup() {
     setSourceFile(null);
     setPdf(null);
     setStructured(null);
+    setPreparationAmount("0");
+    setFailedPreparation(null);
   }
 
   /** Retry source choices independently of the already persisted draft. */
@@ -220,26 +224,74 @@ export function DevelopmentSetup() {
     });
   }
 
-  async function upload(file: File | null, format?: "pdf" | "structured") {
+  async function upload(file: File | null, format?: "pdf" | "structured", freshAttempt = false) {
     if (!draft || !file) return;
     await perform("Uploading and parsing…", async (signal) => {
+      const allowance_usd = Number(preparationAmount);
+      const usesParser = format !== "structured";
+      if (usesParser && (!preparationAmount.trim() || !Number.isFinite(allowance_usd) || allowance_usd < 0)) {
+        throw new Error("Enter a finite nonnegative preparation allowance.");
+      }
       const content_base64 = await fileContent(file);
-      const result = await api<{ experiment: Experiment }>(
-        `${root}/${draft.id}/${format ? "reference-upload" : "source-upload"}`,
-        signal,
-        "POST",
-        {
-          revision: draft.revision,
-          filename: file.name,
-          content_base64,
-          ...(format
-            ? { format, section, source_document_ids: associations }
-            : {}),
-        },
-      );
-      accept(result.experiment);
-      setMessage("Document saved. Any edited name still needs Save name.");
+      const paid = usesParser && allowance_usd > 0;
+      let intentKey: string | undefined;
+      let id: string | undefined;
+      if (paid) {
+        // Store a fingerprint and an authorization ID. A draft reload can change the revision.
+        const context = [draft.id, file.name, format ?? "source", allowance_usd,
+          ...(format === "pdf" ? [section, [...associations].sort()] : []), content_base64];
+        const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(context)));
+        const fingerprint = Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, "0")).join("");
+        intentKey = `synapse.development.preparation.${fingerprint}`;
+        try {
+          id = (freshAttempt ? null : sessionStorage.getItem(intentKey)) ?? crypto.randomUUID();
+          sessionStorage.setItem(intentKey, id);
+          if (sessionStorage.getItem(intentKey) !== id) throw new Error("Authorization was not saved.");
+        } catch {
+          throw new Error("Paid upload was blocked because its authorization could not be saved. Allow session storage in this browser, then retry.");
+        }
+      }
+      const preparation = usesParser ? { id: id ?? crypto.randomUUID(), allowance_usd } : undefined;
+      try {
+        const result = await api<{ experiment: Experiment }>(
+          `${root}/${draft.id}/${format ? "reference-upload" : "source-upload"}`,
+          signal,
+          "POST",
+          {
+            revision: draft.revision,
+            filename: file.name,
+            content_base64,
+            ...(preparation ? { preparation } : {}),
+            ...(format
+              ? { format, section, source_document_ids: associations }
+              : {}),
+          },
+        );
+        if (intentKey) {
+          try { sessionStorage.removeItem(intentKey); } catch { /* Retain the completed authorization. */ }
+        }
+        setFailedPreparation(null);
+        accept(result.experiment);
+        setMessage("Document saved. Any edited name still needs Save name.");
+      } catch (failure) {
+        if (!paid || signal.aborted) throw failure;
+        setFailedPreparation(format === "pdf" ? "pdf" : "source");
+        const message = failure instanceof Error ? failure.message : "Upload failed.";
+        throw new Error(`${message} Retrying this upload reuses its authorization.`);
+      }
     });
+  }
+
+  function freshPreparationAction(kind: "source" | "pdf", file: File | null) {
+    if (failedPreparation !== kind || !file || !(Number(preparationAmount) > 0)) return null;
+    const isPdf = kind === "pdf";
+    return <div className="space-y-2">
+      <p>Review the saved draft and provider usage before authorizing another paid attempt. The earlier request may still incur charges.</p>
+      <Button variant="outline" disabled={busy || stale || (isPdf && !associations.length)}
+        onClick={() => void upload(file, isPdf ? "pdf" : undefined, true)}>
+        Authorize new paid {isPdf ? "PDF" : "source"} attempt
+      </Button>
+    </div>;
   }
 
   return (
@@ -476,6 +528,11 @@ export function DevelopmentSetup() {
                 </div>
               )}
               <label className="block space-y-2">
+                Preparation allowance per upload (USD)
+                <Input type="number" value={preparationAmount} min="0" step="any" onChange={event => setPreparationAmount(event.target.value)} />
+              </label>
+              <p className="text-muted-foreground">This allowance applies to each source file or reference PDF you submit. Verified free parsing works with zero allowance.</p>
+              <label className="block space-y-2">
                 Private source file
                 <input
                   className={fileInputClass}
@@ -497,6 +554,7 @@ export function DevelopmentSetup() {
               >
                 Upload source
               </Button>
+              {freshPreparationAction("source", sourceFile)}
             </fieldset>
             <fieldset
               disabled={busy || stale}
@@ -577,6 +635,7 @@ export function DevelopmentSetup() {
               >
                 Upload reference PDF
               </Button>
+              {freshPreparationAction("pdf", pdf)}
               <label className="block space-y-2">
                 Structured reference JSON
                 <input
