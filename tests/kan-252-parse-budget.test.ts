@@ -4,6 +4,7 @@ import type { SQL } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseWithLlm } from "@/lib/ingest/llm-structure";
 import type { ResolvedRoute, RunHandle } from "@/modules/kernel/contracts";
+import * as preparation from "@/modules/development/preparation-cost-store";
 import { prepareReference } from "@/modules/development/documents";
 import * as ai from "@/modules/kernel/ai-switch";
 import { noAiSections } from "@/modules/kernel/ai-sections";
@@ -125,14 +126,19 @@ describe("S1 per-document request limit", () => {
     vi.spyOn(ai, "aiSections").mockResolvedValue({ ...noAiSections(), ingestion: true });
     vi.spyOn(routing, "resolveRoute").mockResolvedValue(route);
     const fetch = scriptedRequests(2, [structure, classification]);
+    vi.spyOn(preparation, "openPreparationAllowance").mockResolvedValue("fixture-upload");
+    vi.spyOn(preparation, "beginPreparationCall").mockResolvedValue("fixture-call");
+    vi.spyOn(preparation, "settlePreparationCall").mockResolvedValue();
     await expect(prepareReference({
       id: "fixture", name: "Fixture", source_workspace_id: null, owner: "tester",
       revision: 1, status: "draft", created_at: "", updated_at: "", documents: [],
     }, "tester", {
       filename: "fictional.pdf", content_base64: Buffer.from("%PDF-fictional").toString("base64"),
       format: "pdf", section: "gap_extraction", source_document_ids: [],
+      preparation: { id: "00b6631c-264d-4aba-8ba0-2b775d176af4", allowance_usd: 10 },
     })).rejects.toMatchObject({ status: 422, code: "parse_limit" });
     expect(fetch).toHaveBeenCalledTimes(2);
+    expect(preparation.beginPreparationCall).toHaveBeenCalledTimes(2);
   });
 
   it("starts each new document with its own allowance", async () => {

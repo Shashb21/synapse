@@ -38,7 +38,9 @@ async function draft() {
   return updateExperiment(experiment.id, 1, { document, content_base64: Buffer.from(quote).toString('base64') });
 }
 const start = (id: string, revision = 2, target = 'all', config = { mode: 'single_pass' }, prerequisites = {}) => POST(request({ revision, target, config, prerequisites }), ctx(id));
+const originalXaiModel = xaiGrok.default_model;
 beforeEach(async () => {
+  xaiGrok.default_model = 'grok-3'; // Documented non-reasoning redirect with a funded text ceiling.
   restoreControls = await preservePersistedControls();
   vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unscripted network is forbidden in execution tests.'));
   vi.stubEnv('SYNAPSE_DEVELOPMENT_DELIVERY', 'github_actions');
@@ -49,7 +51,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   try { await restoreControls?.(); }
-  finally { restoreControls = undefined; vi.restoreAllMocks(); vi.unstubAllEnvs(); }
+  finally { restoreControls = undefined; xaiGrok.default_model = originalXaiModel; vi.restoreAllMocks(); vi.unstubAllEnvs(); }
 });
 it('refuses unavailable delivery, stale revisions and concurrent conflicting starts; manifests contain sources only', async () => {
   const e = await draft();
@@ -311,7 +313,7 @@ it.each(['standard', 'single_pass'] as const)('uses explicit actual role routes 
   for (const key of ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY']) vi.stubEnv(key, 'test-only-fake-key');
   const route = (provider_id: string, model: string, temperature: number) => ({ provider_id, model, temperature, max_tokens: 4096, fallbacks: [] });
   const overrides = mode === 'standard' ? { critic: route('openai', 'gpt-5.1', 0.4), reviser: route('anthropic-claude', 'claude-sonnet-5-5', 0.5), internal_judge: route('google-gemini', 'gemini-3.8-flash', 0.6) } : { proposer: route('openai', 'gpt-5.1', 0.7) };
-  const input = { revision: 2, target: 'gap_extraction', config: { mode, stages: { gap_extraction: { route: route('xai-grok', 'grok-4', 0.3), overrides } } }, prerequisites: {} };
+  const input = { revision: 2, target: 'gap_extraction', config: { mode, stages: { gap_extraction: { route: route('xai-grok', 'grok-3', 0.3), overrides } } }, prerequisites: {} };
   // Seed real rows: empty-table comparisons could hide accidental writes to defaults.
   await setRouteConfig({ stage: 'S2', provider_id: 'openai', model: 'gpt-5.1', temperature: 0.12, max_tokens: 2345, fallbacks: [], actor_name: 'KAN-211 live sentinel' });
   await seedHistoricalRoute(1.1, 'KAN-211 legacy sentinel');
@@ -380,10 +382,16 @@ it('retains reported usage when provider output validation fails and keeps unpri
     const nextResponse = await POST(request({ revision: 2, target: 'gap_extraction', config: { mode: 'single_pass', stages: { gap_extraction: { route: { model: 'unpriced-experiment-test-model', fallbacks: [] } } } }, prerequisites: {} }), ctx(e.id));
     expect(nextResponse.status).toBe(202);
     const next = (await nextResponse.json()).execution;
-    vi.spyOn(xaiGrok, 'complete').mockResolvedValue(JSON.stringify({ gaps: [gap] }));
-    const completed = await finish(e.id, next.id);
-    expect(completed.calls[0].receipt?.cost_usd).toBeNull();
-    expect(completed.calls[0].receipt?.price_source).toBeNull();
+    const send = vi.spyOn(xaiGrok, 'complete').mockResolvedValue(JSON.stringify({ gaps: [gap] }));
+    await progressExecution(next.id);
+    await progressExecution(next.id);
+    const refused = await getExecution(e.id, next.id);
+    expect(send).not.toHaveBeenCalled();
+    expect(refused.generation_status).toBe('failed');
+    expect(refused.sections[0].error).toMatch(/verified spending limit.*supported priced model/);
+    expect(refused.cost?.reservations).toEqual([]);
+    expect(refused.calls[0]).toMatchObject({ status: 'queued', sending_at: null, receipt: null });
+    expect((await start(e.id, 2, 'gap_extraction')).status).toBe(202);
   } finally { xaiGrok.models.splice(xaiGrok.models.indexOf('unpriced-experiment-test-model'), 1); }
 });
 it('recovers a pre-dispatch queued request and rejects a mismatched replay request without sending', async () => {

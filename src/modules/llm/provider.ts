@@ -1,3 +1,4 @@
+import { providerBaseUrl } from "./provider-endpoint";
 import { fetchProvider, ModelAnswerError, ProviderError, parseProviderErrorBody, redactSecrets } from "./provider-error";
 
 /**
@@ -22,7 +23,7 @@ export type LlmRequest = {
  * Token usage from raw provider parsing or resolved call recording. Raw parsers
  * leave missing counts null. Successful recorded calls fill missing counts from
  * text estimates and label their origin; failed calls retain reported counts only.
- * Input includes cached prompt tokens; output includes billed reasoning tokens.
+ * Input includes cached prompt and tool-use prompt tokens. Output includes billed reasoning tokens.
  * Origin fields are optional so historical records remain readable. Estimates
  * describe approximate usage, not confirmed provider billing.
  */
@@ -31,6 +32,14 @@ export type LlmUsage = {
   source?: "provider" | "estimated" | "mixed";
   /** Earlier HTTP attempts may have incurred unreported charges. */
   prior_charge_unknown?: boolean;
+  /** Present total or reasoning metadata failed numeric or structural validation. */
+  malformed_token_details?: true;
+  /** Reported by adapters whose service tier can affect billing. */
+  service_tier?: string;
+  inference_geo?: string;
+  cached_input_tokens?: number | null;
+  cache_written_input_tokens?: number | null;
+  cost_in_usd_ticks?: number | null;
   input_tokens_source?: "provider" | "estimated";
   output_tokens_source?: "provider" | "estimated";
   input_tokens: number | null;
@@ -56,6 +65,8 @@ export type LlmCallHooks = {
   maxAttempts?: number;
   /** Check that the caller still owns the work before another HTTP send. */
   beforeRetry?: () => Promise<void>;
+  /** Prevent account defaults from selecting a premium tier on a reserved send. */
+  standardBilling?: boolean;
 };
 
 /** The provider's API key, read on the server and sent only to that provider. */
@@ -176,8 +187,9 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
 }
 
 const count = (value: unknown): number | null =>
-  typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
-/** Optional billed components may be absent; a missing or invalid base count is unknown. */
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+
+/** Optional billed components may be absent. A missing or invalid base count is unknown. */
 function billedCount(base: unknown, ...extras: unknown[]): number | null {
   let total = count(base);
   if (total === null) return null;
@@ -187,35 +199,71 @@ function billedCount(base: unknown, ...extras: unknown[]): number | null {
     if (component === null) return null;
     total += component;
   }
-  return total;
+  return count(total);
 }
 
 /** The provider's token counts from a reply payload, whatever its shape; null when it sent none. */
 export function usageFromPayload(payload: Record<string, unknown>): LlmUsage | null {
   const gemini = payload.usageMetadata as Record<string, unknown> | undefined;
   if (gemini && typeof gemini === "object") {
-    const input = count(gemini.promptTokenCount);
-    const reasoning = count(gemini.thoughtsTokenCount);
+    // GenerateContent's total includes tool-use prompts and thoughts. Cached
+    // tokens are already in promptTokenCount.
+    const prompt = count(gemini.promptTokenCount);
+    const input = billedCount(prompt, gemini.toolUsePromptTokenCount);
     const output = billedCount(gemini.candidatesTokenCount, gemini.thoughtsTokenCount);
-    return { input_tokens: input, output_tokens: output, total_tokens: count(gemini.totalTokenCount) ?? billedCount(input, output), reasoning_tokens: reasoning };
+    const total = count(gemini.totalTokenCount);
+    const hasCacheCount = Object.hasOwn(gemini, "cachedContentTokenCount");
+    const cached = count(gemini.cachedContentTokenCount);
+    const reconciled = total !== null && total === billedCount(input, output)
+      && (!hasCacheCount || (cached !== null && prompt !== null && cached <= prompt));
+    const tier = typeof gemini.serviceTier === "string" ? gemini.serviceTier.toLowerCase() : "";
+    return {
+      input_tokens: reconciled ? input : null,
+      output_tokens: reconciled ? output : null,
+      total_tokens: reconciled ? total : null,
+      reasoning_tokens: reconciled ? count(gemini.thoughtsTokenCount) : null,
+      ...(hasCacheCount ? { cached_input_tokens: cached } : {}),
+      ...(Object.hasOwn(gemini, "serviceTier") ? {
+        service_tier: ["standard", "unspecified", "flex", "priority"].includes(tier) ? tier : "unknown",
+      } : {}),
+    };
   }
   const usage = payload.usage as Record<string, unknown> | undefined;
   if (!usage || typeof usage !== "object") return null;
+  const charge = Object.hasOwn(usage, "cost_in_usd_ticks") ? { cost_in_usd_ticks: count(usage.cost_in_usd_ticks) } : {};
   if ("input_tokens" in usage || "output_tokens" in usage) {
     // Anthropic: cached prompt tokens are reported apart from input_tokens.
     const input = billedCount(usage.input_tokens, usage.cache_creation_input_tokens, usage.cache_read_input_tokens);
     const output = count(usage.output_tokens);
-    return { input_tokens: input, output_tokens: output, total_tokens: billedCount(input, output), reasoning_tokens: null };
+    return {
+      input_tokens: input, output_tokens: output, total_tokens: billedCount(input, output), reasoning_tokens: null,
+      ...charge,
+      ...(Object.hasOwn(usage, "cache_read_input_tokens") ? { cached_input_tokens: count(usage.cache_read_input_tokens) } : {}),
+      ...(Object.hasOwn(usage, "cache_creation_input_tokens") ? { cache_written_input_tokens: count(usage.cache_creation_input_tokens) } : {}),
+      ...(typeof usage.inference_geo === "string" ? { inference_geo: usage.inference_geo } : {}),
+      ...(typeof usage.service_tier === "string" ? { service_tier: usage.service_tier } : {}),
+    };
   }
   // OpenAI-compatible (OpenAI, OpenRouter, xAI).
   const input = count(usage.prompt_tokens);
   const output = count(usage.completion_tokens);
-  const details = usage.completion_tokens_details as Record<string, unknown> | undefined;
+  const total = count(usage.total_tokens);
+  const details = usage.completion_tokens_details;
+  const breakdown = details && typeof details === "object" && !Array.isArray(details) ? details as Record<string, unknown> : null;
+  const reasoning = count(breakdown?.reasoning_tokens);
+  const malformedDetails = (Object.hasOwn(usage, "total_tokens") && total === null)
+    || (Object.hasOwn(usage, "completion_tokens_details") && !breakdown)
+    || (breakdown && Object.hasOwn(breakdown, "reasoning_tokens") && reasoning === null);
+  const promptDetails = usage.prompt_tokens_details as Record<string, unknown> | undefined;
   return {
     input_tokens: input,
     output_tokens: output,
-    total_tokens: count(usage.total_tokens) ?? billedCount(input, output),
-    reasoning_tokens: count(details?.reasoning_tokens),
+    total_tokens: total ?? billedCount(input, output),
+    reasoning_tokens: reasoning,
+    ...(malformedDetails ? { malformed_token_details: true } : {}),
+    ...(promptDetails && Object.hasOwn(promptDetails, "cached_tokens") ? { cached_input_tokens: count(promptDetails.cached_tokens) } : {}),
+    ...charge,
+    ...(typeof payload.service_tier === "string" ? { service_tier: payload.service_tier } : {}),
   };
 }
 
@@ -293,6 +341,7 @@ async function chatCompletions(args: {
       model: args.request.model,
       temperature: args.request.temperature,
       max_tokens: args.request.max_tokens,
+      ...(args.hooks?.standardBilling && ["openai", "xai-grok"].includes(args.target.provider_id) ? { service_tier: "default" } : {}),
       messages: [
         { role: "system", content: args.request.system },
         { role: "user", content: args.request.user },
@@ -350,7 +399,7 @@ export const xaiGrok: LlmProvider = {
   async complete(request, auth, hooks) {
     if (!auth) throw new NoRouteError("xai-grok has no API key: set XAI_API_KEY");
     return chatCompletions({
-      base: env("XAI_BASE_URL", "https://api.x.ai/v1"),
+      base: providerBaseUrl("xai-grok"),
       request,
       auth,
       hooks,
@@ -418,11 +467,12 @@ export const anthropicClaude: LlmProvider = {
       headers["anthropic-workspace-id"] = anthropicWorkspaceId;
     }
     const payload = await postJson(
-      `${env("ANTHROPIC_BASE_URL", "https://api.anthropic.com")}/v1/messages`,
+      `${providerBaseUrl("anthropic-claude").replace(/\/$/, "")}/v1/messages`,
       headers,
       {
         model: request.model,
         max_tokens: request.max_tokens,
+        ...(hooks?.standardBilling ? { service_tier: "standard_only" } : {}),
         // Claude 5 models (and Opus 4.7/4.8) reject sampling parameters with a 400.
         ...(anthropicAcceptsTemperature(request.model) ? { temperature: request.temperature } : {}),
         system: request.system,
@@ -446,7 +496,7 @@ export const openAi: LlmProvider = {
   async complete(request, auth, hooks) {
     if (!auth) throw new NoRouteError("openai has no API key: set OPENAI_API_KEY");
     return chatCompletions({
-      base: env("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+      base: providerBaseUrl("openai"),
       request,
       auth,
       hooks,
@@ -467,11 +517,12 @@ export const googleGemini: LlmProvider = {
   async complete(request, auth, hooks) {
     if (!auth) throw new NoRouteError("google-gemini has no API key: set GEMINI_API_KEY");
     const payload = await postJson(
-      `${env("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta")}/models/${request.model}:generateContent`,
+      `${providerBaseUrl("google-gemini").replace(/\/$/, "")}/models/${request.model}:generateContent`,
       { "x-goog-api-key": auth.api_key },
       {
         systemInstruction: { parts: [{ text: request.system }] },
         contents: [{ role: "user", parts: [{ text: request.user }] }],
+        ...(hooks?.standardBilling ? { serviceTier: "standard" } : {}),
         generationConfig: {
           temperature: request.temperature,
           maxOutputTokens: request.max_tokens,
@@ -526,7 +577,7 @@ export const openRouter: LlmProvider = {
   async complete(request, auth, hooks) {
     if (!auth) throw new NoRouteError("openrouter has no API key: set OPENROUTER_API_KEY");
     return chatCompletions({
-      base: env("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+      base: providerBaseUrl("openrouter"),
       request,
       auth,
       hooks,

@@ -19,6 +19,7 @@ export async function POST(request: Request, context: DraftContext) {
       actor,
       input.filename,
       input.content_base64,
+      input.preparation,
     );
     return json({
       experiment: await updateExperiment(id, input.revision, prepared),
