@@ -2,7 +2,8 @@ import { resolveSourceCitation, sourceContextSchema } from "@/lib/ingest/source-
 import { PARSED_DOCUMENTS_DDL } from "@/modules/stages/s1-parse/schema";
 import { stageWrite } from "@/modules/kernel/stage-publication";
 import { quotedRepair, repairText, repairUserMessage, type RepairMessage } from "@/modules/kernel/repair-guidance";
-import { extractionSections, quotedBlock, reconcileSections, proposeSections, reviseSection, type ExtractionSection } from "../extraction-sections";
+import { extractionSections, promptBlockId, quotedBlock, reconcileSections, proposeSections, reviseSection, usesExtractionHandles, type ExtractionSection } from "../extraction-sections";
+import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
@@ -276,7 +277,7 @@ async function reviseWithModel(
               statement: item.candidate.statement,
               domain: item.candidate.domain,
               source_quote: item.candidate.source_quote,
-              block_id: item.candidate.proposed_block_id,
+              block_id: promptBlockId(args.section, item.candidate.proposed_block_id),
               objection: item.objection,
               problems: (lastProblems.get(id) ?? item.problems)?.map(describe),
             };
@@ -304,7 +305,9 @@ async function reviseWithModel(
           lastProblems.set(id, problems);
           continue;
         }
-        map.set(id, toCandidate(id, args.section, { ...row, block_id: row.block_id ?? byId.get(id)?.candidate.block_id }));
+        map.set(id, toCandidate(id, args.section, {
+          ...row, block_id: row.block_id ?? promptBlockId(args.section, byId.get(id)?.candidate.block_id),
+        }));
       }
       return map;
     },
@@ -628,7 +631,8 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
           ? {}
           : { set_aside: gap.status === "excluded" ? ("excluded" as const) : ("parked" as const) }),
       }));
-    const sections = isTestStub() ? [] : documents.flatMap(extractionSections);
+    const stableHandles = usesExtractionHandles(ctx);
+    const sections = isTestStub() ? [] : documents.flatMap(document => extractionSections(document, stableHandles));
     const documentById = new Map(documents.map((document) => [document.id, document]));
     const sectionsByDocument = new Map(documents.map(document => [document.id, [] as ExtractionSection[]]));
     for (const section of sections) sectionsByDocument.get(section.document.id)!.push(section);

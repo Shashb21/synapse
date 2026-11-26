@@ -2597,15 +2597,20 @@ async function assignTacticToGapChange(args: {
   return coverageId;
 }
 
+/** The reuse owner checks the same relationship preconditions before a batch write and on save. */
+export function requireTacticReuse(state: IegpState, gapId: string, tacticId: string) {
+  const tactic = state.tactics.find(row => row.id === tacticId);
+  if (!tactic || tactic.review_status !== "accepted" || tactic.status === "cancelled") throw new TrustedApplicationError("Reuse requires an eligible accepted tactic.");
+  if (humanRejection(state, gapId, tacticId)) throw new TrustedApplicationError("This relationship was rejected or removed; restore it through the mapping review before reusing evidence.");
+}
+
 /** Request review of unchanged evidence, preserving S4 assessments and rejection memory. */
 export async function reuseTacticForGap(args: {gap_id: string; tactic_id: string; actor_name: string; actor_function: ActorFunction; rationale: string}, transaction: import("./tactic-expansions").ExpansionTransaction): Promise<string> {
   const tx = transaction ?? db();
   await tx.select().from(t.tactics).where(eq(t.tactics.id, args.tactic_id)).for("update");
   await tx.select().from(t.gaps).where(eq(t.gaps.id, args.gap_id)).for("update");
   const state = await readState(tx);
-  const tactic = state.tactics.find(row => row.id === args.tactic_id);
-  if (!tactic || tactic.review_status !== "accepted" || tactic.status === "cancelled") throw new TrustedApplicationError("Reuse requires an eligible accepted tactic.");
-  if (humanRejection(state, args.gap_id, args.tactic_id)) throw new TrustedApplicationError("This relationship was rejected or removed; restore it through the mapping review before reusing evidence.");
+  requireTacticReuse(state, args.gap_id, args.tactic_id);
   const existing = state.coverages.find(row => row.gap_id === args.gap_id && row.tactic_id === args.tactic_id && !row.expansion_id);
   if (existing) {
     await tx.update(t.coverages).set({needs_review: true, review_version: newId("coverage")}).where(eq(t.coverages.id, existing.id));

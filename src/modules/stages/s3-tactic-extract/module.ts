@@ -2,7 +2,8 @@ import { resolveSourceCitation, sourceContextSchema } from "@/lib/ingest/source-
 import { PARSED_DOCUMENTS_DDL } from "@/modules/stages/s1-parse/schema";
 import { stageWrite } from "@/modules/kernel/stage-publication";
 import { quotedRepair, repairText, repairUserMessage, type RepairMessage } from "@/modules/kernel/repair-guidance";
-import { extractionSections, quotedBlock, reconcileSections, proposeSections, reviseSection, type ExtractionSection } from "../extraction-sections";
+import { extractionSections, promptBlockId, quotedBlock, reconcileSections, proposeSections, reviseSection, usesExtractionHandles, type ExtractionSection } from "../extraction-sections";
+import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
 import { desc } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
@@ -219,13 +220,13 @@ function toCandidate(section: ExtractionSection, id: string, raw: RawTactic): Ta
   };
 }
 
-const tacticFields = (candidate: TacticCandidate) => ({
+const tacticFields = (candidate: TacticCandidate, section?: ExtractionSection) => ({
   name: candidate.name,
   type: candidate.type,
   status: candidate.status,
   evidence_question: candidate.evidence_question,
   source_quote: candidate.source_quote,
-  block_id: candidate.proposed_block_id,
+  block_id: promptBlockId(section, candidate.proposed_block_id),
 });
 
 type ProposerRow = {
@@ -247,6 +248,7 @@ async function answerRows(
   const rowById = new Map(args.rows.map((row) => [row.id, { ...row }]));
   const problems = new Map<string, string>();
   const passages = args.section.blocks.map(block => block.text);
+  const demoHandles = usesExtractionHandles(ctx);
   return completeAll({
     ids: args.rows.map((row) => row.id),
     what: "tactic",
@@ -262,7 +264,7 @@ async function answerRows(
           worked_examples: args.hints || undefined,
           source: args.section.document.source_id,
           library: args.library,
-          batch: args.batch?.map(candidate => ({ id: candidate.id, source: candidate.source_id, ...tacticFields(candidate) })),
+          batch: args.batch?.map(candidate => ({ id: candidate.id, source: candidate.source_id, ...tacticFields(candidate, args.section) })),
           note:
             attempt > 1
               ? "An earlier answer left these rows unanswered or invalid. Answer each, fixing the problem named."
@@ -288,7 +290,7 @@ async function answerRows(
         }
         const issues = tacticProblems(raw, passages);
         if (issues.length > 0) {
-          row.previous = raw;
+          row.previous = demoHandles ? { ...raw, id: undefined } : raw;
           row.problem = issues;
           problems.set(id, issues.map(repairText).join("; "));
           continue;
@@ -381,7 +383,7 @@ async function llmRevisions(
       .filter((candidate) => candidate.document_id === section.document.id && candidate.source_section === section.number && objections.has(candidate.id))
       .map((candidate) => ({
         id: candidate.id,
-        previous: tacticFields(candidate),
+        previous: tacticFields(candidate, section),
         objection: objections.get(candidate.id),
       }));
     if (rows.length === 0) continue;
@@ -409,7 +411,15 @@ async function llmRevisions(
 
 async function llmReviews(
   ctx: ModuleContext,
-  args: { candidates: TacticCandidate[]; library: LibraryTactic[]; hints: string; round: number; retry: boolean; problems: Map<string, string> },
+  args: {
+    candidates: TacticCandidate[];
+    fieldsFor: (candidate: TacticCandidate) => ReturnType<typeof tacticFields>;
+    library: LibraryTactic[];
+    hints: string;
+    round: number;
+    retry: boolean;
+    problems: Map<string, string>;
+  },
 ): Promise<Map<string, Review>> {
   const payload = (await ctx.complete({
     role: "critic",
@@ -424,7 +434,7 @@ async function llmReviews(
         id: candidate.id,
         source: candidate.source_id,
         problem: args.problems.get(candidate.id),
-        ...tacticFields(candidate),
+        ...args.fieldsFor(candidate),
       })),
     }),
     purpose: "tactic-critic",
@@ -448,6 +458,7 @@ async function llmDecisions(
   ctx: ModuleContext,
   args: {
     batch: TacticCandidate[];
+    fieldsFor: (candidate: TacticCandidate) => ReturnType<typeof tacticFields>;
     ask: string[];
     critiques: Critique[];
     library: LibraryTactic[];
@@ -476,7 +487,7 @@ async function llmDecisions(
             id: candidate.id,
             source: candidate.source_id,
             problem: args.problems.get(candidate.id),
-            ...tacticFields(candidate),
+            ...args.fieldsFor(candidate),
             critic: critique
               ? { verdict: critique.verdict, confidence: critique.score, note: critique.note }
               : undefined,
@@ -603,7 +614,11 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
       };
     }
 
-    const sections = isTestStub() ? [] : documents.flatMap(extractionSections);
+    const stableHandles = usesExtractionHandles(ctx);
+    const sections = isTestStub() ? [] : documents.flatMap(document => extractionSections(document, stableHandles));
+    const fieldsFor = (candidate: TacticCandidate) => tacticFields(candidate, stableHandles
+      ? sections.find(section => section.document.id === candidate.document_id && section.number === candidate.source_section)
+      : undefined);
     const documentById = new Map(documents.map((document) => [document.id, document]));
     const sectionsByDocument = new Map(documents.map(document => [document.id, [] as ExtractionSection[]]));
     for (const section of sections) sectionsByDocument.get(section.document.id)!.push(section);
@@ -686,6 +701,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
           ask: (missing, attempt) =>
             llmReviews(ctx, {
               candidates: candidates.filter((candidate) => missing.includes(candidate.id)),
+              fieldsFor,
               library,
               hints: reviewerHints,
               round,
@@ -738,6 +754,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
               ask: (missing, attempt) =>
                 llmDecisions(ctx, {
                   batch: grounded,
+                  fieldsFor,
                   ask: missing,
                   critiques: outcome.critiques,
                   library,

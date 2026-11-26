@@ -18,6 +18,8 @@ import { sectionOfStage, type AiSections } from "@/modules/kernel/ai-sections";
 import { modelRunTimeoutMs } from "@/modules/kernel/model-timeout";
 import { runStage } from "@/modules/kernel/run";
 import { isTestStub } from "@/modules/kernel/llm";
+import type { DemoExecution } from "@/lib/demo/mode";
+import { DemoReplayMissError } from "@/lib/demo/replay";
 import { resolveRoute } from "@/modules/kernel/routing";
 import { NoRouteError } from "@/modules/llm/provider";
 import type { Actor, StageId } from "@/modules/kernel/contracts";
@@ -49,7 +51,7 @@ export type IngestResult = {
  * Checks model routes before a new upload is saved. Runtime failures remain
  * recoverable at the last completed stage; nothing falls back to rules.
  */
-async function requireLlmStages(sections: AiSections): Promise<void> {
+async function requireLlmStages(sections: AiSections, demo?: DemoExecution): Promise<void> {
   // The admin switch first: with ingestion off nothing is ingested; gaps and tactics are added by hand.
   await assertAiEnabled("Ingest", "ingestion");
   if (isTestStub()) return;
@@ -58,8 +60,9 @@ async function requireLlmStages(sections: AiSections): Promise<void> {
     const section = sectionOfStage(stage);
     if (section && !sections[section]) continue;
     try {
-      await resolveRoute(stage);
+      await resolveRoute(stage, undefined, demo);
     } catch (error) {
+      if (demo?.mode === "replay") throw error;
       const reason = customerErrorMessage(error);
       throw new NoRouteError(
         `Ingest runs gap extraction (S2), tactic extraction (S3) and mapping (S4) on an LLM, and ${stage} has no connected model: ${reason}`,
@@ -79,6 +82,7 @@ type Checkpoint = {
   completed: number;
   file_ids: string[];
   document_ids: string[];
+  execution_source?: "demo_replay";
   result: IngestResult;
 };
 
@@ -88,6 +92,7 @@ export type IngestProgress = {
   stage: StageId | null;
   completed: number;
   total: number;
+  execution_source?: "demo_replay";
 };
 
 type IngestArgs = {
@@ -97,6 +102,7 @@ type IngestArgs = {
   actor: Actor;
   role: Role;
   job_id?: string;
+  demo?: DemoExecution;
 };
 
 /** Run or resume one ingestion stage, atomically saving its output and checkpoint. */
@@ -144,7 +150,7 @@ async function advanceStage(args: IngestArgs): Promise<IngestProgress> {
       state = saved.checkpoint as Checkpoint;
     } else {
       const sections = await aiSections();
-      await requireLlmStages(sections);
+      await requireLlmStages(sections, args.demo);
       state = {
         request_key,
         stages: [
@@ -164,7 +170,7 @@ async function advanceStage(args: IngestArgs): Promise<IngestProgress> {
     if (stage === "S0") {
       // The upload and first checkpoint are short, and neither survives without the other.
       const upload = await runStage<{ files: { id: string }[] }>({
-        stage, input: { files, demo_ids, reuse_existing: true }, actor: args.actor, role: args.role,
+        stage, input: { files, demo_ids, reuse_existing: true }, actor: args.actor, role: args.role, demo: args.demo,
       });
       state.file_ids = [...new Set(upload.output.files.map(file => file.id))];
       if (!state.file_ids.length) throw new TrustedApplicationError("Nothing was ingested. Choose a non-empty file.");
@@ -197,8 +203,12 @@ async function advanceStage(args: IngestArgs): Promise<IngestProgress> {
       Object.assign(state, next);
     };
     const run = <O>(input: unknown, apply: (output: O) => void) => runStage<O>({
-      stage, input, actor: args.actor, role: args.role,
-      onCommit: async output => { apply(output); await finish(); },
+      stage, input, actor: args.actor, role: args.role, demo: args.demo,
+      onCommit: async (output, executionSource) => {
+        apply(output);
+        if (executionSource) state.execution_source = executionSource;
+        await finish();
+      },
     });
     try {
       if (stage === "S1") {
@@ -223,10 +233,11 @@ async function advanceStage(args: IngestArgs): Promise<IngestProgress> {
       tagStageError(error, stage);
       throw error;
     }
-    if (stage === "S1") await compareParsedSources(state.result.source_ids, args.actor);
+    if (stage === "S1" && !args.demo) await compareParsedSources(state.result.source_ids, args.actor);
   }
   return { job_id, done: state.completed === state.stages.length, stage: state.stages[state.completed] ?? null,
-    completed: state.completed, total: state.stages.length };
+    completed: state.completed, total: state.stages.length,
+    ...(state.execution_source ? { execution_source: state.execution_source } : {}) };
 }
 
 /** Compatibility entry point for callers that need the complete pipeline result. */

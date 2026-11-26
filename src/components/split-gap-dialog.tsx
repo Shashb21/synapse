@@ -218,6 +218,7 @@ export function SplitGapDialog({
       error?: string;
       run_id?: string;
       summary?: string;
+      execution_source?: "demo_replay";
       output?: {
         mode: "llm" | "deterministic";
         proposal: {
@@ -239,9 +240,10 @@ export function SplitGapDialog({
       return;
     }
     const proposal = json.output?.proposal;
+    const source = json.execution_source === "demo_replay" ? "Recorded Velmara demo. " : "";
     if (!proposal) {
       // The S6 judge's reason is in the run summary; show it rather than a generic line.
-      setProposalNote(json.summary ?? "The model proposed no split. Fill the split in yourself.");
+      setProposalNote(source + (json.summary ?? "The model proposed no split. Fill the split in yourself."));
       return;
     }
     // Only model runs are learning evidence; deterministic suggestions remain manual splits.
@@ -260,7 +262,7 @@ export function SplitGapDialog({
     setTouched(false);
     setSuggested(true);
     setProposalNote(
-      `Proposed with confidence ${proposal.confidence}. ${proposal.rationale.slice(0, 2).join(" ")}`,
+      `${source}Proposed with confidence ${proposal.confidence}. ${proposal.rationale.slice(0, 2).join(" ")}`,
     );
   }
 

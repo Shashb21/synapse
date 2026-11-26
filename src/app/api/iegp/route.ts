@@ -1,5 +1,7 @@
 import { withModelRun } from "@/modules/kernel/model-run";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
+import { demoExecutionFor } from "@/lib/demo/mode";
+import { DemoReplayMissError } from "@/lib/demo/replay";
 import { compareSource } from "@/lib/ingest/compare-source";
 import { relationshipVersion } from "@/lib/iegp/relationship-version";
 import { lockRelationships, requireGapResolutionSnapshot, requireRelationshipSnapshot } from "@/lib/iegp/relationship-change";
@@ -438,6 +440,7 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
     switch (body.action) {
       case "retry_source_comparison":
         if (!body.source_id?.trim()) throw new TrustedApplicationError("Choose a parsed source to compare.");
+        if (identity.workspace?.demo_mode) throw new DemoReplayMissError();
         await compareSource(body.source_id, identity.actor);
         break;
       case "link_source_support":
@@ -1092,6 +1095,7 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
           ],
           actor: identity.actor,
           role: identity.role,
+          demo: demoExecutionFor(identity.workspace),
         });
         if (body.incremental === "true") return NextResponse.json({ ok: true, ...result });
         break;
@@ -1103,6 +1107,7 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
           demo_ids: body.ingest_job_id ? [] : [body.demo_id],
           actor: identity.actor,
           role: identity.role,
+          demo: demoExecutionFor(identity.workspace),
         });
         if (body.incremental === "true") return NextResponse.json({ ok: true, ...result });
         break;

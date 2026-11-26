@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { acceptDemoStep, demoStepFor } from "@/lib/demo/accept-steps";
+import { acceptDemoIdeation, acceptDemoStep, demoStepFor, loadDemoIdeationReview } from "@/lib/demo/accept-steps";
 
 /** KAN-138: "Accept all as in demo" makes the calls a presenter's clicks would. */
 
@@ -28,13 +28,14 @@ function stubServer(pending: unknown[], replies: Record<string, unknown> = {}) {
       if (url === "/api/demo/pending") return Response.json(pending[Math.min(reads++, pending.length - 1)]);
       const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
       calls.push({ url, body });
-      return Response.json(replies[String(body?.stage ?? body?.action)] ?? { ok: true });
+      return Response.json(replies[String(body?.stage ?? body?.action ?? url)] ?? { ok: true });
     }),
   );
   return calls;
 }
 
 const base = {
+  workspace_id: "velmara-workspace",
   gaps: { partial: [], unvalidated: [], wizard_complete: true, tactics_unlocked: true },
   prioritize: { suggested: [] },
   ideation: { proposed: [] },
@@ -87,15 +88,34 @@ describe("accepting a step", () => {
 
   it("prioritize, ideation and timeline accept what the AI suggested", async () => {
     let calls = stubServer([
-      { ...base, gaps: { ...base.gaps, tactics_unlocked: false }, prioritize: { suggested: [{ gap_id: "GAP-001", band: "high" }] } },
+      { ...base, gaps: { ...base.gaps, tactics_unlocked: false }, prioritize: { suggested: [{ gap_id: "GAP-001", band: "high", version: "placement-version" }] } },
     ]);
     await acceptDemoStep("prioritize");
-    expect(calls[0]!.body).toMatchObject({ action: "validate_band", gap_id: "GAP-001", band: "high" });
+    expect(calls[0]).toEqual({
+      url: "/api/plan",
+      body: {
+        action: "accept_priority_suggestion",
+        gap_id: "GAP-001",
+        band: "high",
+        expected_version: "placement-version",
+        reason: "Accepted as in the demo",
+      },
+    });
     expect(calls[1]!.body).toMatchObject({ action: "unlock_tactics" });
 
-    calls = stubServer([{ ...base, ideation: { proposed: ["IDEA-1", "IDEA-2"] } }]);
-    expect(await acceptDemoStep("ideation")).toBe(2);
-    expect(calls.map((c) => c.body?.decision)).toEqual(["accept", "accept"]);
+    calls = stubServer(
+      [{ ...base, ideation: { proposed: [{ id: "IDEA-1", name: "Study idea", version: "proposal-version" }] } }],
+      { "/api/demo/ideation-approvals": { ok: true, accepted: 1 } },
+    );
+    expect(await acceptDemoIdeation(await loadDemoIdeationReview())).toBe(1);
+    expect(calls).toEqual([{
+      url: "/api/demo/ideation-approvals",
+      body: {
+        workspace_id: "velmara-workspace",
+        proposals: [{ id: "IDEA-1", expected_version: "proposal-version" }],
+        rationale: "Accepted as in the demo",
+      },
+    }]);
 
     calls = stubServer([{ ...base, timeline: { dependencies: [{ id: "ACT-TAC-005", upstream_id: "ACT-TAC-002" }], estimates: true } }]);
     expect(await acceptDemoStep("timeline")).toBe(2);
@@ -107,10 +127,10 @@ describe("accepting a step", () => {
       "fetch",
       vi.fn(async (url: string) =>
         url === "/api/demo/pending"
-          ? Response.json({ ...base, ideation: { proposed: ["IDEA-1"] } })
+          ? Response.json({ ...base, ideation: { proposed: [{ id: "IDEA-1", version: "proposal-version" }] } })
           : Response.json({ safe_error: true, request_outcome: "rejected", error: "Proposal IDEA-1 was already decided." }, { status: 409 }),
       ),
     );
-    await expect(acceptDemoStep("ideation")).rejects.toThrow("Proposal IDEA-1 was already decided.");
+    await expect(acceptDemoIdeation(await loadDemoIdeationReview())).rejects.toThrow("Proposal IDEA-1 was already decided.");
   });
 });

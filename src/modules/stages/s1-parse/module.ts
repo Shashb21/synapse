@@ -1,5 +1,6 @@
 import { stageWrite, staleStage } from "@/modules/kernel/stage-publication";
-import { customerErrorMessage } from "@/modules/kernel/stage-errors";
+import { customerErrorMessage, DemoRecordingWriteError } from "@/modules/kernel/stage-errors";
+import { DemoReplayMissError } from "@/lib/demo/replay";
 import { queueSourceComparison } from "@/lib/ingest/compare-source";
 import { desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -274,14 +275,14 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
             duration_ms: Date.now() - began,
           });
           await markFileParsed({ id: file_id, source_id, note: `${blocks.length} block(s)` });
-          await queueSourceComparison(source_id);
+          if (!ctx.route.demo) await queueSourceComparison(source_id);
           documents.push({ id, file_id, source_id, parser: parsed.parser, blocks: blocks.length, quality });
           ctx.run.note(`parsed:${file_id}`, quality, `${blocks.length} block(s) → ${source_id}`);
         });
       } catch (error) {
-        // A provider error (billing, key, rate limit, outage) fails every file the same
-        // way: stop the stage so the run fails and the cause reaches the person (KAN-68).
-        if (error instanceof ProviderError || error instanceof ModelAnswerError || error instanceof ModelRunStop) throw error;
+        // Provider and demo infrastructure failures stop the entire stage.
+        if (error instanceof ProviderError || error instanceof ModelAnswerError || error instanceof ModelRunStop ||
+            error instanceof DemoReplayMissError || error instanceof DemoRecordingWriteError) throw error;
         const reason = customerErrorMessage(error);
         if (!input.dry_run) await stageWrite(ctx, async () => { await markFileFailed({ id: file_id, note: reason }); });
         failures.push({ file_id, reason });
