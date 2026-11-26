@@ -54,7 +54,7 @@ async function comparison() { const { listSourceComparisons } = await import("@/
 function outcome(input: ComparisonInput, judgment: ComparisonOutcome["judgment"] = "conflict", extra: Partial<ComparisonOutcome> = {}): ComparisonOutcome { return { block_id: input.blocks[0].id, passage: "The study includes children only.", match: "same", judgment, gap_id: gap, tactic_id: tactic, coverage_id: coverage, rationale: "The source challenges the adult population", ...extra }; }
 /** Close the backend holding this fixture's advisory lock, even if other tests use the same server. */
 async function disconnectComparisonWorker(runId: string) {
- const key = `source-comparison-run:public:${runId}`;
+ const key = `workspace-run:public:${runId}`;
  const [worker] = await db().execute(sql`
    select pid from pg_locks
    where locktype = 'advisory' and granted and pid <> pg_backend_pid()
