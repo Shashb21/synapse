@@ -71,6 +71,13 @@ describe("modular pipeline, S0 to S10", () => {
     const result = await run<ParseOutput>("S1", {});
     expect(result.output.documents).toHaveLength(2);
     expect(result.output.failures).toHaveLength(0);
+    const expectedMetrics = [
+      expect.objectContaining({ name: "documents_parsed", value: 2 }),
+      expect.objectContaining({ name: "parse_success_rate", value: 1 }),
+    ];
+    expect(result.evals).toEqual(expect.arrayContaining(expectedMetrics));
+    const saved = (await listEvalRuns({ stage: "S1" })).find((run) => run.run_id === result.run_id);
+    expect(saved?.metrics).toEqual(expect.arrayContaining(expectedMetrics));
     for (const document of result.output.documents) {
       expect(document.blocks).toBeGreaterThan(0);
       expect(document.quality.characters).toBeGreaterThan(100);

@@ -356,7 +356,7 @@ async function executeStage<O>(args: StageRunArgs<O>): Promise<StageRunResult<O>
     const validated = validate();
     if (diagnostic?.approved_first && !firstPrompt) throw new TrustedApplicationError("The approved diagnostic request was never dispatched.");
     // Stage telemetry has no externally scored target. The harness scores the case separately.
-    const evals = (result.evals ?? []).map(({ name, value, unit, detail }) => ({ name, value, unit, detail }));
+    const readEvals = () => (result.evals ?? []).map(({ name, value, unit, detail }) => ({ name, value, unit, detail }));
     const steps = recorder.steps();
     const execution: EvalExecution = isTestStub() ? "synthetic" : steps.some(s => s.name.startsWith("llm:")) || requests.length ? "routed" : "mechanical";
     let evidence_issue: EvalEvidenceIssue | undefined;
@@ -376,7 +376,7 @@ async function executeStage<O>(args: StageRunArgs<O>): Promise<StageRunResult<O>
         mode: runMode(validated.data, steps),
         summary: result.summary,
         output: validated.data as O,
-        evals,
+        evals: readEvals(),
         diagnostic: {
           execution, route_hash: requests.length ? routeIdentity(resolvedRoute) : null,
           prompt_hash: verifiedPrompt ? evidenceHash(requests.map(r => r.design)) : null,
@@ -397,6 +397,7 @@ async function executeStage<O>(args: StageRunArgs<O>): Promise<StageRunResult<O>
         for (const write of writes) await write();
       }
       const parsedOutput = writes.length ? validate() : validated;
+      const evals = readEvals();
       await closeRun({
         recorder,
         status: "ok",
