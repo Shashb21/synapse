@@ -1,3 +1,6 @@
+import { lockSourceCitationOwner, requireRetainedSourceQuote, resolveRetainedSourceQuote } from "./source-citations";
+import type { SourceContext } from "@/lib/ingest/source-citation";
+import { squashText } from "@/lib/ingest/manual-blocks";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { assessmentBasis, coverageReviewVersion, fullConfirmationIssues, getRequirementBasisReview, reviewedRequirementDimensions, type RequirementReviewInput } from "./requirement-basis";
 import type { RequirementBasis } from "./types";
@@ -37,6 +40,7 @@ import type {
   CoverageDimension,
   DimensionValue,
   EvidenceDomain,
+  GapStatus,
   MappedGapStatus,
   OverallCoverage,
 } from "./enums";
@@ -64,6 +68,7 @@ import {
   gapsReadyForPrioritize,
   isLiveGap,
   persistedResidualGaps,
+  reconcileHistoricalCitation,
   requireOverrideReason,
   splitSourceIntoBlocks,
   tacticEligibleForMapping,
@@ -171,7 +176,10 @@ export async function loadState(): Promise<IegpState> {
     state = await readSnapshot();
   }
   if (state.gaps.some((gap) => !gap.number)) state = await numberGaps(state);
-  if (!inWorkspaceTransaction() && (await repairNeedlessGapsOnce(state))) state = await readSnapshot();
+  if (!inWorkspaceTransaction()) {
+    if (await repairNeedlessGapsOnce(state)) state = await readSnapshot();
+    if (await repairRejectedTacticCoverage(state)) state = await readSnapshot();
+  }
   return state;
 }
 
@@ -662,7 +670,12 @@ async function insertLiveOpenGap(args: {
 }
 
 /** Where a need came from (KAN-97): the S2 run, its candidate row and the source block. */
-export type NeedProvenance = { run_id?: string | null; candidate_row_id?: string | null; block_id?: string | null };
+export type NeedProvenance = {
+  run_id?: string | null;
+  candidate_row_id?: string | null;
+  block_id?: string | null;
+  source_context?: SourceContext | null;
+};
 
 async function insertNeedForGap(args: {
   gapId: string;
@@ -730,13 +743,14 @@ async function insertNeedRow(args: {
     timing: "",
     source_id: args.source_id,
     // The whole quote is kept (KAN-97); screens shorten it for display.
-    source_quote: args.source_quote.trim() || args.statement,
+    source_quote: args.provenance?.source_context ? args.source_quote.trim() : args.source_quote.trim() || args.statement,
     confidence: null,
     status: "candidate",
     lock: unlocked(),
     run_id: args.provenance?.run_id ?? null,
     candidate_row_id: args.provenance?.candidate_row_id ?? null,
     block_id: args.provenance?.block_id ?? null,
+    source_context: args.provenance?.source_context ?? null,
   });
 }
 
@@ -958,6 +972,9 @@ export const editNeed = atomic(async function editNeed(args: {
   actor_function: ActorFunction;
 }) {
   const rationale = requireRationale(args.rationale);
+  const [citationOwner] = await db().select({ source_id: t.needs.source_id }).from(t.needs).where(eq(t.needs.id, args.need_id));
+  if (!citationOwner) throw new TrustedApplicationError("Need not found", "not_found", 404);
+  await lockSourceCitationOwner(citationOwner.source_id);
   const assessmentGapIds = await lockAssessmentOwners({ need_ids: [args.need_id] });
   const state = await loadState();
   const need = state.needs.find((n) => n.id === args.need_id);
@@ -969,13 +986,17 @@ export const editNeed = atomic(async function editNeed(args: {
   const citationChanged = quote !== undefined && quote !== need.source_quote;
   const citedBlock = citationChanged && quote ? state.blocks.find(block =>
     block.source_id === need.source_id && block.text.replace(/\s+/g, " ").includes(quote.replace(/\s+/g, " "))) : undefined;
+  const groundedCitation = citationChanged && (need.run_id || need.source_context)
+    ? await resolveRetainedSourceQuote(need.source_id, need.block_id ?? null, quote)
+    : null;
   if (changes.length === 0) throw new TrustedApplicationError("Nothing changed.");
   await db()
     .update(t.needs)
     .set({
       ...(statement !== undefined ? { statement } : {}),
       ...(quote !== undefined ? { source_quote: quote } : {}),
-      ...(citationChanged ? { source_basis_text: null, block_id: citedBlock?.id ?? null } : {}),
+      ...(citationChanged ? { source_basis_text: null, observed_block_ids: null, block_id: citedBlock?.id ?? null } : {}),
+      ...(groundedCitation ?? {}),
       lock: makeLock(args.actor_name, args.actor_function, rationale),
     })
     .where(eq(t.needs.id, args.need_id));
@@ -1195,6 +1216,42 @@ function childParents(state: IegpState): Set<string> {
   );
 }
 
+/** Identify stored computations still explained by the earlier treatment of rejected evidence. */
+function gapsCountingRejectedEvidence(state: IegpState): string[] {
+  const rejected = new Set(state.tactics.filter(tactic => tactic.review_status === "rejected").map(tactic => tactic.id));
+  if (rejected.size === 0) return [];
+  const affected = new Set(state.coverages.filter(row => rejected.has(row.tactic_id)).map(row => row.gap_id));
+  if (affected.size === 0) return [];
+
+  const coveragesByGap = Map.groupBy(state.coverages.filter(row => affected.has(row.gap_id)), row => row.gap_id);
+  const previousTactics = state.tactics.map(tactic => rejected.has(tactic.id)
+    ? { ...tactic, review_status: "accepted" as const }
+    : tactic);
+  const children = childParents(state);
+  return state.gaps.filter(gap => {
+    if (!affected.has(gap.id) || gap.retired || gap.status === "candidate" || gap.status === "excluded") return false;
+    const coverages = coveragesByGap.get(gap.id) ?? [];
+    const scope = { hasAcceptedChild: children.has(gap.id), expansions: state.expansions };
+    const stored = gap.computed_status ?? gap.status;
+    return stored !== computeGapStatus(coverages, state.tactics, scope)
+      && stored === computeGapStatus(coverages, previousTactics, scope);
+  }).map(gap => gap.id);
+}
+
+/** Reconcile old tactic rejections using the same locks and status updates as new reviews. */
+async function repairRejectedTacticCoverage(state: IegpState): Promise<boolean> {
+  const gapIds = new Set(gapsCountingRejectedEvidence(state));
+  if (gapIds.size === 0) return false;
+  const rejected = new Set(state.tactics.filter(tactic => tactic.review_status === "rejected").map(tactic => tactic.id));
+  const tacticIds = state.coverages.filter(row => gapIds.has(row.gap_id) && rejected.has(row.tactic_id)).map(row => row.tactic_id);
+  await withWorkspaceTransaction(async () => {
+    const locked = new Set(await lockAssessmentOwners({ tactic_ids: tacticIds }));
+    const pending = gapsCountingRejectedEvidence(await readState()).filter(id => gapIds.has(id) && locked.has(id));
+    if (pending.length > 0) await syncComputedGapStatuses(pending);
+  });
+  return true;
+}
+
 /**
  * An Addressed gap has no leftover, so a pending leftover row is closed. A
  * Partial gap gets no drafted leftover here: leftovers come from S6 (the model,
@@ -1239,11 +1296,12 @@ function humanHeldStatus(gap: IegpState["gaps"][0]): MappedGapStatus | null {
  * applies. Otherwise (a model run, an ingest) a human override or a
  * human-validated status is kept and only flagged stale when it disagrees.
  */
-export async function syncComputedGapStatuses(gapId?: string, opts?: { human?: boolean }, transaction?: Pick<ReturnType<typeof db>, "select" | "update" | "insert" | "execute">) {
+export async function syncComputedGapStatuses(gapIds?: string | readonly string[], opts?: { human?: boolean }, transaction?: Pick<ReturnType<typeof db>, "select" | "update" | "insert" | "execute">) {
   const d = transaction ?? db();
   const state = transaction ? await readState(transaction) : await loadState();
   const children = childParents(state);
-  const gaps = gapId ? state.gaps.filter((g) => g.id === gapId) : state.gaps;
+  const selected = typeof gapIds === "string" ? new Set([gapIds]) : new Set(gapIds);
+  const gaps = gapIds === undefined ? state.gaps : state.gaps.filter((g) => selected.has(g.id));
   for (const gap of gaps) {
     if (gap.status === "candidate" || gap.status === "excluded" || gap.retired) {
       if (gap.computed_status !== null) {
@@ -1419,6 +1477,7 @@ export async function lockGapStatus(args: {
   }
 }
 
+/** Apply a human override and return the gap status displayed immediately before it. */
 export async function overrideGapStatus(args: {
   gap_id: string;
   status: MappedGapStatus;
@@ -1426,11 +1485,17 @@ export async function overrideGapStatus(args: {
   note?: string;
   actor_name: string;
   actor_function: ActorFunction;
-}) {
+}): Promise<GapStatus> {
+  if (!inWorkspaceTransaction()) {
+    await loadState();
+    return withWorkspaceTransaction(() => overrideGapStatus(args));
+  }
+  await db().execute(sql`select id from gaps where id = ${args.gap_id ?? null} for update`);
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
   if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
-  if (args.status === "validated_partial" || displayedGapStatus(gap) === "validated_partial") {
+  const previousDisplayedStatus = displayedGapStatus(gap);
+  if (args.status === "validated_partial" || previousDisplayedStatus === "validated_partial") {
     throw new TrustedApplicationError("Partially Addressed cannot stay. Split or rewrite the gap instead.");
   }
   if (gap.status === "candidate" || gap.status === "excluded" || gap.retired) {
@@ -1478,6 +1543,7 @@ export async function overrideGapStatus(args: {
     actor_name: args.actor_name,
     actor_function: args.actor_function,
   });
+  return previousDisplayedStatus;
 }
 
 export async function clearGapStatusOverride(args: {
@@ -2016,6 +2082,8 @@ type LibraryTacticDraft = {
   data_source?: string;
   study_design?: string;
   source_quote?: string;
+  block_id?: string | null;
+  source_context?: SourceContext | null;
   /** YYYY-MM or YYYY-MM-DD, or blank. They feed the timeline. */
   start_date?: string | null;
   evidence_available?: string | null;
@@ -2101,6 +2169,8 @@ export async function insertLibraryTactic(args: LibraryTacticDraft, transaction?
     data_source: args.data_source?.trim() ?? "",
     study_design: args.study_design?.trim() ?? "",
     source_quote: args.source_quote?.trim() ?? "",
+    block_id: args.block_id ?? null,
+    source_context: args.source_context ?? null,
     lifecycle_stage: args.lifecycle_stage,
     status: args.status,
     review_status: "accepted",
@@ -2195,6 +2265,7 @@ async function createProposedTacticChange(args: {
 
 /** Gaps catch-up create. Rejects `proposed` — ideation is Tactics after Prioritize. */
 async function recordMissedTacticChange(args: {
+  source_id?: string;
   name: string;
   type: IegpState["tactics"][0]["type"];
   description?: string;
@@ -2214,6 +2285,8 @@ async function recordMissedTacticChange(args: {
   data_source?: string;
   /** The source sentence, when the tactic is promoted from a rejected S3 candidate. */
   source_quote?: string;
+  block_id?: string | null;
+  source_context?: SourceContext | null;
   custom_type?: CustomTacticType | null;
   rationale?: string;
   actor_name: string;
@@ -2245,12 +2318,18 @@ async function recordMissedTacticChange(args: {
     data_source: args.data_source?.trim() ?? "",
     study_design: args.study_design,
     source_quote: args.source_quote,
+    block_id: args.block_id,
+    source_context: args.source_context,
     custom_type: args.custom_type,
     actor_name: args.actor_name,
     actor_function: args.actor_function,
     audit_action: "record_missed",
     note: reasonLabel,
   });
+  if (args.source_id && args.source_quote?.trim()) {
+    const { attachTacticSource } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    await attachTacticSource({ tactic_id: id, source_id: args.source_id, source_quote: args.source_quote, block_id: args.block_id, source_context: args.source_context });
+  }
   if (args.gap_id) {
     await assignTacticToGap({
       gap_id: args.gap_id,
@@ -2617,8 +2696,8 @@ export type MappingRowStatus = (typeof MAPPING_ROW_STATUSES)[number];
 
 /**
  * A /mappings row a person saved is stored as one mapping_suggestions record
- * per gap under this reserved tactic key (`__row__:<status>`); the row's tactic
- * set is the gap's coverages, each marked human-accepted.
+ * per gap under this reserved tactic key (`__row__:<status>`); the row's active
+ * tactic set is the gap's coverages for available parent tactics.
  */
 export const HUMAN_MAPPING_ROW_PREFIX = "__row__:";
 
@@ -2660,9 +2739,9 @@ export function requireMappingRowStatus(value: unknown): MappingRowStatus {
 }
 
 /**
- * Saves a /mappings row as the person's decision: the gap's tactic set becomes
- * exactly `tactic_ids` (removed tactics are unassigned and recorded as rejected,
- * new ones assigned), and the row status is stored so it wins over any S4 run.
+ * Saves a /mappings row as the person's decision about available parent tactics.
+ * Removed selections are recorded as rejected, and unavailable relationships
+ * retain their coverage and pair history. The saved status wins over any S4 run.
  */
 async function saveMappingTableRowChange(args: {
   gap_id: string;
@@ -2691,11 +2770,13 @@ async function saveMappingTableRowChange(args: {
   if (mapping_status !== "open" && uniqueIds.length === 0) {
     throw new TrustedApplicationError("Addressed or partially addressed rows need at least one tactic.");
   }
-  for (const tactic_id of uniqueIds) {
-    const tactic = state.tactics.find((x) => x.id === tactic_id);
-    if (!tactic) throw new Error(`Tactic ${tactic_id} not found`);
+  const availableIds = new Set(state.tactics.filter(tacticEligibleForMapping).map(tactic => tactic.id));
+  if (uniqueIds.some(id => !availableIds.has(id))) {
+    throw new TrustedApplicationError("One or more selected tactics are no longer available for mapping. Reopen the row and select available tactics.");
   }
-  const current = state.coverages.filter((c) => !c.expansion_id && c.gap_id === args.gap_id).map((c) => c.tactic_id);
+  const current = state.coverages
+    .filter(c => !c.expansion_id && c.gap_id === args.gap_id && availableIds.has(c.tactic_id))
+    .map(c => c.tactic_id);
   const removed = current.filter((id) => !uniqueIds.includes(id));
   const saved = humanMappingRow(state, args.gap_id);
   if (saved?.mapping_status === mapping_status && !removed.length && uniqueIds.length === current.length && uniqueIds.every(id => current.includes(id) && state.mapping_suggestions.some(row => row.gap_id === args.gap_id && row.tactic_id === id && row.status === "accepted"))) return { decision_event_id: "", parent_tactic_ids: state.tactics.map(tactic => tactic.id) };
@@ -3341,6 +3422,8 @@ export type OverlapRow = {
   statement: string;
   domain: EvidenceDomain;
   source_quote: string;
+  block_id?: string | null;
+  source_context?: SourceContext | null;
   shared_part: string;
   new_part: string;
   merged_name: string;
@@ -3375,6 +3458,8 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
   gaps: ExtractedGap[];
   tactics: ExtractedTactic[];
   overlaps?: OverlapRow[];
+  /** S2 and S3 require retained block provenance on every generated record. */
+  require_grounded_sources?: boolean;
   /** Gaps whose priority a person validated (S8 keeps those), so a new source on them is flagged. */
   validated_gap_ids?: string[];
   /** @deprecated Ignored. Mapping runs only as S4. */
@@ -3392,14 +3477,18 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
   /** Validated gaps a new source joined; they now show "New source added". */
   flagged_gap_ids: string[];
 }> {
+  const sourceId = args.source_id;
+  await lockSourceCitationOwner(sourceId);
   const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [...args.gaps.flatMap(g => g.duplicate_of ? [g.duplicate_of] : []), ...args.needs.flatMap(n => n.gap_id ? [n.gap_id] : [])] });
   const state = await loadState();
-  const sourceId = args.source_id;
   // Linked to the first objective once setup has named one; a blank plan has none yet.
   const obj = state.objectives[0];
   if (!state.sources.some((s) => s.id === sourceId)) {
     throw new Error(`Source ${sourceId} not found. Nothing was saved.`);
   }
+
+  const groundedContext = async (blockId: string | null | undefined, quote: string) =>
+    args.require_grounded_sources ? requireRetainedSourceQuote(sourceId, blockId, quote) : null;
 
   // Validate every judged reference before writing anything.
   const liveGaps = new Map(state.gaps.filter(isLiveGap).map((g) => [g.id, g]));
@@ -3467,17 +3556,30 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
     state.gaps.filter((g) => g.human_validated || validatedPriority.has(g.id)).map((g) => g.id),
   );
 
-  // A gap holds each source sentence once: re-running extraction on a document, or two
-  // candidates quoting the same sentence, must not attach it again (KAN-74).
-  // Older rows kept only the first 280 characters of a quote, so compare on those.
-  const quoteKey = (gapId: string, quote: string) =>
-    `${gapId}|${sourceId}|${quote.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 280)}`;
-  const attached = new Set(
-    state.need_gap_links.flatMap((link) => {
-      const need = state.needs.find((row) => row.id === link.need_id);
-      return need && need.source_id === sourceId ? [quoteKey(link.gap_id, need.source_quote ?? need.statement)] : [];
-    }),
-  );
+  // Verified citations use the full quotation and its exact block. The historical
+  // prefix still deduplicates unverified writes without suppressing a verified one.
+  const quoteKey = (gapId: string, blockId: string | null, quote: string) => {
+    const normalized = squashText(quote);
+    return JSON.stringify([gapId, blockId, blockId ? normalized : normalized.toLowerCase().slice(0, 280)]);
+  };
+  const historicalKey = (gapId: string, quote: string) => JSON.stringify([gapId, squashText(quote)]);
+  const historicalNeeds = new Map<string, IegpState["needs"]>();
+  const retainedBlocks = state.blocks.filter((block) => block.source_id === sourceId);
+  const needsById = new Map(state.needs.map((need) => [need.id, need]));
+  const attached = new Set<string>();
+  for (const link of state.need_gap_links) {
+    const need = needsById.get(link.need_id);
+    if (!need || need.source_id !== sourceId) continue;
+    const blockId = args.require_grounded_sources && !need.source_context ? null : need.block_id ?? null;
+    attached.add(quoteKey(link.gap_id, blockId, need.source_quote ?? need.statement));
+    if (!args.require_grounded_sources) attached.add(quoteKey(link.gap_id, null, need.source_quote ?? need.statement));
+    if (!need.source_context && need.source_quote?.trim() && (!args.require_grounded_sources || !need.candidate_row_id || need.run_id)) {
+      const key = historicalKey(link.gap_id, need.source_quote);
+      const candidates = historicalNeeds.get(key) ?? [];
+      candidates.push(need);
+      historicalNeeds.set(key, candidates);
+    }
+  }
 
   const addNeed = async (args2: {
     gapId: string;
@@ -3486,9 +3588,35 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
     domain: EvidenceDomain;
     provenance?: NeedProvenance;
   }) => {
-    const key = quoteKey(args2.gapId, args2.quote || args2.statement);
+    const context = await groundedContext(args2.provenance?.block_id, args2.quote);
+    const blockId = args2.provenance?.block_id ?? null;
+    const key = quoteKey(args2.gapId, blockId, args2.quote || args2.statement);
     if (attached.has(key)) return;
     attached.add(key);
+    if (blockId) {
+      if (!args.require_grounded_sources) attached.add(quoteKey(args2.gapId, null, args2.quote || args2.statement));
+      const historical = historicalNeeds.get(historicalKey(args2.gapId, args2.quote)) ?? [];
+      const exact = historical.find((need) => need.block_id === blockId);
+      if (exact && context) {
+        await db().update(t.needs).set({ source_context: context }).where(eq(t.needs.id, exact.id));
+        return;
+      }
+      const unassigned = historical.filter((need) => !need.block_id);
+      if (unassigned.length === 1) {
+        const legacy = unassigned[0]!;
+        const update = reconcileHistoricalCitation(retainedBlocks, args2.quote, blockId, legacy.observed_block_ids);
+        if (update && "block_id" in update) {
+          const citation = { ...update, source_context: context };
+          await db().update(t.needs).set(citation).where(eq(t.needs.id, legacy.id));
+          Object.assign(legacy, citation);
+          return;
+        }
+        if (update) {
+          await db().update(t.needs).set(update).where(eq(t.needs.id, legacy.id));
+          Object.assign(legacy, update);
+        }
+      }
+    }
     const needId = await allocateId("NEED", needIds);
     needIds.push(needId);
     createdNeedIds.push(needId);
@@ -3501,7 +3629,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
       source_id: sourceId,
       objective: obj,
       geography: state.asset.geography,
-      provenance: args2.provenance,
+      provenance: { ...args2.provenance, source_context: context ?? args2.provenance?.source_context },
     });
     const role = hasPrimary.has(args2.gapId) ? "supporting" : "primary";
     hasPrimary.add(args2.gapId);
@@ -3536,7 +3664,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
       statement: need?.statement ?? gapRow.statement,
       quote: need?.source_quote ?? gapRow.source_quote,
       domain: gapRow.domain,
-      provenance: need?.provenance,
+      provenance: need?.provenance ?? { block_id: gapRow.block_id, source_context: gapRow.source_context },
     });
   }
   for (const need of needsOnExistingGaps) {
@@ -3562,6 +3690,8 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
       statement: overlap.statement,
       domain: overlap.domain,
       source_quote: overlap.source_quote,
+      block_id: overlap.block_id ?? null,
+      source_context: await groundedContext(overlap.block_id, overlap.source_quote) ?? overlap.source_context ?? null,
       shared_part: overlap.shared_part,
       new_part: overlap.new_part,
       merged_name: overlap.merged_name,
@@ -3583,9 +3713,13 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
   const createdTacticIds: string[] = [];
   const skippedTacticIds: string[] = [];
   for (const tac of args.tactics) {
+    const source_context = await groundedContext(tac.block_id, tac.source_quote) ?? tac.source_context ?? null;
+    if (args.require_grounded_sources && tac.source_id !== sourceId) {
+      throw new TrustedApplicationError("Tactic citation does not belong to this source.", "conflict", 409);
+    }
     if (tac.duplicate_of) {
       const { attachTacticSource } = await import("@/modules/stages/s3-tactic-extract/suggestions");
-      if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tac.duplicate_of, source_id: sourceId, source_quote: tac.source_quote});
+      if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tac.duplicate_of, source_id: sourceId, source_quote: tac.source_quote, block_id: tac.block_id, source_context});
       skippedTacticIds.push(tac.id);
       continue;
     }
@@ -3616,9 +3750,11 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
       intended_use: `Extracted from ${sourceId}`,
       lock: unlocked(),
       source_quote: (tac.source_quote ?? "").trim(),
+      block_id: tac.block_id ?? null,
+      source_context,
     });
     const { attachTacticSource } = await import("@/modules/stages/s3-tactic-extract/suggestions");
-    if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tacticId, source_id: sourceId, source_quote: tac.source_quote});
+    if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tacticId, source_id: sourceId, source_quote: tac.source_quote, block_id: tac.block_id, source_context});
   }
 
   await appendAudit(
@@ -3648,18 +3784,37 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
  * documents in the same run (KAN-74). They follow the suggestion's outcome, so
  * no source is dropped whichever way a person decides.
  */
-export async function addSuggestionSources(
+export const addSuggestionSources = atomic(async function addSuggestionSources(
   suggestionId: string,
   sources: GapSuggestionSource[],
 ): Promise<void> {
   if (sources.length === 0) return;
-  const state = await loadState();
-  const suggestion = state.gap_suggestions.find((row) => row.id === suggestionId);
-  if (!suggestion) throw new Error(`Suggestion ${suggestionId} not found. Nothing was saved.`);
+  for (const sourceId of [...new Set(sources.map(source => source.source_id))].sort()) {
+    await lockSourceCitationOwner(sourceId);
+  }
+  const suggestion = await lockGapSuggestion(suggestionId);
+  if (!suggestion || suggestion.status !== "pending") {
+    throw new TrustedApplicationError("Pending gap suggestion not found.", "conflict", 409);
+  }
+  const checked = await verifySuggestionSourceQuotes(sources);
   await db()
     .update(t.gapSuggestions)
-    .set({ extra_sources: [...suggestion.extra_sources, ...sources] })
+    .set({ extra_sources: [...(Array.isArray(suggestion.extra_sources) ? suggestion.extra_sources : []), ...checked] })
     .where(eq(t.gapSuggestions.id, suggestionId));
+});
+
+/** Lock the suggestion row before changing its state. */
+async function lockGapSuggestion(id: string) {
+  const [suggestion] = await db().select().from(t.gapSuggestions).where(eq(t.gapSuggestions.id, id)).for("update");
+  return suggestion;
+}
+
+/** Verify each explicit citation or recover a unique historical quote under the source lock. */
+async function verifySuggestionSourceQuotes(sources: GapSuggestionSource[]): Promise<GapSuggestionSource[]> {
+  return Promise.all(sources.map(async (source) => ({
+    ...source,
+    ...await resolveRetainedSourceQuote(source.source_id, source.block_id, source.source_quote),
+  })));
 }
 
 type SuggestionDecision = {
@@ -3699,11 +3854,46 @@ async function closeSuggestion(
 }
 
 /** Every source a suggestion carries: its own candidate first, then repeats. */
-function suggestionSources(suggestion: GapSuggestion): GapSuggestionSource[] {
+function suggestionSources(suggestion: GapSuggestion): [GapSuggestionSource, ...GapSuggestionSource[]] {
   return [
-    { source_id: suggestion.source_id, statement: suggestion.statement, source_quote: suggestion.source_quote },
+    { source_id: suggestion.source_id, statement: suggestion.statement, source_quote: suggestion.source_quote,
+      block_id: suggestion.block_id, source_context: suggestion.source_context },
     ...suggestion.extra_sources,
   ];
+}
+
+class GapSuggestionSourcesChanged extends TrustedApplicationError {
+  constructor() {
+    super("This suggestion changed while you were reviewing it. Refresh and review it again.", "conflict", 409);
+  }
+}
+
+/** Retry once in a new transaction or savepoint to lock any newly appended sources in order. */
+async function retryGapSuggestionDecision<T>(decide: () => Promise<T>): Promise<T> {
+  try {
+    return await decide();
+  } catch (error) {
+    if (!(error instanceof GapSuggestionSourcesChanged)) throw error;
+    return decide();
+  }
+}
+
+/** Lock cited sources, the assessment gap and then the suggestion, in writer order. */
+async function lockGapSuggestionCitations(id: string) {
+  const { suggestion, gap } = await pendingSuggestion(id);
+  const citedSourceIds = new Set(suggestionSources(suggestion).map(source => source.source_id));
+  for (const sourceId of [...citedSourceIds].sort()) {
+    await db().select({ id: t.sources.id }).from(t.sources).where(eq(t.sources.id, sourceId)).for("update");
+  }
+  const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [gap.id] });
+  await lockGapSuggestion(id);
+  const current = await pendingSuggestion(id);
+  const [primary, ...extraSources] = suggestionSources(current.suggestion);
+  if (current.gap.id !== gap.id || [primary, ...extraSources].some(source => !citedSourceIds.has(source.source_id))) {
+    throw new GapSuggestionSourcesChanged();
+  }
+  const [verifiedPrimary, ...verifiedExtras] = await verifySuggestionSourceQuotes([primary, ...extraSources]);
+  return { ...current, primary: verifiedPrimary!, extraSources: verifiedExtras, assessmentGapIds };
 }
 
 /**
@@ -3717,10 +3907,7 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
   args: SuggestionDecision & { name?: string; statement?: string },
 ): Promise<{ gap_id: string }> {
   const rationale = requireRationale(args.rationale);
-  const pending = await pendingSuggestion(args.suggestion_id);
-  const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [pending.gap.id] });
-  const { suggestion, gap } = await pendingSuggestion(args.suggestion_id);
-  const before = await loadState();
+  const { suggestion, gap, primary, extraSources, assessmentGapIds, state: before } = await lockGapSuggestionCitations(args.suggestion_id);
   const name = (args.name ?? suggestion.merged_name).trim();
   const statement = (args.statement ?? suggestion.merged_statement).trim();
   if (!name) throw new TrustedApplicationError("Give the merged gap a name.");
@@ -3764,7 +3951,7 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
       actor_function: args.actor_function,
     });
   }
-  for (const [index, source] of suggestionSources(suggestion).entries()) {
+  for (const [index, source] of [primary, ...extraSources].entries()) {
     await insertNeedForGap({
       gapId: gap.id,
       sourceId: source.source_id,
@@ -3773,7 +3960,8 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
       role: "supporting",
       actor_function: args.actor_function,
       // The suggestion's own candidate is the first source; repeats came from the same run.
-      provenance: { run_id: suggestion.run_id, candidate_row_id: index === 0 ? suggestion.candidate_row_id : null },
+      provenance: { run_id: suggestion.run_id, candidate_row_id: index === 0 ? suggestion.candidate_row_id : null,
+        block_id: source.block_id, source_context: source.source_context },
     });
   }
   await closeSuggestion(suggestion.id, "merged", { ...args, rationale });
@@ -3800,14 +3988,11 @@ const acceptGapMergeChange = atomic(async function acceptGapMerge(
  * the incoming source as its primary need; the shared part joins the existing gap
  * as a supporting need; and the two gaps are linked as related.
  */
-export const acceptGapSplit = atomic(async function acceptGapSplit(
+const acceptGapSplitChange = atomic(async function acceptGapSplit(
   args: SuggestionDecision & { name?: string; statement?: string },
 ): Promise<{ gap_id: string; new_gap_id: string }> {
   const rationale = requireRationale(args.rationale);
-  const pending = await pendingSuggestion(args.suggestion_id);
-  const assessmentGapIds = await lockAssessmentOwners({ gap_ids: [pending.gap.id] });
-  const { suggestion, gap } = await pendingSuggestion(args.suggestion_id);
-  const before = await loadState();
+  const { suggestion, gap, primary, extraSources, assessmentGapIds, state: before } = await lockGapSuggestionCitations(args.suggestion_id);
   const name = (args.name ?? suggestion.split_name).trim();
   const statement = (args.statement ?? suggestion.split_statement).trim();
   if (!name) throw new TrustedApplicationError("Give the new gap a name.");
@@ -3827,9 +4012,10 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
     settings: gap.settings,
     metadata: gap.metadata,
     origin_gap_id: gap.id,
-    need_provenance: { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id },
+    need_provenance: { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id,
+      block_id: primary?.block_id, source_context: primary?.source_context },
   });
-  for (const source of suggestion.extra_sources) {
+  for (const source of extraSources) {
     await insertNeedForGap({
       gapId: newGapId,
       sourceId: source.source_id,
@@ -3837,7 +4023,7 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
       sourceQuote: source.source_quote,
       role: "supporting",
       actor_function: args.actor_function,
-      provenance: { run_id: suggestion.run_id },
+      provenance: { run_id: suggestion.run_id, block_id: source.block_id, source_context: source.source_context },
     });
   }
   await insertNeedForGap({
@@ -3847,7 +4033,8 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
     sourceQuote: suggestion.source_quote,
     role: "supporting",
     actor_function: args.actor_function,
-    provenance: { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id },
+    provenance: { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id,
+      block_id: primary?.block_id, source_context: primary?.source_context },
   });
   await linkRelatedGaps(gap.id, newGapId);
   await closeSuggestion(suggestion.id, "split", { ...args, rationale, result_gap_id: newGapId });
@@ -3884,8 +4071,9 @@ async function linkRelatedGaps(a: string, b: string) {
 }
 
 /** Rejects an overlap: nothing changes in the plan, and the suggestion stays on record. */
-export async function rejectGapSuggestion(args: SuggestionDecision): Promise<GapSuggestion> {
+export const rejectGapSuggestion = atomic(async function rejectGapSuggestion(args: SuggestionDecision): Promise<GapSuggestion> {
   const rationale = requireRationale(args.rationale);
+  await lockGapSuggestion(args.suggestion_id);
   const state = await loadState();
   const suggestion = state.gap_suggestions.find((row) => row.id === args.suggestion_id);
   if (!suggestion) throw new TrustedApplicationError("Suggestion not found.", "not_found", 404);
@@ -3905,7 +4093,7 @@ export async function rejectGapSuggestion(args: SuggestionDecision): Promise<Gap
     signal_kind: "user_rejected_proposal",
   });
   return suggestion;
-}
+});
 
 /** A person has looked at the source that joined a validated gap (KAN-74). */
 export async function clearNewSourceFlag(args: {
@@ -3949,7 +4137,7 @@ export async function lockTacticReview(args: {
   if (!["accepted", "rejected"].includes(args.review_status)) throw new TrustedApplicationError("Invalid tactic review status.");
   await loadState();
   return withWorkspaceTransaction(async () => {
-    await db().execute(sql`SELECT id FROM tactics WHERE id = ${args.tactic_id} FOR UPDATE`);
+    const gapIds = await lockAssessmentOwners({ tactic_ids: [args.tactic_id] });
     const tactic = (await readState()).tactics.find(row => row.id === args.tactic_id);
     if (!tactic) throw new TrustedApplicationError("Tactic not found", "not_found", 404);
     if (args.expected_tactic !== undefined && args.expected_tactic !== tacticEditVersion(tactic)) {
@@ -3962,6 +4150,7 @@ export async function lockTacticReview(args: {
       before: tactic.review_status, after: args.review_status, rationale,
       actor: { name: args.actor_name, function: args.actor_function },
     });
+    if (gapIds.length) await syncComputedGapStatuses(gapIds);
   });
 }
 
@@ -4559,12 +4748,18 @@ async function insertProvisionalClosingCoverage(args: {
   });
 }
 
+/** Confirm a live Open or Addressed gap using its status under the gap row lock. */
 export async function validateGap(args: {
   gap_id: string;
   actor_name: string;
   actor_function: ActorFunction;
   note?: string;
-}) {
+}): Promise<void> {
+  if (!inWorkspaceTransaction()) {
+    await loadState();
+    return withWorkspaceTransaction(() => validateGap(args));
+  }
+  await db().execute(sql`select id from gaps where id = ${args.gap_id ?? null} for update`);
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
   if (!gap || !isLiveGap(gap)) throw new TrustedApplicationError("Gap not found", "not_found", 404);
@@ -4934,10 +5129,13 @@ async function createAddressedGapChange(args: {
 }) {
   let tacticId = args.tactic_id?.trim();
   if (tacticId) {
-    // The tactic must be a real one that counts toward coverage: an id that is
-    // not there, or a proposed or cancelled tactic, cannot close a gap.
+    // Own the tactic while validating review and committing its new coverage.
+    await db().execute(sql`select id from tactics where id = ${tacticId} for update`);
     const tactic = (await loadState()).tactics.find((x) => x.id === tacticId);
     if (!tactic) throw new Error(`Tactic ${tacticId} does not exist. Choose one from the library, or record the missed tactic.`);
+    if (tactic.review_status !== "accepted") {
+      throw new TrustedApplicationError("Only an accepted tactic can address a gap. Choose an accepted tactic or record the missed tactic.");
+    }
     if (tactic.status === "proposed" || tactic.status === "cancelled") {
       throw new Error(`${tactic.name} is ${tactic.status}, so it cannot address a gap. Choose a completed, ongoing or planned tactic.`);
     }
@@ -5223,5 +5421,9 @@ export function rewritePartialGap(args: Parameters<typeof rewritePartialGapChang
 }
 
 export function acceptGapMerge(args: Parameters<typeof acceptGapMergeChange>[0]) {
-  return withRelationshipChange(args, () => acceptGapMergeChange(args));
+  return withRelationshipChange(args, () => retryGapSuggestionDecision(() => acceptGapMergeChange(args)));
+}
+
+export function acceptGapSplit(args: Parameters<typeof acceptGapSplitChange>[0]) {
+  return retryGapSuggestionDecision(() => acceptGapSplitChange(args));
 }

@@ -4,7 +4,7 @@ import "@/modules";
 import { runStage } from "@/modules/kernel/run";
 import { wipePlatform } from "@/modules/kernel/db";
 import { displayedGapStatus, gapInSetting, isLiveGap, settingOptions } from "@/lib/iegp/engine";
-import { createGap, loadState, normalizeSettings, resetDemoSetup, setGapSettings } from "@/lib/iegp/store";
+import { createGap, loadState, normalizeSettings, resetDemoSetup, setGapSettings, validateGap } from "@/lib/iegp/store";
 import {
   ALL_SETTINGS_SCOPE,
   DEFAULT_AXES,
@@ -79,6 +79,9 @@ describe("Prioritize on a setting's matrix", () => {
     expect(openIds.length).toBeGreaterThanOrEqual(2);
     await setGapSettings({ gap_id: openIds[0]!, settings: ["1L", "Perioperative"], expected_settings: state.gaps.find(gap => gap.id === openIds[0])!.settings, rationale: "Scope this gap to both treatment settings", actor_name: ACTOR.name, actor_function: ACTOR.function });
     await setGapSettings({ gap_id: openIds[1]!, settings: ["1l"], expected_settings: state.gaps.find(gap => gap.id === openIds[1])!.settings, rationale: "Scope this gap to first-line care", actor_name: ACTOR.name, actor_function: ACTOR.function });
+    for (const gap_id of openIds) {
+      await validateGap({ gap_id, actor_name: ACTOR.name, actor_function: ACTOR.function, note: "Reviewed for the matrix fixture" });
+    }
   }, 60_000);
 
   it("scopes gaps by setting tag, case-insensitively", async () => {

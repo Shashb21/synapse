@@ -5,7 +5,7 @@ import "@/modules";
 import { AdminMain, AdminWorkspaceBar, PageIntro } from "@/components/admin/admin-page";
 import { Badge } from "@/components/ui/badge";
 import { STAGES, type StageId } from "@/modules/kernel/contracts";
-import { getRun } from "@/modules/kernel/observability";
+import { getRun, recoverInterruptedRuns } from "@/modules/kernel/observability";
 import { listLlmCalls } from "@/modules/kernel/llm-calls";
 import { LlmCallList, LlmTotalsLine } from "@/components/admin/llm-calls";
 import type { AgenticRound } from "@/modules/kernel/agentic";
@@ -40,7 +40,10 @@ export default async function RunDetailPage({
   // sandbox); without one, the console's workspace. Owner only (KAN-62).
   const named = typeof query.workspace === "string" ? query.workspace : null;
   const found = await withAdminWorkspace(
-    async (workspace) => ({ workspace, run: await getRun(id) }),
+    async (workspace) => {
+      await recoverInterruptedRuns(id);
+      return { workspace, run: await getRun(id) };
+    },
     named,
   ).catch((error: unknown) => {
     if (error instanceof UnknownWorkspaceError) return null;

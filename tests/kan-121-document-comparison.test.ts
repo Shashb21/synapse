@@ -11,7 +11,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/iegp/db";
 import type { IegpState } from "@/lib/iegp/types";
 import type { ComparisonOutcome } from "@/lib/ingest/comparison-types";
-import { sourceComparisons, sourceReviews } from "@/lib/iegp/schema";
+import { sourceBlocks, sourceComparisons, sourceReviews } from "@/lib/iegp/schema";
 import { acceptTacticExpansion, tacticVersion } from "@/lib/iegp/tactic-expansions";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -27,6 +27,7 @@ import { advanceIngest } from "@/app/api/iegp/ingest-pipeline";
 import { getRun } from "@/modules/kernel/observability";
 import { HISTORICAL_FAILURE_MESSAGE } from "@/modules/kernel/failure-presentation";
 import { moduleRuns } from "@/modules/kernel/schema";
+import * as routing from "@/modules/kernel/routing";
 import { runStage } from "@/modules/kernel/run";
 import { findProvider } from "@/modules/llm/provider";
 import { listParsedDocuments } from "@/modules/stages/s1-parse/module";
@@ -51,6 +52,20 @@ async function post(body: Record<string, unknown>, signal?: AbortSignal) { const
 async function parse() { await runStage({ stage: "S0", input: { files: [file] }, actor, role: "medical_affairs" }); return runStage({ stage: "S1", input: {}, actor, role: "medical_affairs" }); }
 async function comparison() { const { listSourceComparisons } = await import("@/lib/ingest/compare-source"); return (await listSourceComparisons())[0]; }
 function outcome(input: ComparisonInput, judgment: ComparisonOutcome["judgment"] = "conflict", extra: Partial<ComparisonOutcome> = {}): ComparisonOutcome { return { block_id: input.blocks[0].id, passage: "The study includes children only.", match: "same", judgment, gap_id: gap, tactic_id: tactic, coverage_id: coverage, rationale: "The source challenges the adult population", ...extra }; }
+/** Close the backend holding this fixture's advisory lock, even if other tests use the same server. */
+async function disconnectComparisonWorker(runId: string) {
+ const key = `source-comparison-run:public:${runId}`;
+ const [worker] = await db().execute(sql`
+   select pid from pg_locks
+   where locktype = 'advisory' and granted and pid <> pg_backend_pid()
+   and database = (select oid from pg_database where datname = current_database())
+   and classid::bigint = ((hashtextextended(${key}, 0) >> 32) & 4294967295)
+   and objid::bigint = (hashtextextended(${key}, 0) & 4294967295)
+ `);
+ expect(worker?.pid).toEqual(expect.any(Number));
+ const [disconnected] = await db().execute(sql`select pg_terminate_backend(${worker.pid}::integer, 5000) as terminated`);
+ expect(disconnected?.terminated).toBe(true);
+}
 beforeEach(async () => {
  jar.values.clear();
  await store.resetDemoSetup(); await wipePlatform(["source_files", "parsed_documents"]); await setAiEnabled({ enabled: true, actor_name: actor.name });
@@ -88,6 +103,67 @@ describe("KAN-146 incoming document comparison", () => {
   } else expect(run!.output).toMatchObject({ outcomes: [expect.objectContaining({ coverage_id: coverage })] });
  });
 
+ it("skips the provider when the comparison lock connection closes before the call", async () => {
+  const completionFor = routing.completionFor;
+  let finish!: () => void;
+  const completeSettled = new Promise<void>(resolve => { finish = resolve; });
+  vi.spyOn(routing, "completionFor").mockImplementation((route, run, options) => {
+   const complete = completionFor(route, run, options);
+   return async request => {
+    if (request.purpose !== "incoming-source-comparison") return complete(request);
+    try {
+     await disconnectComparisonWorker(run.id);
+     return await complete(request);
+    } finally {
+     finish();
+    }
+   };
+  });
+  await parse();
+  await completeSettled;
+  const saved = await comparison();
+  expect(saved).toMatchObject({ status: "failed", outcomes: null });
+  expect(calls).toHaveLength(0);
+  expect((await getRun(saved.version))?.status).toBe("error");
+ });
+ it.each(["success", "failure"])("discards late provider %s after the comparison lock connection closes", async result => {
+  const started = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const settled = Promise.withResolvers<void>();
+  respond = async input => {
+   started.resolve();
+   await release.promise;
+   if (result === "failure") throw new Error("Late provider diagnostic");
+   return { outcomes: [outcome(input)] };
+  };
+  const completionFor = routing.completionFor;
+  vi.spyOn(routing, "completionFor").mockImplementation((route, run, options) => {
+   const complete = completionFor(route, run, options);
+   return async request => {
+    if (request.purpose !== "incoming-source-comparison") return complete(request);
+    try { return await complete(request); }
+    finally { settled.resolve(); }
+   };
+  });
+  const parsing = parse();
+  try {
+   await started.promise;
+   const running = await comparison();
+   await disconnectComparisonWorker(running.version);
+   await parsing;
+   expect(await comparison()).toMatchObject({ status: "failed", outcomes: null, review_ids: [] });
+   expect((await getRun(running.version))?.status).toBe("error");
+   release.resolve();
+   await settled.promise;
+   const [row] = await db().select().from(moduleRuns).where(eq(moduleRuns.id, running.version));
+   expect(row).toMatchObject({ status: "error", output: null });
+   expect(row.error).not.toBe("Late provider diagnostic");
+   expect(calls).toHaveLength(1);
+  } finally {
+   release.resolve();
+   await parsing;
+  }
+ });
  it("compares a direct parse against current plan records and preserves the human verdict", async () => {
   const before = await store.loadState(); await parse();
   expect((await listParsedDocuments())).toHaveLength(1);
@@ -377,24 +453,30 @@ describe("KAN-146 incoming document comparison", () => {
   expect((await store.loadState()).source_reviews).toHaveLength(0);
  });
  it.each(["removed", "changed", "surrounding", "unrelated"] as const)("versions a standalone target's actual cited provenance (%s)", async change => {
-  const blockAction = async (body: Record<string, unknown>) => {
+  const blockAction = async (body: Record<string, unknown>, expectedStatus = 200) => {
    const response = await blockPost(new Request("http://localhost/api/sources/blocks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...fields, rationale: "Reviewed target source edit", ...body }) }));
-   const result = await response.json(); expect(response.status, JSON.stringify(result)).toBe(200); return result;
+   const result = await response.json(); expect(response.status, JSON.stringify(result)).toBe(expectedStatus); return result;
   };
   const quote = "The protocol enrols adults only.";
-  const source = await blockAction({ action: "manual_source", title: "Existing target protocol", source_type: "advisory_board", stakeholder_function: actor.function, blocks: [{ text: quote }, { text: "Unrelated administration." }] });
+  const source = await blockAction({ action: "manual_source", title: "Existing target protocol", source_type: "advisory_board", stakeholder_function: actor.function, blocks: [{ text: quote }, { text: "Unrelated administration." }, { text: quote }] });
   const standalone = await store.recordMissedTactic({ name: "Unmapped adult protocol", type: "rwe_study", evidence_question: "Adult outcomes", population: "Adults", status: "ongoing", ...fields });
-  await attachTacticSource({ tactic_id: standalone, source_id: source.source_id, source_quote: quote });
+  const citedBlockId = source.block_ids[0];
+  await attachTacticSource({ tactic_id: standalone, source_id: source.source_id, source_quote: quote, block_id: citedBlockId });
   expect((await store.loadState()).coverages.some(row => row.tactic_id === standalone)).toBe(false);
+  const changed = change === "removed" || change === "changed";
   respond = async input => {
    expect(input.tactic_source_provenance).toContainEqual({ tactic_id: standalone, source_id: source.source_id, passage: quote, retained: true });
    expect(input.provenance_source_ids).toContain(source.source_id);
    const text = change === "removed" ? "Administrative notes only." : change === "changed" ? "The protocol enrols children only." : change === "surrounding" ? `Updated preface. ${quote} Updated appendix.` : "Updated administration.";
-   await blockAction({ action: "edit", block_id: source.block_ids[change === "unrelated" ? 1 : 0], text });
+   const blockId = change === "unrelated" ? source.block_ids[1] : citedBlockId;
+   await blockAction({ action: "edit", block_id: blockId, text }, changed ? 409 : 200);
+   if (changed) {
+    // Simulate out-of-band drift after proving the normal editor rejects it.
+    await db().update(sourceBlocks).set({ text }).where(eq(sourceBlocks.id, citedBlockId));
+   }
    return { outcomes: [outcome(input, "conflict", { gap_id: null, tactic_id: standalone, coverage_id: null })] };
   };
   await parse();
-  const changed = change === "removed" || change === "changed";
   expect(await comparison()).toMatchObject({ status: changed ? "failed" : "completed", basis_current: !changed });
   expect((await store.loadState()).source_reviews).toHaveLength(changed ? 0 : 1);
   expect(await listParsedDocuments()).toHaveLength(1);

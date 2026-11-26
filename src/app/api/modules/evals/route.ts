@@ -11,6 +11,7 @@ import { requestIdentity } from "@/modules/auth/request";
 import { apiErrorResponse, readJsonBody } from "@/modules/auth/api-guard";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 /**
@@ -48,6 +49,7 @@ export async function POST(request: Request) {
         input: { ...(input as Record<string, unknown>), dry_run: true },
         actor: identity.actor,
         role: identity.role,
+        purpose: "owner_evaluation",
       });
       return result.output as never;
     }));

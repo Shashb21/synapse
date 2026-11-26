@@ -13,13 +13,14 @@ import { requirementSourceVersion } from "@/lib/iegp/requirement-basis";
 import { createSourceDiscrepancy, linkSourceSupport, sourceReviewCitationCurrent } from "@/lib/iegp/source-review";
 import { aiSectionEnabled } from "@/modules/kernel/ai-switch";
 import { completionFor, resolveRoute } from "@/modules/kernel/routing";
-import { closeRun, openRun, RunRecorder } from "@/modules/kernel/observability";
+import { closeRun, openRun, RunRecorder, SOURCE_COMPARISON_MODULE, withRunningSourceComparison } from "@/modules/kernel/observability";
 import { currentModelRun, ModelRunStop } from "@/modules/kernel/model-run";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { scopedWorkspaceId } from "@/modules/workspaces/context";
 import type { Actor, ResolvedRoute } from "@/modules/kernel/contracts";
 import type { IegpState } from "@/lib/iegp/types";
 import type { ComparisonOutcome, SourceComparison, SourceComparisonView } from "./comparison-types";
+import { validateQuoteAgainstBlock } from "./quote-validator";
 
 const outcomeSchema = z.object({
   block_id: z.string().min(1), passage: z.string().trim().min(1),
@@ -46,7 +47,9 @@ async function facts(state: IegpState, sourceId: string) {
     .filter(reference => tactics.some(tactic => tactic.id === reference.tactic_id)));
   const provenance = references.map(reference => ({
     tactic_id: reference.tactic_id, source_id: reference.source_id, passage: normalize(reference.source_quote),
-    retained: state.blocks.some(block => block.source_id === reference.source_id && normalize(block.text).includes(normalize(reference.source_quote))),
+    retained: state.blocks.some(block => block.source_id === reference.source_id
+      && (!reference.block_id || block.id === reference.block_id)
+      && validateQuoteAgainstBlock({ block, quote: reference.source_quote }).ok),
   }));
   // Legacy tactics may identify their source by its exact ID/title rather than a reference row.
   // A concrete quote depends only on that passage; an uncited document conservatively depends on all its text.
@@ -57,7 +60,8 @@ async function facts(state: IegpState, sourceId: string) {
       const blocks = state.blocks.filter(block => block.source_id === candidate.id);
       const passage = normalize(tactic.source_quote ?? "");
       return { tactic_id: tactic.id, source_id: candidate.id, passage,
-        retained: Boolean(passage) && blocks.some(block => normalize(block.text).includes(passage)),
+        retained: blocks.some(block => (!tactic.block_id || block.id === tactic.block_id)
+          && validateQuoteAgainstBlock({ block, quote: passage }).ok),
         ...(!passage ? { uncited_source_text: blocks.map(block => normalize(block.text)).sort() } : {}),
       };
     }));
@@ -198,26 +202,39 @@ export async function compareSource(sourceId: string, actor: Actor): Promise<voi
     });
     if (!attempt || attempt.status === "ai_disabled") return;
     const { version, basis_version } = attempt;
-    if (attempt.outcomes === null) {
+    let pendingOutcomes = attempt.outcomes;
+    if (pendingOutcomes === null) {
       const state = await loadState();
-      const recorder = new RunRecorder({ workspace_id: await scopedWorkspaceId() ?? "default", stage: "S1", module_id: "incoming-source-comparison", module_version: "1", actor, input: { source_id: sourceId, basis_version } }, version);
+      const recorder = new RunRecorder({ workspace_id: await scopedWorkspaceId() ?? "default", stage: "S1", module_id: SOURCE_COMPARISON_MODULE, module_version: "1", actor, input: { source_id: sourceId, basis_version } }, version);
       currentModelRun()?.check();
       await openRun(recorder);
       let route: ResolvedRoute | null = null;
+      let result: { outcomes: ComparisonOutcome[] } | { error: unknown };
       try {
-        currentModelRun()?.check();
-        route = await resolveRoute("S1");
-        const complete = completionFor(route, recorder);
-        const reply = replySchema.parse(await complete({ system: SYSTEM, user: JSON.stringify(await facts(state, sourceId)), purpose: "incoming-source-comparison" }));
-        currentModelRun()?.check();
-        attempt.outcomes = reply.outcomes;
-        await closeRun({ recorder, status: "ok", route, output: reply, summary: "Incoming comparison provider reply received." });
+        result = await withRunningSourceComparison(recorder, async ({ assertLive, finalize }) => {
+          let reply: z.infer<typeof replySchema>;
+          try {
+            currentModelRun()?.check();
+            route = await resolveRoute("S1");
+            const complete = completionFor(route, recorder, { beforeSend: assertLive });
+            reply = replySchema.parse(await complete({ system: SYSTEM, user: JSON.stringify(await facts(state, sourceId)), purpose: "incoming-source-comparison" }));
+          } catch (error) {
+            await finalize({ status: "error", route, error: error instanceof Error ? error.message : String(error) });
+            return { error };
+          }
+          currentModelRun()?.check();
+          await finalize({ status: "ok", route, output: reply, summary: "Incoming comparison provider reply received." });
+          return reply;
+        });
       } catch (error) {
+        // A lost lock rolls back terminal writes. Close an interrupted run only
+        // if recovery has left it open. Late provider work cannot finalize this run.
         await closeRun({ recorder, status: "error", route, error: error instanceof Error ? error.message : String(error) });
         throw error;
       }
+      if ("error" in result) throw result.error;
+      pendingOutcomes = result.outcomes;
     }
-    const pendingOutcomes = attempt.outcomes;
     // Normalize and validate the entire reply under current owner locks before saving or applying it.
     // This also upgrades pre-normalization saved outcomes without calling the model on durable retry.
     const outcomes = await comparisonTransaction(async () => {

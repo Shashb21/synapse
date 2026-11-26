@@ -3,12 +3,13 @@ import { isDemoModeWorkspace } from "@/lib/demo/mode";
 import { sql } from "drizzle-orm";
 import { DEFAULT_SCHEMA, DEFAULT_WORKSPACE_ID, runInWorkspace, scopedWorkspaceId } from "@/modules/workspaces/context";
 import type { Actor, JsonCompletion, StageId } from "./contracts";
-import { sharedDb } from "./db";
+import { db, sharedDb } from "./db";
 import { newId, nowIso } from "./ids";
 import { isTestStub } from "./llm";
 import { canPrompt, completionFor, resolveRoute } from "./routing";
 import { originatingSnapshot } from "./decision-replay";
-import { closeRun, getRun, openRun, RunRecorder } from "./observability";
+import { getRun, openRun, RunRecorder } from "./observability";
+import { recordLearningRun } from "./learning-run";
 import { aiSectionEnabled } from "./ai-switch";
 import { sectionOfStage } from "./ai-sections";
 import { currentAttribution, recordAuditBestEffort } from "./audit";
@@ -229,9 +230,10 @@ export async function listDecisionExamples(args: {
   return rows.map(toExample).filter((example) => !kinds || kinds.has(example.kind));
 }
 
-async function setLesson(id: string, lesson: string | null, status: LessonStatus) {
-  await sharedDb().execute(
-    sql`update decision_examples set lesson = ${lesson}, lesson_status = ${status} where id = ${id}`,
+async function setLesson(id: string, lesson: string | null, status: LessonStatus, writer = sharedDb()) {
+  await writer.execute(
+    sql`update public.decision_examples set lesson = ${lesson}, lesson_status = ${status}
+        where id = ${id} and lesson_status <> 'ok'`,
   );
 }
 
@@ -426,14 +428,15 @@ async function computeRecordedLesson(example: DecisionExample, complete?: JsonCo
   });
   await openRun(recorder);
   try {
-    const lesson = await deidentifyLesson(example, completionFor(route, recorder), entityNames);
-    await setLesson(id, lesson, lesson ? "ok" : "failed");
-    await closeRun({ recorder, status: "ok", route, output: { lesson_status: lesson ? "ok" : "failed" } });
-    return lesson ? "ok" : "failed";
+    return await recordLearningRun<LessonStatus>(recorder, route, async assertLive => {
+      const lesson = await deidentifyLesson(example, completionFor(route, recorder, { beforeSend: assertLive }), entityNames);
+      const status = lesson ? "ok" : "failed";
+      await setLesson(id, lesson, status, db());
+      return { value: status, output: { lesson_status: status } };
+    }, () => setLesson(id, null, "failed", db()));
   } catch (error) {
-    await setLesson(id, null, "failed");
-    await closeRun({ recorder, status: "error", route, output: {}, error: error instanceof Error ? error.message : String(error) });
-    throw error;
+    console.error("[learning] lesson generation failed", id, error);
+    return "failed";
   }
 }
 

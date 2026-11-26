@@ -7,6 +7,7 @@ import { ownerAccess, ownerGate } from "@/modules/auth/owner";
 import { inAdminWorkspace } from "./_shared";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 /**

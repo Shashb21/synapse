@@ -23,7 +23,7 @@ The app uses Drizzle + `postgres` (see `src/lib/iegp/db.ts`). Local dev uses Doc
    | Name | Value |
    | --- | --- |
    | `DATABASE_URL` | Copy **Pooled** connection string from the Vercel Postgres store (or `POSTGRES_URL` if that is the pooled URL Vercel provides). |
-   | `DATABASE_POOL_MAX` / `DATABASE_PLATFORM_POOL_MAX` | Optional. Connections per instance for workspace data (default 3 on Vercel) and platform tables (default 2). Keep instances × (both) under the database's connection limit. |
+   | `DATABASE_POOL_MAX` / `DATABASE_PLATFORM_POOL_MAX` | Optional. Connections per instance for workspace data (default 3 on Vercel, 10 self-hosted) and platform tables (default 2 on Vercel, 4 self-hosted). Source comparisons open a third pool on demand, sized to the greater of 2 and `DATABASE_POOL_MAX`. The default total ceiling per instance is 8 on Vercel or 24 self-hosted. Multiply that ceiling by the maximum number of concurrent instances and check it against the database or pooler's client connection limit. |
 
 Apply to **Production**, **Preview**, and **Development** if you use Vercel previews.
 
@@ -126,3 +126,11 @@ The full list is in [`deploy-checklist.md`](./deploy-checklist.md) §6. After se
 - **Port:** Vercel sets `PORT` automatically; local dev uses `43217` via `npm run dev` only.
 - **No custom server** — standard Next.js App Router output.
 - **Retained storage:** Accuracy routes and hygiene APIs are retired. Preserve historical tables and artifacts; see the [retirement runbook](operations/accuracy-retirement.md).
+
+## 7. Recover interrupted stage runs
+
+Stage execution, ingestion, and owner evaluation handlers declare a 300-second Next.js `maxDuration`. Vercel uses that setting to enforce the request limit. On other hosts, configure the request limit in the hosting platform. An executing stage holds a database lock on its run until its workspace transaction finishes. Each such run occupies one workspace pool connection while waiting for the model. Concurrent model runs can therefore delay other workspace queries when the pool is full. Incoming-source comparisons hold their execution locks on a separate pool so comparison retries and plan updates can run while a provider responds. That pool follows `DATABASE_POOL_MAX` with a minimum of two connections.
+
+Open **Admin → Runs** in the affected workspace. The list checks up to 100 records at a time, and a run's detail page checks that record directly. A running record older than 10 minutes is marked failed once its execution lock is gone. Recovery skips active work, respects the ingestion lock for older records, and preserves existing terminal results. It neither calls the model nor retries the stage.
+
+Ingestion retries resume from the last committed checkpoint. A setup failure records its error after the failed transaction rolls back. If the host terminates the process during an ingestion transaction, PostgreSQL rolls back the in-flight stage and its uncommitted trace together. Retry the existing ingestion job to continue. Durable queued execution, worker leases, and retry policy are tracked in [KAN-175](https://synapse21.atlassian.net/browse/KAN-175).

@@ -1,3 +1,8 @@
+import * as tables from "@/lib/iegp/schema";
+import { eq } from "drizzle-orm";
+import { db } from "@/modules/kernel/db";
+import { parsedDocuments } from "@/modules/stages/s1-parse/schema";
+import { tacticCandidates } from "@/modules/stages/s3-tactic-extract/schema";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/iegp/store", async (importOriginal) => {
@@ -10,8 +15,10 @@ import { ensurePlatformSchema, wipePlatform } from "@/modules/kernel/db";
 import { runStage } from "@/modules/kernel/run";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { NoRouteError } from "@/modules/llm/provider";
+import { splitSourceBlock } from "@/lib/iegp/source-blocks";
 import { commitExtractedRecords, loadState, resetDemoSetup } from "@/lib/iegp/store";
 import { tacticExtractModule } from "@/modules/stages/s3-tactic-extract/module";
+import { type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
 
 /**
  * The model path of S3, with a scripted model in place of a provider: the
@@ -64,6 +71,7 @@ function context(script: Script, connected = true): { ctx: ModuleContext; calls:
 }
 
 const QUOTE = "The ongoing VELA registry follows 800 patients for five years.";
+const CLAIMS_QUOTE = "A claims analysis is planned.";
 const good = (overrides: Record<string, unknown> = {}) => ({
   name: "VELA registry",
   type: "registry",
@@ -88,6 +96,8 @@ const acceptAll = (call: Call) => ({
   })),
 });
 
+const subgroupScope = {name: "SLR subgroup", evidence_question: "What safety evidence exists in subgroup?", population: "Subgroup", outcomes: "", geography: "", data_cut: "", analysis: "Post-hoc subgroup", instrument: "", study_design: "Retrospective analysis", gap_coverage: "Subgroup evidence", cost_effort: "Source does not specify", timing: "Source does not specify", feasibility_risks: "Requires source review", post_hoc: true, prospective_enrolment: false, protocol_amendment: false, start_date: null, evidence_available: null};
+
 describe("S3 on the model path", () => {
   let documentId = "";
   let libraryId = "";
@@ -97,7 +107,18 @@ describe("S3 on the model path", () => {
     await resetDemoSetup();
     await ensurePlatformSchema(tacticExtractModule.migrations ?? []);
     await wipePlatform(["source_files", "parsed_documents", "gap_candidates", "tactic_candidates"]);
-    await runStage({ stage: "S0", input: { demo_ids: ["heor-interview"] }, actor: ACTOR, role: "medical_affairs" });
+    await runStage({
+      stage: "S0",
+      input: { files: [{
+        filename: "fictional-tactics.txt",
+        title: "Fictional activity descriptions",
+        source_type: "stakeholder_interview",
+        stakeholder_function: ACTOR.function,
+        text: `Fictional activity descriptions.\n\n${QUOTE}\n\n${CLAIMS_QUOTE}\n\nA systematic literature review was completed last year.`,
+      }] },
+      actor: ACTOR,
+      role: "medical_affairs",
+    });
     await runStage({ stage: "S1", input: {}, actor: ACTOR, role: "medical_affairs" });
     const state = await loadState();
     const source = state.sources[0]!;
@@ -140,6 +161,24 @@ describe("S3 on the model path", () => {
   });
 
   const input = (dry_run = true) => tacticExtractModule.inputSchema.parse({ document_ids: [documentId], dry_run });
+
+  it("checks a revised quotation before it can become a tactic", async () => {
+    let firstReview = true;
+    const { ctx } = context((call) => {
+      if (call.purpose.startsWith("tactic-proposer-revise:")) {
+        return { tactics: idsOf(call, "rows").map((id) => ({ id, ...good({ source_quote: "The fictional pilot enrolled twelve volunteers." }) })) };
+      }
+      if (call.purpose.startsWith("tactic-proposer:")) return { tactics: [good()] };
+      if (call.purpose === "tactic-critic") {
+        if (!firstReview) return keepAll(call);
+        firstReview = false;
+        return { reviews: idsOf(call, "candidates").map((id) => ({ id, verdict: "revise", confidence: 70, note: "Clarify the documented activity" })) };
+      }
+      return acceptAll(call);
+    });
+    await expect(tacticExtractModule.run(input(false), ctx)).rejects.toThrow(/source_quote.*verbatim/i);
+    expect(commitExtractedRecords).not.toHaveBeenCalled();
+  });
 
   it("throws before doing anything when no LLM is connected", async () => {
     const { ctx, calls } = context(() => ({}), false);
@@ -225,6 +264,142 @@ describe("S3 on the model path", () => {
     expect(output.accepted[0]).toMatchObject({ name: "VELA registry", status: "planned" });
   });
 
+  it("preserves accepted critic reviews when a duplicated review must be retried", async () => {
+    let first = true;
+    const { ctx, calls } = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) return { tactics: [good(), good({ name: "Second study" })] };
+      if (call.purpose === "tactic-judge") return acceptAll(call);
+      const answer = keepAll(call);
+      if (first) {
+        first = false;
+        answer.reviews.push(answer.reviews[1]!);
+      }
+      return answer;
+    });
+    await tacticExtractModule.run(input(), ctx);
+    const reviews = calls.filter(call => call.purpose === "tactic-critic");
+    expect(idsOf(reviews[1]!, "candidates")).toEqual([idsOf(reviews[0]!, "candidates")[1]]);
+    expect(reviews[1]!.body?.candidates).toEqual([expect.objectContaining({ problem: expect.stringMatching(/duplicate/i) })]);
+  });
+
+  it.each([true, false])("retries only the malformed document (repair succeeds: %s)", async repairSucceeds => {
+    const request = input(false);
+    const facts = await tacticExtractModule.freeze!(request) as { documents: ParsedDocumentRecord[] };
+    const first = facts.documents[0]!;
+    const second = {
+      ...first, id: "second-document", source_id: "second-source",
+      blocks: first.blocks.map(block => ({ ...block, id: `second-${block.id}`, source_id: "second-source" })),
+    };
+    const { state } = facts as typeof facts & { state: Awaited<ReturnType<typeof loadState>> };
+    state.blocks.push(...second.blocks);
+    facts.documents.push(second);
+    request.document_ids = [first.id, second.id];
+    let attempts = 0;
+    const { ctx, calls } = context(call => {
+      if (call.purpose === `tactic-proposer:${first.id}`) return { tactics: [good()] };
+      if (call.purpose === `tactic-proposer:${second.id}`) {
+        attempts += 1;
+        return repairSucceeds && attempts === 2
+          ? { tactics: [good({ name: "Second claims study", source_quote: CLAIMS_QUOTE })] }
+          : { tactics: null };
+      }
+      return call.purpose === "tactic-critic" ? keepAll(call) : acceptAll(call);
+    });
+    ctx.replay = { evaluation: true, input: request, facts, module_id: tacticExtractModule.manifest.id, module_version: tacticExtractModule.manifest.version, prompt_version: "base" };
+
+    if (repairSucceeds) {
+      const { output } = await tacticExtractModule.run(request, ctx);
+      expect(output.accepted.map(row => row.document_id)).toEqual([first.id, second.id]);
+    } else {
+      await expect(tacticExtractModule.run(request, ctx)).rejects.toThrow(/second-source.*tactics.*list.*3 attempts/i);
+      expect(attempts).toBe(3);
+    }
+    const proposals = calls.filter(call => call.purpose.startsWith("tactic-proposer:"));
+    expect(proposals.filter(call => call.purpose === `tactic-proposer:${first.id}`)).toHaveLength(1);
+    expect(proposals[2]?.user).toMatch(/second-source[\s\S]*tactics.*list/i);
+    expect(commitExtractedRecords).not.toHaveBeenCalled();
+  });
+
+  it("accepts an explicit empty tactic list without re-requesting the document", async () => {
+    const { ctx, calls } = context(() => ({ tactics: [] }));
+
+    const { output } = await tacticExtractModule.run(input(), ctx);
+
+    expect(output.accepted).toEqual([]);
+    expect(calls.map(call => call.purpose)).toEqual([`tactic-proposer:${documentId}`]);
+  });
+
+  it("retries a fabricated source quote without resending the grounded sibling", async () => {
+    const request = input();
+    const facts = await tacticExtractModule.freeze!(request) as { documents: ParsedDocumentRecord[] };
+    const fabricatedQuote = "The search report will include overall survival.";
+    const { ctx, calls } = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) {
+        return { tactics: [good(), good({ name: "Claims study", source_quote: fabricatedQuote })] };
+      }
+      if (call.purpose.startsWith("tactic-proposer-fix:")) {
+        return { tactics: idsOf(call, "rows").map(id => ({ id, ...good({ name: "Claims study", source_quote: CLAIMS_QUOTE }) })) };
+      }
+      return call.purpose === "tactic-critic" ? keepAll(call) : acceptAll(call);
+    });
+    ctx.replay = { evaluation: true, input: request, facts, module_id: tacticExtractModule.manifest.id, module_version: tacticExtractModule.manifest.version, prompt_version: "base" };
+    const { output } = await tacticExtractModule.run(request, ctx);
+    expect(calls[0]!.user).not.toContain(fabricatedQuote);
+    const repair = calls.find(call => call.purpose.startsWith("tactic-proposer-fix:"));
+    expect(repair?.body?.rows).toEqual([expect.objectContaining({
+      id: `${documentId}-LT002`,
+      problem: expect.stringMatching(/source_quote.*verbatim/i),
+    })]);
+    expect(output.accepted.map(row => row.source_quote)).toEqual([QUOTE, CLAIMS_QUOTE]);
+  });
+
+  it("retries a quote stitched across source blocks without resending a grounded sibling", async () => {
+    const request = input();
+    const facts = await tacticExtractModule.freeze!(request) as { documents: ParsedDocumentRecord[] };
+    const document = facts.documents[0]!;
+    const template = document.blocks[0]!;
+    const { state } = facts as typeof facts & { state: Awaited<ReturnType<typeof loadState>> };
+    const firstFragment = "The planned registry excludes";
+    const secondFragment = "patients without consent.";
+    const stitched = `${firstFragment} ${secondFragment}`;
+    document.blocks = [
+      { ...template, heading: "Registry", text: `${QUOTE} ${firstFragment}` },
+      { ...template, id: `${template.id}-claims`, heading: "Claims", text: `${secondFragment} ${CLAIMS_QUOTE}` },
+    ];
+    state.blocks = [...state.blocks.filter(block => block.source_id !== document.source_id), ...document.blocks];
+    const { ctx, calls } = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) {
+        return { tactics: [good(), good({ name: "Claims study", source_quote: stitched })] };
+      }
+      if (call.purpose.startsWith("tactic-proposer-fix:")) {
+        return { tactics: idsOf(call, "rows").map(id => ({ id, ...good({ name: "Claims study", source_quote: CLAIMS_QUOTE }) })) };
+      }
+      return call.purpose === "tactic-critic" ? keepAll(call) : acceptAll(call);
+    });
+    ctx.replay = { evaluation: true, input: request, facts, module_id: tacticExtractModule.manifest.id, module_version: tacticExtractModule.manifest.version, prompt_version: "base" };
+
+    const { output } = await tacticExtractModule.run(request, ctx);
+
+    expect(calls[0]!.user).toContain(`${firstFragment}\n\n## Claims [block_id=${template.id}-claims]\n${secondFragment}`);
+    const repair = calls.find(call => call.purpose.startsWith("tactic-proposer-fix:"));
+    expect(repair?.body?.rows).toEqual([expect.objectContaining({
+      id: `${documentId}-LT002`,
+      problem: expect.stringMatching(/source_quote.*verbatim/i),
+    })]);
+    expect(output.accepted.map(row => row.source_quote)).toEqual([QUOTE, CLAIMS_QUOTE]);
+  });
+
+  it("refuses to commit a revision that repeatedly fabricates a source quote", async () => {
+    const { ctx } = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) return { tactics: [good()] };
+      if (call.purpose === "tactic-critic") return { reviews: keepAll(call).reviews.map(row => ({ ...row, verdict: "revise" })) };
+      if (call.purpose === "tactic-judge") return acceptAll(call);
+      return { tactics: idsOf(call, "rows").map(id => ({ id, ...good({ source_quote: "There are 1,000 registry participants." }) })) };
+    });
+    await expect(tacticExtractModule.run(input(false), ctx)).rejects.toThrow(/source_quote.*verbatim/i);
+    expect(commitExtractedRecords).not.toHaveBeenCalled();
+  });
+
   it("re-asks for an invalid type and a missing quote instead of guessing them", async () => {
     let fixes = 0;
     const { ctx, calls } = context((call) => {
@@ -243,7 +418,7 @@ describe("S3 on the model path", () => {
         return {
           tactics: rows.map((row) => ({
             id: row.id,
-            ...good({ name: "HCRU claims study", type: "hcru_study", source_quote: "A claims analysis is planned." }),
+            ...good({ name: "HCRU claims study", type: "hcru_study", source_quote: CLAIMS_QUOTE }),
           })),
         };
       }
@@ -263,7 +438,7 @@ describe("S3 on the model path", () => {
     expect(secondRows[0]!.problem).toMatch(/source_quote is missing/);
     expect(output.accepted.map((row) => [row.type, row.source_quote])).toEqual([
       ["registry", QUOTE],
-      ["hcru_study", "A claims analysis is planned."],
+      ["hcru_study", CLAIMS_QUOTE],
     ]);
   });
 
@@ -343,7 +518,7 @@ describe("S3 on the model path", () => {
     });
     const {output} = await tacticExtractModule.run(input(), ctx);
     expect(output.accepted[0]).toMatchObject({match: "new", target_tactic_id: null});
-    expect(tacticExtractModule.manifest.version).toBe("3.1.0");
+    expect(tacticExtractModule.manifest.version).toBe("3.2.0");
   });
   it.each([
     {match: "same", target_tactic_id: null},
@@ -361,7 +536,7 @@ describe("S3 on the model path", () => {
 
   it("persists valid overlaps as source review only and retains edited review on rerun", async () => {
     const {listTacticSuggestions, editTacticSuggestion} = await import("@/modules/stages/s3-tactic-extract/suggestions");
-    const scope = {name: "SLR subgroup", evidence_question: "What safety evidence exists in subgroup?", population: "Subgroup", outcomes: "", geography: "", data_cut: "", analysis: "Post-hoc subgroup", instrument: "", study_design: "Retrospective analysis", gap_coverage: "Subgroup evidence", cost_effort: "Source does not specify", timing: "Source does not specify", feasibility_risks: "Requires source review", post_hoc: true, prospective_enrolment: false, protocol_amendment: false, start_date: null, evidence_available: null};
+    const scope = subgroupScope;
     const {ctx} = context(call => {
       if (call.purpose.startsWith("tactic-proposer:")) return {tactics: [good({type: "slr", status: "planned"})]};
       if (call.purpose === "tactic-critic") return keepAll(call);
@@ -377,4 +552,101 @@ describe("S3 on the model path", () => {
     expect((await listTacticSuggestions()).find(r => r.id === suggestion.id)).toEqual(edited);
   });
 
+  it("keeps repeated quotations distinct through tactic storage and human overlap review", async () => {
+    const { listTacticSuggestions, decideTacticSuggestion, listTacticSourceReferences } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    const quote = "Fictional registries measure survival.";
+    const ids = ["new", "same-a", "same-b", "overlap-a", "overlap-b"];
+    const [document] = await db().select().from(parsedDocuments).where(eq(parsedDocuments.id, documentId));
+    const blocks = ids.map(id => ({ id, source_id: document.source_id, text: quote, heading: id, location: id }));
+    await db().insert(tables.sourceBlocks).values(blocks);
+    await db().update(parsedDocuments).set({ blocks }).where(eq(parsedDocuments.id, documentId));
+    const { ctx } = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) return { tactics: blocks.map(block => good({ source_quote: quote, block_id: block.id })) };
+      if (call.purpose === "tactic-critic") return keepAll(call);
+      return { decisions: idsOf(call, "decide").map(id => {
+        const block = ids[Number(id.slice(-3)) - 1]!;
+        const decision = { id, verdict: "accept", confidence: 85, reason: "Checked source" };
+        if (block === "new") return { ...decision, match: "new", target_tactic_id: null };
+        if (block.startsWith("same")) return { ...decision, match: "same", target_tactic_id: libraryId };
+        return { ...decision, match: "overlaps", target_tactic_id: libraryId, shared_scope: "Registry", new_scope: "Subgroup",
+          expansion: subgroupScope, separate: { name: "Independent registry", type: "registry", status: "ongoing", evidence_question: subgroupScope.evidence_question } };
+      }) };
+    });
+    const { output } = await tacticExtractModule.run(input(false), ctx);
+    const candidates = await db().select().from(tacticCandidates).where(eq(tacticCandidates.source_quote, quote));
+    expect(candidates.map(row => row.block_id).sort()).toEqual([...ids].sort());
+    expect((await loadState()).tactics.find(row => row.id === output.committed_tactic_ids[0])?.block_id).toBe("new");
+    expect((await listTacticSourceReferences(libraryId)).filter(row => row.source_quote === quote).map(row => row.block_id).sort()).toEqual(["same-a", "same-b"]);
+    const suggestions = (await listTacticSuggestions()).filter(row => row.source_quote === quote);
+    expect(suggestions.map(row => row.block_id).sort()).toEqual(["overlap-a", "overlap-b"]);
+    for (const row of suggestions) {
+      const decided = await decideTacticSuggestion({ id: row.id, decision: "separate", actor: ACTOR, rationale: "Review confirms independent activity" });
+      expect((await loadState()).tactics.find(t => t.id === decided.result_tactic_id)?.block_id).toBe(row.block_id);
+      expect((await listTacticSourceReferences(decided.result_tactic_id!))[0]?.block_id).toBe(row.block_id);
+    }
+  });
+  it("reconciles historical quote-only reference rows on repeated extraction", async () => {
+    const [document] = await db().select().from(parsedDocuments).where(eq(parsedDocuments.id, documentId));
+    const unique = "One fictional source sentence.";
+    const repeated = "Repeated fictional source sentence.";
+    const block = (id: string, text: string) => ({ id, text, source_id: document.source_id, heading: id, location: id });
+    const blocks = [block("unique", unique), block("first", repeated), block("second", repeated)];
+    await db().insert(tables.sourceBlocks).values(blocks);
+    await db().update(parsedDocuments).set({ blocks }).where(eq(parsedDocuments.id, documentId));
+    const { tacticSourceReferences } = await import("@/modules/stages/s3-tactic-extract/schema");
+    const { listTacticSourceReferences } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    await db().insert(tacticSourceReferences).values([unique, repeated].map((quote, i) => ({
+      id: "old-" + i, tactic_id: libraryId, source_id: document.source_id, source_quote: quote, quote_key: quote.toLowerCase(), created_at: "2020-01-01",
+    })));
+    let omitBlock = false;
+    const { ctx } = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) return { tactics: blocks.map(b => good({ source_quote: b.text, block_id: omitBlock ? undefined : b.id })) };
+      if (call.purpose === "tactic-critic") return keepAll(call);
+      return { decisions: idsOf(call, "decide").map(id => ({ id, verdict: "accept", match: "same", target_tactic_id: libraryId, confidence: 90, reason: "Same activity" })) };
+    });
+    const run = () => tacticExtractModule.run(input(false), ctx);
+    await run();
+    await run();
+    const refs = (await listTacticSourceReferences(libraryId)).filter(r => r.source_quote === unique || r.source_quote === repeated);
+    expect(refs).toHaveLength(4);
+    expect(refs.filter(r => r.source_quote === repeated && r.block_id).map(r => r.block_id).sort()).toEqual(["first", "second"]);
+    expect(refs.find(r => r.id === "old-0")).toMatchObject({ created_at: "2020-01-01", block_id: "unique" });
+    expect(refs.find(r => r.id === "old-1")).toMatchObject({ created_at: "2020-01-01", block_id: null, observed_block_ids: ["first", "second"] });
+    const later = block("later", unique);
+    blocks.push(later);
+    await db().insert(tables.sourceBlocks).values(later);
+    await db().update(parsedDocuments).set({ blocks }).where(eq(parsedDocuments.id, documentId));
+    await run();
+    await run();
+    omitBlock = true;
+    await run();
+    expect((await listTacticSourceReferences(libraryId)).filter(r => r.source_quote === unique).map(r => r.block_id).sort()).toEqual(["later", "unique"]);
+  });
+
+  it("saves a tactic overlap with the current block after a source split", async () => {
+    const { listTacticSuggestions } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    const [document] = await db().select().from(parsedDocuments).where(eq(parsedDocuments.id, documentId));
+    const quote = "The fictional registry includes a subgroup analysis.";
+    const block = { id: "split-registry", source_id: document.source_id, heading: "Registry", location: "p. 1",
+      text: `Background about the registry.\n\n${quote}` };
+    await db().insert(tables.sourceBlocks).values(block);
+    await db().update(parsedDocuments).set({ blocks: [block] }).where(eq(parsedDocuments.id, documentId));
+    const split = await splitSourceBlock({ block_id: block.id, at_text: quote, rationale: "Separate background from the analysis", actor: ACTOR });
+
+    const { ctx } = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) return { tactics: [good({ source_quote: quote })] };
+      if (call.purpose === "tactic-critic") return keepAll(call);
+      return { decisions: idsOf(call, "decide").map(id => ({
+        id, verdict: "accept", match: "overlaps", target_tactic_id: libraryId, confidence: 85, reason: "Subgroup adds scope",
+        shared_scope: "Registry", new_scope: "Subgroup analysis", expansion: subgroupScope,
+        separate: { name: "Subgroup registry analysis", type: "registry", status: "ongoing", evidence_question: subgroupScope.evidence_question },
+      })) };
+    });
+    const { output } = await tacticExtractModule.run(input(false), ctx);
+
+    expect(output.accepted).toMatchObject([{ block_id: split.second_id, source_quote: quote }]);
+    expect((await listTacticSuggestions()).filter(row => row.source_quote === quote)).toMatchObject([
+      { block_id: split.second_id, document_id: documentId, status: "pending" },
+    ]);
+  });
 });

@@ -1,3 +1,5 @@
+import { resolveSourceCitation, sourceContextSchema } from "@/lib/ingest/source-citation";
+import { extractionSections, quotedBlock, reconcileSections, proposeSections, reviseSection, type ExtractionSection } from "../extraction-sections";
 import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
 import { desc } from "drizzle-orm";
 import { z } from "zod";
@@ -10,6 +12,7 @@ import {
   type Critique,
   type JudgedCandidate,
 } from "@/modules/kernel/agentic";
+import { modelRows } from "@/modules/kernel/model-rows";
 import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import { NoRouteError } from "@/modules/llm/provider";
 import { augmentSystemPrompt } from "@/modules/kernel/prompt-variant";
@@ -22,13 +25,14 @@ import {
   type TacticStatus,
   type TacticType,
 } from "@/lib/iegp/enums";
-import { tacticVersion, expansionScopeSchema, modelExpansionScope } from "@/lib/iegp/tactic-expansions";
+import { tacticVersion, expansionScopeSchema } from "@/lib/iegp/tactic-expansions";
 import { createTacticSuggestion, separateTacticOptionSchema } from "./suggestions";
 import type { ExpansionScope, SeparateTacticOption, Tactic } from "@/lib/iegp/types";
 import { commitExtractedRecords, loadState } from "@/lib/iegp/store";
 import { extractCandidateTactics } from "@/lib/iegp/engine";
-import { listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
-import { TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL, TACTIC_MATCHING_DDL, tacticCandidates } from "./schema";
+import { listExtractionDocuments, listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
+import { validateQuoteAgainstBlock } from "@/lib/ingest/quote-validator";
+import { TACTIC_CANDIDATES_DDL, TACTIC_BLOCK_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL, TACTIC_MATCHING_DDL, tacticCandidates } from "./schema";
 import { plural } from "@/lib/plural";
 
 const inputSchema = z.object({
@@ -39,12 +43,15 @@ const inputSchema = z.object({
 const candidateSchema = z.object({
   id: z.string(),
   document_id: z.string(),
+  block_id: z.string().nullable().optional(),
   source_id: z.string(),
   name: z.string(),
   type: z.string(),
   status: z.string(),
   evidence_question: z.string(),
   source_quote: z.string(),
+  source_context: sourceContextSchema.nullable().optional(),
+  citation_error: z.string().nullable().optional(),
   score: z.number(),
   verdict: z.string(),
   critic_note: z.string(),
@@ -68,6 +75,7 @@ export type TacticExtractInput = z.infer<typeof inputSchema>;
 export type TacticExtractOutput = z.infer<typeof outputSchema>;
 
 type TacticCandidate = {
+  source_section?: number;
   id: string;
   document_id: string;
   source_id: string;
@@ -76,6 +84,10 @@ type TacticCandidate = {
   status: TacticStatus;
   evidence_question: string;
   source_quote: string;
+  proposed_block_id: string | null;
+  block_id?: string | null;
+  source_context?: z.infer<typeof sourceContextSchema> | null;
+  citation_error?: string | null;
   /** Set by the judge only; null until then and for a new tactic. */
   duplicate_of: string | null;
   match: "same" | "overlaps" | "new"; target_tactic_id: string | null;
@@ -98,6 +110,7 @@ const TACTIC_FIELDS = `Each tactic has:
 - type: exactly one of ${TACTIC_TYPES.join(", ")}.
 - status: exactly one of ${TACTIC_STATUSES.join(", ")}, reflecting what the document says about it.
 - evidence_question: the question the tactic answers, in one sentence.
+- block_id: the ID of the block containing the full quotation.
 - source_quote: a verbatim sentence or passage from the document that describes the tactic. Never paraphrase and never leave it empty.`;
 
 const TACTIC_PROPOSER_SYSTEM = `You extract tactics already described in pharma evidence-planning source material.
@@ -106,7 +119,7 @@ A tactic is a study, analysis, publication or dissemination activity that exists
 
 ${TACTIC_FIELDS}
 
-Return JSON only: {"tactics":[{"name":"","type":"","status":"","evidence_question":"","source_quote":""}]}`;
+Return JSON only: {"tactics":[{"name":"","type":"","status":"","evidence_question":"","source_quote":"","block_id":""}]}`;
 
 const TACTIC_REVISER_SYSTEM = `You extracted tactics from pharma evidence-planning source material and now answer for specific rows.
 
@@ -116,7 +129,7 @@ ${TACTIC_FIELDS}
 
 Answer every row you are given.
 
-Return JSON only: {"tactics":[{"id":"","withdraw":false,"reason":"","name":"","type":"","status":"","evidence_question":"","source_quote":""}]}
+Return JSON only: {"tactics":[{"id":"","withdraw":false,"reason":"","name":"","type":"","status":"","evidence_question":"","source_quote":"","block_id":""}]}
 Set "withdraw": true with a "reason" to withdraw a row; the tactic fields are then ignored.`;
 
 const TACTIC_CRITIC_SYSTEM = `You review tactic candidates extracted from pharma evidence-planning source material before they enter the tactic library of an Integrated Evidence Generation Plan.
@@ -127,7 +140,7 @@ For each candidate, check that:
 - its evidence question is a clear, specific question the tactic answers;
 - its source quote actually describes it;
 - it distinguishes identical library scope from added scope that needs human review; library repeats may attach provenance and must not overwrite a locked parent;
-- it does not repeat another batch candidate.
+- it does not repeat an identical row from the same source. Preserve distinct source provenance for the same library scope.
 
 verdict is "keep" when the candidate is right as it stands, "revise" when a field should change, and "drop" when it should not enter the library at all. confidence is 0–100 that the candidate belongs in the library as written. note must be actionable: name the field and what it should become, or name the library tactic id or candidate id it duplicates; for "keep" say briefly why it holds.
 
@@ -142,7 +155,7 @@ For each candidate decide:
 - match: exactly "same", "overlaps" or "new". Same is the same activity and scope; overlaps shares an existing activity but adds distinct scope; new is an independent activity.
 - target_tactic_id: an existing library id for same/overlaps, null for new. Never target a batch candidate.
 - shared_scope and new_scope: nonblank descriptions for overlaps, null otherwise.
-- expansion: for overlaps a complete added scope with name, evidence_question, population, outcomes, geography, data_cut, analysis, instrument, study_design, gap_coverage, cost_effort, timing, feasibility_risks, post_hoc, prospective_enrolment, protocol_amendment, start_date, evidence_available. Optional type, comparator and data_source may be included only when the source explicitly supports that child design; omit them when not recorded, never copy the parent or separate alternative. All required fields must be explicit; unused dimensions may be empty strings and dates may be null. Specify at least one added dimension; describe unknown costs/timing/risks honestly, never invent commitments. Completed studies cannot acquire prospective enrolment; identify post-hoc work and protocol amendment needs. Null otherwise.
+- expansion: for overlaps a complete added scope with name, evidence_question, population, outcomes, geography, data_cut, analysis, instrument, study_design, gap_coverage, cost_effort, timing, feasibility_risks, post_hoc, prospective_enrolment, protocol_amendment, start_date, evidence_available. Optional type, comparator and data_source may be included only when the source explicitly supports that child design; omit them when not recorded, never copy the parent or separate alternative. All required fields must be explicit; unused dimensions may be empty strings and dates may be null. Specify at least one added dimension; describe unknown costs/timing/risks honestly, never invent commitments. Dates must be ISO calendar dates (YYYY-MM-DD) or null, and evidence_available must not precede start_date. Use JSON booleans for post_hoc, prospective_enrolment and protocol_amendment. Completed studies cannot acquire prospective enrolment. If analysis describes post-hoc work, set post_hoc to true. Null otherwise.
 - separate: for overlaps a separate linked activity option with name, type, status and evidence_question supported by the source; preserve the candidate's documented type and status. Null otherwise.
 - duplicate_of: optional batch-repeat id only for rejecting repeats of another candidate; keep the better one. Same library references are recorded through target_tactic_id.
 - confidence: 0–100 in your verdict.
@@ -151,10 +164,6 @@ For each candidate decide:
 Decide every candidate you are given. The full batch is listed under "batch" so you can spot repeats.
 
 Return JSON only: {"decisions":[{"id":"","verdict":"accept","match":"new","target_tactic_id":null,"shared_scope":null,"new_scope":null,"expansion":null,"separate":null,"duplicate_of":null,"confidence":0,"reason":""}]}`;
-
-function documentText(document: ParsedDocumentRecord): string {
-  return document.blocks.map((block) => `## ${block.heading}\n${block.text}`).join("\n\n").slice(0, 40_000);
-}
 
 type RawTactic = {
   id?: unknown;
@@ -165,12 +174,13 @@ type RawTactic = {
   status?: unknown;
   evidence_question?: unknown;
   source_quote?: unknown;
+  block_id?: unknown;
 };
 
 const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 
 /** What is wrong with a proposed row, in words the model can act on. Empty when valid. */
-function tacticProblems(raw: RawTactic): string[] {
+function tacticProblems(raw: RawTactic, passages: string[]): string[] {
   const problems: string[] = [];
   if (!text(raw.name)) problems.push("name is missing");
   if (!TACTIC_TYPES.includes(text(raw.type) as TacticType)) {
@@ -180,13 +190,19 @@ function tacticProblems(raw: RawTactic): string[] {
     problems.push(`status "${text(raw.status)}" is not one of ${TACTIC_STATUSES.join(", ")}`);
   }
   if (!text(raw.evidence_question)) problems.push("evidence_question is missing");
-  if (!text(raw.source_quote)) problems.push("source_quote is missing; give the verbatim passage from the document");
+  const quote = text(raw.source_quote);
+  if (!quote) problems.push("source_quote is missing; give the verbatim passage from the document");
+  else if (!passages.some(passage => validateQuoteAgainstBlock({ block: { text: passage }, quote }).ok)) {
+    problems.push("source_quote must be a verbatim passage from one block in the supplied document excerpt");
+  }
   return problems;
 }
 
-function toCandidate(document: ParsedDocumentRecord, id: string, raw: RawTactic): TacticCandidate {
+function toCandidate(section: ExtractionSection, id: string, raw: RawTactic): TacticCandidate {
+  const { document } = section;
   return {
     id,
+    source_section: section.number,
     document_id: document.id,
     source_id: document.source_id,
     name: text(raw.name),
@@ -194,6 +210,7 @@ function toCandidate(document: ParsedDocumentRecord, id: string, raw: RawTactic)
     status: text(raw.status) as TacticStatus,
     evidence_question: text(raw.evidence_question),
     source_quote: text(raw.source_quote),
+    proposed_block_id: text(raw.block_id) || null,
     duplicate_of: null,
     match: "new", target_tactic_id: null, shared_scope: null, new_scope: null, expansion: null, separate: null,
   };
@@ -205,6 +222,7 @@ const tacticFields = (candidate: TacticCandidate) => ({
   status: candidate.status,
   evidence_question: candidate.evidence_question,
   source_quote: candidate.source_quote,
+  block_id: candidate.proposed_block_id,
 });
 
 type ProposerRow = {
@@ -221,13 +239,16 @@ type ProposerRow = {
  */
 async function answerRows(
   ctx: ModuleContext,
-  args: { document: ParsedDocumentRecord; hints: string; rows: ProposerRow[]; purpose: string; role?: "proposer" | "reviser" },
+  args: { section: ExtractionSection; hints: string; rows: ProposerRow[]; library?: LibraryTactic[]; batch?: TacticCandidate[]; purpose: string; role?: "proposer" | "reviser" },
 ): Promise<Map<string, ProposerAnswer>> {
   const rowById = new Map(args.rows.map((row) => [row.id, { ...row }]));
+  const problems = new Map<string, string>();
+  const passages = args.section.blocks.map(block => block.text);
   return completeAll({
     ids: args.rows.map((row) => row.id),
     what: "tactic",
-    describe: (id) => `${id} (${args.document.source_id})`,
+    problems,
+    describe: (id) => `${id} (${args.section.document.source_id})`,
     remedy: REMEDY,
     ask: async (missing, attempt) => {
       const payload = (await ctx.complete({
@@ -235,35 +256,34 @@ async function answerRows(
         system: augmentSystemPrompt(TACTIC_REVISER_SYSTEM),
         user: JSON.stringify({
           worked_examples: args.hints || undefined,
-          source: args.document.source_id,
+          source: args.section.document.source_id,
+          library: args.library,
+          batch: args.batch?.map(candidate => ({ id: candidate.id, source: candidate.source_id, ...tacticFields(candidate) })),
           note:
             attempt > 1
               ? "An earlier answer left these rows unanswered or invalid. Answer each, fixing the problem named."
               : undefined,
-          rows: missing.map((id) => rowById.get(id)!),
-          document: documentText(args.document),
+          rows: missing.map((id) => ({ ...rowById.get(id)!, problem: problems.get(id) ?? rowById.get(id)!.problem })),
+          document: args.section.body,
         }),
-        purpose: `${args.purpose}:${args.document.id}`,
+        purpose: `${args.purpose}:${args.section.document.id}`,
       })) as { tactics?: RawTactic[] } | null;
       const answers = new Map<string, ProposerAnswer>();
-      for (const raw of payload?.tactics ?? []) {
-        const id = text(raw.id);
-        const row = rowById.get(id);
-        if (!row || !missing.includes(id)) continue;
+      for (const [id, raw] of modelRows({ payload, field: "tactics", idField: "id", ids: missing, problems, report: details => ctx.run.note("answer:invalid", details) })) {
+        const row = rowById.get(id)!;
         if (raw.withdraw === true) {
           const reason = text(raw.reason);
           if (reason) answers.set(id, { kind: "withdrawn", reason });
-          else row.problem = "withdraw needs a reason";
+          else problems.set(id, "withdraw needs a reason");
           continue;
         }
-        const problems = tacticProblems(raw);
-        if (problems.length > 0) {
-          // Left out so it is asked for again, with the problem named.
+        const issues = tacticProblems(raw, passages);
+        if (issues.length > 0) {
           row.previous = raw;
-          row.problem = problems.join("; ");
+          problems.set(id, issues.join("; "));
           continue;
         }
-        answers.set(id, { kind: "tactic", tactic: toCandidate(args.document, id, raw) });
+        answers.set(id, { kind: "tactic", tactic: toCandidate(args.section, id, { ...raw, block_id: raw.block_id ?? row.previous?.block_id }) });
       }
       return answers;
     },
@@ -271,43 +291,58 @@ async function answerRows(
 }
 
 /** Round 1: the model lists the tactics in each document; any invalid row is sent back to it. */
-async function llmProposals(
+async function proposeSection(
   ctx: ModuleContext,
-  documents: ParsedDocumentRecord[],
+  section: ExtractionSection,
   hints: string,
 ): Promise<TacticCandidate[]> {
   const out: TacticCandidate[] = [];
-  for (const document of documents) {
-    const payload = (await ctx.complete({
-      role: "proposer",
-      system: augmentSystemPrompt(TACTIC_PROPOSER_SYSTEM),
-      user: [hints, `Source: ${document.source_id}`, documentText(document)].filter(Boolean).join("\n\n"),
-      purpose: `tactic-proposer:${document.id}`,
-    })) as { tactics?: RawTactic[] } | null;
-    const invalid: ProposerRow[] = [];
-    const proposed: { id: string; candidate?: TacticCandidate }[] = [];
-    for (const [index, raw] of (payload?.tactics ?? []).entries()) {
-      const id = `${document.id}-LT${String(index + 1).padStart(3, "0")}`;
-      const problems = tacticProblems(raw);
-      if (problems.length > 0) {
-        invalid.push({ id, previous: raw, problem: problems.join("; ") });
-        proposed.push({ id });
-      } else {
-        proposed.push({ id, candidate: toCandidate(document, id, raw) });
-      }
+  const { document } = section;
+  const listProblem = "The response must contain a tactics list. Use an empty list if the source has no tactics.";
+  const problems = new Map<string, string>();
+  const lists = await completeAll<RawTactic[]>({
+    ids: [document.id],
+    what: "tactics list",
+    describe: () => `${document.source_id} section ${section.number}/${section.total}`,
+    problems,
+    remedy: REMEDY,
+    ask: async (_missing, attempt) => {
+      const payload = (await ctx.complete({
+        role: "proposer",
+        system: augmentSystemPrompt(TACTIC_PROPOSER_SYSTEM),
+        user: [hints, `Source: ${document.source_id}`, attempt > 1 ? listProblem : "", section.body].filter(Boolean).join("\n\n"),
+        purpose: `tactic-proposer:${document.id}`,
+      })) as { tactics?: RawTactic[] } | null;
+      if (Array.isArray(payload?.tactics)) return new Map([[document.id, payload.tactics]]);
+      problems.set(document.id, listProblem);
+      return new Map();
+    },
+  });
+  const invalid: ProposerRow[] = [];
+  const proposed: { id: string; candidate?: TacticCandidate }[] = [];
+  const passages = section.blocks.map(block => block.text);
+  for (const [index, value] of lists.get(document.id)!.entries()) {
+    const raw = value && typeof value === "object" ? value : {};
+    const id = `${document.id}-LT${String(index + 1).padStart(3, "0")}${section.number > 1 ? `-W${section.number}` : ""}`;
+    const issues = tacticProblems(raw, passages);
+    if (issues.length > 0) {
+      invalid.push({ id, previous: raw, problem: issues.join("; ") });
+      proposed.push({ id });
+    } else {
+      proposed.push({ id, candidate: toCandidate(section, id, raw) });
     }
-    const fixed =
-      invalid.length > 0
-        ? await answerRows(ctx, { document, hints, rows: invalid, purpose: "tactic-proposer-fix", role: "proposer" })
-        : new Map<string, ProposerAnswer>();
-    for (const row of proposed) {
-      if (row.candidate) {
-        out.push(row.candidate);
-        continue;
-      }
-      const answer = fixed.get(row.id);
-      if (answer?.kind === "tactic") out.push(answer.tactic);
+  }
+  const fixed =
+    invalid.length > 0
+      ? await answerRows(ctx, { section, hints, rows: invalid, purpose: "tactic-proposer-fix", role: "proposer" })
+      : new Map<string, ProposerAnswer>();
+  for (const row of proposed) {
+    if (row.candidate) {
+      out.push(row.candidate);
+      continue;
     }
+    const answer = fixed.get(row.id);
+    if (answer?.kind === "tactic") out.push(answer.tactic);
   }
   return out;
 }
@@ -316,10 +351,11 @@ async function llmProposals(
 async function llmRevisions(
   ctx: ModuleContext,
   args: {
-    documents: ParsedDocumentRecord[];
+    sections: ExtractionSection[];
     hints: string;
     round: number;
     previous: TacticCandidate[];
+    library: LibraryTactic[];
     critiques: Critique[];
   },
 ): Promise<TacticCandidate[]> {
@@ -330,17 +366,17 @@ async function llmRevisions(
   );
   if (objections.size === 0) return args.previous;
   const answers = new Map<string, ProposerAnswer>();
-  for (const document of args.documents) {
+  for (const section of args.sections) {
     const rows = args.previous
-      .filter((candidate) => candidate.document_id === document.id && objections.has(candidate.id))
+      .filter((candidate) => candidate.document_id === section.document.id && candidate.source_section === section.number && objections.has(candidate.id))
       .map((candidate) => ({
         id: candidate.id,
         previous: tacticFields(candidate),
         objection: objections.get(candidate.id),
       }));
     if (rows.length === 0) continue;
-    const answered = await answerRows(ctx, {
-      document,
+    const answered = await reviseSection(ctx.run, section, args.round - 1, () => answerRows(ctx, {
+      section,
       hints: [
         args.hints,
         `Exchange ${args.round - 1} of ${PROPOSER_CRITIC_EXCHANGES}: answer the critic for each row, keeping its id.`,
@@ -348,8 +384,10 @@ async function llmRevisions(
         .filter(Boolean)
         .join("\n\n"),
       rows,
+      library: args.library,
+      batch: args.previous,
       purpose: "tactic-proposer-revise",
-    });
+    }));
     for (const [id, answer] of answered) answers.set(id, answer);
   }
   return args.previous.flatMap((candidate) => {
@@ -361,7 +399,7 @@ async function llmRevisions(
 
 async function llmReviews(
   ctx: ModuleContext,
-  args: { candidates: TacticCandidate[]; library: LibraryTactic[]; hints: string; round: number; retry: boolean },
+  args: { candidates: TacticCandidate[]; library: LibraryTactic[]; hints: string; round: number; retry: boolean; problems: Map<string, string> },
 ): Promise<Map<string, Review>> {
   const payload = (await ctx.complete({
     role: "critic",
@@ -374,24 +412,23 @@ async function llmReviews(
       candidates: args.candidates.map((candidate) => ({
         id: candidate.id,
         source: candidate.source_id,
+        problem: args.problems.get(candidate.id),
         ...tacticFields(candidate),
       })),
     }),
     purpose: "tactic-critic",
   })) as { reviews?: { id?: unknown; verdict?: unknown; confidence?: unknown; note?: unknown }[] } | null;
   const map = new Map<string, Review>();
-  for (const row of payload?.reviews ?? []) {
-    const id = text(row.id);
-    if (!id) continue;
-    if (row.verdict !== "keep" && row.verdict !== "revise" && row.verdict !== "drop") continue;
-    if (typeof row.confidence !== "number" || !Number.isFinite(row.confidence)) continue;
-    const note = text(row.note);
-    if (!note) continue;
-    map.set(id, {
-      verdict: row.verdict,
-      confidence: Math.max(0, Math.min(100, Math.round(row.confidence))),
-      note,
-    });
+  for (const [id, row] of modelRows({ payload, field: "reviews", idField: "id", ids: args.candidates.map(candidate => candidate.id), problems: args.problems, report: details => ctx.run.note("answer:invalid", details) })) {
+    if (row.verdict !== "keep" && row.verdict !== "revise" && row.verdict !== "drop") {
+      args.problems.set(id, "verdict must be keep, revise or drop");
+    } else if (typeof row.confidence !== "number" || !Number.isFinite(row.confidence)) {
+      args.problems.set(id, "confidence must be numeric");
+    } else if (!text(row.note)) {
+      args.problems.set(id, "note must explain the review");
+    } else {
+      map.set(id, { verdict: row.verdict, confidence: Math.max(0, Math.min(100, Math.round(row.confidence))), note: text(row.note) });
+    }
   }
   return map;
 }
@@ -405,6 +442,7 @@ async function llmDecisions(
     library: LibraryTactic[];
     hints: string;
     retry: boolean;
+    problems: Map<string, string>;
   },
 ): Promise<Map<string, Decision>> {
   const critiqueOf = (id: string) => args.critiques.find((critique) => critique.subject === id);
@@ -425,6 +463,7 @@ async function llmDecisions(
           return {
             id: candidate.id,
             source: candidate.source_id,
+            problem: args.problems.get(candidate.id),
             ...tacticFields(candidate),
             critic: critique
               ? { verdict: critique.verdict, confidence: critique.score, note: critique.note }
@@ -439,34 +478,36 @@ async function llmDecisions(
   const libraryIds = new Set(args.library.map((tactic) => tactic.id));
   const batchIds = new Set(args.batch.map((candidate) => candidate.id));
   const map = new Map<string, Decision>();
-  for (const row of payload?.decisions ?? []) {
-    const id = text(row.id);
-    if (!id) continue;
-    if (row.verdict !== "accept" && row.verdict !== "reject") continue;
-    if (typeof row.confidence !== "number" || !Number.isFinite(row.confidence)) continue;
+  for (const [id, row] of modelRows({ payload, field: "decisions", idField: "id", ids: args.ask, problems: args.problems, report: details => ctx.run.note("answer:invalid", details) })) {
+    const reject = (problem: string) => args.problems.set(id, problem);
+    if (row.verdict !== "accept" && row.verdict !== "reject") { reject("verdict must be accept or reject"); continue; }
+    if (typeof row.confidence !== "number" || !Number.isFinite(row.confidence)) { reject("confidence must be numeric"); continue; }
     const reason = text(row.reason);
-    if (!reason) continue;
-    if (row.match !== "same" && row.match !== "overlaps" && row.match !== "new") continue;
-    if (!("target_tactic_id" in row)) continue;
+    if (!reason) { reject("reason must explain the decision"); continue; }
+    if (row.match !== "same" && row.match !== "overlaps" && row.match !== "new") { reject("match must be same, overlaps or new"); continue; }
     const target_tactic_id = row.target_tactic_id === null ? null : text(row.target_tactic_id);
-    if (row.match === "new" ? target_tactic_id !== null : !target_tactic_id || !libraryIds.has(target_tactic_id)) continue;
+    if (row.match === "new" ? target_tactic_id !== null : !target_tactic_id || !libraryIds.has(target_tactic_id)) {
+      reject("target_tactic_id must be null for new and name a supplied library tactic for same or overlaps"); continue;
+    }
     let expansion: ExpansionScope | null = null, separate: SeparateTacticOption | null = null;
     const shared_scope = row.match === "overlaps" ? text(row.shared_scope) : null;
     const new_scope = row.match === "overlaps" ? text(row.new_scope) : null;
     if (row.match === "overlaps") {
-      const parsedExpansion = expansionScopeSchema.safeParse(modelExpansionScope(row.expansion)), parsedSeparate = separateTacticOptionSchema.safeParse(row.separate);
+      const parsedExpansion = expansionScopeSchema.safeParse(row.expansion), parsedSeparate = separateTacticOptionSchema.safeParse(row.separate);
       const candidate = args.batch.find(c => c.id === id);
-      if (!shared_scope || !new_scope || !parsedExpansion.success || !parsedSeparate.success || parsedSeparate.data.status !== candidate?.status || parsedSeparate.data.type !== candidate?.type) continue;
+      if (!shared_scope || !new_scope) { reject("overlap needs shared_scope and new_scope"); continue; }
+      if (!parsedExpansion.success) { reject(parsedExpansion.error.issues.map(issue => `${issue.path.join(".")}: ${issue.message}`).join("; ")); continue; }
+      if (!parsedSeparate.success || parsedSeparate.data.status !== candidate?.status || parsedSeparate.data.type !== candidate?.type) { reject("separate must be a complete option preserving the candidate type and status"); continue; }
       const target = args.library.find(t => t.id === target_tactic_id);
-      if (target?.status === "completed" && parsedExpansion.data.prospective_enrolment) continue;
-      if (/post[- ]?hoc/i.test(parsedExpansion.data.analysis) && !parsedExpansion.data.post_hoc) continue;
+      if (target?.status === "completed" && parsedExpansion.data.prospective_enrolment) { reject("completed targets cannot add prospective enrolment"); continue; }
+      if (/post[- ]?hoc/i.test(parsedExpansion.data.analysis) && !parsedExpansion.data.post_hoc) { reject("post-hoc analysis requires post_hoc: true"); continue; }
       expansion = parsedExpansion.data; separate = parsedSeparate.data;
     }
     let duplicate_of = row.match === "same" ? target_tactic_id : null;
     if (row.duplicate_of != null) {
       const duplicate = text(row.duplicate_of);
       if (batchIds.has(duplicate) && duplicate !== id && row.verdict === "reject") duplicate_of = duplicate;
-      else if (duplicate !== target_tactic_id || row.match !== "same") continue;
+      else if (duplicate !== target_tactic_id || row.match !== "same") { reject("duplicate_of must name a supplied library match or a different supplied batch candidate on rejection"); continue; }
     }
     map.set(id, {
       verdict: row.verdict,
@@ -519,7 +560,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
   manifest: {
     id: "s3-tactic-extract.pcj",
     stage: "S3",
-    version: "3.1.0",
+    version: "3.2.0",
     title: "Tactic extraction (proposer → critic → judge)",
     summary:
       "A model proposes the tactics the source material describes, a model critic challenges each over three exchanges, and a model judge classifies same, overlapping and new scope. Overlaps await human source review. Needs a connected LLM.",
@@ -529,7 +570,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
   },
   inputSchema,
   outputSchema,
-  migrations: [TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL, ...TACTIC_MATCHING_DDL.split(";").filter(s => s.trim())],
+  migrations: [TACTIC_CANDIDATES_DDL, TACTIC_BLOCK_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL, ...TACTIC_MATCHING_DDL.split(";").filter(s => s.trim())],
   freeze: freezeFacts,
   async run(input, ctx) {
     requireLlm(ctx, "Tactic extraction");
@@ -550,6 +591,31 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
       };
     }
 
+    const sections = isTestStub() ? [] : documents.flatMap(extractionSections);
+    const documentById = new Map(documents.map((document) => [document.id, document]));
+    const sectionsByDocument = new Map(documents.map(document => [document.id, [] as ExtractionSection[]]));
+    for (const section of sections) sectionsByDocument.get(section.document.id)!.push(section);
+    const ground = (candidate: TacticCandidate): TacticCandidate => {
+      const documentBlocks = documentById.get(candidate.document_id)?.blocks ?? [];
+      const section = candidate.source_section ? sectionsByDocument.get(candidate.document_id)?.[candidate.source_section - 1] : undefined;
+      if (ctx.execution_scope === "development") {
+        return section
+          ? { ...candidate, block_id: quotedBlock(section.blocks, candidate.source_quote, candidate.proposed_block_id) }
+          : candidate;
+      }
+      const displayed = section ? section.blocks.flatMap(fragment => {
+        const block = documentBlocks.find(row => row.id === fragment.id);
+        return block ? [{ ...block, text: fragment.text }] : [];
+      }) : documentBlocks;
+      const citation = resolveSourceCitation({
+        source_id: candidate.source_id,
+        quote: candidate.source_quote,
+        proposed_block_id: candidate.proposed_block_id,
+        displayed,
+        retained: state.blocks,
+      });
+      return { ...candidate, ...citation };
+    };
     const library: LibraryTactic[] = state.tactics;
     // The kernel hands similar past reviewer decisions (worked examples, KAN-79) to the proposer; the critic and judge see them too.
     let reviewerHints = "";
@@ -575,15 +641,18 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
               status: tactic.status,
               evidence_question: tactic.evidence_question,
               source_quote: tactic.source_quote,
+              proposed_block_id: tactic.block_id ?? null,
               duplicate_of: null,
               match: "new" as const, target_tactic_id: null, shared_scope: null, new_scope: null, expansion: null, separate: null,
-            })),
+            })).map(ground),
           );
         },
         llm: async ({ hints, round, critiques, previous }) => {
           reviewerHints = hints;
-          if (round === 1) return llmProposals(ctx, documents, hints);
-          return llmRevisions(ctx, { documents, hints, round, previous, critiques });
+          const candidates = round === 1
+            ? await proposeSections(ctx.run, sections, section => proposeSection(ctx, section, hints))
+            : await llmRevisions(ctx, { sections, hints, round, previous, library, critiques });
+          return reconcileSections(candidates.map(ground), row => [row.name, row.evidence_question, row.type, row.status]);
         },
       },
       critic: async (candidates, round) => {
@@ -595,9 +664,11 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
             score: 50,
           }));
         }
+        const problems = new Map<string, string>();
         const reviews = await completeAll({
           ids: candidates.map((candidate) => candidate.id),
           what: "review",
+          problems,
           describe: (id) => candidates.find((candidate) => candidate.id === id)?.name ?? id,
           remedy: REMEDY,
           ask: (missing, attempt) =>
@@ -607,6 +678,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
               hints: reviewerHints,
               round,
               retry: attempt > 1,
+              problems,
             }),
         });
         return candidates.map((candidate) => {
@@ -638,29 +710,36 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
     };
 
     const survivors = outcome.judged.map((item) => item.candidate);
+    const decisionProblems = new Map<string, string>();
+    const grounded = survivors.filter((candidate) => !candidate.citation_error);
     const decisions = await ctx.run.step(
       "judge:model",
       () =>
         isTestStub()
-          ? Promise.resolve(stubDecisions(survivors, library))
+          ? Promise.resolve(stubDecisions(grounded, library))
           : completeAll({
-              ids: survivors.map((candidate) => candidate.id),
+              ids: grounded.map((candidate) => candidate.id),
               what: "judge decision",
-              describe: (id) => survivors.find((candidate) => candidate.id === id)?.name ?? id,
+              problems: decisionProblems,
+              describe: (id) => grounded.find((candidate) => candidate.id === id)?.name ?? id,
               remedy: REMEDY,
               ask: (missing, attempt) =>
                 llmDecisions(ctx, {
-                  batch: survivors,
+                  batch: grounded,
                   ask: missing,
                   critiques: outcome.critiques,
                   library,
                   hints: reviewerHints,
                   retry: attempt > 1,
+                  problems: decisionProblems,
                 }),
             }),
-      `${survivors.length} candidate(s) for the model judge`,
+      `${grounded.length} candidate(s) for the model judge`,
     );
     const judged: JudgedCandidate<TacticCandidate>[] = survivors.map((candidate) => {
+      if (candidate.citation_error) {
+        return { candidate, subject: candidate.id, verdict: "reject", score: 0, note: candidate.citation_error };
+      }
       const decision = decisions.get(candidate.id)!;
       return {
         candidate: { ...candidate, duplicate_of: decision.duplicate_of, match: decision.match, target_tactic_id: decision.target_tactic_id, shared_scope: decision.shared_scope, new_scope: decision.new_scope, expansion: decision.expansion, separate: decision.separate },
@@ -683,6 +762,9 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
       status: item.candidate.status,
       evidence_question: item.candidate.evidence_question,
       source_quote: item.candidate.source_quote,
+      block_id: item.candidate.block_id ?? null,
+      source_context: item.candidate.source_context ?? null,
+      citation_error: item.candidate.citation_error ?? null,
       score: item.score,
       verdict: item.verdict,
       critic_note: item.note,
@@ -703,6 +785,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
         const result = await ctx.run.step(`commit:${document.id}`, () =>
           commitExtractedRecords({
             source_id: document.source_id,
+            require_grounded_sources: true,
             title: source?.title ?? document.source_id,
             stakeholder_function: source?.stakeholder_function ?? ctx.actor.function,
             actor_name: ctx.actor.name,
@@ -717,6 +800,8 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
               evidence_question: candidate.evidence_question,
               source_id: candidate.source_id,
               source_quote: candidate.source_quote,
+              block_id: candidate.block_id,
+              source_context: candidate.source_context,
               duplicate_of: candidate.duplicate_of,
             })),
             apply_mappings: false,
@@ -729,13 +814,15 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
     if (!ctx.replay?.evaluation && !input.dry_run) {
       for (const candidate of accepted.filter(c => c.match === "overlaps")) {
         const parent = state.tactics.find(t => t.id === candidate.target_tactic_id)!;
-        await createTacticSuggestion({run_id: ctx.run.id, document_id: candidate.document_id, source_id: candidate.source_id, source_quote: candidate.source_quote,
+        await createTacticSuggestion({require_grounded_source: true, run_id: ctx.run.id, document_id: candidate.document_id, source_id: candidate.source_id, source_quote: candidate.source_quote,
+          block_id: candidate.block_id, source_context: candidate.source_context,
           target_tactic_id: parent.id, expected_tactic_version: tacticVersion(parent), shared_scope: candidate.shared_scope!, new_scope: candidate.new_scope!, expansion: candidate.expansion!, separate: candidate.separate!});
       }
     }
 
     const toOut = (item: JudgedCandidate<TacticCandidate>) => ({
       id: item.candidate.id,
+      block_id: item.candidate.block_id,
       document_id: item.candidate.document_id,
       source_id: item.candidate.source_id,
       name: item.candidate.name,
@@ -743,6 +830,8 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
       status: item.candidate.status,
       evidence_question: item.candidate.evidence_question,
       source_quote: item.candidate.source_quote,
+      source_context: item.candidate.source_context ?? null,
+      citation_error: item.candidate.citation_error ?? null,
       score: item.score,
       verdict: item.verdict,
       critic_note: item.note,
@@ -827,7 +916,7 @@ export async function listTacticCandidates(limit = 200) {
   return db().select().from(tacticCandidates).orderBy(desc(tacticCandidates.created_at)).limit(limit);
 }
 
-/** Freeze the source facts this stage consumes, before any proposal or human decision. */
+/** Freeze the current source editor blocks while preserving each selected parse ID. */
 async function freezeFacts(input: z.infer<typeof inputSchema>) {
-  return { documents: await listParsedDocuments(input.document_ids), state: await loadState() };
+  return { documents: await listExtractionDocuments(input.document_ids), state: await loadState() };
 }

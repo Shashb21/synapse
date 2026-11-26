@@ -125,6 +125,7 @@ async function advanceStage(args: IngestArgs): Promise<IngestProgress> {
   await ensurePlatformSchema([INGESTION_JOBS_DDL]);
   const schema = await currentSchemaName();
   let comparisonSources: string[] = [];
+  let recordStageFailure: (() => Promise<void>) | undefined;
   const progress = await withWorkspaceTransaction(async () => {
     // A transaction lock is released even if a worker dies. No expiring lease can
     // let a slow model call overlap with a retry. Scope includes the workspace.
@@ -158,7 +159,10 @@ async function advanceStage(args: IngestArgs): Promise<IngestProgress> {
       };
     }
     const stage = state.stages[state.completed];
-    const run = <O>(input: unknown) => runStage<O>({ stage, input, actor: args.actor, role: args.role });
+    const run = <O>(input: unknown) => runStage<O>({
+      stage, input, actor: args.actor, role: args.role,
+      deferFailureRecord: (persist) => { recordStageFailure = persist; },
+    });
     try {
       if (stage === "S0") {
         const upload = await run<{ files: { id: string }[] }>({ files, demo_ids, reuse_existing: true });
@@ -208,6 +212,9 @@ async function advanceStage(args: IngestArgs): Promise<IngestProgress> {
       completed: state.completed,
       total: state.stages.length,
     };
+  }).catch(async (error: unknown) => {
+    await recordStageFailure?.();
+    throw error;
   });
   // Comparison failure cannot roll back a successfully committed parse checkpoint.
   await compareParsedSources(comparisonSources, args.actor);

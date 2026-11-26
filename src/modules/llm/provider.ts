@@ -54,6 +54,8 @@ export type LlmCallHooks = {
   onUsage?: (usage: LlmUsage) => void;
   /** Per-call HTTP bound; omitted preserves ordinary provider retry policy. */
   maxAttempts?: number;
+  /** Check that the caller still owns the work before another HTTP send. */
+  beforeRetry?: () => Promise<void>;
 };
 
 /** The provider's API key, read on the server and sent only to that provider. */
@@ -169,6 +171,7 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
     const wait = requestedWait(res, text) ?? Math.min(RETRY.base_ms * 2 ** (attempt - 1), RETRY.max_wait_ms);
     if (wait > RETRY.max_wait_ms || (hooks?.run && Date.now() + wait >= hooks.run.deadline)) throw error;
     await RETRY.sleep(wait, hooks?.run?.signal);
+    await hooks?.beforeRetry?.();
   }
 }
 

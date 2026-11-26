@@ -101,6 +101,7 @@ import {
 } from "@/modules/stages/s2-gap-extract/suggestions";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 /** Actions that replace the whole workspace: its owner only, on top of the reset_workspace capability. */
 const WORKSPACE_OWNER_ACTIONS = new Set(["reset", "load_demo", "clear_ingested_files"]);
@@ -426,6 +427,10 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
       requireRationale(rationaleOf(body));
       await lockRelationships();
       requireGapResolutionSnapshot(await loadState(), body.parent_gap_id || body.gap_id, body.expected_resolution);
+    }
+    if (body.gap_id && (body.action === "classify_gap" || body.action === "override_gap_status")) {
+      // Capture the same pre-edit computation as the override when a tactic review is finishing.
+      await db().execute(sql`select id from gaps where id = ${body.gap_id} for update`);
     }
     const before = await gateBefore(body);
     // The id of a gap or tactic this action created, so the caller can address it without guessing (ids are never reissued).
@@ -798,6 +803,9 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
           : undefined;
         if (body.judgement_origin === "model" && (!suggestion || body.expected_suggestion !== relationshipVersion(suggestion))) {
           throw new TrustedApplicationError("Model suggestion changed or is unavailable. Review the current suggestion or make a manual judgement with a reason.");
+        }
+        if (suggestion?.review_only) {
+          throw new TrustedApplicationError("This stale coverage reassessment is review-only. Review the existing coverage on the gap record.");
         }
         await acceptMapping({
           model: body.judgement_origin === "model",

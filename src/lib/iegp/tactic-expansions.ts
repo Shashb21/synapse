@@ -75,10 +75,27 @@ function canonical(value: unknown): unknown {
 /** Stable optimistic version: a stale proposal cannot amend a changed parent. */
 export function tacticVersion(tactic: Tactic): string {
   // Persisted optional fields have canonical defaults so seed/import and loaded rows agree.
-  const value = { ...tactic, source_quote: tactic.source_quote ?? "", custom_type: tactic.custom_type ?? null };
+  const { block_id, source_context, ...fields } = tactic;
+  const value = {
+    ...fields,
+    source_quote: tactic.source_quote ?? "",
+    custom_type: tactic.custom_type ?? null,
+    // Keep versions already saved for tactics without verified citations valid.
+    ...(block_id ? { block_id } : {}),
+    ...(source_context ? { source_context } : {}),
+  };
   const sorted = Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)));
 
   return createHash("sha256").update(JSON.stringify(canonical(sorted))).digest("hex");
+}
+
+/** Check a source review's saved parent while allowing its verified citation to move. */
+export function isCurrentTacticReviewParent(current: Tactic, reviewed: Tactic): boolean {
+  return tacticVersion({
+    ...current,
+    block_id: reviewed.block_id,
+    source_context: reviewed.source_context,
+  }) === tacticVersion(reviewed);
 }
 
 function validateActor(actor: Actor) {

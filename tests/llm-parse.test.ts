@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "@/modules";
 import { NoRouteError } from "@/modules/llm/provider";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
@@ -51,6 +51,229 @@ const good = (id: string) =>
   })[id];
 
 describe("LLM structuring", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("keeps a unit at the source-text cap as one prompt unit", async () => {
+    const text = "a".repeat(12_000);
+    const { ask, calls } = scripted((call) => ({
+      units: idsOf(call).map((id) => {
+        const row = (call.body.units as { unit: string; text: string }[]).find((unit) => unit.unit === id)!;
+        return { unit: id, blocks: [{ text: row.text, kind: "paragraph", heading: null }] };
+      }),
+    }));
+
+    const result = await structureWithLlm({
+      filename: "long.txt",
+      units: [{ location: { kind: "page", ref: "p.1" }, text }],
+      ask,
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.body.units).toEqual([{ unit: "u1", location: "p.1", text }]);
+    expect(result.blocks).toEqual([{ text, kind: "paragraph", location: { kind: "page", ref: "p.1" } }]);
+  });
+
+  it("splits a unit over the cap before assigning prompt ids and keeps repeated text distinct", async () => {
+    const text = `${"same ".repeat(2_399)}sameXY`;
+    const { ask, calls } = scripted((call) => ({
+      units: idsOf(call).map((id) => {
+        const row = (call.body.units as { unit: string; text: string }[]).find((unit) => unit.unit === id)!;
+        return { unit: id, blocks: [{ text: row.text, kind: "paragraph", heading: null }] };
+      }),
+    }));
+
+    const result = await structureWithLlm({
+      filename: "long.txt",
+      units: [{ location: { kind: "page", ref: "p.1" }, text }],
+      ask,
+    });
+
+    expect(calls.map((call) => idsOf(call))).toEqual([["u1"], ["u2"]]);
+    const parts = calls.map((call) => (call.body.units as { text: string }[])[0]!.text);
+    expect(parts.join(""), "split pieces retain repeated source text in order").toBe(text);
+    expect(parts.every((part) => part.length <= 12_000)).toBe(true);
+    expect(parts).toEqual([`${"same ".repeat(2_399)}sameX`, "Y"]);
+    expect(result.blocks.map((block) => block.text).join("")).toBe(text);
+    expect(result.blocks.every((block) => block.location.ref === "p.1")).toBe(true);
+    expect(result.split_units).toEqual({ 0: { index: 0, text }, 1: { index: 0, text } });
+  });
+
+  it("does not split a UTF-16 surrogate pair and preserves accepted and dropped order", async () => {
+    const first = "x".repeat(11_999);
+    const text = `${first}😀tail`;
+    const { ask, calls } = scripted((call) => ({
+      units: idsOf(call).map((id) => {
+        const row = (call.body.units as { unit: string; text: string }[]).find((unit) => unit.unit === id)!;
+        return id === "u1"
+          ? { unit: id, blocks: [{ text: row.text, kind: "paragraph", heading: null }] }
+          : { unit: id, blocks: [], dropped_reason: "footer" };
+      }),
+    }));
+
+    const result = await structureWithLlm({
+      filename: "unicode.txt",
+      units: [{ location: { kind: "page", ref: "p.7" }, text }],
+      ask,
+    });
+
+    const parts = calls.map((call) => (call.body.units as { text: string }[])[0]!.text);
+    expect(parts).toEqual([first, "😀tail"]);
+    expect(parts.join(""), "surrogate-safe parts retain exact source order").toBe(text);
+    expect(parts[0]!.endsWith("\uD83D")).toBe(false);
+    expect(parts[1]!.startsWith("\uDE00")).toBe(false);
+    expect(result.blocks).toEqual([{ text: first, kind: "paragraph", location: { kind: "page", ref: "p.7" } }]);
+    expect(result.dropped).toEqual([{ location: "p.7", reason: "footer" }]);
+    expect(result.dropped_units).toEqual([{ location: "p.7", reason: "footer", text: "😀tail", occurrence_id: "u2" }]);
+  });
+
+  it("reconstructs accepted and dropped split pieces with boundary whitespace intact", async () => {
+    const accepted = `${"a".repeat(11_999)} `;
+    const dropped = " footer";
+    const { ask, calls } = scripted((call) => ({
+      units: idsOf(call).map((id) => {
+        const row = (call.body.units as { unit: string; text: string }[]).find((unit) => unit.unit === id)!;
+        return id === "u1"
+          ? { unit: id, blocks: [{ text: row.text, kind: "paragraph", heading: null }] }
+          : { unit: id, blocks: [], dropped_reason: "footer" };
+      }),
+    }));
+
+    const result = await structureWithLlm({
+      filename: "boundary-whitespace.txt",
+      units: [{ location: { kind: "page", ref: "p.9" }, text: accepted + dropped }],
+      ask,
+    });
+
+    expect(calls.map((call) => idsOf(call))).toEqual([["u1"], ["u2"]]);
+    expect(result.blocks).toEqual([{ text: accepted, kind: "paragraph", location: { kind: "page", ref: "p.9" } }]);
+    expect(result.dropped_units).toEqual([{ location: "p.9", reason: "footer", text: dropped, occurrence_id: "u2" }]);
+  });
+
+  it("materializes split blocks from source ranges when the model trims and collapses whitespace", async () => {
+    const first = `${"a".repeat(11_999)} `;
+    const second = " B  C";
+    const { ask, calls } = scripted((call) => ({
+      units: idsOf(call).map((id) => {
+        const row = (call.body.units as { unit: string; text: string }[]).find((unit) => unit.unit === id)!;
+        return { unit: id, blocks: [{ text: row.text.trim().replace(/\s+/g, " "), kind: "paragraph", heading: null }] };
+      }),
+    }));
+
+    const result = await structureWithLlm({
+      filename: "materialize-ranges.txt",
+      units: [{ location: { kind: "page", ref: "p.11" }, text: first + second }],
+      ask,
+    });
+
+    expect(calls.map((call) => idsOf(call))).toEqual([["u1"], ["u2"]]);
+    expect(result.blocks.map((block) => block.text)).toEqual([first, second]);
+    expect(result.blocks.map((block) => block.text).join("")).toBe(first + second);
+  });
+
+  it("preserves whitespace gaps between multiple accepted blocks in one split piece", async () => {
+    const left = `${"L".repeat(6_000)}Alpha`;
+    const gap = "  \n\n";
+    const right = `Beta${"R".repeat(5_987)}`;
+    const firstPiece = left + gap + right;
+    const secondPiece = "tail";
+    expect(firstPiece).toHaveLength(12_000);
+    const { ask, calls } = scripted((call) => ({
+      units: idsOf(call).map((id) => {
+        const row = (call.body.units as { unit: string; text: string }[]).find((unit) => unit.unit === id)!;
+        return id === "u1"
+          ? {
+              unit: id,
+              blocks: [
+                { text: left, kind: "paragraph", heading: null },
+                { text: right, kind: "paragraph", heading: null },
+              ],
+            }
+          : { unit: id, blocks: [{ text: row.text, kind: "paragraph", heading: null }] };
+      }),
+    }));
+
+    const result = await structureWithLlm({
+      filename: "multi-block-gap.txt",
+      units: [{ location: { kind: "page", ref: "p.12" }, text: firstPiece + secondPiece }],
+      ask,
+    });
+
+    expect(calls.map((call) => idsOf(call))).toEqual([["u1"], ["u2"]]);
+    expect(result.blocks.map((block) => block.text)).toEqual([left + gap, right, secondPiece]);
+    expect(result.blocks.map((block) => block.text).join("")).toBe(firstPiece + secondPiece);
+  });
+
+  it("keeps identical split pieces as separate accepted occurrences", async () => {
+    const piece = "same".repeat(3_000);
+    const { ask, calls } = scripted((call) => ({
+      units: idsOf(call).map((id) => {
+        const row = (call.body.units as { unit: string; text: string }[]).find((unit) => unit.unit === id)!;
+        return { unit: id, blocks: [{ text: row.text, kind: "paragraph", heading: null }] };
+      }),
+    }));
+
+    const result = await structureWithLlm({
+      filename: "repeated-pieces.txt",
+      units: [{ location: { kind: "page", ref: "p.10" }, text: `${piece}${piece}tail` }],
+      ask,
+    });
+
+    expect(calls.map((call) => idsOf(call))).toEqual([["u1"], ["u2"], ["u3"]]);
+    expect(result.blocks.map((block) => block.text)).toEqual([piece, piece, "tail"]);
+  });
+
+  it("keeps a whitespace-only continuation available for an explicit drop", async () => {
+    const text = `${"a".repeat(12_000)}   `;
+    const { ask, calls } = scripted((call) => ({
+      units: idsOf(call).map((id) => {
+        const row = (call.body.units as { unit: string; text: string }[]).find((unit) => unit.unit === id)!;
+        return id === "u1"
+          ? { unit: id, blocks: [{ text: row.text, kind: "paragraph", heading: null }] }
+          : { unit: id, blocks: [], dropped_reason: "trailing whitespace" };
+      }),
+    }));
+
+    const result = await structureWithLlm({
+      filename: "whitespace.txt",
+      units: [{ location: { kind: "page", ref: "p.8" }, text }],
+      ask,
+    });
+
+    expect(calls.map((call) => idsOf(call))).toEqual([["u1"], ["u2"]]);
+    expect(result.blocks).toEqual([{ text: "a".repeat(12_000), kind: "paragraph", location: { kind: "page", ref: "p.8" } }]);
+    expect(result.dropped_units).toEqual([{ location: "p.8", reason: "trailing whitespace", text: "   ", occurrence_id: "u2" }]);
+  });
+
+  it("rejects split groups over the configured call budget before calling the model", async () => {
+    vi.stubEnv("SYNAPSE_MAX_PARSE_CALLS", "1");
+    const ask = vi.fn();
+
+    await expect(
+      structureWithLlm({
+        filename: "over-budget.txt",
+        units: [{ location: { kind: "page", ref: "p.1" }, text: "z".repeat(12_001) }],
+        ask,
+      }),
+    ).rejects.toThrow(/would take 2 model calls/);
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("counts every split piece toward the configured section limit before calling the model", async () => {
+    vi.stubEnv("SYNAPSE_MAX_PARSE_UNITS", "1");
+    const ask = vi.fn();
+
+    await expect(
+      structureWithLlm({
+        filename: "over-sections.txt",
+        units: [{ location: { kind: "page", ref: "p.1" }, text: "z".repeat(12_001) }],
+        ask,
+      }),
+    ).rejects.toThrow(/has 2 sections of text/);
+    expect(ask).not.toHaveBeenCalled();
+  });
+
   it("takes every block, kind and heading from the model and records dropped noise", async () => {
     const { ask, calls } = scripted((call) => ({ units: idsOf(call).map(good) }));
     const { blocks, dropped, dropped_units } = await structureWithLlm({ filename: "deck.pptx", units, ask });

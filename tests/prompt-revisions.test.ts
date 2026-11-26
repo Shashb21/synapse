@@ -1,8 +1,10 @@
 /** Persisted candidates keep held-out lineage away from model inputs and live prompts. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { sql } from "drizzle-orm";
-import { sharedDb } from "@/modules/kernel/db";
-import { recordDecisionExample } from "@/modules/kernel/decision-examples";
+import { db, sharedDb } from "@/modules/kernel/db";
+import { computeLesson, getDecisionExample, recordDecisionExample } from "@/modules/kernel/decision-examples";
+import * as observations from "@/modules/kernel/observability";
+import * as transactions from "@/lib/iegp/db";
 import * as stateStore from "@/lib/iegp/store";
 import * as routing from "@/modules/kernel/routing";
 import * as llm from "@/modules/kernel/llm";
@@ -27,6 +29,89 @@ async function fixture() {
   return { ws, ids };
 }
 describe("prompt revision generation", () => {
+  it.each(["lesson", "revision"] as const)("discards a delayed %s response after the run owner disconnects", async kind => {
+    const { ws, ids } = await fixture();
+    await sharedDb().execute(sql`update decision_examples set lesson_status = 'pending', lesson = null where id = ${ids[0]}`);
+    const entered = Promise.withResolvers<number>();
+    const release = Promise.withResolvers<void>();
+    const lateWork = Promise.withResolvers<void>();
+    let released = false;
+    // Wait until the detached work attempts to publish or leaves its savepoint.
+    // This also catches a regression to publishing through the independent pool.
+    const originalTransaction = transactions.withWorkspaceTransaction;
+    vi.spyOn(transactions, "withWorkspaceTransaction").mockImplementation(work => originalTransaction(async () => {
+      try { return await work(); } finally { if (released) lateWork.resolve(); }
+    }));
+    const originalClose = observations.closeRun;
+    vi.spyOn(observations, "closeRun").mockImplementation(args => {
+      if (released) lateWork.resolve();
+      return originalClose(args);
+    });
+    vi.stubEnv("XAI_API_KEY", "synthetic-test-key");
+    vi.spyOn(llm, "isTestStub").mockReturnValue(false);
+    const http = vi.fn(async () => {
+      const [owner] = await db().execute(sql`select pg_backend_pid() as pid`);
+      entered.resolve(Number(owner.pid));
+      await release.promise;
+      const content = JSON.stringify({ lesson: "Reviewers separate distinct populations.", instruction_text: "Separate distinct populations." });
+      return Response.json({ choices: [{ message: { content: kind === "lesson" ? content : JSON.stringify({ instruction_text: "Separate distinct populations." }) } }] });
+    });
+    vi.stubGlobal("fetch", http);
+    const processing = (kind === "lesson" ? computeLesson(ids[0]) : proposePromptRevision({ stage: "S2", workspace_id: ws.id, actor, exclude_ids: [] })).catch(error => error);
+    try {
+      const owner = await Promise.race([entered.promise, processing.then(result => { throw new Error(String(result)); })]);
+      const [disconnected] = await sharedDb().execute(sql`select pg_terminate_backend(${owner}::integer, 5000) as ok`);
+      expect(disconnected.ok).toBe(true);
+      const result = await processing;
+      if (kind === "lesson") expect(result).toBe("failed");
+      else expect(result).toBeInstanceOf(Error);
+      const runsTable = sql`${sql.identifier(ws.schema_name)}.module_runs`;
+      const [failed] = await sharedDb().execute(sql`select * from ${runsTable} where status = 'error'`);
+      expect(failed).toBeDefined();
+      released = true;
+      release.resolve();
+      await lateWork.promise;
+      expect(await getDecisionExample(ids[0])).toMatchObject({ lesson_status: kind === "lesson" ? "failed" : "pending", lesson: null });
+      expect(await listPromptRevisions(ws.id)).toEqual([]);
+      expect(await sharedDb().execute(sql`select id from audit_events where run_id = ${failed.id} and action = 'prompt.generate'`)).toHaveLength(0);
+      expect(await sharedDb().execute(sql`select * from ${runsTable} where id = ${failed.id}`)).toEqual([failed]);
+      expect(http).toHaveBeenCalledTimes(1);
+    } finally {
+      release.resolve();
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each(["lesson", "revision"] as const)("records an overdue %s failure before releasing the run to recovery", async kind => {
+    const { ws, ids } = await fixture();
+    await sharedDb().execute(sql`update decision_examples set lesson_status = 'pending', lesson = null where id = ${ids[0]}`);
+    vi.spyOn(llm, "isTestStub").mockReturnValue(false);
+    vi.stubEnv("XAI_API_KEY", "synthetic-test-key");
+    const diagnostic = "Synthetic learning diagnostic";
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: { message: diagnostic } }, { status: 400 })));
+    const table = sql`${sql.identifier(ws.schema_name)}.module_runs`;
+    const insertRun = observations.openRun;
+    vi.spyOn(observations, "openRun").mockImplementation(async recorder => {
+      await insertRun(recorder);
+      await sharedDb().execute(sql`update ${table} set started_at = '2000-01-01' where id = ${recorder.id}`);
+    });
+    const originalClose = observations.closeRun;
+    vi.spyOn(observations, "closeRun").mockImplementation(async args => {
+      await sharedDb().execute(sql`update ${table} set status = 'error', error = 'Interrupted' where id in (
+        select id from ${table} where id = ${args.recorder.id} and status = 'running' and started_at = '2000-01-01' for update skip locked)`);
+      return originalClose(args);
+    });
+    try {
+      if (kind === "lesson") expect(await computeLesson(ids[0])).toBe("failed");
+      else await expect(proposePromptRevision({ stage: "S2", workspace_id: ws.id, actor, exclude_ids: [] })).rejects.toThrow();
+      const [failed] = await sharedDb().execute(sql`select error from ${table} where status = 'error'`);
+      expect(failed?.error).toContain(diagnostic);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
   it("freezes linked run and subject decisions in one held-out group", async () => {
     const { ws, ids } = await fixture();
     await sharedDb().execute(sql`update decision_examples set run_id = 'run-5' where id = ${ids[4]}`);

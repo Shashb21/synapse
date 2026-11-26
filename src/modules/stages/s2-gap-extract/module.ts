@@ -1,3 +1,5 @@
+import { resolveSourceCitation, sourceContextSchema } from "@/lib/ingest/source-citation";
+import { extractionSections, quotedBlock, reconcileSections, proposeSections, reviseSection, type ExtractionSection } from "../extraction-sections";
 import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
@@ -17,8 +19,8 @@ import { EVIDENCE_DOMAINS, type EvidenceDomain } from "@/lib/iegp/enums";
 import { addSuggestionSources, commitExtractedRecords, loadState } from "@/lib/iegp/store";
 import { validatedPlacementGapIds } from "@/modules/stages/s8-prioritization/module";
 import { extractCandidateGaps, isLiveGap } from "@/lib/iegp/engine";
-import { listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
-import { GAP_CANDIDATES_DDL, gapCandidates } from "./schema";
+import { listExtractionDocuments, listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
+import { GAP_CANDIDATES_DDL, GAP_BLOCK_DDL, gapCandidates } from "./schema";
 import { augmentSystemPrompt } from "@/modules/kernel/prompt-variant";
 import { curatedS2Cases } from "@/modules/eval-gold";
 import { scoreMustMatch } from "@/modules/eval-gold/types";
@@ -27,7 +29,6 @@ import {
   GAP_JUDGE_SYSTEM,
   GAP_PROPOSER_SYSTEM,
   GAP_REVISER_SYSTEM,
-  documentBody,
   gapProposerUser,
 } from "./prompts";
 import { plural } from "@/lib/plural";
@@ -42,11 +43,14 @@ const inputSchema = z.object({
 const candidateSchema = z.object({
   id: z.string(),
   document_id: z.string(),
+  block_id: z.string().nullable().optional(),
   source_id: z.string(),
   name: z.string(),
   statement: z.string(),
   domain: z.string(),
   source_quote: z.string(),
+  source_context: sourceContextSchema.nullable().optional(),
+  citation_error: z.string().nullable().optional(),
   /** The judge's confidence in its verdict, 0–100, as the model gave it. */
   score: z.number(),
   verdict: z.string(),
@@ -76,6 +80,7 @@ export type GapExtractInput = z.infer<typeof inputSchema>;
 export type GapExtractOutput = z.infer<typeof outputSchema>;
 
 type GapCandidate = {
+  source_section?: number;
   id: string;
   document_id: string;
   source_id: string;
@@ -83,6 +88,10 @@ type GapCandidate = {
   statement: string;
   domain: EvidenceDomain;
   source_quote: string;
+  proposed_block_id: string | null;
+  block_id?: string | null;
+  source_context?: z.infer<typeof sourceContextSchema> | null;
+  citation_error?: string | null;
   /** Set only by the model judge. Null until then, and for a new gap. */
   duplicate_of: string | null;
 } & Partial<MatchFields>;
@@ -136,6 +145,7 @@ type RawGap = {
   statement?: unknown;
   domain?: unknown;
   source_quote?: unknown;
+  block_id?: unknown;
 };
 
 type JudgeDecision = {
@@ -180,27 +190,20 @@ function gapProblems(raw: RawGap): string[] {
   return problems;
 }
 
-function toCandidate(id: string, document: ParsedDocumentRecord, raw: RawGap): GapCandidate {
+function toCandidate(id: string, section: ExtractionSection, raw: RawGap): GapCandidate {
+  const { document } = section;
   return {
     id,
+    source_section: section.number,
     document_id: document.id,
     source_id: document.source_id,
     name: text(raw.name),
     statement: text(raw.statement),
     domain: text(raw.domain) as EvidenceDomain,
     source_quote: text(raw.source_quote),
+    proposed_block_id: text(raw.block_id) || null,
     duplicate_of: null,
   };
-}
-
-/** The block a candidate's quote comes from, when one block holds it (KAN-97). */
-export function blockIdFor(document: ParsedDocumentRecord | undefined, quote: string): string | null {
-  if (!document) return null;
-  const norm = (text: string) => text.toLowerCase().replace(/\s+/g, " ").trim();
-  const needle = norm(quote).slice(0, 120);
-  if (!needle) return null;
-  const block = document.blocks.find((row) => norm(row.text).includes(needle));
-  return block?.id ?? null;
 }
 
 const titleOf = (document: ParsedDocumentRecord) => document.blocks[0]?.heading ?? document.source_id;
@@ -221,6 +224,7 @@ function stubProposals(documents: ParsedDocumentRecord[]): GapCandidate[] {
       statement: gap.statement,
       domain: gap.domain,
       source_quote: gap.source_quote,
+      proposed_block_id: gap.block_id ?? null,
       duplicate_of: null,
     })),
   );
@@ -240,7 +244,7 @@ type RevisionItem = {
  */
 async function reviseWithModel(
   ctx: ModuleContext,
-  args: { document: ParsedDocumentRecord; hints: string; exchange: string; items: RevisionItem[]; role?: "proposer" | "reviser" },
+  args: { section: ExtractionSection; hints: string; exchange: string; items: RevisionItem[]; role?: "proposer" | "reviser" },
 ): Promise<Map<string, GapCandidate | null>> {
   const byId = new Map(args.items.map((item) => [item.candidate.id, item]));
   const lastProblems = new Map<string, string[]>();
@@ -253,7 +257,7 @@ async function reviseWithModel(
         role: args.role ?? "reviser",
         system: augmentSystemPrompt(GAP_REVISER_SYSTEM),
         user: JSON.stringify({
-          source_document: titleOf(args.document),
+          source_document: titleOf(args.section.document),
           exchange: args.exchange,
           worked_examples: args.hints || undefined,
           note:
@@ -268,13 +272,14 @@ async function reviseWithModel(
               statement: item.candidate.statement,
               domain: item.candidate.domain,
               source_quote: item.candidate.source_quote,
+              block_id: item.candidate.proposed_block_id,
               objection: item.objection,
               problems: lastProblems.get(id) ?? item.problems,
             };
           }),
-          document: documentBody(args.document.blocks),
+          document: args.section.body,
         }),
-        purpose: `gap-reviser:${args.document.id}`,
+        purpose: `gap-reviser:${args.section.document.id}`,
       })) as { gaps?: RawGap[] } | null;
       const map = new Map<string, GapCandidate | null>();
       for (const row of payload?.gaps ?? []) {
@@ -295,7 +300,7 @@ async function reviseWithModel(
           lastProblems.set(id, problems);
           continue;
         }
-        map.set(id, toCandidate(id, args.document, row));
+        map.set(id, toCandidate(id, args.section, { ...row, block_id: row.block_id ?? byId.get(id)?.candidate.block_id }));
       }
       return map;
     },
@@ -303,22 +308,24 @@ async function reviseWithModel(
   return answers;
 }
 
-/** First proposal for one document; incomplete rows go back to the model. */
-async function proposeFromDocument(
+/** First proposal for one source section; incomplete rows go back to the model. */
+async function proposeFromSection(
   ctx: ModuleContext,
-  document: ParsedDocumentRecord,
+  section: ExtractionSection,
   hints: string,
 ): Promise<GapCandidate[]> {
+  const { document } = section;
   const payload = (await ctx.complete({
     role: "proposer",
     system: augmentSystemPrompt(GAP_PROPOSER_SYSTEM),
-    user: gapProposerUser({ title: titleOf(document), blocks: document.blocks, hints }),
+    user: gapProposerUser({ title: titleOf(document), body: section.body, hints }),
     purpose: `gap-proposer:${document.id}`,
   })) as { gaps?: RawGap[] } | null;
-  const drafts = (payload?.gaps ?? [])
+  if (!Array.isArray(payload?.gaps)) throw new Error(`Incomplete gap extraction for ${document.id}, section ${section.number}: missing gaps array.`);
+  const drafts = payload.gaps
     .filter((gap) => gap && typeof gap === "object")
     .filter((gap) => [gap.name, gap.statement, gap.domain, gap.source_quote].some((field) => text(field)))
-    .map((gap, index) => ({ id: `${document.id}-L${String(index + 1).padStart(3, "0")}`, raw: gap }));
+    .map((gap, index) => ({ id: `${document.id}-L${String(index + 1).padStart(3, "0")}${section.number > 1 ? `-W${section.number}` : ""}`, raw: gap }));
   const incomplete = drafts
     .map((draft) => ({ ...draft, problems: gapProblems(draft.raw) }))
     .filter((draft) => draft.problems.length > 0);
@@ -326,7 +333,7 @@ async function proposeFromDocument(
     incomplete.length === 0
       ? new Map<string, GapCandidate | null>()
       : await reviseWithModel(ctx, {
-          document,
+          section,
           hints,
           exchange: "initial proposal",
           role: "proposer",
@@ -342,7 +349,7 @@ async function proposeFromDocument(
           })),
         });
   return drafts.flatMap((draft) => {
-    if (!repaired.has(draft.id)) return [toCandidate(draft.id, document, draft.raw)];
+    if (!repaired.has(draft.id)) return [toCandidate(draft.id, section, draft.raw)];
     const fixed = repaired.get(draft.id);
     return fixed ? [fixed] : [];
   });
@@ -561,7 +568,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
   manifest: {
     id: "s2-gap-extract.pcj",
     stage: "S2",
-    version: "1.0.0",
+    version: "1.1.0",
     title: "Gap extraction (proposer → critic → judge)",
     summary:
       "A model proposes evidence gaps per parsed document, a model critic challenges them over three exchanges, and a model judge decides what commits and which plan gaps they duplicate. Needs a connected LLM.",
@@ -571,7 +578,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
   },
   inputSchema,
   outputSchema,
-  migrations: [GAP_CANDIDATES_DDL],
+  migrations: GAP_CANDIDATES_DDL.split(";").filter((statement) => statement.trim()),
   freeze: freezeFacts,
   async run(input, ctx) {
     requireLlm(ctx, "Gap extraction");
@@ -607,7 +614,31 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
           ? {}
           : { set_aside: gap.status === "excluded" ? ("excluded" as const) : ("parked" as const) }),
       }));
+    const sections = isTestStub() ? [] : documents.flatMap(extractionSections);
     const documentById = new Map(documents.map((document) => [document.id, document]));
+    const sectionsByDocument = new Map(documents.map(document => [document.id, [] as ExtractionSection[]]));
+    for (const section of sections) sectionsByDocument.get(section.document.id)!.push(section);
+    const ground = (candidate: GapCandidate): GapCandidate => {
+      const documentBlocks = documentById.get(candidate.document_id)?.blocks ?? [];
+      const section = candidate.source_section ? sectionsByDocument.get(candidate.document_id)?.[candidate.source_section - 1] : undefined;
+      if (ctx.execution_scope === "development") {
+        return section
+          ? { ...candidate, block_id: quotedBlock(section.blocks, candidate.source_quote, candidate.proposed_block_id) }
+          : candidate;
+      }
+      const displayed = section ? section.blocks.flatMap(fragment => {
+        const block = documentBlocks.find(row => row.id === fragment.id);
+        return block ? [{ ...block, text: fragment.text }] : [];
+      }) : documentBlocks;
+      const citation = resolveSourceCitation({
+        source_id: candidate.source_id,
+        quote: candidate.source_quote,
+        proposed_block_id: candidate.proposed_block_id,
+        displayed,
+        retained: state.blocks,
+      });
+      return { ...candidate, ...citation };
+    };
     // The kernel hands similar past reviewer decisions (worked examples, KAN-79) to the proposer; the critic and judge see them too.
     let reviewerHints = "";
     // The model judge runs as soon as the proposer's last revision is in; the
@@ -619,16 +650,13 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       proposer: {
         local: ({ round, previous }) => {
           if (!isTestStub()) throw new NoRouteError("Gap extraction has no rule-based fallback.");
-          return round === 1 ? stubProposals(documents) : previous;
+          return round === 1 ? stubProposals(documents).map(ground) : previous;
         },
         llm: async ({ hints, round, critiques, previous }) => {
           reviewerHints = hints;
           let candidates: GapCandidate[];
           if (round === 1) {
-            candidates = [];
-            for (const document of documents) {
-              candidates.push(...(await proposeFromDocument(ctx, document, hints)));
-            }
+            candidates = await proposeSections(ctx.run, sections, section => proposeFromSection(ctx, section, hints));
           } else {
             // Revisions answer only what the critic objected to.
             const objections = new Map(
@@ -637,17 +665,17 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
                 .map((critique) => [critique.subject, `${critique.verdict}: ${critique.note}`]),
             );
             const revised = new Map<string, GapCandidate | null>();
-            for (const document of documents) {
+            for (const section of sections) {
               const items = previous
-                .filter((candidate) => candidate.document_id === document.id && objections.has(candidate.id))
+                .filter((candidate) => candidate.document_id === section.document.id && candidate.source_section === section.number && objections.has(candidate.id))
                 .map((candidate) => ({ candidate, objection: objections.get(candidate.id) }));
               if (items.length === 0) continue;
-              const answers = await reviseWithModel(ctx, {
-                document,
+              const answers = await reviseSection(ctx.run, section, round - 1, () => reviseWithModel(ctx, {
+                section,
                 hints,
                 exchange: `revision after critique ${round - 1} of ${PROPOSER_CRITIC_EXCHANGES}`,
                 items,
-              });
+              }));
               for (const [id, answer] of answers) revised.set(id, answer);
             }
             candidates = previous.flatMap((candidate) => {
@@ -656,14 +684,17 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
               return answer ? [answer] : [];
             });
           }
+          candidates = candidates.map(ground);
+          candidates = reconcileSections(candidates, row => [row.statement, row.domain]);
           if (round === PROPOSER_CRITIC_EXCHANGES + 1) {
+            const grounded = candidates.filter((candidate) => !candidate.citation_error);
             decisions =
-              candidates.length === 0
+              grounded.length === 0
                 ? new Map()
                 : await ctx.run.step(
                     "judge:model",
-                    () => judgeWithModel(ctx, { candidates, critiques, planGaps, hints }),
-                    `${candidates.length} candidate(s) for the model judge`,
+                    () => judgeWithModel(ctx, { candidates: grounded, critiques, planGaps, hints }),
+                    `${grounded.length} candidate(s) for the model judge`,
                   );
           }
           return candidates;
@@ -702,14 +733,17 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
           return candidates.map((candidate) => ({
             candidate,
             subject: candidate.id,
-            verdict: "accept" as const,
+            verdict: candidate.citation_error ? "reject" : "accept",
             score: critiques.find((item) => item.subject === candidate.id)?.score ?? 50,
-            note: "Test stub: no model judge was called.",
+            note: candidate.citation_error ?? "Test stub: no model judge was called.",
           }));
         }
         const decided = decisions;
         if (!decided) throw new Error("The model judge did not run. Nothing was saved; " + REMEDY);
         return candidates.map((candidate) => {
+          if (candidate.citation_error) {
+            return { candidate, subject: candidate.id, verdict: "reject", score: 0, note: candidate.citation_error };
+          }
           const decision = decided.get(candidate.id);
           if (!decision) {
             throw new Error(`The model judge did not decide ${candidate.name || candidate.id}. Nothing was saved; ${REMEDY}`);
@@ -757,6 +791,9 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       statement: item.candidate.statement,
       domain: item.candidate.domain,
       source_quote: item.candidate.source_quote,
+      block_id: item.candidate.block_id ?? null,
+      source_context: item.candidate.source_context ?? null,
+      citation_error: item.candidate.citation_error ?? null,
       score: item.score,
       verdict: item.verdict,
       critic_note: item.note,
@@ -785,14 +822,16 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       const provenanceOf = (candidate: GapCandidate) => ({
         run_id: ctx.run.id,
         candidate_row_id: rowIdByCandidate.get(candidate.id) ?? null,
-        block_id: blockIdFor(documents.find((document) => document.id === candidate.document_id), candidate.source_quote),
+        block_id: candidate.block_id,
+        source_context: candidate.source_context,
       });
       const gapByCandidate = new Map<string, string>();
       const suggestionByCandidate = new Map<string, string>();
-      const commitFor = (document: ParsedDocumentRecord, rows: Omit<Parameters<typeof commitExtractedRecords>[0], "source_id" | "title" | "stakeholder_function" | "actor_name" | "actor_function" | "tactics" | "validated_gap_ids">) => {
+      const commitFor = (document: ParsedDocumentRecord, rows: Omit<Parameters<typeof commitExtractedRecords>[0], "source_id" | "title" | "stakeholder_function" | "actor_name" | "actor_function" | "tactics" | "validated_gap_ids" | "require_grounded_sources">) => {
         const source = state.sources.find((row) => row.id === document.source_id);
         return commitExtractedRecords({
           source_id: document.source_id,
+          require_grounded_sources: true,
           title: source?.title ?? document.source_id,
           stakeholder_function: source?.stakeholder_function ?? ctx.actor.function,
           actor_name: ctx.actor.name,
@@ -838,6 +877,8 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
               statement: candidate.statement,
               domain: candidate.domain,
               source_quote: candidate.source_quote,
+              block_id: candidate.block_id,
+              source_context: candidate.source_context,
               ...candidate.overlap!,
             })),
           }),
@@ -862,7 +903,8 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
           const suggestionId = suggestionByCandidate.get(representative.get(candidate.id)!.id);
           if (!suggestionId) continue;
           await addSuggestionSources(suggestionId, [
-            { source_id: candidate.source_id, statement: candidate.statement, source_quote: candidate.source_quote },
+            { source_id: candidate.source_id, statement: candidate.statement, source_quote: candidate.source_quote,
+              block_id: candidate.block_id, source_context: candidate.source_context },
           ]);
         }
         if (onGap.length === 0) continue;
@@ -891,12 +933,15 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
 
     const toOut = (item: (typeof outcome.judged)[number]) => ({
       id: item.candidate.id,
+      block_id: item.candidate.block_id,
       document_id: item.candidate.document_id,
       source_id: item.candidate.source_id,
       name: item.candidate.name,
       statement: item.candidate.statement,
       domain: item.candidate.domain,
       source_quote: item.candidate.source_quote,
+      source_context: item.candidate.source_context ?? null,
+      citation_error: item.candidate.citation_error ?? null,
       score: item.score,
       verdict: item.verdict,
       critic_note: item.note,
@@ -981,16 +1026,16 @@ function followSameAs(candidate: GapCandidate, accepted: Map<string, GapCandidat
 }
 
 export async function listGapCandidates(limit = 200) {
-  await ensurePlatformSchema([GAP_CANDIDATES_DDL]);
+  await ensurePlatformSchema([GAP_CANDIDATES_DDL, GAP_BLOCK_DDL]);
   return db().select().from(gapCandidates).orderBy(desc(gapCandidates.created_at)).limit(limit);
 }
 
 export async function gapCandidatesForRun(run_id: string) {
-  await ensurePlatformSchema([GAP_CANDIDATES_DDL]);
+  await ensurePlatformSchema([GAP_CANDIDATES_DDL, GAP_BLOCK_DDL]);
   return db().select().from(gapCandidates).where(eq(gapCandidates.run_id, run_id));
 }
 
 /** Freeze the source facts this stage consumes, before any proposal or human decision. */
 async function freezeFacts(input: z.infer<typeof inputSchema>) {
-  return { documents: await listParsedDocuments(input.document_ids), state: await loadState() };
+  return { documents: await listExtractionDocuments(input.document_ids), state: await loadState() };
 }

@@ -280,6 +280,7 @@ export async function tracedCompletion(args: {
           await args.beforeSend?.();
           text = await args.provider.complete(args.request, { api_key: args.api_key }, {
             run: modelRun, requestBudget: args.requestBudget, maxAttempts: args.maxAttempts,
+            beforeRetry: args.beforeSend,
             onDispatch: () => { sends++; },
             onUsage: reported => { usage = sends > 1 ? { ...reported, prior_charge_unknown: true } : reported; },
           });

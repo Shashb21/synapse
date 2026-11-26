@@ -1,3 +1,5 @@
+import { validateQuoteAgainstBlock } from "@/lib/ingest/quote-validator";
+import type { SourceContext } from "@/lib/ingest/source-citation";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { assessmentDesignVersion, getRequirementBasisReview, hasSupportedFullConfirmation } from "./requirement-basis";
 import { gapResolutionVersion } from "./relationship-version";
@@ -42,6 +44,20 @@ export {
   type MappingScoreExtras,
 } from "./mapping";
 
+/** Reconcile a verified occurrence while preserving uncertainty about a historical citation. */
+export function reconcileHistoricalCitation(
+  blocks: { id: string; text: string }[],
+  historicalQuote: string,
+  observedId: string,
+  observedIds: string[] | null | undefined,
+): { block_id: string } | { observed_block_ids: string[] } | null {
+  if (observedIds?.includes(observedId)) return null;
+  const matches = blocks.filter(block => validateQuoteAgainstBlock({ block, quote: historicalQuote }).ok);
+  if (!matches.some(block => block.id === observedId)) return null;
+  if (matches.length === 1 && !observedIds?.length) return { block_id: observedId };
+  return { observed_block_ids: [...(observedIds ?? []), observedId] };
+}
+
 export const unlocked = (): {
   locked: false;
   actor_name: null;
@@ -82,7 +98,10 @@ export function uncoveredDimensions(
   );
 }
 
-export type AddressingTactic = Pick<Tactic, "id" | "status" | "type" | "evidence_available">;
+type TacticAddressingStatus = Pick<Tactic, "status" | "type" | "evidence_available"> &
+  Partial<Pick<Tactic, "review_status">>;
+
+export type AddressingTactic = Pick<Tactic, "id"> & TacticAddressingStatus;
 
 const PUBLICATION_TYPES: ReadonlySet<TacticType> = new Set([
   "publication",
@@ -103,11 +122,9 @@ export function isPublishedLiterature(
   return Boolean(tactic.evidence_available?.trim());
 }
 
-/** Completed + ongoing + planned count; proposed does not (unless published literature). */
-export function tacticCountsTowardAddressing(
-  tactic: Pick<Tactic, "status" | "type" | "evidence_available">,
-): boolean {
-  if (tactic.status === "cancelled") return false;
+/** Rejected tactics contribute no evidence. Otherwise use the delivery lifecycle and publication evidence. */
+export function tacticCountsTowardAddressing(tactic: TacticAddressingStatus): boolean {
+  if (tactic.review_status === "rejected" || tactic.status === "cancelled") return false;
   if (tactic.status === "completed" || tactic.status === "ongoing" || tactic.status === "planned") {
     return true;
   }
@@ -122,13 +139,12 @@ export function countingCoverages(
   const byId = new Map(tactics.map((t) => [t.id, t]));
   return coverages.filter((c) => {
     const tactic = byId.get(c.tactic_id);
-    if (c.expansion_id) {
-      const child = expansions.find((e) => e.id === c.expansion_id);
-      return Boolean(tactic && child && child.tactic_id === c.tactic_id &&
-        child.gap_ids.includes(c.gap_id) &&
-        ["planned", "ongoing", "completed"].includes(child.status));
-    }
-    return Boolean(tactic && tacticCountsTowardAddressing(tactic));
+    if (!tactic) return false;
+    if (!c.expansion_id) return tacticCountsTowardAddressing(tactic);
+    if (tactic.review_status === "rejected") return false;
+    const child = expansions.find((e) => e.id === c.expansion_id);
+    return Boolean(child && child.tactic_id === c.tactic_id && child.gap_ids.includes(c.gap_id) &&
+      ["planned", "ongoing", "completed"].includes(child.status));
   });
 }
 
@@ -755,6 +771,8 @@ export type ExtractedGap = {
   domain: EvidenceDomain;
   source_id: string;
   source_quote: string;
+  block_id?: string | null;
+  source_context?: SourceContext | null;
   /**
    * Set by the stage's LLM judge: the id of the existing live gap this one is
    * the same as. Commit merges only when this is set; it never decides
@@ -780,6 +798,7 @@ export function extractCandidateGaps(
         domain: guessDomain(`${block.heading} ${statement}`),
         source_id: block.source_id,
         source_quote: sentence.slice(0, 280),
+        block_id: block.id,
       });
     }
   }
@@ -794,6 +813,8 @@ export type ExtractedTactic = {
   evidence_question: string;
   source_id: string;
   source_quote: string;
+  block_id?: string | null;
+  source_context?: SourceContext | null;
   /**
    * Set by the stage's LLM judge: the id of the existing live tactic this one is
    * the same as. Commit merges only when this is set; it never decides
@@ -833,6 +854,7 @@ export function extractCandidateTactics(
         evidence_question: statement,
         source_id: block.source_id,
         source_quote: sentence.slice(0, 280),
+        block_id: block.id,
       });
     }
   }
@@ -854,13 +876,42 @@ export function isParked(gap: Pick<EvidenceGap, "parked_at">): boolean {
   return Boolean(gap.parked_at);
 }
 
-export function gapsReadyForPrioritize(state: IegpState): boolean {
+export type PrioritizationBlocker =
+  | { gapId: null; reason: string }
+  | { gapId: string; gapName: string; reason: string };
+
+export type GapPrioritizationReadiness = {
+  liveCount: number;
+  blockers: PrioritizationBlocker[];
+};
+
+/** Reports which live evidence assessments need human review before prioritization. */
+export function gapPrioritizationReadiness(state: Pick<IegpState, "gaps">): GapPrioritizationReadiness {
   const live = state.gaps.filter(isLiveGap);
-  if (live.length === 0) return false;
-  return live.every((gap) => {
+  const blockers: PrioritizationBlocker[] = [];
+  if (live.length === 0) {
+    blockers.push({ gapId: null, reason: "Add and confirm at least one live gap in Evidence Inventory." });
+  }
+  for (const gap of live) {
     const shown = displayedGapStatus(gap);
-    return gap.human_validated && shown !== "validated_partial" && shown !== "candidate";
-  });
+    let reason: string;
+    if (shown === "validated_partial") {
+      reason = "Coverage is Partially Addressed and still provisional. Split or rewrite this gap as Open or Addressed, then confirm the assessment.";
+    } else if (shown === "candidate") {
+      reason = "Review this Candidate. Add and confirm an Open or Addressed gap if it belongs in the inventory, then park the Candidate.";
+    } else if (!gap.human_validated) {
+      reason = "Confirm the evidence assessment with your reason. If the computed status needs an Open or Addressed override, record the override with a reason.";
+    } else {
+      continue;
+    }
+    blockers.push({ gapId: gap.id, gapName: gap.name, reason });
+  }
+  return { liveCount: live.length, blockers };
+}
+
+/** Whether every live assessment is settled and the inventory is nonempty. */
+export function gapsReadyForPrioritize(state: IegpState): boolean {
+  return gapPrioritizationReadiness(state).blockers.length === 0;
 }
 
 const ACCEPTED_GAP_FOR_MAPPING: GapStatus[] = ["validated_open", "validated_partial"];
