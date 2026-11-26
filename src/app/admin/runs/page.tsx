@@ -5,7 +5,7 @@ import { AdminMain, AdminWorkspaceBar, PageIntro } from "@/components/admin/admi
 import { runTraceHref } from "@/components/admin/admin-nav";
 import { Badge } from "@/components/ui/badge";
 import { STAGES, type StageId } from "@/modules/kernel/contracts";
-import { listRuns, stageHealth } from "@/modules/kernel/observability";
+import { listRuns, recoverInterruptedRuns, stageHealth } from "@/modules/kernel/observability";
 import { llmTotalsByStage } from "@/modules/kernel/llm-calls";
 import { formatCost } from "@/components/admin/llm-calls";
 import { listEdits } from "@/modules/kernel/edit-records";
@@ -28,6 +28,7 @@ export default async function RunsPage() {
   await requireOwnerPage();
   // Runs live in each workspace's own schema: this page reads the console's workspace (KAN-62).
   const { workspace, runs, health, edits, signals, evals, ai, usage } = await withAdminWorkspace(async (workspace) => {
+    await recoverInterruptedRuns();
     const [runs, health, edits, signals, evals, ai, usage] = await Promise.all([
       listRuns({ limit: 40 }),
       stageHealth(),

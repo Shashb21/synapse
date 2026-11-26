@@ -1,7 +1,7 @@
 import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import "@/modules";
-import { getRun } from "@/modules/kernel/observability";
+import { getRun, recoverInterruptedRuns } from "@/modules/kernel/observability";
 import { listLlmCalls, totalsOf } from "@/modules/kernel/llm-calls";
 import { listEdits } from "@/modules/kernel/edit-records";
 import { listSignals } from "@/modules/kernel/hillclimb";
@@ -15,6 +15,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const denied = await ownerGate();
   if (denied) return denied;
   const { id } = await params;
+  await recoverInterruptedRuns(id);
   const run = await getRun(id);
   if (!run) return NextResponse.json({ safe_error: true, error: "This run is no longer available. Return to the run list and choose another." }, { status: 404 });
   const url = new URL(request.url);

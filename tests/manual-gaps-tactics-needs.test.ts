@@ -22,7 +22,8 @@ import {
   unlinkNeedFromGap,
 } from "@/lib/iegp/store";
 import { db, resetWorkspaceModules, wipePlatform } from "@/modules/kernel/db";
-import { listEdits } from "@/modules/kernel/edit-records";
+import { listEdits, recordEdit } from "@/modules/kernel/edit-records";
+import { reparseSourceBlocks } from "@/lib/iegp/source-blocks";
 import { lastResetAt } from "@/lib/iegp/gap-history";
 import { gapCandidates, GAP_CANDIDATES_DDL } from "@/modules/stages/s2-gap-extract/schema";
 import {
@@ -337,6 +338,32 @@ describe("manual need edits", () => {
   });
 });
 
+describe("source citations across reparses", () => {
+  it("keeps distinct need citations when two blocks contain the same quotation", async () => {
+    await fresh();
+    const quote = "Evidence on elderly patients is missing.";
+    const sections = [
+      { heading: "Payer", location: "Page 1", text: `The payer asked: ${quote}` },
+      { heading: "Panel", location: "Page 2", text: `The panel noted: ${quote}` },
+    ];
+    const src = await persistSourceAndBlocks({
+      title: "Repeated evidence", source_type: "other_internal", stakeholder_function: "hta",
+      text: sections.map(section => section.text).join("\n"), sections,
+    });
+    for (const block of src.blocks) {
+      await createGap({
+        statement: block.heading, source_id: src.source_id, source_quote: quote,
+        need_provenance: { block_id: block.id }, ...who,
+      });
+    }
+
+    await reparseSourceBlocks({ source_id: src.source_id, sections });
+
+    const needs = (await loadState()).needs.filter(need => need.source_id === src.source_id);
+    expect(needs.map(need => need.block_id).sort()).toEqual(src.blocks.map(block => block.id).sort());
+  });
+});
+
 describe("leftovers and rejected AI candidates", () => {
   it("files leftover edits and accepts with the reviewer's rationale", async () => {
     await fresh();
@@ -349,12 +376,12 @@ describe("leftovers and rejected AI candidates", () => {
     expect((await loadState()).gaps.find((g) => g.id === child)!.parent_gap_id).toBe(parent);
   });
 
-  it("promotes a rejected gap or tactic candidate by hand with its source quote", async () => {
+  it.each([false, true])("requires unambiguous citations to promote rejected gap and tactic candidates after reparse (ambiguous %s)", async (ambiguous) => {
     await fresh();
     await wipePlatform(["gap_candidates", "tactic_candidates"]);
     await ensurePlatformSchema([GAP_CANDIDATES_DDL, TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL]);
     const src = await source();
-    const common = { run_id: "run-1", document_id: "doc-1", source_id: src.source_id, score: 20, verdict: "reject", critic_note: "Too vague", proposer: "llm", created_at: new Date().toISOString() };
+    const common = { block_id: src.blocks[0]!.id, run_id: "run-1", document_id: "doc-1", source_id: src.source_id, score: 20, verdict: "reject", critic_note: "Too vague", proposer: "llm", created_at: new Date().toISOString() };
     await db().insert(gapCandidates).values({
       ...common, id: "gc-1", name: "Rejected gap", statement: "Rejected statement.", domain: "safety",
       source_quote: "Evidence on elderly patients is missing.", committed_gap_id: null,
@@ -363,8 +390,25 @@ describe("leftovers and rejected AI candidates", () => {
       ...common, id: "tc-1", name: "Rejected registry", type: "rwe_study", status: "ongoing",
       evidence_question: "Registry question?", source_quote: "Evidence on elderly patients is missing.", duplicate_of: null,
     });
+    const reparsed = await reparseSourceBlocks({
+      source_id: src.source_id,
+      sections: [
+        { heading: "Context", location: "Page 1", text: "The panel met on Monday." },
+        { heading: "Evidence", location: "Page 2", text: "Evidence on elderly patients is missing." },
+        ...(ambiguous ? [{ heading: "Minutes", location: "Page 3", text: "They noted: Evidence on elderly patients is missing." }] : []),
+      ],
+    });
+    const currentBlockId = ambiguous ? null : reparsed.blocks.find(block => block.heading === "Evidence")!.id;
+    expect(currentBlockId).not.toBe(common.block_id);
     expect((await listRejectedGapCandidates()).map((r) => r.id)).toEqual(["gc-1"]);
     await expect(promoteGapCandidate({ candidate_id: "gc-1", rationale: "", ...who })).rejects.toThrow(/rationale/i);
+    if (ambiguous) {
+      const before = await loadState();
+      await expect(promoteGapCandidate({ candidate_id: "gc-1", rationale: "AI was wrong", ...who })).rejects.toThrow(/more than one source block/);
+      await expect(promoteTacticCandidate({ candidate_id: "tc-1", name: "Confirmed registry", rationale: "Real study", ...who })).rejects.toThrow(/more than one source block/);
+      expect(await loadState()).toEqual(before);
+      return;
+    }
     const gapId = await promoteGapCandidate({ candidate_id: "gc-1", rationale: "AI was wrong", ...who });
     const state = await loadState();
     const gap = state.gaps.find((g) => g.id === gapId)!;
@@ -372,16 +416,102 @@ describe("leftovers and rejected AI candidates", () => {
     const needId = state.need_gap_links.find((l) => l.gap_id === gapId)!.need_id;
     const need = state.needs.find((n) => n.id === needId)!;
     expect(need.source_id).toBe(src.source_id);
+    expect(need.block_id).toBe(currentBlockId);
     expect(need.source_quote).toBe("Evidence on elderly patients is missing.");
     await expect(promoteGapCandidate({ candidate_id: "gc-1", rationale: "Again", ...who })).rejects.toThrow(/already/i);
 
-    const tacticId = await promoteTacticCandidate({ candidate_id: "tc-1", gap_id: gapId, rationale: "Real study", ...who });
+    const tacticId = await promoteTacticCandidate({ candidate_id: "tc-1", name: "Confirmed registry", gap_id: gapId, rationale: "Real study", ...who });
     const tactic = (await loadState()).tactics.find((x) => x.id === tacticId)!;
     expect((await listEdits({ entity_id: `${gapId}::${tacticId}` })).find(row => row.rationale === "Real study")).toBeDefined();
     expect(tactic.source_quote).toBe("Evidence on elderly patients is missing.");
     expect(tactic.data_source).toBe("HTA briefing");
+    expect(tactic.block_id).toBe(currentBlockId);
+    const { listTacticSourceReferences } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    expect(await listTacticSourceReferences(tacticId)).toEqual([
+      expect.objectContaining({ source_id: src.source_id, block_id: currentBlockId, source_quote: tactic.source_quote }),
+    ]);
     expect((await listRejectedTacticCandidates())[0]!.promoted_tactic_id).toBe(tacticId);
     expect((await listEdits({ entity_id: "tc-1" }))[0]!.after).toBe(tacticId);
+  });
+
+  it("marks only the promoted same-name candidate and replays a renamed promotion", async () => {
+    await fresh();
+    await wipePlatform(["tactic_candidates"]);
+    const quote = "The same fictional registry is ongoing.";
+    const firstSource = await source("First interview", quote);
+    const secondSource = await source("Second interview", quote);
+    await listRejectedTacticCandidates();
+    const common = {
+      run_id: "run-1", document_id: "doc-1", name: "Suggested registry", type: "rwe_study", status: "ongoing",
+      evidence_question: "What did the registry measure?", source_quote: quote, score: 20,
+      verdict: "reject", critic_note: "Too vague", proposer: "llm", created_at: new Date().toISOString(),
+    };
+    await db().insert(tacticCandidates).values([
+      { ...common, id: "first-promotion", source_id: firstSource.source_id },
+      { ...common, id: "second-promotion", source_id: secondSource.source_id },
+    ]);
+    const first = { candidate_id: "first-promotion", rationale: "Reviewed the first registry", ...who };
+    const firstId = await promoteTacticCandidate(first);
+    const promotionMarkers = async () => Object.fromEntries((await listRejectedTacticCandidates()).map(row => [row.id, row.promoted_tactic_id]));
+    expect(await promotionMarkers()).toEqual({ "first-promotion": firstId, "second-promotion": null });
+
+    const renamed = { candidate_id: "second-promotion", name: "Renamed registry", rationale: "Reviewed and renamed", ...who };
+    const [renamedId, concurrentId] = await Promise.all([promoteTacticCandidate(renamed), promoteTacticCandidate(renamed)]);
+    expect(concurrentId).toBe(renamedId);
+    expect(await promotionMarkers()).toEqual({ "first-promotion": firstId, "second-promotion": renamedId });
+    await expect(promoteTacticCandidate(renamed)).resolves.toBe(renamedId);
+    expect((await loadState()).tactics.filter(tactic => tactic.name === renamed.name)).toHaveLength(1);
+    expect((await listEdits({ entity_id: renamed.candidate_id })).map(edit => edit.after)).toEqual([renamedId]);
+  });
+
+  it("replays a renamed historical promotion recorded by candidate ID", async () => {
+    await fresh();
+    await wipePlatform(["tactic_candidates"]);
+    const quote = "The fictional registry enrolled twenty patients.";
+    const stored = await source("Historical study", quote);
+    await listRejectedTacticCandidates();
+    await db().insert(tacticCandidates).values({
+      id: "historical-promotion", run_id: "old-run", document_id: "old-doc", source_id: stored.source_id,
+      name: "Original name", type: "rwe_study", status: "ongoing", evidence_question: "Who was enrolled?",
+      source_quote: quote, score: 20, verdict: "reject", critic_note: "Too vague", proposer: "llm",
+      created_at: new Date().toISOString(),
+    });
+    const tacticId = await recordMissedTactic({
+      name: "Historical renamed record", type: "rwe_study", status: "ongoing",
+      evidence_question: "Who was enrolled?", source_quote: quote, data_source: "Historical study", ...who,
+    });
+    await recordEdit({
+      stage: "S3", entity_type: "tactic_candidate", entity_id: "historical-promotion", field: "verdict",
+      action: "accept", before: "reject", after: tacticId, rationale: "Confirmed enrolment",
+      actor: { name: who.actor_name, function: who.actor_function },
+    });
+    expect(await listRejectedTacticCandidates()).toMatchObject([{ id: "historical-promotion", promoted_tactic_id: tacticId }]);
+    expect(await promoteTacticCandidate({ candidate_id: "historical-promotion", rationale: "Retried promotion", ...who })).toBe(tacticId);
+    expect((await listEdits({ entity_id: "historical-promotion" })).map(edit => edit.after)).toEqual([tacticId]);
+  });
+
+  it.each(["gap", "tactic"] as const)("refuses to promote a rejected %s with an unsupported quote", async (kind) => {
+    await fresh();
+    await wipePlatform(["gap_candidates", "tactic_candidates"]);
+    await ensurePlatformSchema([GAP_CANDIDATES_DDL, TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL]);
+    const src = await source();
+    const common = {
+      id: "unsupported-candidate", run_id: "run-1", document_id: "doc-1", source_id: src.source_id,
+      name: "Rejected candidate", source_quote: "An unrelated sentence.", score: 0,
+      verdict: "reject", critic_note: "Unverified quote", proposer: "llm", created_at: new Date().toISOString(),
+    };
+    const before = await loadState();
+    const args = { candidate_id: common.id, rationale: "Review complete", ...who };
+    if (kind === "gap") {
+      await db().insert(gapCandidates).values({ ...common, statement: "A safety gap.", domain: "safety" });
+      await expect(promoteGapCandidate(args)).rejects.toThrow(/quote.*source block/i);
+    } else {
+      await db().insert(tacticCandidates).values({ ...common, type: "rwe_study", status: "ongoing", evidence_question: "What is known?" });
+      await expect(promoteTacticCandidate(args)).rejects.toThrow(/quote.*source block/i);
+    }
+    const after = await loadState();
+    expect(after.gaps).toEqual(before.gaps);
+    expect(after.tactics).toEqual(before.tactics);
   });
 
   it("the UI mounts the manual controls", () => {
