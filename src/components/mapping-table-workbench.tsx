@@ -36,7 +36,7 @@ function StatusSummary({ row }: { row: MappingTableViewRow }) {
       {view && view !== row.gap_status ? (
         <p className="text-[10px] text-muted-foreground">
           {row.source === "human" ? "Saved row" : "AI view"}: {STATUS_LABEL[view].toLowerCase()}
-          {STATUS_RANK[view] > STATUS_RANK[row.gap_status] ? " (proposed tactics don't count until planned)" : ""}
+          {STATUS_RANK[view] > STATUS_RANK[row.gap_status] ? " (coverage depends on eligible tactics and reviewed assessments)" : ""}
         </p>
       ) : null}
     </div>

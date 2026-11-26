@@ -40,6 +40,7 @@ import type {
   CoverageDimension,
   DimensionValue,
   EvidenceDomain,
+  GapStatus,
   MappedGapStatus,
   OverallCoverage,
 } from "./enums";
@@ -175,7 +176,10 @@ export async function loadState(): Promise<IegpState> {
     state = await readSnapshot();
   }
   if (state.gaps.some((gap) => !gap.number)) state = await numberGaps(state);
-  if (!inWorkspaceTransaction() && (await repairNeedlessGapsOnce(state))) state = await readSnapshot();
+  if (!inWorkspaceTransaction()) {
+    if (await repairNeedlessGapsOnce(state)) state = await readSnapshot();
+    if (await repairRejectedTacticCoverage(state)) state = await readSnapshot();
+  }
   return state;
 }
 
@@ -1212,6 +1216,42 @@ function childParents(state: IegpState): Set<string> {
   );
 }
 
+/** Identify stored computations still explained by the earlier treatment of rejected evidence. */
+function gapsCountingRejectedEvidence(state: IegpState): string[] {
+  const rejected = new Set(state.tactics.filter(tactic => tactic.review_status === "rejected").map(tactic => tactic.id));
+  if (rejected.size === 0) return [];
+  const affected = new Set(state.coverages.filter(row => rejected.has(row.tactic_id)).map(row => row.gap_id));
+  if (affected.size === 0) return [];
+
+  const coveragesByGap = Map.groupBy(state.coverages.filter(row => affected.has(row.gap_id)), row => row.gap_id);
+  const previousTactics = state.tactics.map(tactic => rejected.has(tactic.id)
+    ? { ...tactic, review_status: "accepted" as const }
+    : tactic);
+  const children = childParents(state);
+  return state.gaps.filter(gap => {
+    if (!affected.has(gap.id) || gap.retired || gap.status === "candidate" || gap.status === "excluded") return false;
+    const coverages = coveragesByGap.get(gap.id) ?? [];
+    const scope = { hasAcceptedChild: children.has(gap.id), expansions: state.expansions };
+    const stored = gap.computed_status ?? gap.status;
+    return stored !== computeGapStatus(coverages, state.tactics, scope)
+      && stored === computeGapStatus(coverages, previousTactics, scope);
+  }).map(gap => gap.id);
+}
+
+/** Reconcile old tactic rejections using the same locks and status updates as new reviews. */
+async function repairRejectedTacticCoverage(state: IegpState): Promise<boolean> {
+  const gapIds = new Set(gapsCountingRejectedEvidence(state));
+  if (gapIds.size === 0) return false;
+  const rejected = new Set(state.tactics.filter(tactic => tactic.review_status === "rejected").map(tactic => tactic.id));
+  const tacticIds = state.coverages.filter(row => gapIds.has(row.gap_id) && rejected.has(row.tactic_id)).map(row => row.tactic_id);
+  await withWorkspaceTransaction(async () => {
+    const locked = new Set(await lockAssessmentOwners({ tactic_ids: tacticIds }));
+    const pending = gapsCountingRejectedEvidence(await readState()).filter(id => gapIds.has(id) && locked.has(id));
+    if (pending.length > 0) await syncComputedGapStatuses(pending);
+  });
+  return true;
+}
+
 /**
  * An Addressed gap has no leftover, so a pending leftover row is closed. A
  * Partial gap gets no drafted leftover here: leftovers come from S6 (the model,
@@ -1256,11 +1296,12 @@ function humanHeldStatus(gap: IegpState["gaps"][0]): MappedGapStatus | null {
  * applies. Otherwise (a model run, an ingest) a human override or a
  * human-validated status is kept and only flagged stale when it disagrees.
  */
-export async function syncComputedGapStatuses(gapId?: string, opts?: { human?: boolean }, transaction?: Pick<ReturnType<typeof db>, "select" | "update" | "insert" | "execute">) {
+export async function syncComputedGapStatuses(gapIds?: string | readonly string[], opts?: { human?: boolean }, transaction?: Pick<ReturnType<typeof db>, "select" | "update" | "insert" | "execute">) {
   const d = transaction ?? db();
   const state = transaction ? await readState(transaction) : await loadState();
   const children = childParents(state);
-  const gaps = gapId ? state.gaps.filter((g) => g.id === gapId) : state.gaps;
+  const selected = typeof gapIds === "string" ? new Set([gapIds]) : new Set(gapIds);
+  const gaps = gapIds === undefined ? state.gaps : state.gaps.filter((g) => selected.has(g.id));
   for (const gap of gaps) {
     if (gap.status === "candidate" || gap.status === "excluded" || gap.retired) {
       if (gap.computed_status !== null) {
@@ -1436,6 +1477,7 @@ export async function lockGapStatus(args: {
   }
 }
 
+/** Apply a human override and return the gap status displayed immediately before it. */
 export async function overrideGapStatus(args: {
   gap_id: string;
   status: MappedGapStatus;
@@ -1443,11 +1485,17 @@ export async function overrideGapStatus(args: {
   note?: string;
   actor_name: string;
   actor_function: ActorFunction;
-}) {
+}): Promise<GapStatus> {
+  if (!inWorkspaceTransaction()) {
+    await loadState();
+    return withWorkspaceTransaction(() => overrideGapStatus(args));
+  }
+  await db().execute(sql`select id from gaps where id = ${args.gap_id ?? null} for update`);
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
   if (!gap) throw new TrustedApplicationError("Gap not found", "not_found", 404);
-  if (args.status === "validated_partial" || displayedGapStatus(gap) === "validated_partial") {
+  const previousDisplayedStatus = displayedGapStatus(gap);
+  if (args.status === "validated_partial" || previousDisplayedStatus === "validated_partial") {
     throw new TrustedApplicationError("Partially Addressed cannot stay. Split or rewrite the gap instead.");
   }
   if (gap.status === "candidate" || gap.status === "excluded" || gap.retired) {
@@ -1495,6 +1543,7 @@ export async function overrideGapStatus(args: {
     actor_name: args.actor_name,
     actor_function: args.actor_function,
   });
+  return previousDisplayedStatus;
 }
 
 export async function clearGapStatusOverride(args: {
@@ -2647,8 +2696,8 @@ export type MappingRowStatus = (typeof MAPPING_ROW_STATUSES)[number];
 
 /**
  * A /mappings row a person saved is stored as one mapping_suggestions record
- * per gap under this reserved tactic key (`__row__:<status>`); the row's tactic
- * set is the gap's coverages, each marked human-accepted.
+ * per gap under this reserved tactic key (`__row__:<status>`); the row's active
+ * tactic set is the gap's coverages for available parent tactics.
  */
 export const HUMAN_MAPPING_ROW_PREFIX = "__row__:";
 
@@ -2690,9 +2739,9 @@ export function requireMappingRowStatus(value: unknown): MappingRowStatus {
 }
 
 /**
- * Saves a /mappings row as the person's decision: the gap's tactic set becomes
- * exactly `tactic_ids` (removed tactics are unassigned and recorded as rejected,
- * new ones assigned), and the row status is stored so it wins over any S4 run.
+ * Saves a /mappings row as the person's decision about available parent tactics.
+ * Removed selections are recorded as rejected, and unavailable relationships
+ * retain their coverage and pair history. The saved status wins over any S4 run.
  */
 async function saveMappingTableRowChange(args: {
   gap_id: string;
@@ -2721,11 +2770,13 @@ async function saveMappingTableRowChange(args: {
   if (mapping_status !== "open" && uniqueIds.length === 0) {
     throw new TrustedApplicationError("Addressed or partially addressed rows need at least one tactic.");
   }
-  for (const tactic_id of uniqueIds) {
-    const tactic = state.tactics.find((x) => x.id === tactic_id);
-    if (!tactic) throw new Error(`Tactic ${tactic_id} not found`);
+  const availableIds = new Set(state.tactics.filter(tacticEligibleForMapping).map(tactic => tactic.id));
+  if (uniqueIds.some(id => !availableIds.has(id))) {
+    throw new TrustedApplicationError("One or more selected tactics are no longer available for mapping. Reopen the row and select available tactics.");
   }
-  const current = state.coverages.filter((c) => !c.expansion_id && c.gap_id === args.gap_id).map((c) => c.tactic_id);
+  const current = state.coverages
+    .filter(c => !c.expansion_id && c.gap_id === args.gap_id && availableIds.has(c.tactic_id))
+    .map(c => c.tactic_id);
   const removed = current.filter((id) => !uniqueIds.includes(id));
   const saved = humanMappingRow(state, args.gap_id);
   if (saved?.mapping_status === mapping_status && !removed.length && uniqueIds.length === current.length && uniqueIds.every(id => current.includes(id) && state.mapping_suggestions.some(row => row.gap_id === args.gap_id && row.tactic_id === id && row.status === "accepted"))) return { decision_event_id: "", parent_tactic_ids: state.tactics.map(tactic => tactic.id) };
@@ -4086,7 +4137,7 @@ export async function lockTacticReview(args: {
   if (!["accepted", "rejected"].includes(args.review_status)) throw new TrustedApplicationError("Invalid tactic review status.");
   await loadState();
   return withWorkspaceTransaction(async () => {
-    await db().execute(sql`SELECT id FROM tactics WHERE id = ${args.tactic_id} FOR UPDATE`);
+    const gapIds = await lockAssessmentOwners({ tactic_ids: [args.tactic_id] });
     const tactic = (await readState()).tactics.find(row => row.id === args.tactic_id);
     if (!tactic) throw new TrustedApplicationError("Tactic not found", "not_found", 404);
     if (args.expected_tactic !== undefined && args.expected_tactic !== tacticEditVersion(tactic)) {
@@ -4099,6 +4150,7 @@ export async function lockTacticReview(args: {
       before: tactic.review_status, after: args.review_status, rationale,
       actor: { name: args.actor_name, function: args.actor_function },
     });
+    if (gapIds.length) await syncComputedGapStatuses(gapIds);
   });
 }
 
@@ -4696,12 +4748,18 @@ async function insertProvisionalClosingCoverage(args: {
   });
 }
 
+/** Confirm a live Open or Addressed gap using its status under the gap row lock. */
 export async function validateGap(args: {
   gap_id: string;
   actor_name: string;
   actor_function: ActorFunction;
   note?: string;
-}) {
+}): Promise<void> {
+  if (!inWorkspaceTransaction()) {
+    await loadState();
+    return withWorkspaceTransaction(() => validateGap(args));
+  }
+  await db().execute(sql`select id from gaps where id = ${args.gap_id ?? null} for update`);
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
   if (!gap || !isLiveGap(gap)) throw new TrustedApplicationError("Gap not found", "not_found", 404);
@@ -5071,10 +5129,13 @@ async function createAddressedGapChange(args: {
 }) {
   let tacticId = args.tactic_id?.trim();
   if (tacticId) {
-    // The tactic must be a real one that counts toward coverage: an id that is
-    // not there, or a proposed or cancelled tactic, cannot close a gap.
+    // Own the tactic while validating review and committing its new coverage.
+    await db().execute(sql`select id from tactics where id = ${tacticId} for update`);
     const tactic = (await loadState()).tactics.find((x) => x.id === tacticId);
     if (!tactic) throw new Error(`Tactic ${tacticId} does not exist. Choose one from the library, or record the missed tactic.`);
+    if (tactic.review_status !== "accepted") {
+      throw new TrustedApplicationError("Only an accepted tactic can address a gap. Choose an accepted tactic or record the missed tactic.");
+    }
     if (tactic.status === "proposed" || tactic.status === "cancelled") {
       throw new Error(`${tactic.name} is ${tactic.status}, so it cannot address a gap. Choose a completed, ongoing or planned tactic.`);
     }
