@@ -3,6 +3,7 @@ import "@/modules";
 import { runStage } from "@/modules/kernel/run";
 import { wipePlatform } from "@/modules/kernel/db";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
+import { addSourceBlock } from "@/lib/iegp/source-blocks";
 import { isLiveGap } from "@/lib/iegp/engine";
 import { commitExtractedRecords, createGap, loadState, resetDemoSetup, validateGap } from "@/lib/iegp/store";
 import { listParsedDocuments } from "@/modules/stages/s1-parse/module";
@@ -271,7 +272,6 @@ describe("KAN-74 S2 run across two documents", () => {
   });
 
   it("creates new gaps, joins repeats, flags the validated gap and files the overlap", async () => {
-    const before = await loadState();
     const persistence = gap("Real-world persistence", "How long do patients persist on therapy?", "Persistence is unknown.");
     const versusSoc = gap("Versus SoC", "How does it compare with SoC?", "Payers want SoC data.", "comparative_effectiveness");
     const over75 = gap("Over-75s versus SoC", "How does it compare with SoC in over-75s?", "Over-75s are a gap.", "comparative_effectiveness");
@@ -282,8 +282,14 @@ describe("KAN-74 S2 run across two documents", () => {
     const B2 = `${docB}-L002`;
     const B3 = `${docB}-L003`;
     const B4 = `${docB}-L004`;
-    const citedBlock = before.blocks.find(block => block.source_id === sourceB)!;
-    const groundedRepeat = { ...over75, name: "Over-75s in the cited section", source_quote: citedBlock.text, block_id: citedBlock.id };
+    const groundedQuote = "No comparative study reports outcomes for the oldest patients.";
+    const addEvidence = (source_id: string, text: string) =>
+      addSourceBlock({ source_id, text, actor: ACTOR, rationale: "Add evidence used by the scripted model." });
+    await addEvidence(sourceA, [persistence.source_quote, versusSoc.source_quote].join(" "));
+    const corroboratingBlock = await addEvidence(sourceB, [persistence.source_quote, over75.source_quote, corroboratingQuote].join(" "));
+    const citedBlock = await addEvidence(sourceB, groundedQuote);
+    const groundedRepeat = { ...over75, name: "Over-75s in the cited section", source_quote: groundedQuote, block_id: citedBlock.id };
+    const before = await loadState();
     const ctx = context((call) => {
       if (call.purpose === `gap-proposer:${docA}`) return { gaps: [persistence, versusSoc] };
       if (call.purpose === `gap-proposer:${docB}`) return { gaps: [{ ...persistence, name: "Persistence again" }, over75, { ...over75, name: "Over-75s again", source_quote: corroboratingQuote }, groundedRepeat] };
@@ -322,13 +328,13 @@ describe("KAN-74 S2 run across two documents", () => {
     // A2 joined the validated plan gap, which now shows "New source added".
     expect(sourcesOn(planGapId)).toContain(sourceA);
     expect(state.gaps.find((row) => row.id === planGapId)!.new_source_at).toBeTruthy();
-    // A repeat without a verified block keeps its historical shape. A grounded repeat carries its citation.
+    // Inferred and explicit citations both preserve their retained block.
     const suggestion = state.gap_suggestions.find((row) => row.id === output.suggestion_ids[0])!;
     expect(suggestion).toMatchObject({ gap_id: planGapId, status: "pending", source_id: sourceB, name: "Over-75s versus SoC" });
     expect(suggestion.candidate_row_id).toBeTruthy();
-    expect(suggestion.extra_sources).toEqual([
+    expect(suggestion.extra_sources).toMatchObject([
       { source_id: sourceB, statement: over75.statement, source_quote: corroboratingQuote, domain: over75.domain,
-        provenance: { run_id: "kan74-run", candidate_row_id: expect.any(String), block_id: null, requires_current_citation: true } },
+        provenance: { run_id: "kan74-run", candidate_row_id: expect.any(String), block_id: corroboratingBlock.id, requires_current_citation: true } },
       { source_id: sourceB, statement: groundedRepeat.statement, source_quote: groundedRepeat.source_quote, domain: groundedRepeat.domain,
         provenance: { run_id: "kan74-run", candidate_row_id: expect.any(String), block_id: citedBlock.id, requires_current_citation: true } },
     ]);

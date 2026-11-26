@@ -426,12 +426,18 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     expect(blocks.every((b) => b.heading !== "HEOR stakeholder interviews")).toBe(true);
   });
 
+  it("leaves coverage recall unscored when there are no gold mappings", () => {
+    expect(coverageEval([], []).recall).toBeNull();
+    expect(coverageEval([{ gap_id: "g", tactic_id: "t", overall: "partial" }], []).recall).toBeNull();
+  });
+
   it("scores gold coverage overall degrees", () => {
     const result = coverageEval(
       [{ gap_id: "g", tactic_id: "t", overall: "partial" }],
       [{ gap_id: "g", tactic_id: "t", overall: "partial" }],
     );
     expect(result.exact).toBe(1);
+    expect(result.recall).toBe(1);
     expect(result.wrong).toBe(0);
   });
 

@@ -5,6 +5,11 @@
  * modules/kernel/stage-errors.ts. The API key is never part of either.
  */
 
+/** Terminal model outcome; incomplete or refused text must never enter JSON repair. */
+export class ModelAnswerError extends Error {
+  constructor(readonly kind: "truncation" | "refusal", message: string) { super(message); }
+}
+
 export type ProviderErrorKind = "billing" | "auth" | "rate_limit" | "unavailable" | "bad_request" | "other";
 
 export type ProviderErrorInfo = {
@@ -155,12 +160,14 @@ export async function fetchProvider(
   init: RequestInit,
   target: ProviderTarget,
 ): Promise<{ res: Response; text: string }> {
-  const signal = AbortSignal.timeout(providerTimeoutMs());
+  const timeout = AbortSignal.timeout(providerTimeoutMs());
+  const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
   try {
     const res = await fetch(url, { ...init, signal });
     return { res, text: await res.text() };
   } catch (error) {
-    const timedOut = signal.aborted || (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError"));
+    init.signal?.throwIfAborted();
+    const timedOut = timeout.aborted || (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError"));
     throw new ProviderError({
       ...target,
       status: timedOut ? 504 : 503,

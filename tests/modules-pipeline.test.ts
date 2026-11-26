@@ -1,5 +1,5 @@
 import { priorityDecision } from "./support/priority-decision";
-import { makeFinalReady } from "./support/final-ready";
+import { makeFinalReady, reviewInventoryForFinal } from "./support/final-ready";
 import { beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import "@/modules";
@@ -71,6 +71,13 @@ describe("modular pipeline, S0 to S10", () => {
     const result = await run<ParseOutput>("S1", {});
     expect(result.output.documents).toHaveLength(2);
     expect(result.output.failures).toHaveLength(0);
+    const expectedMetrics = [
+      expect.objectContaining({ name: "documents_parsed", value: 2 }),
+      expect.objectContaining({ name: "parse_success_rate", value: 1 }),
+    ];
+    expect(result.evals).toEqual(expect.arrayContaining(expectedMetrics));
+    const saved = (await listEvalRuns({ stage: "S1" })).find((run) => run.run_id === result.run_id);
+    expect(saved?.metrics).toEqual(expect.arrayContaining(expectedMetrics));
     for (const document of result.output.documents) {
       expect(document.blocks).toBeGreaterThan(0);
       expect(document.quality.characters).toBeGreaterThan(100);
@@ -177,6 +184,7 @@ describe("modular pipeline, S0 to S10", () => {
   }, 60_000);
 
   it("suggests priority bands on the configured axes and keeps a validated band on re-run", async () => {
+    await reviewInventoryForFinal(ACTOR);
     const suggested = await run<PrioritizationOutput>("S8", {});
     expect(suggested.output.placements.length).toBeGreaterThan(0);
     expect(suggested.output.axes.length).toBeGreaterThanOrEqual(2);
@@ -329,8 +337,11 @@ describe("modular pipeline, S0 to S10", () => {
       const exchanges = detail!.steps.find((step) => step.name === "exchanges");
       expect((exchanges?.data as unknown[] | undefined)?.length).toBe(3);
       expect(detail!.evals.find((score) => score.name === "exchanges")?.value).toBe(3);
-      expect(detail!.evals.some((score) => score.name === "dialogue_retention")).toBe(true);
-      expect(detail!.evals.some((score) => score.name === "critic_score_gain")).toBe(true);
+      const first = detail!.steps.find(step => step.name === "round1:critic")?.data as { subject: string }[];
+      const last = detail!.steps.find(step => step.name === "round3:critic")?.data as { subject: string }[];
+      const matched = first.filter(item => first.filter(other => other.subject === item.subject).length === 1
+        && last.filter(other => other.subject === item.subject).length === 1);
+      expect(detail!.evals.some(score => score.name === "critic_score_gain")).toBe(matched.length > 0);
     }
   }, 60_000);
 

@@ -17,8 +17,12 @@ import { withAdminWorkspace } from "@/modules/workspaces/admin-context";
 import { aiSections } from "@/modules/kernel/ai-switch";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { isTestStub } from "@/modules/kernel/llm";
+import { tracedCompletion } from "@/modules/kernel/llm-calls";
 import { completionFor, resolveRoute } from "@/modules/kernel/routing";
-import { NoRouteError } from "@/modules/llm/provider";
+import { providerApiKey } from "@/modules/llm/api-keys";
+import { findProvider, NoRouteError, type LlmUsage } from "@/modules/llm/provider";
+import { developmentUsageCost, rawCallBound } from "./cost";
+import { beginPreparationCall, openPreparationAllowance, settlePreparationCall } from "./preparation-cost-store";
 import {
   DevelopmentError,
   structuredReferenceSchema,
@@ -26,6 +30,7 @@ import {
   type DevelopmentSection,
   type Experiment,
   type ParserIdentity,
+  type PreparationControls,
 } from "./schema";
 /** Content identity independent of filename and source workspace identifiers. */
 export function sha256(value: Buffer | string): string {
@@ -229,7 +234,7 @@ function makeDocument(
     compatibility: "compatible",
   };
 }
-async function parserCompletion() {
+async function parserCompletion(experiment: Experiment, actor: string, kind: 'source' | 'pdf_reference', controls?: PreparationControls) {
   if (!(await aiSections()).ingestion)
     throw new DevelopmentError(
       409,
@@ -237,7 +242,8 @@ async function parserCompletion() {
       "AI ingestion is turned off. Enable ingestion in /admin/control before parsing a private document or PDF reference.",
     );
   const requestBudget = createParseRequestBudget();
-  const run_id = `development-parse-${randomUUID()}`;
+  const preparationId = controls?.id ?? randomUUID();
+  const run_id = `development-parse-${preparationId}`;
   if (isTestStub())
     return {
       requestBudget,
@@ -253,12 +259,52 @@ async function parserCompletion() {
     };
   try {
     const route = await resolveRoute("S1");
-    const ask = completionFor(route, {
-      id: run_id,
-      step: async (_name, fn) => await fn(),
-      note: () => undefined,
-      steps: () => [],
-    });
+    const provider = findProvider(route.provider_id);
+    const api_key = providerApiKey(route.provider_id);
+    if (!provider || !api_key) throw new NoRouteError('The S1 parser credentials are unavailable.');
+    const run = { id: run_id, step: async <T>(_name: string, fn: () => Promise<T>) => fn(), note: () => undefined, steps: () => [] };
+    let preparation: Promise<string> | undefined;
+    const ask = completionFor(route, run, { completeRaw: async ({ request, purpose, attempt }) => {
+      requestBudget.check();
+      const bound = rawCallBound(provider.id, request);
+      if (bound.cost_usd === null) {
+        throw new DevelopmentError(409, 'unverified_preparation_cost', 'The configured S1 parsing route has no verified spending limit. Choose a supported priced or free S1 route in AI & routing.');
+      }
+      if (bound.cost_usd > 0 && !controls) {
+        throw new DevelopmentError(409, 'preparation_not_authorized', 'Set a USD preparation allowance and authorize a new upload before using this S1 route.');
+      }
+      const id = await (preparation ??= openPreparationAllowance(experiment, actor, kind, controls ?? { id: preparationId, allowance_usd: 0 }));
+      const began = new Date();
+      let callId: string | undefined;
+      let failedUsage: LlmUsage | null = null;
+      let receipt: Awaited<ReturnType<typeof tracedCompletion>>;
+      try {
+        receipt = await tracedCompletion({
+          provider, request, api_key, run, step: `llm:${purpose}`, detail: `${route.provider_label} · ${route.model}`,
+          purpose, attempt, stage: route.stage, workspace_id: null, requestBudget, maxAttempts: 1, standardBilling: true,
+          beforeSend: async () => {
+            if (!(await aiSections()).ingestion) throw new DevelopmentError(409, 'ai_disabled', 'AI ingestion was turned off before this request.');
+            callId = await beginPreparationCall(id, bound);
+          },
+          onFailure: ({ usage }) => { failedUsage = usage; },
+        });
+      } catch (providerError) {
+        if (callId) {
+          const billing = developmentUsageCost(provider.id, request.model, failedUsage, began, new Date());
+          if (billing.cost_usd !== null) {
+            try {
+              await settlePreparationCall(id, callId, billing);
+            } catch {
+              // The bound remains in the ledger. Preserve the provider failure for the caller.
+              console.error('[development] Failed preparation charge could not be settled', { preparation_id: id, call_id: callId });
+            }
+          }
+        }
+        throw providerError;
+      }
+      if (callId) await settlePreparationCall(id, callId, developmentUsageCost(provider.id, request.model, receipt.usage, began, new Date()));
+      return receipt.text;
+    } });
     return {
       ask,
       requestBudget,
@@ -320,6 +366,7 @@ async function parseFile(
     return (await parseWithLlm({ filename, buffer, mime, ask: completion.ask, requestBudget: completion.requestBudget }))
       .document;
   } catch (error) {
+    if (error instanceof DevelopmentError) throw error;
     if (error instanceof TrustedApplicationError && error.code === "parse_limit")
       throw new DevelopmentError(error.status, error.code, error.message);
     throw new DevelopmentError(
@@ -335,13 +382,14 @@ export async function prepareSource(
   actor: string,
   filename: string,
   content: string,
+  preparation?: PreparationControls,
 ) {
   const buffer = uploadBytes(content),
     kind = uploadKindOf(filename);
   if (kind.kind === "refused")
     throw new DevelopmentError(400, "unsupported_format", kind.reason);
   const mime = kind.kind === "text" ? "text/plain" : kind.mime;
-  const completion = await parserCompletion();
+  const completion = await parserCompletion(experiment, actor, 'source', preparation);
   const parsed = await parseFile(filename, buffer, mime, completion);
   return {
     document: makeDocument(experiment, actor, {
@@ -384,6 +432,7 @@ export async function prepareReference(
     format: "pdf" | "structured";
     section: DevelopmentSection;
     source_document_ids: string[];
+    preparation?: PreparationControls;
   },
 ) {
   validateAssociations(experiment, input.source_document_ids);
@@ -442,7 +491,7 @@ export async function prepareReference(
         "unsupported_format",
         "Choose a valid PDF reference, or upload a structured .json reference separately.",
       );
-    const completion = await parserCompletion();
+    const completion = await parserCompletion(experiment, actor, 'pdf_reference', input.preparation);
     const document = await parseFile(
       input.filename,
       buffer,
@@ -462,6 +511,7 @@ export async function prepareReference(
         requestBudget: completion.requestBudget,
       });
     } catch (error) {
+      if (error instanceof DevelopmentError) throw error;
       if (error instanceof TrustedApplicationError && error.code === "parse_limit")
         throw new DevelopmentError(error.status, error.code, error.message);
       throw new DevelopmentError(

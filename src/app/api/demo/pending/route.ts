@@ -8,19 +8,20 @@ import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 import { listIdeationProposals } from "@/modules/stages/s9-ideation/module";
 import { timelineModel } from "@/modules/stages/s10-timeline/module";
 import { planIssues } from "@/modules/stages/s10-timeline/plan-checks";
+import { gapResolutionVersion } from "@/lib/iegp/relationship-version";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
  * What each walkthrough step still waits on, for "Accept all as in demo"
- * (KAN-138). Client-demo workspaces only: the shortcut then makes the same
- * calls a presenter's clicks would.
+ * (KAN-138). The presenter reviews the opening proposal versions before
+ * saving the Ideation decisions.
  */
 export async function GET() {
   try {
-    await requireCustomerContext();
-    if (!(await isDemoModeWorkspace())) {
+    const { workspace } = await requireCustomerContext();
+    if (!workspace || !(await isDemoModeWorkspace(workspace.id))) {
       return NextResponse.json({ safe_error: true, error: "Only a client-demo workspace has demo shortcuts.", code: "not_demo" }, { status: 403 });
     }
     const [state, placements, proposals, timeline] = await Promise.all([
@@ -32,10 +33,11 @@ export async function GET() {
     const live = state.gaps.filter(isLiveGap);
     return NextResponse.json(
       {
+        workspace_id: workspace.id,
         gaps: {
           partial: live
             .filter((gap) => displayedGapStatus(gap) === "validated_partial")
-            .map((gap) => ({ id: gap.id, name: gap.name, statement: gap.statement })),
+            .map((gap) => ({ id: gap.id, name: gap.name, statement: gap.statement, resolution: gapResolutionVersion(state, gap.id) })),
           unvalidated: live
             .filter((gap) => !gap.human_validated && ["validated_open", "validated_addressed"].includes(displayedGapStatus(gap)))
             .map((gap) => gap.id),
@@ -45,9 +47,9 @@ export async function GET() {
         prioritize: {
           suggested: placements
             .filter((p) => !p.validated && p.suggested_band && live.some((gap) => gap.id === p.gap_id))
-            .map((p) => ({ gap_id: p.gap_id, band: p.suggested_band })),
+            .map((p) => ({ gap_id: p.gap_id, band: p.suggested_band, version: p.version })),
         },
-        ideation: { proposed: proposals.filter((p) => p.status === "proposed").map((p) => p.id) },
+        ideation: { proposed: proposals.filter((p) => p.status === "proposed").map(({ id, name, version }) => ({ id, name, version })) },
         timeline: {
           dependencies: timeline.activities.flatMap((activity) =>
             (activity.meta.proposed_dependencies ?? []).map((dep) => ({ id: activity.id, upstream_id: dep.id })),

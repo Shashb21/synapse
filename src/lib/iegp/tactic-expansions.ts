@@ -12,7 +12,7 @@ import { appendAudit, readState, syncComputedGapStatuses } from "./store";
 import { tacticDatesError } from "./tactic-dates";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import { newId, nowIso } from "@/modules/kernel/ids";
-import type { Actor, ExpansionScope, Tactic, TacticExpansion } from "./types";
+import type { Actor, ExpansionScope, IegpState, Tactic, TacticExpansion } from "./types";
 
 export type ExpansionTransaction = Parameters<Parameters<ReturnType<typeof db>["transaction"]>[0]>[0];
 const text = z.string().trim();
@@ -109,6 +109,28 @@ export type AcceptExpansionArgs = {
   rationale: string; actor: Actor; expected_tactic_version: string;
 };
 
+/** Check the canonical child preconditions against the source owner's locked state. */
+export function checkTacticExpansionAcceptance(
+  state: IegpState, args: Pick<AcceptExpansionArgs, "proposal_id" | "tactic_id" | "gap_id" | "expected_tactic_version">, scope: ExpansionScope,
+): TacticExpansion | undefined {
+  const tactic = state.tactics.find((p) => p.id === args.tactic_id);
+  if (!tactic) throw new TrustedApplicationError("Tactic not found in this workspace.", "not_found", 404);
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
+  if (!gap || gap.retired || gap.status === "excluded") throw new TrustedApplicationError("Live gap not found in this workspace.", "not_found", 404);
+  if (tactic.review_status !== "accepted" || tactic.status === "cancelled") throw new TrustedApplicationError("Expansion requires an accepted, active tactic.");
+  if (tacticVersion(tactic) !== args.expected_tactic_version) throw new TrustedApplicationError("Tactic changed; refresh the stale proposal before accepting.");
+  const existing = state.expansions.find((e) => e.proposal_id === args.proposal_id);
+  if (existing) {
+    if (existing.tactic_id !== args.tactic_id || !existing.gap_ids.includes(args.gap_id) || JSON.stringify(canonical(existing.scope)) !== JSON.stringify(canonical(scope))) {
+      throw new TrustedApplicationError("Proposal already accepted with different scope or parent.");
+    }
+    return existing;
+  }
+  if (tactic.status === "completed" && scope.prospective_enrolment) throw new TrustedApplicationError("Completed studies cannot add prospective enrolment.");
+  if (/post[- ]?hoc/i.test(scope.analysis) && !scope.post_hoc) throw new TrustedApplicationError("Post-hoc analysis must be identified as post_hoc.");
+  return undefined;
+}
+
 /**
  * Creates a proposed child, scoped assessment and acceptance history atomically.
  * Pass the source owner's transaction after locking and validating its pending proposal.
@@ -126,20 +148,8 @@ async function acceptTacticExpansionChange(args: AcceptExpansionArgs, transactio
     // Parent then gap is the acceptance lock order; serialise computation for this gap.
     await tx.select().from(t.gaps).where(eq(t.gaps.id, args.gap_id)).for("update");
     const state = await readState(tx);
-    const tactic = state.tactics.find((p) => p.id === args.tactic_id)!;
-    const gap = state.gaps.find((g) => g.id === args.gap_id);
-    if (!gap || gap.retired || gap.status === "excluded") throw new TrustedApplicationError("Live gap not found in this workspace.", "not_found", 404);
-    if (tactic.review_status !== "accepted" || tactic.status === "cancelled") throw new TrustedApplicationError("Expansion requires an accepted, active tactic.");
-    if (tacticVersion(tactic) !== args.expected_tactic_version) throw new TrustedApplicationError("Tactic changed; refresh the stale proposal before accepting.");
-    const existing = state.expansions.find((e) => e.proposal_id === args.proposal_id);
-    if (existing) {
-      if (existing.tactic_id !== args.tactic_id || !existing.gap_ids.includes(args.gap_id) || JSON.stringify(canonical(existing.scope)) !== JSON.stringify(canonical(scope))) {
-        throw new TrustedApplicationError("Proposal already accepted with different scope or parent.");
-      }
-      return existing;
-    }
-    if (tactic.status === "completed" && scope.prospective_enrolment) throw new TrustedApplicationError("Completed studies cannot add prospective enrolment.");
-    if (/post[- ]?hoc/i.test(scope.analysis) && !scope.post_hoc) throw new TrustedApplicationError("Post-hoc analysis must be identified as post_hoc.");
+    const existing = checkTacticExpansionAcceptance(state, args, scope);
+    if (existing) return existing;
     const at = nowIso(), version = newId("EXV");
     const child: TacticExpansion = {
       id: newId("EXP"), tactic_id: args.tactic_id, gap_ids: [args.gap_id], scope,

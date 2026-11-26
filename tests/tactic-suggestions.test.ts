@@ -8,7 +8,7 @@ import { db } from "@/lib/iegp/db";
 import * as t from "@/lib/iegp/schema";
 import { buildSeed } from "@/lib/iegp/seed";
 import { commitExtractedRecords, createProposedTactic, loadState, persistSourceAndBlocks, persistState } from "@/lib/iegp/store";
-import { deleteSourceBlock, mergeSourceBlocks, reparseSourceBlocks, splitSourceBlock } from "@/lib/iegp/source-blocks";
+import { addSourceBlock, deleteSourceBlock, mergeSourceBlocks, reparseSourceBlocks, splitSourceBlock } from "@/lib/iegp/source-blocks";
 import { tacticVersion } from "@/lib/iegp/tactic-expansions";
 import type { ExpansionScope } from "@/lib/iegp/types";
 import * as suggestions from "@/modules/stages/s3-tactic-extract/suggestions";
@@ -29,12 +29,28 @@ beforeEach(async () => {
   state.tactics[0]!.lock = {locked: true, actor_name: actor.name, actor_function: actor.function, locked_at: "2026-10-07", note: "Protocol locked"};
   await persistState(state);
   sourceId = state.sources[0]!.id; parentId = state.tactics[0]!.id; gapId = state.gaps[0]!.id;
+  await addSourceBlock({ source_id: sourceId, text: sourceQuote, actor, rationale: "Record the quoted evidence." });
   await suggestions.ensureTacticSuggestionSchema();
   await db().delete(tacticCandidates).where(eq(tacticCandidates.run_id, "source-run"));
   await db().execute(sql`DELETE FROM tactic_suggestions`);
   await db().execute(sql`DELETE FROM tactic_source_references`);
 });
 describe("S3 source matching", () => {
+  it("stores a bounded citation identity for a long verified quotation", async () => {
+    const quote = `Verified source ${"evidence ".repeat(2_000)}`;
+    const source = await persistSourceAndBlocks({
+      title: "Long evidence", source_type: "advisory_board", stakeholder_function: actor.function,
+      text: quote, sections: [{ heading: "Evidence", text: quote, location: "1" }],
+    });
+
+    await suggestions.attachTacticSource({
+      tactic_id: parentId, source_id: source.source_id, source_quote: quote, block_id: source.blocks[0]!.id,
+    });
+
+    expect((await suggestions.listTacticSourceReferences(parentId)).find(reference => reference.source_id === source.source_id))
+      .toMatchObject({ quote_key: expect.stringMatching(/^[a-f0-9]{64}$/) });
+  });
+
   it("attaches each same source sentence once without replacing design or creating tactics", async () => {
     const before = await loadState();
     const args = {source_id: sourceId, title: "Second source", stakeholder_function: actor.function, actor_name: actor.name, actor_function: actor.function, needs: [], gaps: [], tactics: [{id: "candidate", name: "Duplicate", type: "registry" as const, status: "planned" as const, evidence_question: "Changed question", source_id: sourceId, source_quote: "Same source sentence", duplicate_of: parentId}]};
@@ -235,7 +251,11 @@ describe("S3 source matching", () => {
       ? (await splitSourceBlock({ block_id: original.block_id!, at_text: sourceQuote, rationale: "Separate evidence", actor })).second_id
       : (await mergeSourceBlocks({ block_id: source.blocks[0]!.id, rationale: "Combine related text", actor })).block_id;
 
-    const moved = { ...rejected, block_id: currentBlockId };
+    const moved = {
+      ...rejected,
+      block_id: currentBlockId,
+      source_context: { heading: background.heading, location: background.location },
+    };
     expect(await proposal(currentBlockId)).toEqual(moved);
     expect(await suggestions.listTacticSuggestions()).toEqual(existing ? [moved, existing] : [moved]);
   });
@@ -275,6 +295,19 @@ describe("S3 source matching", () => {
     expect(after.tactics.find(t => t.id === result.result_tactic_id)).toMatchObject({name: row.separate.name, status: "planned", source_quote: row.source_quote});
     expect(after.tactics.find(t => t.id === parentId)).toEqual(before.tactics.find(t => t.id === parentId));
   });
+  it("accepts a review after the parent citation moves without accepting a scope change", async () => {
+    const row = await proposal();
+    await db().update(t.tactics).set({
+      block_id: "relocated-citation",
+      source_context: { heading: "Relocated evidence", location: "2" },
+    }).where(eq(t.tactics.id, parentId));
+
+    const result = await suggestions.decideTacticSuggestion({
+      id: row.id, decision: "separate", rationale: "The distinct activity remains supported.", actor,
+    });
+
+    expect(result.status).toBe("separate");
+  });
   it.each(["separate", "expand"] as const)("relinks the quote after a source edit before accepting %s", async decision => {
     const background = { heading: "Background", text: "Registry study background.", location: "1" };
     const cited = { heading: "Results", text: sourceQuote, location: "2" };
@@ -310,7 +343,7 @@ describe("S3 source matching", () => {
     }
   });
 
-  it("keeps a suggestion pending when its cited quote was removed", async () => {
+  it("protects a pending suggestion's cited quote from removal", async () => {
     const sections = [
       { heading: "Background", text: "Registry study background.", location: "1" },
       { heading: "Results", text: sourceQuote, location: "2" },
@@ -321,11 +354,9 @@ describe("S3 source matching", () => {
     });
     sourceId = source.source_id;
     const row = await proposal(source.blocks[1].id);
-    await deleteSourceBlock({ block_id: row.block_id!, rationale: "Remove obsolete results", actor });
     const before = await loadState();
-    await expect(suggestions.decideTacticSuggestion({
-      id: row.id, decision: "separate", rationale: "Reviewed source evidence", actor,
-    })).rejects.toThrow(/source passage.*rerun/i);
+    await expect(deleteSourceBlock({ block_id: row.block_id!, rationale: "Remove obsolete results", actor }))
+      .rejects.toThrow(/orphan.*cited quote/i);
     expect(await suggestions.listTacticSuggestions()).toContainEqual(expect.objectContaining({ id: row.id, status: "pending" }));
     expect((await loadState()).tactics).toEqual(before.tactics);
   });

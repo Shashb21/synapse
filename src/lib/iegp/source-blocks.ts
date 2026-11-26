@@ -198,7 +198,7 @@ async function quotesFor(source_id: string): Promise<SourceQuote[]> {
     [suggestion, ...(Array.isArray(suggestion.extra_sources) ? suggestion.extra_sources : [])]
       .map((source, index) => ({
         id: suggestion.id, citationKey: `gap-suggestion:${suggestion.id}:${index}`,
-        quote: source.source_quote, block_id: source.block_id ?? null, source_id: source.source_id,
+        quote: source.source_quote, block_id: source.provenance?.block_id ?? source.block_id ?? null, source_id: source.source_id,
       }))
       .filter((source) => source.source_id === source_id),
   );
@@ -217,11 +217,33 @@ async function quotesFor(source_id: string): Promise<SourceQuote[]> {
   return citations;
 }
 
+/** Read the current editor order without pruning rows from a prior source generation. */
+export async function listCurrentSourceBlocks(source_id: string): Promise<BlockRow[]> {
+  await ensureSourceBlocksSchema();
+  const rows = await db()
+    .select({ block: t.sourceBlocks, position: sourceBlockMeta.position })
+    .from(t.sourceBlocks)
+    .innerJoin(t.sources, eq(t.sources.id, t.sourceBlocks.source_id))
+    .leftJoin(sourceBlockMeta, and(
+      eq(sourceBlockMeta.block_id, t.sourceBlocks.id),
+      eq(sourceBlockMeta.source_id, t.sources.id),
+      eq(sourceBlockMeta.source_generation, t.sources.ingested_at),
+    ))
+    .where(eq(t.sourceBlocks.source_id, source_id));
+  return rows
+    .map(({ block, position }) => ({ block, position: position ?? idOrdinal(block.id) }))
+    .sort((a, b) => a.position - b.position || a.block.id.localeCompare(b.block.id))
+    .map(({ block }) => block);
+}
+
 /** Blocks of one source in reading order, with human/model provenance and citing needs. */
 export async function listSourceBlocks(source_id: string): Promise<SourceBlockView[]> {
-  await pruneStale(source_id);
-  const [blocks, metas, quotes] = await Promise.all([rawBlocks(source_id), metasFor(source_id), quotesFor(source_id)]);
-  const metaById = new Map(metas.map((m) => [m.block_id, m]));
+  await ensureSourceBlocksSchema();
+  const [blocks, metas, quotes, generation] = await Promise.all([
+    rawBlocks(source_id), metasFor(source_id), quotesFor(source_id), generationOf(source_id),
+  ]);
+  const metaById = new Map(metas.filter((meta) => generation && meta.source_generation === generation)
+    .map((meta) => [meta.block_id, meta]));
   return blocks
     .map((block) => {
       const meta = metaById.get(block.id);
@@ -542,11 +564,13 @@ async function moveSplitOrMergedCitations(
   // Edits to different sources can share a suggestion. Lock its current row
   // before reading the array, in the same source-first order as decisions.
   const extraCitation = JSON.stringify([{ source_id: sourceId, block_id: original.id }]);
+  const nestedExtraCitation = JSON.stringify([{ source_id: sourceId, provenance: { block_id: original.id } }]);
   const suggestions = await d.select().from(t.gapSuggestions).where(and(
     eq(t.gapSuggestions.status, "pending"),
     or(
       and(eq(t.gapSuggestions.source_id, sourceId), eq(t.gapSuggestions.block_id, original.id)),
       sql`${t.gapSuggestions.extra_sources} @> ${extraCitation}::jsonb`,
+      sql`${t.gapSuggestions.extra_sources} @> ${nestedExtraCitation}::jsonb`,
     ),
   )).orderBy(t.gapSuggestions.id).for("update");
   for (const suggestion of suggestions) {
@@ -556,11 +580,17 @@ async function moveSplitOrMergedCitations(
     const sources = Array.isArray(suggestion.extra_sources) ? suggestion.extra_sources : [];
     let changed = false;
     const extra_sources = sources.map(source => {
-      if (source.source_id !== sourceId || source.block_id !== original.id) return source;
+      const hasBlock = source.block_id === original.id;
+      const hasProvenanceBlock = source.provenance?.block_id === original.id;
+      if (source.source_id !== sourceId || (!hasBlock && !hasProvenanceBlock)) return source;
       const citation = movedCitation(source.source_quote);
       if (!citation) return source;
       changed = true;
-      return { ...source, ...citation };
+      return {
+        ...source,
+        ...(hasBlock ? citation : { source_context: citation.source_context }),
+        ...(hasProvenanceBlock ? { provenance: { ...source.provenance, block_id: citation.block_id } } : {}),
+      };
     });
     if (primary || changed) {
       await d.update(t.gapSuggestions).set({ ...primary, ...(changed ? { extra_sources } : {}) })
@@ -904,6 +934,7 @@ export const reparseSourceBlocks = assessmentSourceEdit(async function reparseSo
   sections: { heading: string; text: string; location: string; split_unit?: { index: number; text: string } }[];
 }): Promise<ReparseResult> {
   await requireSourceRow(args.source_id);
+  await pruneStale(args.source_id);
   const current = await listSourceBlocks(args.source_id);
   const metas = await metasFor(args.source_id);
   const quotes = await quotesFor(args.source_id);

@@ -60,6 +60,13 @@ describe("admin AI harness (KAN-54)", () => {
     }
   }, 240_000);
 
+  it("scores the sample Open gaps while preserving the Partial demo examples for subsequent runs", async () => {
+    const result = await runHarness({ case: "prioritization", input: { mode: "sample" }, actor: ACTOR });
+    expect(result.steps.at(-1)!.stage).toBe("S8");
+    expect(result.input_summary).toMatch(/Every Velmara Open gap/);
+    expect((await harnessPartialGaps()).length).toBeGreaterThan(0);
+  }, 120_000);
+
   it("suggests a split for a partially addressed sample gap, and extracts tactics from a sample", async () => {
     const partial = await harnessPartialGaps();
     expect(partial.length).toBeGreaterThan(0);

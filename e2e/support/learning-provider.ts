@@ -33,7 +33,7 @@ export async function startLearningBrowserServer() {
         answer = { reviews: payload.placements.map((placement: { gap_id: string }) => ({ gap_id: placement.gap_id, verdict: "keep", confidence: 90, note: "Supported by fixture evidence." })) };
       } else if (Array.isArray(payload.gaps) && Array.isArray(payload.axes)) {
         purpose = "priority-suggester";
-        answer = { gaps: payload.gaps.map((gap: { id: string }) => ({ gap_id: gap.id, scores: Object.fromEntries(payload.axes.map((axis: { id: string }) => [axis.id, system.includes(CANDIDATE_INSTRUCTION) ? 20 : 80])), rationale: "Evidence supports this placement." })) };
+        answer = { gaps: payload.gaps.map((gap: { id: string }) => ({ gap_id: gap.id, scores: Object.fromEntries(payload.axes.map((axis: { id: string }) => [axis.id, system.includes(CANDIDATE_INSTRUCTION) ? 20 : 80])), rationale: "Evidence supports this placement.", references:[{entity_type:"gap",entity_id:gap.id,reason:"This supplied gap defines the decision."}] })) };
       } else {
         throw new Error("Unsupported learning fixture prompt.");
       }

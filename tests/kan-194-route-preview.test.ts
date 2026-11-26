@@ -61,3 +61,16 @@ it.each(["xai-grok", "deterministic-local"])("renders raw saved %s routing while
   expect(execution.provider_id).toBe("xai-grok");
   expect(stored).toMatchObject({ provider_id: providerId, model: "removed-model", fallbacks: [] });
 });
+
+it.each([{ rows: [] }, { rows: [{ stage: "S2", provider_id: "deterministic-local", model: "old", fallbacks: null,
+  params: { temperature: 0, max_tokens: 8192 }, updated_by: "old", updated_at: "old" }] }])(
+  "requires deployment approval before an inherited alternate receives traffic", async ({ rows }) => {
+    database.rows = rows;
+    vi.stubEnv("XAI_API_KEY", "");
+    vi.stubEnv("ANTHROPIC_API_KEY", "fictional-alternate");
+    vi.stubEnv("SYNAPSE_APPROVED_FALLBACK_PAIRS", "anthropic-claude>xai-grok");
+    await expect(resolveRoute("S2")).rejects.toThrow("XAI_API_KEY");
+    vi.stubEnv("SYNAPSE_APPROVED_FALLBACK_PAIRS", "xai-grok>anthropic-claude");
+    expect(await resolveRoute("S2")).toMatchObject({ provider_id: "anthropic-claude", degraded: true });
+  },
+);

@@ -26,9 +26,10 @@ import { ensurePlatformSchema, wipePlatform } from "@/modules/kernel/db";
 import { runStage } from "@/modules/kernel/run";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { NoRouteError } from "@/modules/llm/provider";
-import { splitSourceBlock } from "@/lib/iegp/source-blocks";
+import { addSourceBlock, splitSourceBlock } from "@/lib/iegp/source-blocks";
 import { commitExtractedRecords, loadState, resetDemoSetup } from "@/lib/iegp/store";
 import { tacticExtractModule } from "@/modules/stages/s3-tactic-extract/module";
+import { listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
 
 /**
  * The model path of S3, with a scripted model in place of a provider: the
@@ -81,6 +82,7 @@ function context(script: Script, connected = true): { ctx: ModuleContext; calls:
 }
 
 const QUOTE = "The ongoing VELA registry follows 800 patients for five years.";
+const CLAIMS_QUOTE = "A claims analysis is planned.";
 const good = (overrides: Record<string, unknown> = {}) => ({
   name: "VELA registry",
   type: "registry",
@@ -116,8 +118,18 @@ describe("S3 on the model path", () => {
     await resetDemoSetup();
     await ensurePlatformSchema(tacticExtractModule.migrations ?? []);
     await wipePlatform(["source_files", "parsed_documents", "gap_candidates", "tactic_candidates"]);
-    await runStage({ stage: "S0", input: { files: [{ filename: "s3-llm.txt", title: "S3-LLM fictional source",
-      source_type: "stakeholder_interview", stakeholder_function: ACTOR.function, text: [QUOTE, "A claims analysis is planned.", "A systematic literature review was completed last year."].join("\n\n") }] }, actor: ACTOR, role: "medical_affairs" });
+    await runStage({
+      stage: "S0",
+      input: { files: [{
+        filename: "fictional-tactics.txt",
+        title: "Fictional activity descriptions",
+        source_type: "stakeholder_interview",
+        stakeholder_function: ACTOR.function,
+        text: `Fictional activity descriptions.\n\n${QUOTE}\n\n${CLAIMS_QUOTE}\n\nA systematic literature review was completed last year.`,
+      }] },
+      actor: ACTOR,
+      role: "medical_affairs",
+    });
     await runStage({ stage: "S1", input: {}, actor: ACTOR, role: "medical_affairs" });
     const state = await loadState();
     const source = state.sources[0]!;
@@ -161,6 +173,11 @@ describe("S3 on the model path", () => {
 
   const input = (dry_run = true) => tacticExtractModule.inputSchema.parse({ document_ids: [documentId], dry_run });
 
+  async function retainTestPassage(text: string) {
+    const [document] = await listParsedDocuments([documentId]);
+    await addSourceBlock({ source_id: document!.source_id, text, actor: ACTOR, rationale: "Add the excerpt used by the scripted model." });
+  }
+
   it("checks a revised quotation before it can become a tactic", async () => {
     let firstReview = true;
     const { ctx } = context((call) => {
@@ -175,9 +192,7 @@ describe("S3 on the model path", () => {
       }
       return acceptAll(call);
     });
-    const { output } = await tacticExtractModule.run(input(false), ctx);
-    expect(output.accepted).toEqual([]);
-    expect(output.rejected[0]?.critic_note).toMatch(/quote.*source/i);
+    await expect(tacticExtractModule.run(input(false), ctx)).rejects.toThrow(/source_quote.*verbatim/i);
     expect(commitExtractedRecords).not.toHaveBeenCalled();
   });
 
@@ -265,6 +280,142 @@ describe("S3 on the model path", () => {
     expect(output.accepted[0]).toMatchObject({ name: "VELA registry", status: "planned" });
   });
 
+  it("preserves accepted critic reviews when a duplicated review must be retried", async () => {
+    let first = true;
+    const { ctx, calls } = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) return { tactics: [good(), good({ name: "Second study" })] };
+      if (call.purpose === "tactic-judge") return acceptAll(call);
+      const answer = keepAll(call);
+      if (first) {
+        first = false;
+        answer.reviews.push(answer.reviews[1]!);
+      }
+      return answer;
+    });
+    await tacticExtractModule.run(input(), ctx);
+    const reviews = calls.filter(call => call.purpose === "tactic-critic");
+    expect(idsOf(reviews[1]!, "candidates")).toEqual([idsOf(reviews[0]!, "candidates")[1]]);
+    expect(reviews[1]!.body?.candidates).toEqual([expect.objectContaining({ problem: expect.stringMatching(/duplicate/i) })]);
+  });
+
+  it.each([true, false])("retries only the malformed document (repair succeeds: %s)", async repairSucceeds => {
+    const request = input(false);
+    const facts = await tacticExtractModule.freeze!(request) as { documents: ParsedDocumentRecord[] };
+    const first = facts.documents[0]!;
+    const second = {
+      ...first, id: "second-document", source_id: "second-source",
+      blocks: first.blocks.map(block => ({ ...block, id: `second-${block.id}`, source_id: "second-source" })),
+    };
+    const { state } = facts as typeof facts & { state: Awaited<ReturnType<typeof loadState>> };
+    state.blocks.push(...second.blocks);
+    facts.documents.push(second);
+    request.document_ids = [first.id, second.id];
+    let attempts = 0;
+    const { ctx, calls } = context(call => {
+      if (call.purpose === `tactic-proposer:${first.id}`) return { tactics: [good()] };
+      if (call.purpose === `tactic-proposer:${second.id}`) {
+        attempts += 1;
+        return repairSucceeds && attempts === 2
+          ? { tactics: [good({ name: "Second claims study", source_quote: CLAIMS_QUOTE })] }
+          : { tactics: null };
+      }
+      return call.purpose === "tactic-critic" ? keepAll(call) : acceptAll(call);
+    });
+    ctx.replay = { evaluation: true, input: request, facts, module_id: tacticExtractModule.manifest.id, module_version: tacticExtractModule.manifest.version, prompt_version: "base" };
+
+    if (repairSucceeds) {
+      const { output } = await tacticExtractModule.run(request, ctx);
+      expect(output.accepted.map(row => row.document_id)).toEqual([first.id, second.id]);
+    } else {
+      await expect(tacticExtractModule.run(request, ctx)).rejects.toThrow(/second-source.*tactics.*list.*3 attempts/i);
+      expect(attempts).toBe(3);
+    }
+    const proposals = calls.filter(call => call.purpose.startsWith("tactic-proposer:"));
+    expect(proposals.filter(call => call.purpose === `tactic-proposer:${first.id}`)).toHaveLength(1);
+    expect(proposals[2]?.user).toMatch(/second-source[\s\S]*tactics.*list/i);
+    expect(commitExtractedRecords).not.toHaveBeenCalled();
+  });
+
+  it("accepts an explicit empty tactic list without re-requesting the document", async () => {
+    const { ctx, calls } = context(() => ({ tactics: [] }));
+
+    const { output } = await tacticExtractModule.run(input(), ctx);
+
+    expect(output.accepted).toEqual([]);
+    expect(calls.map(call => call.purpose)).toEqual([`tactic-proposer:${documentId}`]);
+  });
+
+  it("retries a fabricated source quote without resending the grounded sibling", async () => {
+    const request = input();
+    const facts = await tacticExtractModule.freeze!(request) as { documents: ParsedDocumentRecord[] };
+    const fabricatedQuote = "The search report will include overall survival.";
+    const { ctx, calls } = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) {
+        return { tactics: [good(), good({ name: "Claims study", source_quote: fabricatedQuote })] };
+      }
+      if (call.purpose.startsWith("tactic-proposer-fix:")) {
+        return { tactics: idsOf(call, "rows").map(id => ({ id, ...good({ name: "Claims study", source_quote: CLAIMS_QUOTE }) })) };
+      }
+      return call.purpose === "tactic-critic" ? keepAll(call) : acceptAll(call);
+    });
+    ctx.replay = { evaluation: true, input: request, facts, module_id: tacticExtractModule.manifest.id, module_version: tacticExtractModule.manifest.version, prompt_version: "base" };
+    const { output } = await tacticExtractModule.run(request, ctx);
+    expect(calls[0]!.user).not.toContain(fabricatedQuote);
+    const repair = calls.find(call => call.purpose.startsWith("tactic-proposer-fix:"));
+    expect(repair?.body?.rows).toEqual([expect.objectContaining({
+      id: `${documentId}-LT002`,
+      problem: expect.stringMatching(/source_quote.*verbatim/i),
+    })]);
+    expect(output.accepted.map(row => row.source_quote)).toEqual([QUOTE, CLAIMS_QUOTE]);
+  });
+
+  it("retries a quote stitched across source blocks without resending a grounded sibling", async () => {
+    const request = input();
+    const facts = await tacticExtractModule.freeze!(request) as { documents: ParsedDocumentRecord[] };
+    const document = facts.documents[0]!;
+    const template = document.blocks[0]!;
+    const { state } = facts as typeof facts & { state: Awaited<ReturnType<typeof loadState>> };
+    const firstFragment = "The planned registry excludes";
+    const secondFragment = "patients without consent.";
+    const stitched = `${firstFragment} ${secondFragment}`;
+    document.blocks = [
+      { ...template, heading: "Registry", text: `${QUOTE} ${firstFragment}` },
+      { ...template, id: `${template.id}-claims`, heading: "Claims", text: `${secondFragment} ${CLAIMS_QUOTE}` },
+    ];
+    state.blocks = [...state.blocks.filter(block => block.source_id !== document.source_id), ...document.blocks];
+    const { ctx, calls } = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) {
+        return { tactics: [good(), good({ name: "Claims study", source_quote: stitched })] };
+      }
+      if (call.purpose.startsWith("tactic-proposer-fix:")) {
+        return { tactics: idsOf(call, "rows").map(id => ({ id, ...good({ name: "Claims study", source_quote: CLAIMS_QUOTE }) })) };
+      }
+      return call.purpose === "tactic-critic" ? keepAll(call) : acceptAll(call);
+    });
+    ctx.replay = { evaluation: true, input: request, facts, module_id: tacticExtractModule.manifest.id, module_version: tacticExtractModule.manifest.version, prompt_version: "base" };
+
+    const { output } = await tacticExtractModule.run(request, ctx);
+
+    expect(calls[0]!.user).toContain(`${firstFragment}\n\n## Claims [block_id=${template.id}-claims]\n${secondFragment}`);
+    const repair = calls.find(call => call.purpose.startsWith("tactic-proposer-fix:"));
+    expect(repair?.body?.rows).toEqual([expect.objectContaining({
+      id: `${documentId}-LT002`,
+      problem: expect.stringMatching(/source_quote.*verbatim/i),
+    })]);
+    expect(output.accepted.map(row => row.source_quote)).toEqual([QUOTE, CLAIMS_QUOTE]);
+  });
+
+  it("refuses to commit a revision that repeatedly fabricates a source quote", async () => {
+    const { ctx } = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) return { tactics: [good()] };
+      if (call.purpose === "tactic-critic") return { reviews: keepAll(call).reviews.map(row => ({ ...row, verdict: "revise" })) };
+      if (call.purpose === "tactic-judge") return acceptAll(call);
+      return { tactics: idsOf(call, "rows").map(id => ({ id, ...good({ source_quote: "There are 1,000 registry participants." }) })) };
+    });
+    await expect(tacticExtractModule.run(input(false), ctx)).rejects.toThrow(/source_quote.*verbatim/i);
+    expect(commitExtractedRecords).not.toHaveBeenCalled();
+  });
+
   it("re-asks for an invalid type and a missing quote instead of guessing them", async () => {
     let fixes = 0;
     const { ctx, calls } = context((call) => {
@@ -283,7 +434,7 @@ describe("S3 on the model path", () => {
         return {
           tactics: rows.map((row) => ({
             id: row.id,
-            ...good({ name: "HCRU claims study", type: "hcru_study", source_quote: "A claims analysis is planned." }),
+            ...good({ name: "HCRU claims study", type: "hcru_study", source_quote: CLAIMS_QUOTE }),
           })),
         };
       }
@@ -303,7 +454,7 @@ describe("S3 on the model path", () => {
     expect(secondRows[0]!.problem).toMatch(/source_quote is missing/);
     expect(output.accepted.map((row) => [row.type, row.source_quote])).toEqual([
       ["registry", QUOTE],
-      ["hcru_study", "A claims analysis is planned."],
+      ["hcru_study", CLAIMS_QUOTE],
     ]);
   });
 
@@ -401,6 +552,7 @@ describe("S3 on the model path", () => {
 
   it("claims each tactic once and preserves different studies supported by one sentence", async () => {
     const quote = "Finch sponsors an outcomes registry and an economic review.";
+    await retainTestPassage(quote);
     const run = (withReview: boolean) => {
       const { ctx } = context(call => {
         if (call.purpose.startsWith("tactic-proposer:")) return { tactics: [
@@ -421,6 +573,7 @@ describe("S3 on the model path", () => {
     { batch: "separate batches", activities: ["Gamma", "Delta"] },
   ])("persists named registries from a shared quotation in $batch", async ({ batch, activities }) => {
     const quote = `The ${activities.join(" and ")} registries will evaluate long-term safety.`;
+    await retainTestPassage(quote);
     const names = activities.map(activity => `${activity} registry`);
     const run = (activityNames: string[], owners: string[] = []) => {
       const { ctx } = context(call => {
@@ -460,6 +613,7 @@ describe("S3 on the model path", () => {
     const { sql } = await import("drizzle-orm");
     const names = repeatOriginal ? ["Coral registry", "Opal registry"] : ["Pine registry", "Birch registry"];
     const quote = `The ${names.join(" and ")} both follow treatment safety.`;
+    await retainTestPassage(quote);
     const run = (activities: string[]) => {
       const { ctx } = context(call => call.purpose.startsWith("tactic-proposer:")
         ? { tactics: activities.map(name => good({ name, source_quote: quote })) }
@@ -485,6 +639,7 @@ describe("S3 on the model path", () => {
     const quote = renamed
       ? `The ${first} was renamed and is now called the ${second}. It tracks survival.`
       : `${first} and the ${second} are separate registries tracking survival.`;
+    await retainTestPassage(quote);
     const run = (names: string[]) => {
       const { ctx } = context(call => call.purpose.startsWith("tactic-proposer:")
         ? { tactics: names.map(name => good({ name, source_quote: quote, evidence_question: "What is survival?" })) }
@@ -507,6 +662,7 @@ describe("S3 on the model path", () => {
     const { source_id: sourceId } = (await listParsedDocuments([documentId]))[0]!;
     const schema = await currentSchemaName();
     const quote = "Aster's payer review confirms the existing comparative analysis.";
+    await retainTestPassage(quote);
     const { ctx } = context(call => {
       if (call.purpose.startsWith("tactic-proposer:")) {
         return { tactics: [good({ name: "Aster payer review", type: "slr", source_quote: quote })] };
@@ -553,6 +709,7 @@ describe("S3 on the model path", () => {
       expected_tactic_version: tacticVersion(parent), shared_scope: "Review", new_scope: "Costs", expansion: scope,
       separate: {name: "Cost review", type: "slr", status: "planned", evidence_question: scope.evidence_question} });
     const quote = "An independent passage confirms the existing payer review.";
+    await retainTestPassage(quote);
     const { ctx } = context(call => call.purpose.startsWith("tactic-proposer:")
       ? {tactics: [good({name: parent.name, type: parent.type, source_quote: quote})]}
       : call.purpose === "tactic-critic" ? keepAll(call)

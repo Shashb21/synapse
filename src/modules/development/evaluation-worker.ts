@@ -1,6 +1,7 @@
 /** Bounded durable evaluator dispatch; raw receipt settlement precedes parsing and publication. */
+import { frozenRouteAllowed } from './routes';
 import { CostPause, CostSettlementPending, reserveCost, settleCost } from './cost-store';
-import { rawCallBound, developmentUsageCost } from './cost';
+import { developmentReceiptBilling, HISTORICAL_USAGE_COST, rawCallBound } from './cost';
 import { PROVIDERS, findProvider, providerServes } from '@/modules/llm/provider';
 import { providerApiKey } from '@/modules/llm/api-keys';
 import { redactSecrets } from '@/modules/llm/provider-error';
@@ -13,11 +14,10 @@ import { scoreEvaluation } from './evaluation-scoring';
 function safeError(error: unknown): string { return redactSecrets(error instanceof Error ? error.message : 'Evaluation could not continue.', PROVIDERS.map(provider => providerApiKey(provider.id)).filter((key): key is string => Boolean(key))).slice(0, 1200); }
 /** Repair the ledger from the saved outcome without authorizing another evaluator send. */
 async function settleSavedEvaluationCost(evaluation: Evaluation): Promise<void> {
-  const route = evaluation.manifest.route?.actual;
-  if (!route) return;
-  const usage = evaluation.receipt?.usage ?? evaluation.failure_accounting?.usage ?? null;
+  if (!evaluation.manifest.route) return;
+  const billing = evaluation.receipt?.billing ?? evaluation.failure_accounting?.billing ?? HISTORICAL_USAGE_COST;
   try {
-    await settleCost(evaluation.manifest.execution_id, evaluation.id, developmentUsageCost(route.provider_id, route.model, usage), Boolean(evaluation.receipt));
+    await settleCost(evaluation.manifest.execution_id, evaluation.id, billing, Boolean(evaluation.receipt));
   } catch (error) {
     throw new CostSettlementPending(error);
   }
@@ -34,26 +34,31 @@ export async function progressEvaluation(id?: string): Promise<EvaluationProgres
   };
   if (evaluation.status === 'sending') return done('needs_attention', 'Interrupted after dispatch: provider acceptance or receipt is uncertain. No automatic resend.');
   try {
+    if (evaluation.status === 'received') await settleSavedEvaluationCost(evaluation);
     if (manifest.code_identity !== executionCodeIdentity()) throw new DevelopmentError(409, 'code_changed', 'Evaluator code changed. Start a fresh evaluation; saved calls cannot resume under different code.');
     if (evaluation.status === 'received') {
-      await settleSavedEvaluationCost(evaluation);
       if (!evaluation.receipt) throw new Error(evaluation.error ?? 'Provider request failed without a replayable receipt.');
       return await done('succeeded', null, scoreEvaluation(manifest, JSON.parse(evaluation.receipt.text)));
     }
     if (!manifest.request || !manifest.route) return await done('succeeded', null, scoreEvaluation(manifest));
     if (!deliveryConfiguration().available) throw new DevelopmentError(503, 'delivery_unavailable', 'Durable evaluation delivery is unavailable.');
     const route = manifest.route.actual, provider = findProvider(route.provider_id), api_key = providerApiKey(route.provider_id);
-    if (!provider || !providerServes(provider, route.model) || !api_key) throw new DevelopmentError(409, 'route_unavailable', 'The frozen evaluator provider/model credentials are unavailable.');
+    if (!frozenRouteAllowed(manifest.route) || !provider || !providerServes(provider, route.model) || !api_key) throw new DevelopmentError(409, 'route_unavailable', 'The frozen evaluator provider/model credentials are unavailable.');
+    if (manifest.request.model !== route.model) throw new DevelopmentError(409, 'route_mismatch', 'The frozen evaluator request and its pricing route differ.');
     await requireSectionAi(manifest.section); await requireEvaluationClaim(evaluation.id, token);
     await reserveCost(manifest.execution_id, evaluation.id, 'evaluation', rawCallBound(route.provider_id, manifest.request));
-    await beginEvaluationSend(evaluation.id, token);
+    await beginEvaluationSend(evaluation.id, token, manifest.execution_id);
+    const began = new Date();
     let receipt: CallReceipt;
     let failure: ExecutionCall['failure_accounting'] = null;
     try {
       receipt = await tracedCompletion({ provider, request: manifest.request, api_key,
         run: { id: evaluation.id, step: async (_name, fn) => fn(), note: () => {} },
-        step: 'llm:development-evaluation', detail: `${provider.label} · ${route.model}`, purpose: `development-evaluation:${manifest.section}`, attempt: 1, stage: route.stage, workspace_id: null, maxAttempts: 1,
-        beforeSend: async () => { await requireEvaluationClaim(evaluation.id, token); await requireSectionAi(manifest.section); }, onFailure: accounting => { failure = accounting; },
+        step: 'llm:development-evaluation', detail: `${provider.label} · ${route.model}`, purpose: `development-evaluation:${manifest.section}`, attempt: 1, stage: route.stage, workspace_id: null, maxAttempts: 1, standardBilling: true,
+        beforeSend: async () => { await requireEvaluationClaim(evaluation.id, token); await requireSectionAi(manifest.section); },
+        onFailure: accounting => {
+          failure = { ...accounting, ...developmentReceiptBilling(route.provider_id, route.model, accounting.usage, began, new Date()) };
+        },
       });
     } catch (error) {
       await settleEvaluationReceipt(evaluation.id, token, null, safeError(error), failure);
@@ -61,6 +66,7 @@ export async function progressEvaluation(id?: string): Promise<EvaluationProgres
       return await done('failed', safeError(error));
     }
     // This write is deliberately outside the provider catch: indeterminate settlement is never resent.
+    receipt = { ...receipt, ...developmentReceiptBilling(route.provider_id, route.model, receipt.usage, began, new Date()) };
     await settleEvaluationReceipt(evaluation.id, token, receipt);
     await settleSavedEvaluationCost({ ...evaluation, receipt });
     await releaseEvaluation(evaluation.id, token, 'received', null);

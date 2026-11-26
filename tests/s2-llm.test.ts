@@ -107,6 +107,7 @@ const keepAll = (call: Call) => ({
 
 describe("S2 on the model path", () => {
   let documentId = "";
+  let sourceId = "";
   let planGapId = "";
   let savedStub: string | undefined;
   const L1 = () => `${documentId}-L001`;
@@ -119,6 +120,15 @@ describe("S2 on the model path", () => {
     await runStage({ stage: "S0", input: { demo_ids: ["heor-interview"] }, ...lead });
     await runStage({ stage: "S1", input: {}, ...lead });
     documentId = (await listParsedDocuments())[0]!.id;
+    sourceId = (await listParsedDocuments([documentId]))[0]!.source_id;
+    const { listSourceBlocks } = await import("@/lib/iegp/source-blocks");
+    const currentBlock = (await listSourceBlocks(sourceId))[0]!;
+    await editSourceBlock({
+      block_id: currentBlock.id,
+      text: `${currentBlock.text}\n\n${QUOTE_A}\n\n${QUOTE_B}`,
+      actor: ACTOR,
+      rationale: "Include the scripted model citations in the editable source fixture.",
+    });
     await createGap({
       statement: "No comparative effectiveness data versus standard of care for the payer dossier.",
       domain: "comparative_effectiveness",
@@ -140,6 +150,20 @@ describe("S2 on the model path", () => {
 
   const input = (dry_run = true) =>
     gapExtractModule.inputSchema.parse({ document_ids: [documentId], dry_run });
+
+  const includeCurrentEvidence = async (...quotes: string[]) => {
+    const { listSourceBlocks } = await import("@/lib/iegp/source-blocks");
+    const block = (await listSourceBlocks(sourceId))[0]!;
+    const missing = quotes.filter(quote => !block.text.includes(quote));
+    if (missing.length) {
+      await editSourceBlock({
+        block_id: block.id,
+        text: `${block.text}\n\n${missing.join("\n\n")}`,
+        actor: ACTOR,
+        rationale: "Include the scripted model citations in the editable source fixture.",
+      });
+    }
+  };
 
   it("throws before doing anything when no LLM is connected", async () => {
     const { ctx, calls } = context(() => ({}), false);
@@ -257,6 +281,7 @@ describe("S2 on the model path", () => {
   it("joins repeat evidence to a promoted gap after its overlap was rejected", async () => {
     const original = { ...gapA, source_quote: "The Finch panel requests comparative effectiveness data." };
     const repeat = { ...gapA, source_quote: "The Finch committee confirmed the same evidence need." };
+    await includeCurrentEvidence(original.source_quote, repeat.source_quote);
     const run = (corroborate: boolean) => {
       const { ctx } = context(call => {
         if (call.purpose.startsWith("gap-proposer:")) return { gaps: corroborate ? [original, repeat] : [original] };
@@ -300,15 +325,15 @@ describe("S2 on the model path", () => {
     expect(state.gap_suggestions.find(row => row.id === suggestionId)?.status).toBe("rejected");
   });
 
-  it("keeps a fresh overlap pending when all initially ambiguous supporting blocks disappear", async () => {
-    const { addSourceBlock, deleteSourceBlock } = await import("@/lib/iegp/source-blocks");
+  it("keeps a fresh overlap pending when all supporting blocks become stale", async () => {
+    const { addSourceBlock } = await import("@/lib/iegp/source-blocks");
     const { acceptGapMerge, acceptGapSplit } = await import("@/lib/iegp/store");
     const doc = (await listParsedDocuments([documentId]))[0]!;
     const quote = "Both copies describe the Hazel cost study.";
     const blockInput = { source_id: doc.source_id, text: quote, actor: ACTOR, rationale: "Record the passage." };
     const blocks = [await addSourceBlock(blockInput), await addSourceBlock(blockInput)];
     const { ctx } = context(call => {
-      if (call.purpose.startsWith("gap-proposer:")) return { gaps: [{...gapA, source_quote: quote}] };
+      if (call.purpose.startsWith("gap-proposer:")) return { gaps: [{...gapA, source_quote: quote, block_id: blocks[0]!.id}] };
       if (call.purpose === "gap-critic") return keepAll(call);
       return { decisions: subjectsOf(call, "candidates").map(subject => ({ subject, verdict: "accept", confidence: 90,
         reason: "Hazel study", match: "overlaps", match_gap_id: planGapId, shared_part: "Costs", new_part: "Admissions",
@@ -317,18 +342,22 @@ describe("S2 on the model path", () => {
     });
     const { output } = await gapExtractModule.run(input(false), ctx);
     const suggestion_id = output.suggestion_ids[0]!;
-    expect((await loadState()).gap_suggestions.find(row => row.id === suggestion_id)).toMatchObject({block_id: null});
-    for (const block of blocks) await deleteSourceBlock({block_id: block.id, actor: ACTOR, rationale: "Withdraw this duplicate."});
+    expect((await loadState()).gap_suggestions.find(row => row.id === suggestion_id)).toMatchObject({block_id: blocks[0]!.id});
+    // Source-block edits refuse to orphan an active citation. Bypass that edit
+    // guard here to model a stale imported record and exercise the later human
+    // acceptance guard that re-resolves the citation from current source text.
+    for (const block of blocks) await db().delete(tables.sourceBlocks).where(eq(tables.sourceBlocks.id, block.id));
     const before = await loadState();
     for (const decide of [acceptGapMerge, acceptGapSplit]) {
       await expect(decide({suggestion_id, actor_name: ACTOR.name, actor_function: ACTOR.function, rationale: "Review current source."}))
-        .rejects.toThrow(/source passage changed or is ambiguous/);
+        .rejects.toMatchObject({ code: "conflict", status: 409, message: expect.stringMatching(/source passage changed/i) });
     }
     expect(await loadState()).toEqual(before);
   });
 
   it("claims repeated findings within a batch and keeps distinct questions citing the same sentence on rerun", async () => {
     const quote = "The fictional Finch review requests comparative effectiveness and persistence.";
+    await includeCurrentEvidence(quote);
     const run = (includePersistence: boolean) => {
       const { ctx } = context(call => {
         if (call.purpose.startsWith("gap-proposer:")) return { gaps: [
@@ -353,6 +382,7 @@ describe("S2 on the model path", () => {
 
   it("follows sibling links through aliases and stops at recorded evidence", async () => {
     const quote = (letter: string) => `Aster finding ${letter}.`;
+    await includeCurrentEvidence(...["A", "B", "D", "E", "F"].map(quote));
     const run = (letters: string[], targets: (number | null)[]) => {
       const { ctx } = context(call => {
         if (call.purpose.startsWith("gap-proposer:")) return { gaps: letters.map(letter => ({...gapA, source_quote: quote(letter)})) };
@@ -382,15 +412,7 @@ describe("S2 on the model path", () => {
     const originalQuote = `The fictional ${subjectName} assessment requests comparative effectiveness.`;
     const newQuote = `The fictional ${subjectName} committee confirmed the same comparison is needed.`;
     const who = { actor_name: ACTOR.name, actor_function: ACTOR.function };
-    if (mergeOverlap) {
-      const { editSourceBlock } = await import("@/lib/iegp/source-blocks");
-      const doc = (await listParsedDocuments()).find(row => row.id === documentId)!;
-      const block = (await loadState()).blocks.find(row => row.source_id === doc.source_id)!;
-      await editSourceBlock({
-        block_id: block.id, text: `${block.text} ${originalQuote} ${newQuote}`,
-        actor: ACTOR, rationale: "Add the Rowan panel evidence.",
-      });
-    }
+    await includeCurrentEvidence(originalQuote, newQuote);
     const targetId = mergeOverlap
       ? await createGap({ statement: "What is the comparative effectiveness in the Rowan cohort?", ...who })
       : null;

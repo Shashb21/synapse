@@ -1,5 +1,5 @@
 /** Source windows shared by the production gap and tactic extractors. */
-import type { RunHandle } from "../kernel/contracts";
+import type { ModuleContext, RunHandle } from "../kernel/contracts";
 import type { ParsedDocumentRecord } from "./s1-parse/module";
 
 // Preserve the previous per-call source budget. Overlap carries sentences across hard cuts.
@@ -11,18 +11,25 @@ export type ExtractionSection = {
   number: number;
   total: number;
   body: string;
-  blocks: { id: string; text: string }[];
+  blocks: { id: string; text: string; handle?: string }[];
 };
 
+/** The kernel resolves this demo route after verifying the customer workspace. */
+export function usesExtractionHandles(ctx: ModuleContext): boolean {
+  return !!ctx.route.demo && ctx.route.demo.workspace_id === ctx.workspace_id && !ctx.replay?.evaluation &&
+    ctx.execution_scope !== "development";
+}
+
 /** Keep blocks intact when possible and carry context across both block and hard text cuts. */
-export function extractionSections(document: ParsedDocumentRecord): ExtractionSection[] {
+export function extractionSections(document: ParsedDocumentRecord, stableHandles = false): ExtractionSection[] {
   const parts: string[] = [];
-  const blocks: { id: string; textStart: number; start: number; end: number }[] = [];
+  const blocks: { id: string; handle?: string; textStart: number; start: number; end: number }[] = [];
   let offset = 0;
-  for (const block of document.blocks) {
-    const header = `## ${block.heading} [block_id=${block.id}]\n`;
+  for (const [index, block] of document.blocks.entries()) {
+    const handle = stableHandles ? `block-${index + 1}` : undefined;
+    const header = `## ${block.heading} [block_id=${handle ?? block.id}]\n`;
     const body = header + block.text;
-    blocks.push({ id: block.id, start: offset, textStart: offset + header.length, end: offset + body.length });
+    blocks.push({ id: block.id, handle, start: offset, textStart: offset + header.length, end: offset + body.length });
     parts.push(body);
     offset += body.length + 2;
   }
@@ -44,7 +51,11 @@ export function extractionSections(document: ParsedDocumentRecord): ExtractionSe
     const fragments: ExtractionSection["blocks"] = [];
     for (let i = first; i < blocks.length && blocks[i].start < end; i++) {
       const block = blocks[i];
-      fragments.push({ id: block.id, text: source.slice(Math.max(start, block.textStart), Math.min(end, block.end)) });
+      fragments.push({
+        id: block.id,
+        text: source.slice(Math.max(start, block.textStart), Math.min(end, block.end)),
+        ...(block.handle ? { handle: block.handle } : {}),
+      });
     }
     sections.push({ document, number: sections.length + 1, body: source.slice(start, end), blocks: fragments, total: 0 });
     if (end === source.length) break;
@@ -57,12 +68,25 @@ export function extractionSections(document: ParsedDocumentRecord): ExtractionSe
 const normalize = (value: string) => value.toLowerCase().replace(/\s+/g, " ").trim();
 
 /** Resolve a full quotation to one block. A matching reported ID can disambiguate repeated text. */
-export function quotedBlock(blocks: readonly { id: string; text: string }[], quote: string, reportedId?: unknown): string | null {
+export function quotedBlock(blocks: Readonly<ExtractionSection["blocks"]>, quote: string, reportedId?: unknown): string | null {
   const needle = normalize(quote);
   if (!needle) return null;
   const matches = blocks.filter(block => normalize(block.text).includes(needle));
   if (matches.length === 1) return matches[0].id;
-  return matches.find(block => block.id === reportedId)?.id ?? null;
+  return matches.find(block => (block.handle ?? block.id) === reportedId)?.id ?? null;
+}
+
+/**
+ * Replace a displayed demo block handle with its workspace ID before validating a citation.
+ * Preserve unknown values so citation validation can reject them.
+ */
+export function sourceBlockId(section: ExtractionSection | undefined, reportedId: string | null): string | null {
+  return section?.blocks.find(block => block.handle === reportedId)?.id ?? reportedId;
+}
+
+/** Project only the block field of an already resolved candidate. */
+export function promptBlockId(section: ExtractionSection | undefined, id: string | null | undefined): string | null | undefined {
+  return id ? section?.blocks.find(block => block.id === id)?.handle ?? id : id;
 }
 
 type Proposal = { document_id: string; source_section?: number; block_id?: string | null; source_quote: string };

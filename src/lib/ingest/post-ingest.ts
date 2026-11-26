@@ -13,7 +13,7 @@ const STAGE_LABELS: Record<string, string> = {
 // retrying uses its saved checkpoint and cannot run a second copy concurrently.
 const STEP_TIMEOUT_MS = 180_000;
 
-type ProgressReply = { job_id: string; done: boolean; stage: string | null; completed: number; total: number; code?: string; error?: string; safe_error?: boolean };
+type ProgressReply = { job_id: string; done: boolean; stage: string | null; completed: number; total: number; code?: string; error?: string; safe_error?: boolean; execution_source?: "demo_replay" };
 
 /** Advance ingestion to completion, reporting progress and preserving server errors. */
 export async function postIngest(
@@ -25,6 +25,7 @@ export async function postIngest(
     let job_id: string | undefined;
     let completed = 0;
     let total: number | undefined;
+    let replayed = false;
     onProgress(STAGE_LABELS.S0);
     let deadline = Date.now() + STEP_TIMEOUT_MS;
     while (!signal?.aborted) {
@@ -59,12 +60,14 @@ export async function postIngest(
           (next.done ? next.completed !== next.total || next.stage !== null : next.completed >= next.total || !next.stage || !STAGE_LABELS[next.stage] || next.completed <= completed)) {
         return { ok: false, outcome: "unknown", status: res.status, json: { error: "Could not confirm ingestion progress. Retry to continue from the last completed step." } };
       }
-      if (next.done) return res;
+      replayed ||= next.execution_source === "demo_replay";
+      if (next.done) return replayed ? { ...res, json: { ...next, execution_source: "demo_replay" } } : res;
       job_id = next.job_id;
       completed = next.completed;
       total = next.total;
       deadline = Date.now() + STEP_TIMEOUT_MS;
-      onProgress(`${STAGE_LABELS[next.stage!]} (${completed + 1} of ${next.total})`);
+      const savedSteps = replayed ? "Includes recorded Velmara steps so far · " : "";
+      onProgress(`${savedSteps}${STAGE_LABELS[next.stage!]} (${completed + 1} of ${next.total})`);
     }
     return { ok: false, outcome: "unknown", status: 0, json: { error: "Ingestion paused. Select the file again to continue." } };
   } catch {

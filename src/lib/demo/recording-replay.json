@@ -1,0 +1,520 @@
+{
+  "version": 3,
+  "fixture": "velmara-client-demo",
+  "recorded_at": "2026-10-19T11:34:22.656Z",
+  "calls": [
+    {
+      "stage": "S1",
+      "purpose_hash": "8871581b06a0982c6c21e3e5ab29d3f7fd774fb4763c0e958675016ba41bc08d",
+      "system_hash": "e23025ec2783830886b84e13a2a47c1da450bfee6f1e5f28510e360a7015c41c",
+      "user_hash": "478512629f2bc1d73b74a9793eda0a2a7f21517ae9ab4e9c22ab8a1dcbbf63b3",
+      "ids": [],
+      "historical_reply": {
+        "index": 0,
+        "sha256": "701634bed3bd2dda4522af709a145fff032a2d1d6af457bf6d2b4e945590ca65"
+      }
+    },
+    {
+      "stage": "S1",
+      "purpose_hash": "39ff5ca50f3ab300001d75ebc0ff867169b3aa7411347c5cfc9d118a055170d9",
+      "system_hash": "3e9ca1eb44cc777ec30ce2bd5ec4c8fd72bb7524b189ecc6bcfd33012606dba7",
+      "user_hash": "8bbc406593c4eb94f884752c1702568d7d024f7d247ba111583bfdd7933fcaaf",
+      "ids": [],
+      "historical_reply": {
+        "index": 1,
+        "sha256": "4f177ccfcd4b706ed1fb8499c6471a7381bf16611fd1cd1cff6e67e833dc91c9"
+      }
+    },
+    {
+      "stage": "S1",
+      "purpose_hash": "8871581b06a0982c6c21e3e5ab29d3f7fd774fb4763c0e958675016ba41bc08d",
+      "system_hash": "e23025ec2783830886b84e13a2a47c1da450bfee6f1e5f28510e360a7015c41c",
+      "user_hash": "71770fb53dd3f612a8a5b100c20e1ae1844bf8b62ef0581bb3f63bbfd4878e6b",
+      "ids": [],
+      "historical_reply": {
+        "index": 26,
+        "sha256": "d2c07b1fc61c0126135159de78d550d78a3ba387eaae394679ee0d9d92853cac"
+      }
+    },
+    {
+      "stage": "S1",
+      "purpose_hash": "39ff5ca50f3ab300001d75ebc0ff867169b3aa7411347c5cfc9d118a055170d9",
+      "system_hash": "3e9ca1eb44cc777ec30ce2bd5ec4c8fd72bb7524b189ecc6bcfd33012606dba7",
+      "user_hash": "56a660b8765afdd5e834d9fa028497e4414d3575389b4789934dd6f420b2b05e",
+      "ids": [],
+      "historical_reply": {
+        "index": 27,
+        "sha256": "caf5563b773df59daeaa9430bad41063a071377036347037625ed99bb3f6a7d0"
+      }
+    },
+    {
+      "stage": "S1",
+      "purpose_hash": "8871581b06a0982c6c21e3e5ab29d3f7fd774fb4763c0e958675016ba41bc08d",
+      "system_hash": "e23025ec2783830886b84e13a2a47c1da450bfee6f1e5f28510e360a7015c41c",
+      "user_hash": "59c867e60d6ca62dc2078c0cb4098d692e5b778fdc08dbd489848c4dfe0b1455",
+      "ids": [],
+      "historical_reply": {
+        "index": 50,
+        "sha256": "6bf0ac1d80dbf213132fd5cb98cc2f14f0122b3a6dcc3a1843c5eed66a2ea01a"
+      }
+    },
+    {
+      "stage": "S1",
+      "purpose_hash": "39ff5ca50f3ab300001d75ebc0ff867169b3aa7411347c5cfc9d118a055170d9",
+      "system_hash": "3e9ca1eb44cc777ec30ce2bd5ec4c8fd72bb7524b189ecc6bcfd33012606dba7",
+      "user_hash": "4c76e9c2523526371b8a35e01f349b9473f37440d16f64ba626e35ce6d894caf",
+      "ids": [],
+      "historical_reply": {
+        "index": 51,
+        "sha256": "996b23f986bf53728a03098fc0c70bb84f5128f72cbd101f95a6aac123905537"
+      }
+    },
+    {
+      "stage": "S1",
+      "purpose_hash": "8871581b06a0982c6c21e3e5ab29d3f7fd774fb4763c0e958675016ba41bc08d",
+      "system_hash": "e23025ec2783830886b84e13a2a47c1da450bfee6f1e5f28510e360a7015c41c",
+      "user_hash": "57ef0694d60cd80ebc0e2ece269747187ba2ee68c662fd058c0d9b9ef5301775",
+      "ids": [],
+      "historical_reply": {
+        "index": 69,
+        "sha256": "7a2f76cd1bcf479f2425a3b1c8ae8f20f2877a67e43ffdf6bbd4d8a7bd1902c5"
+      }
+    },
+    {
+      "stage": "S1",
+      "purpose_hash": "39ff5ca50f3ab300001d75ebc0ff867169b3aa7411347c5cfc9d118a055170d9",
+      "system_hash": "3e9ca1eb44cc777ec30ce2bd5ec4c8fd72bb7524b189ecc6bcfd33012606dba7",
+      "user_hash": "3962acf756f3f84609334e328913a3cb9dadef9f80fa92a26add7c836958edf8",
+      "ids": [],
+      "historical_reply": {
+        "index": 70,
+        "sha256": "b684349b34c03790c2dac1556a6d19aa8dd4482aafeb9df0f2b5931b5c3490a5"
+      }
+    },
+    {
+      "stage": "S1",
+      "purpose_hash": "8871581b06a0982c6c21e3e5ab29d3f7fd774fb4763c0e958675016ba41bc08d",
+      "system_hash": "e23025ec2783830886b84e13a2a47c1da450bfee6f1e5f28510e360a7015c41c",
+      "user_hash": "8b68399f279b40b33a33c19b3a4d9407ddf66c4545b004b5475af18c5965d38a",
+      "ids": [],
+      "historical_reply": {
+        "index": 94,
+        "sha256": "f20215f3566ef72a9c5805c381af7864327d56c3b2d913854975fce7f0b09e2f"
+      }
+    },
+    {
+      "stage": "S1",
+      "purpose_hash": "39ff5ca50f3ab300001d75ebc0ff867169b3aa7411347c5cfc9d118a055170d9",
+      "system_hash": "3e9ca1eb44cc777ec30ce2bd5ec4c8fd72bb7524b189ecc6bcfd33012606dba7",
+      "user_hash": "d468680b2ed7f6bffae14526784828986446e1b4737508563fcaf0a9b84faddf",
+      "ids": [],
+      "historical_reply": {
+        "index": 95,
+        "sha256": "2ece33f09b858fe9fed66a436783b9f9bb4f04adebfdeecabd9ef6daed9a578a"
+      }
+    },
+    {
+      "stage": "S1",
+      "purpose_hash": "8871581b06a0982c6c21e3e5ab29d3f7fd774fb4763c0e958675016ba41bc08d",
+      "system_hash": "e23025ec2783830886b84e13a2a47c1da450bfee6f1e5f28510e360a7015c41c",
+      "user_hash": "78d8c0355da9a9197ae5e398e3eb9628e594632378c21ba22c193cdc280616f4",
+      "ids": [],
+      "historical_reply": {
+        "index": 119,
+        "sha256": "b10d547382511186587b128cc2e6f8f4fe6f7885b6d6e897ca4fedfd6c5a270b"
+      }
+    },
+    {
+      "stage": "S1",
+      "purpose_hash": "39ff5ca50f3ab300001d75ebc0ff867169b3aa7411347c5cfc9d118a055170d9",
+      "system_hash": "3e9ca1eb44cc777ec30ce2bd5ec4c8fd72bb7524b189ecc6bcfd33012606dba7",
+      "user_hash": "0603b30fc388a7beeaa84f41ba8a3b7e015653a6ca0501b4e8fea1e02ba14079",
+      "ids": [],
+      "historical_reply": {
+        "index": 120,
+        "sha256": "0839293ecb366490e9c383ebc28c02fded0f79039228a7224883d00a3b797153"
+      }
+    },
+    {
+      "stage": "S1",
+      "purpose_hash": "8871581b06a0982c6c21e3e5ab29d3f7fd774fb4763c0e958675016ba41bc08d",
+      "system_hash": "e23025ec2783830886b84e13a2a47c1da450bfee6f1e5f28510e360a7015c41c",
+      "user_hash": "9170e48f66fd9b430c144241c47ccc87bee72acca475d026b9c59a47ea6345b2",
+      "ids": [],
+      "historical_reply": {
+        "index": 153,
+        "sha256": "a11e6406c3f63abf7dec1c0a4d31a4ce29728b0b60f81bc6c8fe09ddbf02e157"
+      }
+    },
+    {
+      "stage": "S1",
+      "purpose_hash": "8871581b06a0982c6c21e3e5ab29d3f7fd774fb4763c0e958675016ba41bc08d",
+      "system_hash": "e23025ec2783830886b84e13a2a47c1da450bfee6f1e5f28510e360a7015c41c",
+      "user_hash": "b4d6e6ed04f52089ed9522ec0f459b42642af8e4b34b316e53bbfefe7819fc29",
+      "ids": [],
+      "reply": "{\"units\":[{\"unit\":\"u15\",\"blocks\":[{\"text\":\"- \\\"Response rate in the brain is not enough; I need to know it holds.\\\" (academic medical oncologist, US)\",\"kind\":\"bullet\",\"heading\":\"2. THEME 1 — BRAIN METASTASES AND INTRACRANIAL DURABILITY (raised in 46 percent of interactions)\"}],\"dropped_reason\":null},{\"unit\":\"u16\",\"blocks\":[{\"text\":\"- \\\"Half my patients at progression have new or growing brain lesions. If Velmara delays radiotherapy, that matters a lot.\\\" (radiation oncologist, EU5)\",\"kind\":\"bullet\",\"heading\":\"2. THEME 1 — BRAIN METASTASES AND INTRACRANIAL DURABILITY (raised in 46 percent of interactions)\"}],\"dropped_reason\":null},{\"unit\":\"u21\",\"blocks\":[{\"text\":\"- \\\"I need to see what my peers are doing after osimertinib and how patients do.\\\" (community medical oncologist, US)\",\"kind\":\"bullet\",\"heading\":\"3. THEME 2 — SEQUENCING AFTER OSIMERTINIB (raised in 38 percent)\"}],\"dropped_reason\":null},{\"unit\":\"u22\",\"blocks\":[{\"text\":\"- \\\"Is there a reason to use NX-441 before Velmara, or the other way round?\\\" (academic medical oncologist, EU5)\",\"kind\":\"bullet\",\"heading\":\"3. THEME 2 — SEQUENCING AFTER OSIMERTINIB (raised in 38 percent)\"}],\"dropped_reason\":null},{\"unit\":\"u26\",\"blocks\":[{\"text\":\"- \\\"The trial patients are younger and fitter than mine. What happens in my 78-year-old with heart disease?\\\" (community medical oncologist, US)\",\"kind\":\"bullet\",\"heading\":\"4. THEME 3 — OLDER AND FRAIL PATIENTS (raised in 33 percent)\"}],\"dropped_reason\":null},{\"unit\":\"u27\",\"blocks\":[{\"text\":\"- \\\"Families carry a lot of the burden with oral drugs: monitoring, transport, side effects at home. Nobody measures that.\\\" (oncology nurse, EU5)\",\"kind\":\"bullet\",\"heading\":\"4. THEME 3 — OLDER AND FRAIL PATIENTS (raised in 33 percent)\"}],\"dropped_reason\":null},{\"unit\":\"u28\",\"blocks\":[{\"text\":\"- \\\"Show me quality of life in patients like the ones I treat, not only EORTC in a trial.\\\" (academic medical oncologist, EU5)\",\"kind\":\"bullet\",\"heading\":\"4. THEME 3 — OLDER AND FRAIL PATIENTS (raised in 33 percent)\"}],\"dropped_reason\":null},{\"unit\":\"u30\",\"blocks\":[{\"text\":\"- Comparative effectiveness in elderly patients versus the standard of care they would otherwise receive is not established.\",\"kind\":\"bullet\",\"heading\":\"4. THEME 3 — OLDER AND FRAIL PATIENTS (raised in 33 percent)\"}],\"dropped_reason\":null},{\"unit\":\"u31\",\"blocks\":[{\"text\":\"- There is insufficient evidence on caregiver burden and on PROs in frail patients.\",\"kind\":\"bullet\",\"heading\":\"4. THEME 3 — OLDER AND FRAIL PATIENTS (raised in 33 percent)\"}],\"dropped_reason\":null},{\"unit\":\"u34\",\"blocks\":[{\"text\":\"- \\\"We do not do routine ECGs in our satellite clinics. I need a practical monitoring plan.\\\" (community medical oncologist, US)\",\"kind\":\"bullet\",\"heading\":\"5. THEME 4 — SAFETY MONITORING IN ROUTINE CARE (raised in 27 percent)\"}],\"dropped_reason\":null},{\"unit\":\"u35\",\"blocks\":[{\"text\":\"- \\\"How quickly does ILD come on, and what should a community practice do about it?\\\" (pharmacist, US)\",\"kind\":\"bullet\",\"heading\":\"5. THEME 4 — SAFETY MONITORING IN ROUTINE CARE (raised in 27 percent)\"}],\"dropped_reason\":null},{\"unit\":\"u39\",\"blocks\":[{\"text\":\"- \\\"Our pathway committee will want persistence data before they put it ahead of NX-441.\\\" (community practice pharmacist, US)\",\"kind\":\"bullet\",\"heading\":\"6. THEME 5 — ACCESS AND COST (raised in 19 percent, mostly US)\"}],\"dropped_reason\":null},{\"unit\":\"u40\",\"blocks\":[{\"text\":\"- \\\"Payers are already asking about IRA pricing for the class.\\\" (US IDN oncology lead)\",\"kind\":\"bullet\",\"heading\":\"6. THEME 5 — ACCESS AND COST (raised in 19 percent, mostly US)\"}],\"dropped_reason\":null},{\"unit\":\"u41\",\"blocks\":[{\"text\":\"- \\\"Recurrence is expensive: repeat scans, biopsies, admissions. Is anyone measuring that?\\\" (academic medical oncologist, US)\",\"kind\":\"bullet\",\"heading\":\"6. THEME 5 — ACCESS AND COST (raised in 19 percent, mostly US)\"}],\"dropped_reason\":null},{\"unit\":\"u43\",\"blocks\":[{\"text\":\"- Six-month discontinuation and persistence in US routine care are expected by pathway committees.\",\"kind\":\"bullet\",\"heading\":\"6. THEME 5 — ACCESS AND COST (raised in 19 percent, mostly US)\"}],\"dropped_reason\":null},{\"unit\":\"u44\",\"blocks\":[{\"text\":\"- HCPs and IDNs perceive a high but unquantified burden of recurrence (emergency department use, hospitalisations, outpatient visits).\",\"kind\":\"bullet\",\"heading\":\"6. THEME 5 — ACCESS AND COST (raised in 19 percent, mostly US)\"}],\"dropped_reason\":null},{\"unit\":\"u46\",\"blocks\":[{\"text\":\"- Long-term overall survival (raised in 12 percent): HCPs accept that OS will be immature at first read-out but want a plan for longer follow-up.\",\"kind\":\"bullet\",\"heading\":\"7. LOWER-FREQUENCY THEMES\"}],\"dropped_reason\":null},{\"unit\":\"u47\",\"blocks\":[{\"text\":\"- Congress presence (raised in 4 percent, mostly by internal stakeholders): requests for more symposia. Field medical regards this as a communication topic, not an evidence gap.\",\"kind\":\"bullet\",\"heading\":\"7. LOWER-FREQUENCY THEMES\"}],\"dropped_reason\":null}]}"
+    },
+    {
+      "stage": "S1",
+      "purpose_hash": "39ff5ca50f3ab300001d75ebc0ff867169b3aa7411347c5cfc9d118a055170d9",
+      "system_hash": "3e9ca1eb44cc777ec30ce2bd5ec4c8fd72bb7524b189ecc6bcfd33012606dba7",
+      "user_hash": "4bf890ee7a3211078ddf5b927ebc4ce7b0251dfa79be928fbe6f8c72078ef6c5",
+      "ids": [],
+      "historical_reply": {
+        "index": 154,
+        "sha256": "627eeb4b412808270e147cacf3f0bcd9f34584809da74f1ba575ca42358e1a1f"
+      }
+    },
+    {
+      "stage": "S2",
+      "purpose_hash": "724246d66635760e116285db66ca4480b4b86abd70e3fd9ae3b4ebb7f86cedbe",
+      "system_hash": "bf443d76d48f69c6a9829960c4e3ffa1f6330c1b96c77e7a7f50e8fd8916a993",
+      "user_hash": "a6fb97f6efb9cc84d408a91718ff4fa2154c52d1daf602161c641832e01fd669",
+      "ids": [
+        "DOC_20261016T142825_0024_wwr9"
+      ],
+      "historical_reply": {
+        "index": 2,
+        "sha256": "575ee1c9e6ef252f77629eb751dacc839beb8f0b2b4a22e97c27b16dde3f63e4"
+      }
+    },
+    {
+      "stage": "S2",
+      "purpose_hash": "2f043ae7c0242eaced49fc4cf9992dc86f8c8acdde9e69d4ebb4a647a9120831",
+      "system_hash": "3c07f8ea857a69da8c4b5c13e50cefa83095804ea4f3c2dc33f860ee9019d782",
+      "user_hash": "dd780d92dca16cbd87554f3962ecfdae521adb6d6915c4f4350752c75bb7d9a4",
+      "ids": [
+        "DOC_20261016T142825_0024_wwr9"
+      ],
+      "historical_reply": {
+        "index": 3,
+        "sha256": "86a5c32cd57f490015f436c74a5bfcce857193350c6fb269f5cb88bf28001424"
+      }
+    },
+    {
+      "stage": "S2",
+      "purpose_hash": "df52c8aa047bdfdaace1137d586a0c9dfc394b7d6e96a50b0af0952a770951c6",
+      "system_hash": "be62a0d0a6ee368f1d063da4c819a8fade22210e27edfebb8631c22c85211897",
+      "user_hash": "dadf8553879bf6476c37fe3ba4e81b49da6683f7fab316ae45cb103cc88cd0bd",
+      "ids": [
+        "DOC_20261016T142825_0024_wwr9"
+      ],
+      "historical_reply": {
+        "index": 4,
+        "sha256": "465cbf0a4bd93dea9cdd8c75b4009084e222a92633a585b852ca2bd9b173affa"
+      }
+    },
+    {
+      "stage": "S2",
+      "purpose_hash": "2f043ae7c0242eaced49fc4cf9992dc86f8c8acdde9e69d4ebb4a647a9120831",
+      "system_hash": "3c07f8ea857a69da8c4b5c13e50cefa83095804ea4f3c2dc33f860ee9019d782",
+      "user_hash": "169bb99082e49b1554150005398801186901554bd52370212fec6618d9700b6b",
+      "ids": [
+        "DOC_20261016T142825_0024_wwr9"
+      ],
+      "historical_reply": {
+        "index": 5,
+        "sha256": "f9b56a7da9ff6efd99c46829c2bd5263fea2ed0a7502f8a81568951b709d2b55"
+      }
+    },
+    {
+      "stage": "S2",
+      "purpose_hash": "df52c8aa047bdfdaace1137d586a0c9dfc394b7d6e96a50b0af0952a770951c6",
+      "system_hash": "be62a0d0a6ee368f1d063da4c819a8fade22210e27edfebb8631c22c85211897",
+      "user_hash": "03a07379be04c59ebd1b284a35e81e993088e4320d585c128f28a6f2f504e673",
+      "ids": [
+        "DOC_20261016T142825_0024_wwr9"
+      ],
+      "historical_reply": {
+        "index": 6,
+        "sha256": "c9afeab475df2bd7277d7df55d5fbcf010adaa6b738ae8a77192812f8580983c"
+      }
+    },
+    {
+      "stage": "S2",
+      "purpose_hash": "2f043ae7c0242eaced49fc4cf9992dc86f8c8acdde9e69d4ebb4a647a9120831",
+      "system_hash": "3c07f8ea857a69da8c4b5c13e50cefa83095804ea4f3c2dc33f860ee9019d782",
+      "user_hash": "8c28f219e45d865d605f252ab2d3e07bcfa166d3a8c3401b22f489ca4efd5b04",
+      "ids": [
+        "DOC_20261016T142825_0024_wwr9"
+      ],
+      "historical_reply": {
+        "index": 7,
+        "sha256": "ef6dd1ddfa7f2a975cb55a22af5430fd6f86409423993d0e9c1aa0adb88f3172"
+      }
+    },
+    {
+      "stage": "S2",
+      "purpose_hash": "df52c8aa047bdfdaace1137d586a0c9dfc394b7d6e96a50b0af0952a770951c6",
+      "system_hash": "be62a0d0a6ee368f1d063da4c819a8fade22210e27edfebb8631c22c85211897",
+      "user_hash": "831393646a47aa249e0137ffa582500fe12d9b8830983b99f9a335c5fc7618c2",
+      "ids": [
+        "DOC_20261016T142825_0024_wwr9"
+      ],
+      "historical_reply": {
+        "index": 8,
+        "sha256": "fbec158f26ff4a12f37e0b7f2e4aa78c8b86561a62063727a38021d9077bc96e"
+      }
+    },
+    {
+      "stage": "S2",
+      "purpose_hash": "5b8e8e0d86527286765a8b6ce35a06c6e69f0f76308a8b0b404ab1f0158a0ab8",
+      "system_hash": "9c9df1d1b116f8884d3006fa9ffd3510ecd4015d3beac7be2e9718565ecd99c1",
+      "user_hash": "f5dbe70d168429d5768dcfe12d7626716620c381b37b7edd935bb33dba52eab3",
+      "ids": [
+        "DOC_20261016T142825_0024_wwr9"
+      ],
+      "historical_reply": {
+        "index": 9,
+        "sha256": "daafc497f226c9648d66d0d675f769e0a4109d9b79aa46a11a77478d0f76e45a"
+      }
+    },
+    {
+      "stage": "S3",
+      "purpose_hash": "655078911c426cbe74344da9c18ad6a7fc9f3a9dce68108b9820e61c5bd2c4d8",
+      "system_hash": "2ffd6a7038bb86aff1c40b2412957955e582f93e80090626609e9a4156e54cf4",
+      "user_hash": "2034963126b1c29fa580922061ac7fdcc4783293dfb2d4554e1caeb0d08dcfee",
+      "ids": [
+        "DOC_20261016T142825_0024_wwr9",
+        "SRC-001"
+      ],
+      "historical_reply": {
+        "index": 10,
+        "sha256": "1a472c5e2cbcf3678c57d63851e27cfa09aefacb86629862d93a80ca9aaafd1a"
+      }
+    },
+    {
+      "stage": "S3",
+      "purpose_hash": "413164e52033b503301d7efd126d3ee6de509962fac54e8951d6f72e651ce422",
+      "system_hash": "6f2fbc648033eea908782ad773641d1726ea93f8980ba32d7514c24cac9e656e",
+      "user_hash": "5a3a640f9819619b12b6b83bd096e91e632eb7b0528b4ae9f5e86e1996329e04",
+      "ids": [
+        "DOC_20261016T142825_0024_wwr9",
+        "SRC-001"
+      ],
+      "historical_reply": {
+        "index": 11,
+        "sha256": "354aa25b9312890d4518d6f1b8fa656104f3bc6a077dd2b1c59587cdf844dd18"
+      }
+    },
+    {
+      "stage": "S3",
+      "purpose_hash": "30cb63e043e1c9bbedaf9113a14a9268a88f4faaac2a9ec65cfae7099c89917f",
+      "system_hash": "0c6c4c7be40fc5ee6b06bf08c5548c6d93c1fa39dfe6c23c300c0e2cf5735ca2",
+      "user_hash": "a12a0c4216b60f1459d91b5f5a665fbc10d608eb4deec70cc0586156ac819566",
+      "ids": [
+        "DOC_20261016T142825_0024_wwr9",
+        "SRC-001"
+      ],
+      "historical_reply": {
+        "index": 12,
+        "sha256": "3246473dbb9420edbe8ec32ca7ca857776ce665b47396d509756ab71a64f62b8"
+      }
+    },
+    {
+      "stage": "S3",
+      "purpose_hash": "413164e52033b503301d7efd126d3ee6de509962fac54e8951d6f72e651ce422",
+      "system_hash": "6f2fbc648033eea908782ad773641d1726ea93f8980ba32d7514c24cac9e656e",
+      "user_hash": "663da1fc60b4756743591c3e08a94917733d4c14ad9eaf9b6a68126b71f7828e",
+      "ids": [
+        "DOC_20261016T142825_0024_wwr9",
+        "SRC-001"
+      ],
+      "historical_reply": {
+        "index": 13,
+        "sha256": "c35fc1b0d2abb4f206deaa1c6711b285c19ccd70aa203fe607d9677967a00dfe"
+      }
+    },
+    {
+      "stage": "S3",
+      "purpose_hash": "30cb63e043e1c9bbedaf9113a14a9268a88f4faaac2a9ec65cfae7099c89917f",
+      "system_hash": "0c6c4c7be40fc5ee6b06bf08c5548c6d93c1fa39dfe6c23c300c0e2cf5735ca2",
+      "user_hash": "a3dd7a2e26570846afe2dc22aaff772b1c90c08c5e94bf5695e43c04c9da00a2",
+      "ids": [
+        "DOC_20261016T142825_0024_wwr9",
+        "SRC-001"
+      ],
+      "historical_reply": {
+        "index": 14,
+        "sha256": "6015fdf0c15ed6ca46fa29a6a4385558c22504e040b0f40cd1e4ab334ef9b2db"
+      }
+    },
+    {
+      "stage": "S3",
+      "purpose_hash": "413164e52033b503301d7efd126d3ee6de509962fac54e8951d6f72e651ce422",
+      "system_hash": "6f2fbc648033eea908782ad773641d1726ea93f8980ba32d7514c24cac9e656e",
+      "user_hash": "fe4fb061152e690792e4cc24980b4a4317d8ef9c59d2de364ba523bee0e6104a",
+      "ids": [
+        "DOC_20261016T142825_0024_wwr9",
+        "SRC-001"
+      ],
+      "historical_reply": {
+        "index": 15,
+        "sha256": "52f35871f2d1192695448b6393df9cb82fc379937686eeee42092404903381e6"
+      }
+    },
+    {
+      "stage": "S3",
+      "purpose_hash": "30cb63e043e1c9bbedaf9113a14a9268a88f4faaac2a9ec65cfae7099c89917f",
+      "system_hash": "0c6c4c7be40fc5ee6b06bf08c5548c6d93c1fa39dfe6c23c300c0e2cf5735ca2",
+      "user_hash": "b6b3ed94f09b29865638d52709df4272ad5ecdd9798f1c9f14c4d6cc6cf9605f",
+      "ids": [
+        "DOC_20261016T142825_0024_wwr9",
+        "SRC-001"
+      ],
+      "historical_reply": {
+        "index": 16,
+        "sha256": "432e5de391a7d7130beee9367a033d77636688b63ccbb329977c87294a3cf521"
+      }
+    },
+    {
+      "stage": "S3",
+      "purpose_hash": "6c80472c0a029d7c83632a78bf60c0788fb37aca79d33ee941e65e70adc2ec03",
+      "system_hash": "ba491ef95c7bc02938d9ff5340167a1dd7317297fe32cb79ef35132b08fec097",
+      "user_hash": "fd033037694ab99f02f9777f3d480340b7071ad232f2f74664e51a7d5ad51d62",
+      "ids": [
+        "DOC_20261016T142825_0024_wwr9",
+        "SRC-001"
+      ],
+      "historical_reply": {
+        "index": 17,
+        "sha256": "6338dc6a53c4f9e238109bf3b84d1fd0f49bc4a7327e4b3f3212cb2e0dbbf0d3"
+      }
+    },
+    {
+      "stage": "S2",
+      "purpose_hash": "724246d66635760e116285db66ca4480b4b86abd70e3fd9ae3b4ebb7f86cedbe",
+      "system_hash": "bf443d76d48f69c6a9829960c4e3ffa1f6330c1b96c77e7a7f50e8fd8916a993",
+      "user_hash": "6e96194e9b2b9d19dda6cc8a72ae216dacc8ffe6464da61a9603b8d77134be0e",
+      "ids": [
+        "DOC_20261019T080538_0008_8qr6"
+      ],
+      "historical_reply": {
+        "index": 28,
+        "sha256": "d49fe0411fd39f8801b97169455a3a0c1aeae001c33188a5aa482765e9b2527c"
+      }
+    },
+    {
+      "stage": "S3",
+      "purpose_hash": "655078911c426cbe74344da9c18ad6a7fc9f3a9dce68108b9820e61c5bd2c4d8",
+      "system_hash": "2ffd6a7038bb86aff1c40b2412957955e582f93e80090626609e9a4156e54cf4",
+      "user_hash": "09241eec6f3287dcb0aa0df28b81d61244e31a887e019fcfa4dd4dd7d26b0dfa",
+      "ids": [
+        "DOC_20261019T080538_0008_8qr6",
+        "SRC-002"
+      ],
+      "historical_reply": {
+        "index": 36,
+        "sha256": "2e48e0e1c5464734d3e54e3dacfab196e67a5a54f41e5643893767f9be4ca8b3"
+      }
+    },
+    {
+      "stage": "S2",
+      "purpose_hash": "724246d66635760e116285db66ca4480b4b86abd70e3fd9ae3b4ebb7f86cedbe",
+      "system_hash": "bf443d76d48f69c6a9829960c4e3ffa1f6330c1b96c77e7a7f50e8fd8916a993",
+      "user_hash": "19bc569298f042d910f09af8e328f206fe36898e0f320272ad7f6217b8d15d71",
+      "ids": [
+        "DOC_20261019T081211_0048_gnp7"
+      ],
+      "historical_reply": {
+        "index": 52,
+        "sha256": "5f954bdc32f4f768a839c7b89c73d5795d3349a65b10f9ceb2eff8f1240813d8"
+      }
+    },
+    {
+      "stage": "S3",
+      "purpose_hash": "655078911c426cbe74344da9c18ad6a7fc9f3a9dce68108b9820e61c5bd2c4d8",
+      "system_hash": "2ffd6a7038bb86aff1c40b2412957955e582f93e80090626609e9a4156e54cf4",
+      "user_hash": "d912867a5593b1360d07cf8257b7559c740e1b3d1d30460bcd6a6fdf757e6937",
+      "ids": [
+        "DOC_20261019T081211_0048_gnp7",
+        "SRC-003"
+      ],
+      "historical_reply": {
+        "index": 59,
+        "sha256": "865804308b8658804fc1bd94235d84b2596dc30ce5c13667af2251b340e2ae7d"
+      }
+    },
+    {
+      "stage": "S2",
+      "purpose_hash": "724246d66635760e116285db66ca4480b4b86abd70e3fd9ae3b4ebb7f86cedbe",
+      "system_hash": "bf443d76d48f69c6a9829960c4e3ffa1f6330c1b96c77e7a7f50e8fd8916a993",
+      "user_hash": "fc8a335afcfbf1f9feef1765b04597f616524da66a413ddf38ca3d6afdf33954",
+      "ids": [
+        "DOC_20261019T081704_0120_0rlr"
+      ],
+      "historical_reply": {
+        "index": 71,
+        "sha256": "4f15783d5badb1388c6b8dab34c444f35d3d1619b290df50c3c3f20a33c29d6a"
+      }
+    },
+    {
+      "stage": "S3",
+      "purpose_hash": "655078911c426cbe74344da9c18ad6a7fc9f3a9dce68108b9820e61c5bd2c4d8",
+      "system_hash": "2ffd6a7038bb86aff1c40b2412957955e582f93e80090626609e9a4156e54cf4",
+      "user_hash": "dca36831319e6aa80cd95b543fafdd9f7f053226d91b626fa2266aab3fd94fa8",
+      "ids": [
+        "DOC_20261019T081704_0120_0rlr",
+        "SRC-004"
+      ],
+      "historical_reply": {
+        "index": 79,
+        "sha256": "1a690f6d23733372749313bd10451314a542d88062aa2c6f3f7fcb2908f9387b"
+      }
+    },
+    {
+      "stage": "S2",
+      "purpose_hash": "724246d66635760e116285db66ca4480b4b86abd70e3fd9ae3b4ebb7f86cedbe",
+      "system_hash": "bf443d76d48f69c6a9829960c4e3ffa1f6330c1b96c77e7a7f50e8fd8916a993",
+      "user_hash": "bb102f07e268cd007cd4bffa2bbee505610cbaf919f9583d323975e6318c235d",
+      "ids": [
+        "DOC_20261019T082352_0213_bo7v"
+      ],
+      "historical_reply": {
+        "index": 96,
+        "sha256": "c092e521280dae9929cead85078ee5f77777e823b423127f9d466380cf207580"
+      }
+    },
+    {
+      "stage": "S3",
+      "purpose_hash": "655078911c426cbe74344da9c18ad6a7fc9f3a9dce68108b9820e61c5bd2c4d8",
+      "system_hash": "2ffd6a7038bb86aff1c40b2412957955e582f93e80090626609e9a4156e54cf4",
+      "user_hash": "c4b7e1db7fd8889423a0e4f78a387863b6d0b0f91d912612f4e731867f87163b",
+      "ids": [
+        "DOC_20261019T082352_0213_bo7v",
+        "SRC-005"
+      ],
+      "historical_reply": {
+        "index": 104,
+        "sha256": "e1d0910549b3cdf1479a127e3120405d6b040a3bfafe6fd8b10192b43b854d65"
+      }
+    },
+    {
+      "stage": "S2",
+      "purpose_hash": "724246d66635760e116285db66ca4480b4b86abd70e3fd9ae3b4ebb7f86cedbe",
+      "system_hash": "bf443d76d48f69c6a9829960c4e3ffa1f6330c1b96c77e7a7f50e8fd8916a993",
+      "user_hash": "42f3f51980c2b3d22b42912146a1f58337391c81379f50fecbc2eab1d5fe65d4",
+      "ids": [
+        "DOC_20261019T083034_0319_z2ti"
+      ],
+      "historical_reply": {
+        "index": 121,
+        "sha256": "8f7c8da27eed3df07af1451e854118030a6331aef4bcfef1574976bacefea928"
+      }
+    },
+    {
+      "stage": "S3",
+      "purpose_hash": "655078911c426cbe74344da9c18ad6a7fc9f3a9dce68108b9820e61c5bd2c4d8",
+      "system_hash": "2ffd6a7038bb86aff1c40b2412957955e582f93e80090626609e9a4156e54cf4",
+      "user_hash": "b95a2e2695296d6109046437fa7d5456dd56d1452420b06facfe41a65ddaadbf",
+      "ids": [
+        "DOC_20261019T083034_0319_z2ti",
+        "SRC-006"
+      ],
+      "historical_reply": {
+        "index": 128,
+        "sha256": "259ad2354017781717775867385ebca955070b55df3db21a582ee65f668daec3"
+      }
+    }
+  ]
+}

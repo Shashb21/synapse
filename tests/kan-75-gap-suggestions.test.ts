@@ -1,8 +1,10 @@
 import { modelMappingSupport } from "./support/model-mapping";
-import { priorityDecision } from "./support/priority-decision";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { priorityDecision, reviewInventoryForPriorities } from "./support/priority-decision";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { eq, sql } from "drizzle-orm";
+import { db as workspaceDb, withWorkspaceTransaction } from "@/lib/iegp/db";
+import { gapSuggestions, sourceBlocks } from "@/lib/iegp/schema";
 import { addSourceBlock } from "@/lib/iegp/source-blocks";
-import { eq } from "drizzle-orm";
 import "@/modules";
 import { runStage } from "@/modules/kernel/run";
 import { db, ensurePlatformSchema, wipePlatform } from "@/modules/kernel/db";
@@ -50,8 +52,9 @@ const OVERLAP = {
 };
 
 let sourceId = "";
+const primaryQuote = "Nobody has looked at the over-75s.";
 
-async function overlapOn(gapId: string, candidateRowId: string | null = null, blockId: string | null = null, quote = "Nobody has looked at the over-75s."): Promise<string> {
+async function overlapOn(gapId: string, candidateRowId: string | null = null, blockId: string | null = null, quote = primaryQuote): Promise<string> {
   const result = await commitExtractedRecords({
     source_id: sourceId,
     title: "HEOR interview",
@@ -86,6 +89,7 @@ beforeAll(async () => {
   await runStage({ stage: "S0", input: { demo_ids: ["heor-interview"] }, actor: ACTOR, role: "medical_affairs" });
   await runStage({ stage: "S1", input: {}, actor: ACTOR, role: "medical_affairs" });
   sourceId = (await listParsedDocuments())[0]!.source_id;
+  await addSourceBlock({ source_id: sourceId, text: primaryQuote, actor: ACTOR, rationale: "Record the quoted evidence." });
 }, 60_000);
 
 it.each([
@@ -173,7 +177,11 @@ it("keeps separate cited occurrences and deduplicates retries of the same occurr
   ]);
   await addSuggestionSources(suggestionId, [secondCitation]);
   expect((await loadState()).gap_suggestions.find(row => row.id === suggestionId)?.extra_sources)
-    .toEqual([secondCitation]);
+    .toEqual([expect.objectContaining({
+      ...secondCitation,
+      block_id: repeat!.id,
+      provenance: expect.objectContaining(secondCitation.provenance),
+    })]);
 
   await acceptGapSplitSuggestion({ suggestion_id: suggestionId, rationale: "Reviewed both sessions", ...who });
   const citedBlocks = (await loadState()).needs
@@ -216,9 +224,9 @@ it.each([
   const split = await splitSourceBlock({ block_id: primary.blocks[0]!.id, at_text: quote, rationale: "Separate evidence", actor: ACTOR });
   const accept = () => acceptSuggestion({ suggestion_id: suggestionId, rationale: "Reviewed both sources", ...who });
   if (decision === "removed quote") {
-    await deleteSourceBlock({ block_id: extra.blocks[1]!.id, rationale: "Remove obsolete evidence", actor: ACTOR });
     const before = await loadState();
-    await expect(accept()).rejects.toThrow(/source passage changed or is ambiguous/i);
+    await expect(deleteSourceBlock({ block_id: extra.blocks[1]!.id, rationale: "Remove obsolete evidence", actor: ACTOR }))
+      .rejects.toThrow(/orphan.*cited quote/i);
     expect(await loadState()).toEqual(before);
     return;
   }
@@ -239,6 +247,7 @@ describe("KAN-75 merge", () => {
 
   beforeEach(async () => {
     gapId = await newGap();
+    await reviewInventoryForPriorities(ACTOR);
     // Prioritize places Open gaps only: validate the band before a tactic changes the status.
     await validatePlacement({ ...await priorityDecision(gapId, "blocks the HTA decision"), gap_id: gapId, band: "high", rationale: "blocks the HTA decision", actor: ACTOR });
     await recordMissedTactic({ name: `Registry ${gapId}`, type: "registry", evidence_question: "q", status: "ongoing", ...who });
@@ -304,8 +313,9 @@ describe("KAN-75 split", () => {
       { source_id: sourceId, statement: "Over-75s are missing.", source_quote: "We have nothing on over-75s.", provenance: { run_id: "later-run", candidate_row_id: "later-candidate", block_id: oldBlock.id } },
     ]);
 
-    await deleteSourceBlock({ block_id: oldBlock.id, actor: ACTOR, rationale: "Relocate supporting passage." });
-    const liveBlock = await addSourceBlock({ source_id: sourceId, text: quote, actor: ACTOR, rationale: "Restore the cited passage." });
+    // Pending review evidence is protected from removal; it remains attached to
+    // the original block until the reviewer decides the suggestion.
+    const liveBlock = oldBlock;
     const { new_gap_id } = await acceptGapSplitSuggestion({ suggestion_id: suggestionId, rationale: "Separate question", ...who });
 
     const state = await loadState();
@@ -337,9 +347,9 @@ it.each([acceptGapMergeSuggestion, acceptGapSplitSuggestion])("leaves review pen
   const quote = "Birch enrollment is missing older adults.";
   const block = await addSourceBlock({source_id: sourceId, text: quote, actor: ACTOR, rationale: "Add the cited passage."});
   const id = await overlapOn(await newGap(), null, block.id, quote);
-  await deleteSourceBlock({block_id: block.id, actor: ACTOR, rationale: "Withdraw this passage."});
   const before = await loadState();
-  await expect(decide({suggestion_id: id, rationale: "Reviewed the proposal", ...who})).rejects.toThrow(/passage|quote/i);
+  await expect(deleteSourceBlock({block_id: block.id, actor: ACTOR, rationale: "Withdraw this passage."}))
+    .rejects.toThrow(/orphan.*cited quote/i);
   expect(await loadState()).toEqual(before);
 });
 

@@ -1,4 +1,7 @@
+import { withModelRun } from "@/modules/kernel/model-run";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
+import { demoExecutionFor } from "@/lib/demo/mode";
+import { DemoReplayMissError } from "@/lib/demo/replay";
 import { compareSource } from "@/lib/ingest/compare-source";
 import { relationshipVersion } from "@/lib/iegp/relationship-version";
 import { lockRelationships, requireGapResolutionSnapshot, requireRelationshipSnapshot } from "@/lib/iegp/relationship-change";
@@ -34,6 +37,7 @@ import {
   lockCoverageDimension,
   lockCoverageOverall,
   confirmCoverageReview,
+  lockGapForDecision,
   lockGapStatus,
   lockNeed,
   lockTactic,
@@ -284,6 +288,10 @@ async function actionOf(request: Request): Promise<string> {
  * write, leaves nothing half-written.
  */
 export async function POST(request: Request) {
+  return withModelRun(request.signal, () => handlePost(request)).catch(apiErrorResponse);
+}
+
+async function handlePost(request: Request) {
   const action = await actionOf(request.clone());
   if (action === "reset" || action === "load_demo") {
     // Verify the confirmed target before schema initialization, denial audits or writes.
@@ -423,12 +431,16 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
       await lockRelationships();
       requireGapResolutionSnapshot(await loadState(), body.parent_gap_id || body.gap_id, body.expected_resolution);
     }
+    if (["classify_gap", "override_gap_status", "validate_gap"].includes(body.action) && body.gap_id) {
+      await lockGapForDecision(body.gap_id);
+    }
     const before = await gateBefore(body);
     // The id of a gap or tactic this action created, so the caller can address it without guessing (ids are never reissued).
     let createdId: string | undefined;
     switch (body.action) {
       case "retry_source_comparison":
         if (!body.source_id?.trim()) throw new TrustedApplicationError("Choose a parsed source to compare.");
+        if (identity.workspace?.demo_mode) throw new DemoReplayMissError();
         await compareSource(body.source_id, identity.actor);
         break;
       case "link_source_support":
@@ -795,6 +807,9 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
         if (body.judgement_origin === "model" && (!suggestion || body.expected_suggestion !== relationshipVersion(suggestion))) {
           throw new TrustedApplicationError("Model suggestion changed or is unavailable. Review the current suggestion or make a manual judgement with a reason.");
         }
+        if (suggestion?.review_only) {
+          throw new TrustedApplicationError("This stale coverage reassessment is review-only. Review the existing coverage on the gap record.");
+        }
         await acceptMapping({
           model: body.judgement_origin === "model",
           references: suggestion?.references,
@@ -1080,6 +1095,7 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
           ],
           actor: identity.actor,
           role: identity.role,
+          demo: demoExecutionFor(identity.workspace),
         });
         if (body.incremental === "true") return NextResponse.json({ ok: true, ...result });
         break;
@@ -1091,6 +1107,7 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
           demo_ids: body.ingest_job_id ? [] : [body.demo_id],
           actor: identity.actor,
           role: identity.role,
+          demo: demoExecutionFor(identity.workspace),
         });
         if (body.incremental === "true") return NextResponse.json({ ok: true, ...result });
         break;

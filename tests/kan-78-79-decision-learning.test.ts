@@ -330,7 +330,7 @@ describe("decision originating provenance", () => {
     const replay = { stage_input: { gap_ids: ["GAP-test"] }, context: { gaps: [{ id: "GAP-test", statement: "Original question" }] } };
     const id = await recordDecisionExample({ workspace_id: "unknown-origin-workspace", stage: "S8", kind: "s8_band", subject_id: unique(), ai_input: {}, ai_output: { band: "high" }, outcome: "accepted", replay_input: replay });
     const saved = (await getDecisionExample(id!))!;
-    expect(saved.replay_input).toEqual(replay); expect(saved.replay_exclusion_reason).toBeNull();
+    expect(saved.replay_input).toEqual(replay); expect(saved.replay_exclusion_reason).toMatch(/confirm the priority/i);
     expect(saved.model).toBeNull(); expect(saved.provider_id).toBeNull(); expect(saved.run_id).toBeNull(); expect(saved.prompt_version).toBeNull();
     expect(configuredRoute).not.toHaveBeenCalled(); configuredRoute.mockRestore();
     await vi.waitFor(async () => expect((await getDecisionExample(id!))?.lesson_status).toBe("failed"));
@@ -364,12 +364,13 @@ describe("distinct human decision events", () => {
   });
 
   it("skips manual S8 validation but retains every actual model validation event", async () => {
-    const { createGap } = await import("@/lib/iegp/store");
+    const { createGap, validateGap } = await import("@/lib/iegp/store");
     const { setPlacement, validatePlacement } = await import("@/modules/stages/s8-prioritization/module");
     const workspace = await createWorkspace({ name: `s8-events-${unique()}`, owner: "learning-test" });
     const actor = { name: "Band reviewer", function: "medical_affairs" as const };
     await runInWorkspace({ workspace_id: workspace.id, schema: workspace.schema_name }, async () => {
       const gap = await createGap({ statement: "Unanswered evidence question", actor_name: actor.name, actor_function: actor.function });
+      await validateGap({ gap_id: gap, actor_name: actor.name, actor_function: actor.function, note: "Reviewed evidence before recording priority decisions" });
       await setPlacement({ ...await priorityDecision(gap, "Manual placement"), gap_id: gap, band: "high", rationale: "Manual placement", actor });
       await validatePlacement({ ...await priorityDecision(gap, "Manual validation"), gap_id: gap, band: "high", rationale: "Manual validation", actor });
       expect(await sharedDb().execute(sql`select id from decision_examples where workspace_id = ${workspace.id}`)).toHaveLength(0);
@@ -411,13 +412,14 @@ describe("review round one real decision paths", () => {
     expect(scrubLesson("Reviewers don't merge a patient's evidence needs.", [], [])).toBe("Reviewers don't merge a patient's evidence needs.");
   });
   it("captures combined S8 validation using the original model band", async () => {
-    const { createGap } = await import("@/lib/iegp/store");
+    const { createGap, validateGap } = await import("@/lib/iegp/store");
     const { setPlacement } = await import("@/modules/stages/s8-prioritization/module");
     const { db } = await import("@/modules/kernel/db");
     const ws = await createWorkspace({ name: `s8-combined-${unique()}`, owner: "test" });
     const actor = { name: "Reviewer", function: "medical_affairs" as const };
     await runInWorkspace({ workspace_id: ws.id, schema: ws.schema_name }, async () => {
       const gap = await createGap({ statement: "Unanswered population question", actor_name: actor.name, actor_function: actor.function });
+      await validateGap({ gap_id: gap, actor_name: actor.name, actor_function: actor.function, note: "Reviewed evidence before recording priority decisions" });
       await setPlacement({ ...await priorityDecision(gap, "Initial placement"), gap_id: gap, band: "high", actor, rationale: "Initial placement" });
       const recorder = new RunRecorder({ workspace_id: ws.id, stage: "S8", module_id: "s8.test", module_version: "test", actor, input: {} });
       await openRun(recorder); await closeRun({ recorder, status: "ok", output: {} });
@@ -434,7 +436,7 @@ describe("review round one real decision paths", () => {
     });
   });
   it.each([false, true])("compares S9 terminal acceptance against immutable AI values after saved edit=%s", async (edited) => {
-    const { createGap } = await import("@/lib/iegp/store");
+    const { createGap, validateGap } = await import("@/lib/iegp/store");
     const { editIdeationProposal, decideIdeationProposal } = await import("@/modules/stages/s9-ideation/module");
     const { db, ensurePlatformSchema } = await import("@/modules/kernel/db");
     const { ideationProposals } = await import("@/modules/kernel/schema");
@@ -443,6 +445,7 @@ describe("review round one real decision paths", () => {
     await runInWorkspace({ workspace_id: ws.id, schema: ws.schema_name }, async () => {
       await ensurePlatformSchema();
       const gap = await createGap({ statement: "Unanswered evidence question", actor_name: actor.name, actor_function: actor.function });
+      await validateGap({ gap_id: gap, actor_name: actor.name, actor_function: actor.function, note: "Reviewed evidence before recording priority decisions" });
       const recorder = new RunRecorder({ workspace_id: ws.id, stage: "S9", module_id: "s9.test", module_version: "test", actor, input: {} });
       await openRun(recorder); await closeRun({ recorder, status: "ok", output: {} });
       const id = `IDEA-${unique()}`;

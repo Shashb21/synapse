@@ -1,3 +1,4 @@
+import * as entityProjection from "@/modules/kernel/learning-entities";
 import * as llm from "@/modules/kernel/llm";
 import * as workspaceStore from "@/modules/workspaces/store";
 import { runAgenticCycle } from "@/modules/kernel/agentic";
@@ -20,7 +21,7 @@ async function workspace() {
   return ws;
 }
 async function example(workspace_id: string) {
-  return (await recordDecisionExample({ workspace_id, stage: "S2", kind: "gap_suggestion", subject_id: unique(), ai_input: { text: "secretbrand corneal population" }, ai_output: {}, outcome: "accepted" }))!;
+  return (await recordDecisionExample({ workspace_id, stage: "S2", kind: "gap_suggestion", subject_id: unique(), ai_input: { text: "secretbrand corneal population" }, ai_output: {decision:"merge"}, outcome: "edited", final: {decision:"split"} }))!;
 }
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -63,7 +64,7 @@ describe("decision learning fails closed", () => {
     await setLearningSharingEligible(b.id, true);
     expect((await similarExamples({ ...query, allow_cross_workspace: true })).map(x => x.id)).not.toContain(foreign);
     await setLearningSharingEligible(a.id, true);
-    vi.spyOn(stateStore, "loadState").mockResolvedValue({ asset: { name: "secretbrand" }, sources: [], tactics: [] } as unknown as Awaited<ReturnType<typeof stateStore.loadState>>);
+    vi.spyOn(entityProjection,"readLearningEntityProjection").mockResolvedValue({asset:{name:"secretbrand",inn:"",planning_context:{}},names:[]});
     await setLearningSharingEligible(b.id, false);
     expect((await similarExamples({ ...query, allow_cross_workspace: true })).map(x => x.id)).not.toContain(foreign);
     await setLearningSharingEligible(b.id, true);
@@ -75,11 +76,22 @@ describe("decision learning fails closed", () => {
     expect((await similarExamples({ ...query, allow_cross_workspace: true })).map(x => x.id)).not.toContain(foreign);
   });
 
+  it("loads one name projection for several ranked foreign lessons",async()=>{
+    const a=await workspace(),b=await workspace();
+    await setLearningSharingEligible(a.id,true);await setLearningSharingEligible(b.id,true);
+    const ids=await Promise.all([example(b.id),example(b.id)]);
+    for(const id of ids)await sharedDb().execute(sql`update decision_examples set lesson='Reviewers prefer a narrower population.',lesson_status='ok' where id=${id}`);
+    const names=vi.spyOn(entityProjection,"readLearningEntityProjection").mockResolvedValue({asset:{name:"Fiction",inn:"",planning_context:{}},names:[]});
+    const result=await similarExamples({stage:"S2",text:"narrower population",workspace_id:a.id,take:20,allow_cross_workspace:true});
+    expect(result.map(row=>row.id)).toEqual(expect.arrayContaining(ids));
+    expect(names).toHaveBeenCalledTimes(1);
+  });
+
   it("does not rank foreign examples using their raw text", async () => {
     const a = await workspace(); const b = await workspace(); const id = await example(b.id);
     await setLearningSharingEligible(a.id, true); await setLearningSharingEligible(b.id, true);
     await sharedDb().execute(sql`update decision_examples set lesson = 'Reviewers keep a narrower population separate.', lesson_status = 'ok' where id = ${id}`);
-    vi.spyOn(stateStore, "loadState").mockResolvedValue({ asset: { name: "secretbrand" }, sources: [], tactics: [] } as unknown as Awaited<ReturnType<typeof stateStore.loadState>>);
+    vi.spyOn(entityProjection,"readLearningEntityProjection").mockResolvedValue({asset:{name:"secretbrand",inn:"",planning_context:{}},names:[]});
     expect((await similarExamples({ stage: "S2", text: "corneal", workspace_id: a.id, allow_cross_workspace: true })).map(x => x.id)).not.toContain(id);
   });
 });

@@ -7,7 +7,7 @@ import { wipePlatform } from "@/modules/kernel/db";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { NoRouteError } from "@/modules/llm/provider";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
-import { createGap, createProposedTactic, loadState, resetDemoSetup } from "@/lib/iegp/store";
+import { createGap, createProposedTactic, loadState, resetDemoSetup, validateGap } from "@/lib/iegp/store";
 import { validatePlacement } from "@/modules/stages/s8-prioritization/module";
 import { ideationModule } from "@/modules/stages/s9-ideation/module";
 
@@ -19,7 +19,7 @@ import { ideationModule } from "@/modules/stages/s9-ideation/module";
 
 const ACTOR = { name: "LLM Test", function: "medical_affairs" as const };
 
-type Call = { purpose: string; body: Record<string, unknown> };
+type Call = { purpose: string; system: string; body: Record<string, unknown> };
 type Script = (call: Call) => unknown;
 
 function route(connected: boolean): ResolvedRoute {
@@ -37,7 +37,7 @@ function route(connected: boolean): ResolvedRoute {
   };
 }
 
-function context(script: Script, connected = true): { ctx: ModuleContext; calls: Call[] } {
+function context(script: Script, connected = true, adaptProposer = true): { ctx: ModuleContext; calls: Call[] } {
   const calls: Call[] = [];
   const ctx: ModuleContext = {
     ai: true,
@@ -46,15 +46,15 @@ function context(script: Script, connected = true): { ctx: ModuleContext; calls:
     role: "medical_affairs",
     route: route(connected),
     run: { id: "test", step: async (_name, fn) => fn(), note: () => {}, steps: () => [] },
-    complete: async ({ purpose, user }) => {
-      const call = { purpose, body: JSON.parse(user) as Record<string, unknown> };
+    complete: async ({ purpose, system, user }) => {
+      const call = { purpose, system, body: JSON.parse(user) as Record<string, unknown> };
       calls.push(call);
       const reply = await script(call);
       // A model answers the gaps it was asked about: the proposer asks one gap at a time (KAN-148).
-      if (purpose === "ideation-proposer" && reply && Array.isArray((reply as { tactics?: unknown }).tactics)) {
-        const asked = new Set(gapsOf(call).map((gap) => gap.id));
-        const tactics = (reply as { tactics: { gap_id?: string }[] }).tactics;
-        return { ...reply, tactics: tactics.filter((row) => !row.gap_id || asked.has(row.gap_id)) };
+      if (adaptProposer && purpose === "ideation-proposer" && reply && Array.isArray((reply as { tactics?: unknown }).tactics)) {
+        const [gap] = gapsOf(call);
+        const tactics = (reply as { tactics: { id?: string; gap_id?: string }[] }).tactics.filter(row => !row.gap_id || gap?.id === row.gap_id);
+        return { ...reply, tactics: tactics.map((row, index) => ({ ...row, id: row.id ?? gap?.proposal_slots?.[index] })) };
       }
       return reply;
     },
@@ -62,9 +62,20 @@ function context(script: Script, connected = true): { ctx: ModuleContext; calls:
   return { ctx, calls };
 }
 
-type PromptGap = { id: string; revise?: { id: string; objection: string }[]; problems?: string[] };
+type PromptGap = { id: string; proposal_slots?: string[]; revise?: { id: string; objection: string }[]; problems?: string[] };
 type PromptTactic = { id: string; gap_id: string; name: string };
-type JudgeGap = { id: string; problem?: string; candidates: { id: string; name: string }[] };
+type JudgeGap = {
+  id: string;
+  problem?: string;
+  outcome_requested?: boolean;
+  candidates: { id: string; name: string }[];
+  completed_candidates?: {
+    id: string;
+    name: string;
+    recommendation: { deadline: { status: string; explanation: string } };
+    decision: { verdict: string; rank: number | null; reason: string };
+  }[];
+};
 
 const gapsOf = (call: Call) => call.body.gaps as PromptGap[];
 const tacticsOf = (call: Call) => call.body.tactics as PromptTactic[];
@@ -114,6 +125,7 @@ const keepAll = (call: Call) => ({
 const judgeFirst = (call: Call, take: number) => ({
   gaps: judgeGapsOf(call).map((gap) => ({
     gap_id: gap.id,
+    outcome: { status: "options", explanation: "Candidates were reviewed for this need." },
     decisions: gap.candidates.map((candidate, index) => ({
       id: candidate.id,
       references: support(gap.id),
@@ -162,6 +174,9 @@ describe("S9 on the model path", () => {
       .map((gap) => gap.id)
       .slice(0, 2);
     expect(ids).toHaveLength(2);
+    for (const gap_id of ids) {
+      await validateGap({ gap_id, actor_name: ACTOR.name, actor_function: ACTOR.function, note: "Confirm the evidence assessment" });
+    }
     for (const gap_id of ids) await validatePlacement({ ...await priorityDecision(gap_id, "Blocks dossier"),gap_id,band:"high",rationale:"Blocks dossier",actor:ACTOR});
     libraryId = state.tactics[0]!.id;
   }, 60_000);
@@ -236,6 +251,7 @@ describe("S9 on the model path", () => {
       return {
         gaps: judgeGapsOf(call).map((gap) => ({
           gap_id: gap.id,
+          outcome: { status: "options", explanation: "Candidates were reviewed for this need." },
           decisions: gap.candidates.map((candidate) => ({
             id: candidate.id,
       references: support(gap.id),
@@ -263,12 +279,21 @@ describe("S9 on the model path", () => {
     const revision = calls.find((call) => call.purpose === "ideation-proposer" && gapsOf(call).some((gap) => gap.revise?.length))!;
     expect(gapsOf(revision).map((gap) => gap.id)).toEqual([a]);
     expect(gapsOf(revision)[0]!.revise![0]!.objection).toBe("comparator should be physician's choice");
+    expect(gapsOf(revision)[0]!.proposal_slots).toBeUndefined();
+    expect(revision.system).toMatch(/carries revise requests, answer each one/);
+    expect(revision.system).toMatch(/"duration_months":[1-9]\d*/);
+    expect(revision.system).toMatch(/When neither proposal_slots nor revise ids are supplied, return an empty tactics list/);
 
-    expect(output.proposals.map((row) => row.name)).toEqual(["A1 revised", "B2"]);
-    const [first, second] = output.proposals as [(typeof output.proposals)[0], (typeof output.proposals)[0]];
-    expect(first.design).toMatchObject({ comparator: "Physician's choice", duration_months: 18, readout_lag_months: 4, timing_rationale: "Timing for A1 revised" });
-    expect(first).toMatchObject({ score: 88, rank: 1, judge_note: "judge on A1 revised" });
-    expect(second).toMatchObject({ type: "itc", design: { duration_months: 11, readout_lag_months: 0 } });
+    expect(output.proposals.map((row) => row.name).sort()).toEqual(["A1 revised", "B2"]);
+    const revised = output.proposals.find((row) => row.name === "A1 revised");
+    expect(revised).toMatchObject({
+      gap_id: a,
+      design: { comparator: "Physician's choice", duration_months: 18, readout_lag_months: 4, timing_rationale: "Timing for A1 revised" },
+      score: 88,
+      rank: 1,
+      judge_note: "judge on A1 revised",
+    });
+    expect(output.proposals.find((row) => row.name === "B2")).toMatchObject({ gap_id: b, type: "itc", design: { duration_months: 11, readout_lag_months: 0 } });
     expect(output.rejected.map((row) => row.name)).toEqual(["B1"]);
     expect(output.rejected[0]).toMatchObject({ judge_note: "judge on B1", rank: null, score: 30 });
   });
@@ -432,7 +457,7 @@ describe("S9 on the model path", () => {
       if (call.purpose === "ideation-proposer") return proposer();
       if (call.purpose === "ideation-critic") return keepAll(call);
       judgeCalls += 1;
-      return judgeFirst(call, judgeCalls === 1 ? 3 : 2);
+      return judgeFirst(call, judgeCalls === 1 ? 3 : 0);
     });
 
     const { output } = await ideationModule.run(input(2), ctx);
@@ -450,6 +475,242 @@ describe("S9 on the model path", () => {
       return judgeFirst(call, 3);
     });
     await expect(ideationModule.run(input(2), always.ctx)).rejects.toThrow(/did not return a complete judgement/);
+  });
+
+  it("preserves valid sibling rows while repairing only invalid proposals, reviews and judgements", async () => {
+    const gapId = ids[0]!;
+    let propose = 0;
+    let critic = 0;
+    let judge = 0;
+    const { ctx, calls } = context(call => {
+      if (call.purpose === "ideation-proposer") {
+        const gap = gapsOf(call)[0]!;
+        const slots = gap.proposal_slots ?? [`${gapId}:proposal:1`, `${gapId}:proposal:2`];
+        propose++;
+        if (propose > 1) return { tactics: [tactic(gapId, "Repaired", { id: slots.at(-1) })] };
+        return { tactics: [
+          tactic(gapId, "Preserved", { id: slots[0] }),
+          tactic(gapId, "Invalid", { id: slots[1], references: support(ids[1]!) }),
+        ] };
+      }
+      if (call.purpose === "ideation-critic") {
+        const answer = keepAll(call);
+        if (++critic > 1) return answer;
+        return { reviews: [answer.reviews[0], answer.reviews[1], answer.reviews[1]] };
+      }
+      const answer = judgeFirst(call, 1);
+      if (++judge > 1) {
+        return { gaps: answer.gaps.map(gap => ({ ...gap, decisions: gap.decisions.map(row => ({ ...row, verdict: "reject", rank: null })) })) };
+      }
+      return { gaps: answer.gaps.map(gap => ({ ...gap, decisions: gap.decisions.slice(0, 1) })) };
+    });
+    const request = { ...input(2), gap_ids: [gapId] };
+    ctx.replay = { evaluation: true, input: request, facts: await ideationModule.freeze!(request), module_id: ideationModule.manifest.id, module_version: ideationModule.manifest.version, prompt_version: "base" };
+
+    const { output } = await ideationModule.run(request, ctx);
+
+    const proposer = calls.filter(call => call.purpose === "ideation-proposer");
+    expect(gapsOf(proposer[1]!)[0]!.proposal_slots).toEqual([`${gapId}:proposal:2`]);
+    expect(tacticsOf(calls.filter(call => call.purpose === "ideation-critic")[1]!).map(row => row.name)).toEqual(["Repaired"]);
+    expect(judgeGapsOf(calls.filter(call => call.purpose === "ideation-judge")[1]!)[0]!.candidates.map(row => row.name)).toEqual(["Repaired"]);
+    expect(output.proposals.map(row => row.name)).toEqual(["Preserved"]);
+    expect(output.rejected.map(row => row.name)).toEqual(["Repaired"]);
+  });
+
+  it("preserves a deadline outcome across partial retries when the final candidates are withdrawn", async () => {
+    const [gapId, otherId] = ids as [string, string];
+    const deadline = { gap_id: gapId, status: "no_timely_option", explanation: "Claims and registry readouts both fall after the evidence deadline." };
+    const otherOutcome = { gap_id: otherId, status: "no_credible_option", explanation: "No design can answer the separate comparative question." };
+    const { ctx, calls } = context(call => {
+      if (call.purpose === "ideation-critic") {
+        return { reviews: keepAll(call).reviews.map(row => ({ ...row, verdict: "revise", note: "The proposed readout misses the evidence deadline." })) };
+      }
+      if (call.purpose === "ideation-judge") return judgeFirst(call, 1);
+      const [gap] = gapsOf(call);
+      if (!gap!.revise?.length) {
+        if (gap!.id === otherId) return { tactics: [], gap_outcomes: [otherOutcome] };
+        return { tactics: [tactic(gapId, "Late claims study"), tactic(gapId, "Late registry")] };
+      }
+      const withdrawal = { id: gap!.revise[0]!.id, gap_id: gapId, withdraw: true, withdraw_reason: "Readout cannot move before the deadline." };
+      return gap!.revise.length === 2
+        ? { tactics: [withdrawal], gap_outcomes: [deadline] }
+        : { tactics: [withdrawal], gap_outcomes: [
+          { ...deadline, explanation: "Conflicting explanation supplied during the tactic repair." },
+          { ...deadline, gap_id: otherId, explanation: "Unrequested change to another gap." },
+        ] };
+    });
+
+    const { output } = await ideationModule.run(input(2), ctx);
+
+    const revisions = calls.filter(call => call.purpose === "ideation-proposer" && gapsOf(call)[0]!.revise?.length);
+    expect(revisions.map(call => gapsOf(call)[0]!.revise!.map(row => row.id))).toEqual([
+      [`${gapId}:proposal:1`, `${gapId}:proposal:2`],
+      [`${gapId}:proposal:2`],
+    ]);
+    expect(calls.some(call => call.purpose === "ideation-judge")).toBe(false);
+    expect(output.proposals).toEqual([]);
+    expect(output.gap_outcomes).toEqual(expect.arrayContaining([deadline, otherOutcome]));
+  });
+
+  it("ignores an outcome for a different gap when accepting the final withdrawal", async () => {
+    const [gapId, otherId] = ids as [string, string];
+    const { ctx, calls } = context(call => {
+      if (call.purpose === "ideation-critic") {
+        return { reviews: keepAll(call).reviews.map(row => ({ ...row, verdict: "revise", note: "Validate the comparator data availability." })) };
+      }
+      if (call.purpose === "ideation-judge") return judgeFirst(call, 1);
+      const [gap] = gapsOf(call);
+      if (!gap!.revise?.length) return { tactics: [tactic(gap!.id, "Feasibility study")] };
+      return {
+        tactics: [{ id: gap!.revise[0]!.id, gap_id: gap!.id, withdraw: true, withdraw_reason: "No matching comparator records are available." }],
+        gap_outcomes: gap!.id === gapId
+          ? [{ gap_id: otherId, status: "no_timely_option", explanation: "Unrequested deadline judgement for a different gap." }]
+          : [],
+      };
+    });
+
+    const { output } = await ideationModule.run(input(), ctx);
+
+    const revisions = calls.filter(call => call.purpose === "ideation-proposer" && gapsOf(call)[0]!.revise?.length);
+    expect(revisions).toHaveLength(2);
+    expect(revisions[0]!.body.exchange).toBe(revisions[1]!.body.exchange);
+    expect(revisions.map(call => gapsOf(call).map(gap => gap.id))).toEqual(expect.arrayContaining([[gapId], [otherId]]));
+    expect(output.proposals).toEqual([]);
+    expect(output.gap_outcomes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ gap_id: gapId, status: "no_credible_option" }),
+      expect.objectContaining({ gap_id: otherId, status: "no_credible_option" }),
+    ]));
+  });
+
+  it.each(["candidate decision", "gap outcome"])("includes completed decisions when repairing a missing %s", async (missing) => {
+    const gapId = ids[0]!;
+    const conditional = "The deadline can be met if claims access is confirmed by March.";
+    let firstJudgeCall = true;
+    const { ctx, calls } = context(call => {
+      if (call.purpose === "ideation-proposer") {
+        const existing = tactic(gapId, "Conditional claims analysis");
+        const late = tactic(gapId, "Late registry");
+        return { tactics: [
+          { ...existing, recommendation: { ...existing.recommendation, deadline: { status: "conditional", explanation: conditional } } },
+          { ...late, recommendation: { ...late.recommendation, deadline: { status: "late", explanation: "The registry readout is after the deadline." } } },
+        ] };
+      }
+      if (call.purpose === "ideation-critic") return keepAll(call);
+
+      if (firstJudgeCall) {
+        firstJudgeCall = false;
+        const [answer] = judgeFirst(call, 1).gaps;
+        return { gaps: [{
+          ...answer,
+          decisions: missing === "candidate decision" ? answer!.decisions.slice(0, 1) : answer!.decisions,
+          outcome: missing === "gap outcome" ? undefined : answer!.outcome,
+        }] };
+      }
+
+      const [gap] = judgeGapsOf(call);
+      const [answer] = judgeFirst(call, 0).gaps;
+      const completed = gap?.completed_candidates?.find(candidate =>
+        candidate.decision.verdict === "accept" && candidate.recommendation.deadline.status === "conditional");
+      return { gaps: [{
+        ...answer,
+        outcome: completed
+          ? { status: "options", explanation: completed.recommendation.deadline.explanation }
+          : { status: "no_timely_option", explanation: "The visible options do not meet the deadline." },
+      }] };
+    });
+
+    const { output } = await ideationModule.run({ ...input(2), gap_ids: [gapId] }, ctx);
+
+    const judgeCalls = calls.filter(call => call.purpose === "ideation-judge");
+    expect(judgeCalls).toHaveLength(2);
+    const [firstGap] = judgeGapsOf(judgeCalls[0]!);
+    const [repair] = judgeGapsOf(judgeCalls[1]!);
+    expect(repair?.outcome_requested).toBe(true);
+    expect(repair?.candidates.map(row => row.name)).toEqual(missing === "candidate decision" ? ["Late registry"] : []);
+    expect(repair?.completed_candidates).toHaveLength(missing === "candidate decision" ? 1 : 2);
+    expect(repair?.completed_candidates?.[0]).toMatchObject({
+      id: firstGap?.candidates[0]?.id,
+      name: "Conditional claims analysis",
+      recommendation: { deadline: { status: "conditional", explanation: conditional } },
+      decision: { verdict: "accept", rank: 1, reason: "judge on Conditional claims analysis" },
+    });
+    expect(output.proposals.map(row => row.name)).toEqual(["Conditional claims analysis"]);
+    expect(output.rejected.map(row => row.name)).toEqual(["Late registry"]);
+    expect(output.gap_outcomes).toEqual([{ gap_id: gapId, status: "options", explanation: conditional }]);
+  });
+
+  it.each([
+    ["a missing id", (gapId: string) => tactic(gapId, "Missing id"), /missing id/i],
+    ["a foreign id", (gapId: string) => tactic(gapId, "Foreign id", { id: "unrequested-slot" }), /unrequested.slot|not requested/i],
+    ["a null row", () => null, /missing id|invalid.*row/i],
+  ] as const)("repairs %s without resending the valid proposal", async (_case, invalidRow, problem) => {
+    const gapId = ids[0]!;
+    let proposals = 0;
+    const { ctx, calls } = context(call => {
+      if (call.purpose === "ideation-proposer") {
+        const slots = gapsOf(call)[0]!.proposal_slots!;
+        if (++proposals > 1) return { tactics: [tactic(gapId, "Repaired", { id: slots[0] })] };
+        return { tactics: [tactic(gapId, "Preserved", { id: slots[0] }), invalidRow(gapId)] };
+      }
+      return call.purpose === "ideation-critic" ? keepAll(call) : judgeFirst(call, 2);
+    }, true, false);
+    const { output } = await ideationModule.run({ ...input(2), gap_ids: [gapId] }, ctx);
+    const retry = calls.filter(call => call.purpose === "ideation-proposer")[1];
+    expect(retry && gapsOf(retry)[0]).toMatchObject({
+      proposal_slots: [`${gapId}:proposal:2`],
+      problems: [expect.stringMatching(problem)],
+    });
+    expect(output.proposals.map(row => row.name)).toEqual(["Preserved", "Repaired"]);
+  });
+
+  it("repairs a malformed outcome separately from an accepted proposal slot", async () => {
+    const gapId = ids[0]!;
+    let proposals = 0;
+    const { ctx, calls } = context(call => {
+      if (call.purpose === "ideation-proposer") {
+        const slots = gapsOf(call)[0]!.proposal_slots!;
+        if (++proposals === 1) return { tactics: [tactic(gapId, "Preserved", { id: slots[0] })], gap_outcomes: [{ gap_id: gapId, status: "invented" }] };
+        return { tactics: [], gap_outcomes: [{ gap_id: gapId, status: "options", explanation: "One design can address the remaining question." }] };
+      }
+      return call.purpose === "ideation-critic" ? keepAll(call) : judgeFirst(call, 1);
+    }, true, false);
+    const { output } = await ideationModule.run({ ...input(1), gap_ids: [gapId] }, ctx);
+    const retry = calls.filter(call => call.purpose === "ideation-proposer")[1];
+    expect(retry && gapsOf(retry)[0]).toMatchObject({
+      proposal_slots: [], outcome_requested: true, problems: [expect.stringMatching(/outcome/i)],
+    });
+    expect(output.proposals.map(row => row.name)).toEqual(["Preserved"]);
+  });
+
+  it("repairs an invalid tactics envelope even when a valid gap outcome is present", async () => {
+    const gapId = ids[0]!;
+    const outcome = { gap_id: gapId, status: "no_credible_option", explanation: "No supplied design can answer the required comparison." };
+    let proposals = 0;
+    const { ctx, calls } = context(call => {
+      if (call.purpose === "ideation-proposer") {
+        if (++proposals === 1) return { tactics: null, gap_outcomes: [outcome] };
+        return { tactics: [] };
+      }
+      return { gaps: [{ gap_id: gapId, outcome, decisions: [] }] };
+    }, true, false);
+    const { output } = await ideationModule.run({ ...input(1), gap_ids: [gapId] }, ctx);
+    const retry = calls.filter(call => call.purpose === "ideation-proposer")[1];
+    expect(retry && gapsOf(retry)[0]).toMatchObject({ problems: [expect.stringMatching(/tactics.*list/i)] });
+    expect(output.proposals).toEqual([]);
+    expect(output.gap_outcomes).toEqual([outcome]);
+  });
+
+  it("fails visibly when a malformed sibling cannot be repaired", async () => {
+    const gapId = ids[0]!;
+    const { ctx, calls } = context(call => {
+      if (call.purpose !== "ideation-proposer") return call.purpose === "ideation-critic" ? keepAll(call) : judgeFirst(call, 1);
+      const slots = gapsOf(call)[0]!.proposal_slots!;
+      return { tactics: slots.includes(`${gapId}:proposal:1`) ? [tactic(gapId, "Preserved", { id: slots[0] }), null] : [null] };
+    }, true, false);
+    await expect(ideationModule.run({ ...input(1), gap_ids: [gapId] }, ctx)).rejects.toThrow(/missing id/i);
+    const repairs = calls.filter(call => call.purpose === "ideation-proposer").slice(1);
+    expect(repairs.length).toBeGreaterThan(0);
+    for (const repair of repairs) expect(gapsOf(repair)[0]!.proposal_slots).toEqual([`${gapId}:proposal:2`]);
   });
 
   it("fails the run when the model critic never reviews a tactic", async () => {

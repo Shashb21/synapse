@@ -222,6 +222,7 @@ export type NeedProvenance = {
   run_id?: string | null;
   candidate_row_id?: string | null;
   block_id?: string | null;
+  source_context?: SourceContext | null;
   /** Current extraction can require a live citation even when no block was unique at proposal time. */
   requires_current_citation?: boolean;
 };

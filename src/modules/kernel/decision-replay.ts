@@ -1,3 +1,5 @@
+import { isTestStub } from "./llm";
+import { inEvaluationIsolation } from "./evaluation-isolation";
 import { expansionScopeSchema } from "@/lib/iegp/tactic-expansions";
 /** Frozen originating facts and typed human-target agreement; no historical facts are reconstructed. */
 import { sql } from 'drizzle-orm';
@@ -7,6 +9,7 @@ import type { DecisionExample, DecisionKind, WorkedExample } from './decision-ex
 import type { ModuleContext, ResolvedRoute, StageId } from './contracts';
 export type FrozenReplayCase = {
     version: 1;
+    execution?: "routed" | "test";
     workspace_id: string;
     stage: StageId;
     run_id: string;
@@ -45,9 +48,9 @@ export function evidenceHash(value: unknown): string {
 }
 /** Store full pre-execution context separately from size-limited observability steps. */
 export async function saveReplaySnapshot(ctx: ModuleContext, stage: StageId, examples: WorkedExample[]): Promise<void> {
-    if (!ctx.replay || ctx.replay.evaluation)
+    if (inEvaluationIsolation() || !ctx.replay || ctx.replay.evaluation)
         return;
-    const snapshot: FrozenReplayCase = { version: 1, workspace_id: ctx.workspace_id, stage, run_id: ctx.run.id, module_id: ctx.replay.module_id, module_version: ctx.replay.module_version, prompt_version: ctx.replay.prompt_version, input: ctx.replay.input, facts: ctx.replay.facts, examples, route: ctx.route };
+    const snapshot: FrozenReplayCase = { version: 1, execution: isTestStub() ? "test" : "routed", workspace_id: ctx.workspace_id, stage, run_id: ctx.run.id, module_id: ctx.replay.module_id, module_version: ctx.replay.module_version, prompt_version: ctx.replay.prompt_version, input: ctx.replay.input, facts: ctx.replay.facts, examples, route: ctx.route };
     await sharedDb().execute(sql `insert into prompt_replay_snapshots (run_id, workspace_id, stage, snapshot) values (${ctx.run.id}, ${ctx.workspace_id}, ${stage}, ${JSON.stringify(snapshot)}::jsonb) on conflict (run_id) do nothing`);
     ctx.run.note('replay:frozen', { hash: evidenceHash(snapshot), run_id: ctx.run.id });
 }
@@ -151,8 +154,9 @@ export function projectReplayDecision(example: DecisionExample, output: unknown)
     const o = record(output);
     const find = (key: string, idKey: string) => Array.isArray(o[key]) ? (o[key] as Record<string, unknown>[]).find(r => r[idKey] === example.subject_id) : undefined;
     if (example.kind === 's8_band') {
-        const row = find('placements', 'gap_id');
-        return row ? { kind: example.kind, subject_id: example.subject_id, decision: 'accept', band: String(row.suggested_band) } : null;
+        const placements = Array.isArray(o.placements) ? o.placements.filter(row => row.gap_id === example.subject_id) : [];
+        const row = placements.length === 1 ? placements[0] : null;
+        return row && row.support_status !== 'unsupported' ? { kind: example.kind, subject_id: example.subject_id, decision: 'accept', band: String(row.suggested_band) } : null;
     }
     if (example.kind === 's9_proposal') {
         const slot = example.ai_input.slot_id;
@@ -169,6 +173,8 @@ export function projectReplayDecision(example: DecisionExample, output: unknown)
         return { kind: example.kind, subject_id: example.subject_id, decision: matches[0].decision, fields: matches[0].row };
     }
     if (example.kind === 's4_mapping') {
+        const outcomes = ['accepted','rejected','withdrawn'].flatMap(key=>Array.isArray(o[key]) ? (o[key] as Record<string,unknown>[]).filter(row=>row.gap_id===example.subject_id) : []);
+        if (outcomes.length !== 1) return null;
         const row = find('accepted', 'gap_id');
         const rejected = find('rejected', 'gap_id') ?? find('withdrawn', 'gap_id');
         return row ? { kind: example.kind, subject_id: example.subject_id, decision: 'accept', mapping_status: String(row.mapping_status ?? row.status), tactic_ids: mappingTargets(example,row.tactic_ids) } : rejected ? { kind: example.kind, subject_id: example.subject_id, decision: 'reject' } : null;

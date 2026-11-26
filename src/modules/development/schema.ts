@@ -24,11 +24,14 @@ export const saveDraftSchema = z
 export const sourceImportSchema = z
   .object({ revision: z.number().int().positive(), source_file_id: id })
   .strict();
+const preparationControlsSchema = z.object({ id: z.uuid(), allowance_usd: z.number().finite().nonnegative() }).strict();
+export type PreparationControls = z.infer<typeof preparationControlsSchema>;
 export const sourceUploadSchema = z
   .object({
     revision: z.number().int().positive(),
     filename: z.string().trim().min(1).max(255),
     content_base64: z.string().min(1),
+    preparation: preparationControlsSchema.optional(),
   })
   .strict();
 export const referenceUploadSchema = sourceUploadSchema
