@@ -48,13 +48,13 @@ type ComparisonInput = Pick<IegpState, "blocks" | "gaps"> & {
 };
 let respond: (input: ComparisonInput) => unknown | Promise<unknown>;
 let calls: ComparisonInput[];
-async function post(body: Record<string, unknown>) { const response = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...fields, ...await openingActionTokens(body), ...body }) })); return { status: response.status, body: await response.json() }; }
+async function post(body: Record<string, unknown>, signal?: AbortSignal) { const response = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...fields, ...await openingActionTokens(body), ...body }), signal })); return { status: response.status, body: await response.json() }; }
 async function parse() { await runStage({ stage: "S0", input: { files: [file] }, actor, role: "medical_affairs" }); return runStage({ stage: "S1", input: {}, actor, role: "medical_affairs" }); }
 async function comparison() { const { listSourceComparisons } = await import("@/lib/ingest/compare-source"); return (await listSourceComparisons())[0]; }
 function outcome(input: ComparisonInput, judgment: ComparisonOutcome["judgment"] = "conflict", extra: Partial<ComparisonOutcome> = {}): ComparisonOutcome { return { block_id: input.blocks[0].id, passage: "The study includes children only.", match: "same", judgment, gap_id: gap, tactic_id: tactic, coverage_id: coverage, rationale: "The source challenges the adult population", ...extra }; }
 /** Close the backend holding this fixture's advisory lock, even if other tests use the same server. */
 async function disconnectComparisonWorker(runId: string) {
- const key = `source-comparison-run:public:${runId}`;
+ const key = `workspace-run:public:${runId}`;
  const [worker] = await db().execute(sql`
    select pid from pg_locks
    where locktype = 'advisory' and granted and pid <> pg_backend_pid()
@@ -192,6 +192,38 @@ describe("KAN-146 incoming document comparison", () => {
   respond = () => { throw new Error("Direct comparison failure"); }; await expect(parse()).resolves.toBeDefined();
   expect(await comparison()).toMatchObject({ status: "failed" }); expect(await listParsedDocuments()).toHaveLength(1);
  });
+ it.each(["direct", "ingestion"] as const)("stops a %s post-parse batch after cancellation and leaves the tail untouched", async mode => {
+  const controller = new AbortController();
+  const files = [file, { ...file, filename: "follow-up.txt", text: `${file.text} Follow-up correspondence.` },
+   { ...file, filename: "last.txt", text: `${file.text} Final correspondence.` }];
+  let tailBeforeCancellation: IegpState["source_comparisons"];
+  respond = async input => {
+   if (calls.length === 2) {
+    const visited = calls.map(call => call.blocks[0].source_id);
+    tailBeforeCancellation = (await store.loadState()).source_comparisons!.filter(row => !visited.includes(row.source_id));
+    controller.abort();
+   }
+   return { outcomes: [outcome(input)] };
+  };
+  const role = "medical_affairs" as const;
+  if (mode === "direct") {
+   await runStage({ stage: "S0", input: { files }, actor, role });
+   await expect(runStage({ stage: "S1", input: {}, actor, role, signal: controller.signal })).resolves.toMatchObject({ stage: "S1" });
+  } else {
+   const first = await advanceIngest({ files, actor, role });
+   await expect(advanceIngest({ job_id: first.job_id, actor, role, signal: controller.signal })).resolves.toMatchObject({ completed: 2 });
+  }
+  const [first, cancelled] = calls.map(call => call.blocks[0].source_id);
+  const state = await store.loadState();
+  expect(await listParsedDocuments()).toHaveLength(3);
+  expect(state.source_reviews).toMatchObject([{ source_id: first }]);
+  expect(state.source_comparisons!.find(row => row.source_id === first)).toMatchObject({ status: "completed" });
+  expect(state.source_comparisons!.find(row => row.source_id === cancelled)).toMatchObject({ status: "pending", outcomes: null, review_ids: [] });
+  expect(calls).toHaveLength(2);
+  expect(tailBeforeCancellation).toHaveLength(1);
+  expect(state.source_comparisons!.filter(row => row.source_id !== first && row.source_id !== cancelled)).toEqual(tailBeforeCancellation);
+  expect(await db().select().from(moduleRuns).where(eq(moduleRuns.module_id, "incoming-source-comparison"))).toHaveLength(2);
+ });
  it("persists AI-disabled independently and leaves manual review available", async () => {
   respond = async input => { await setAiEnabled({ enabled: false, actor_name: actor.name }); return { outcomes: [outcome(input)] }; };
   await parse(); expect(await comparison()).toMatchObject({ status: "ai_disabled" });
@@ -227,6 +259,33 @@ describe("KAN-146 incoming document comparison", () => {
   expect((await store.loadState()).source_reviews).toHaveLength(2); expect((await store.loadState()).source_reviews!.find(r => r.id === finding.id)!.status).toBe("dismissed");
   await runStage({ stage: "S1", input: { file_ids: [(await listSourceFiles())[0].id] }, actor, role: "medical_affairs" });
   expect((await store.loadState()).source_reviews).toHaveLength(2); expect((await store.loadState()).source_reviews!.find(r => r.id === finding.id)!.status).toBe("dismissed");
+ });
+ it("cancels a saved comparison retry at its publication lock and preserves resumable outcomes", async () => {
+  respond = input => ({ outcomes: [outcome(input), outcome(input, "support", { passage: "Outcomes improved." })] });
+  vi.spyOn(reviews, "linkSourceSupport").mockRejectedValueOnce(new Error("Interrupted outcome application"));
+  await parse();
+  const saved = await comparison();
+  const findings = (await store.loadState()).source_reviews;
+  expect(findings).toHaveLength(1);
+  expect(saved).toMatchObject({ status: "failed", outcomes: [expect.any(Object), expect.any(Object)] });
+  const controller = new AbortController();
+  const relationships = await import("@/lib/iegp/relationship-change");
+  const lock = relationships.lockRelationships;
+  let acquisitions = 0;
+  const lockSpy = vi.spyOn(relationships, "lockRelationships").mockImplementation(async (...args) => {
+   await lock(...args);
+   // The first lock saves the batch; the next two lock the individual outcomes.
+   if (++acquisitions === 3) controller.abort();
+  });
+  const response = await post({ action: "retry_source_comparison", source_id: saved.source_id }, controller.signal);
+  lockSpy.mockRestore();
+  expect(response).toMatchObject({ status: 408, body: { code: "cancelled" } });
+  expect((await store.loadState()).source_reviews).toEqual(findings);
+  expect(await comparison()).toMatchObject({ status: "pending", outcomes: saved.outcomes, review_ids: saved.review_ids });
+  expect((await post({ action: "retry_source_comparison", source_id: saved.source_id })).status).toBe(200);
+  expect(await comparison()).toMatchObject({ status: "completed" });
+  expect((await store.loadState()).source_reviews).toHaveLength(2);
+  expect(calls).toHaveLength(1);
  });
  it("shows changed completed basis as needing a new check and keeps accepted human changes on reprocessing", async () => {
   await parse(); const finding = (await store.loadState()).source_reviews![0]; const before = await store.loadState();

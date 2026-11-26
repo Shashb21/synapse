@@ -1,11 +1,12 @@
+import { withModelRun } from "@/modules/kernel/model-run";
 import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { aiOffResponse, stageErrorResponse } from "@/app/api/modules/ai-off";
 import { aiEnabled } from "@/modules/kernel/ai-switch";
-import { runStage } from "@/modules";
+import "@/modules";
 import { STAGE_IDS, type StageId } from "@/modules/kernel/contracts";
 import { activeModule } from "@/modules/kernel/registry";
-import { runHillclimbSweep } from "@/modules/kernel/hillclimb-loop";
+import { runOwnerDiagnostics } from "@/modules/kernel/hillclimb-loop";
 import { requestIdentity } from "@/modules/auth/request";
 import { apiErrorResponse, readJsonBody } from "@/modules/auth/api-guard";
 import { HILLCLIMB_STAGES } from "@/modules/kernel/prompt-versions";
@@ -39,15 +40,7 @@ export async function POST(request: Request) {
     if (!implementation.evals) {
       return NextResponse.json({ safe_error: true, error: `${implementation.manifest.id} has no eval harness.` }, { status: 400 });
     }
-    const sweep = await runHillclimbSweep(stage, implementation, async (input) => {
-      const result = await runStage({
-        stage,
-        input: { ...(input as Record<string, unknown>), dry_run: true },
-        actor: identity.actor,
-        role: identity.role,
-      });
-      return result.output as never;
-    });
+    const sweep = await withModelRun(request.signal, () => runOwnerDiagnostics(implementation, identity, body.workspace_id, true));
     return NextResponse.json({ ok: true, ...sweep });
   } catch (error) {
     return stageErrorResponse(error, "Hillclimb sweep failed");

@@ -11,7 +11,7 @@ import {
   planActionExpectingError,
   planState,
   runStage,
-  seedMapped,
+  seedPrioritizable,
   validateBandHigh,
 } from "../support/synapse";
 
@@ -44,7 +44,7 @@ test.describe("S9 tactics ideation", () => {
   let lowGap: { gap_id: string; name: string } | null = null;
 
   test.beforeAll(async ({ request }) => {
-    await seedMapped(request);
+    await seedPrioritizable(request);
     await runStage(request, "S8");
     const gap = await firstOpenGap(request);
     await validateBandHigh(request, gap.gap_id, "Blocks the EU5 submission, so it is High");
@@ -199,16 +199,15 @@ test.describe("S9 tactics ideation", () => {
     expect(response.ok(), await response.text()).toBeTruthy();
     const body = (await response.json()) as {
       cases: number;
-      passed: boolean;
+      passed: boolean | null;
       metrics: { name: string; value: number; detail?: string }[];
     };
     expect(body.cases).toBe(1);
     const names = body.metrics.map((metric) => metric.name);
     expect(names).toContain("gaps_covered");
     expect(names).toContain("designs_runnable");
-    // Every proposal must be runnable; an empty proposal set is scored without a
-    // target rather than as a regression.
-    expect(body.passed, JSON.stringify(body.metrics)).toBeTruthy();
+    // Synthetic format diagnostics have no model-quality verdict.
+    expect(body.passed, JSON.stringify(body.metrics)).toBeNull();
   });
   test("edits, rejects, restores and accepts an expansion without duplicating its parent", async ({page,request}) => {
     test.setTimeout(90_000);

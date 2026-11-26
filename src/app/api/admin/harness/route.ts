@@ -1,3 +1,5 @@
+import { apiErrorResponse } from "@/modules/auth/api-guard";
+import { withModelRun } from "@/modules/kernel/model-run";
 import { ownerErrorMessage } from "@/modules/kernel/stage-errors";
 import { NextResponse } from "next/server";
 import "@/modules";
@@ -28,6 +30,10 @@ export async function GET() {
 
 /** `{ case, mode, ...input }` runs one AI use case in the harness sandbox. Owner only. */
 export async function POST(request: Request) {
+  return withModelRun(request.signal, () => handlePost(request)).catch(apiErrorResponse);
+}
+
+async function handlePost(request: Request) {
   const denied = await ownerGate();
   if (denied) return denied;
   let body: Record<string, unknown> | null;

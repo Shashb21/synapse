@@ -1,3 +1,4 @@
+import { assertEvaluationRoute, inEvaluationIsolation } from "./evaluation-isolation";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { sql } from "drizzle-orm";
 import { selectCredentialRoute, stageHasRoute } from "./credential-route";
@@ -11,7 +12,7 @@ import { extractJsonObject } from "@/lib/llm/anthropic";
 import { tracedCompletion } from "./llm-calls";
 import { replaysDemo } from "@/lib/demo/mode";
 import { DEMO_REPLAY_PROVIDER, isDemoReplayProvider } from "@/lib/demo/replay-provider";
-import { missingKeyReason, providerApiKey, providerConfigured } from "@/modules/llm/api-keys";
+import { approvedProviderFallbacks, missingKeyReason, providerApiKey, providerConfigured } from "@/modules/llm/api-keys";
 import {
   DEFAULT_ROUTE_FALLBACKS,
   DEFAULT_ROUTE_PROVIDER,
@@ -252,7 +253,7 @@ export async function resolveRoute(stage: StageId, frozenConfig?: RouteConfig): 
     };
   }
   const { selected, rejected } = selectCredentialRoute(config, PROVIDERS.map(provider => ({
-    ...provider, status: providerConfigured(provider) ? "configured" : "missing",
+    ...provider, approved_fallbacks: approvedProviderFallbacks(provider.id), status: providerConfigured(provider) ? "configured" : "missing",
   })));
   const reasons = rejected.map(({ id, reason }) => {
     const provider = findProvider(id);
@@ -317,8 +318,16 @@ export function canPrompt(route: ResolvedRoute): boolean {
 export type RawCompletionCall = { request: import("@/modules/llm/provider").LlmRequest; purpose: string; attempt: number; role?: import("./contracts").CompletionRole };
 export type RawCompletionExecutor = (call: RawCompletionCall) => Promise<string>;
 
-export function completionFor(route: ResolvedRoute, run: RunHandle, options?: { completeRaw?: RawCompletionExecutor; beforeSend?: () => Promise<void> }): JsonCompletion {
+type CompletionOptions = {
+  completeRaw?: RawCompletionExecutor;
+  beforeSend?: () => Promise<void>;
+  beforeRequest?: () => Promise<void>;
+  onReceipt?: (receipt: { attempt: number; id: string | null }) => void;
+};
+
+export function completionFor(route: ResolvedRoute, run: RunHandle, options?: CompletionOptions): JsonCompletion {
   return async ({ system, user, purpose, maxTokens, role, requestBudget }) => {
+    if (inEvaluationIsolation()) assertEvaluationRoute(route);
     if (!canPrompt(route)) {
       throw new NoRouteError(`${route.provider_label} cannot serve ${purpose}. ${KEY_PROMPT}`);
     }
@@ -338,21 +347,25 @@ export function completionFor(route: ResolvedRoute, run: RunHandle, options?: { 
           temperature: route.params.temperature,
           max_tokens: maxTokens ?? route.params.max_tokens,
         };
-      const text = options?.completeRaw ? await options.completeRaw({ request, purpose, attempt, role }) : (await tracedCompletion({
-        provider, request,
-        requestBudget,
-        api_key: api_key!,
-        run,
-        step: `llm:${purpose}`,
-        detail: `${route.provider_label} · ${route.model}`,
-        purpose,
-        attempt,
-        beforeSend: options?.beforeSend,
-        stage: route.stage,
-        workspace_id: run.workspace_id ?? null,
-      })).text;
+      const reply = options?.completeRaw
+        ? { text: await options.completeRaw({ request, purpose, attempt, role }), llm_call_id: null }
+        : await tracedCompletion({
+            provider, request,
+            requestBudget,
+            beforeSend: options?.beforeSend,
+            beforeRequest: options?.beforeRequest,
+            api_key: api_key!,
+            run,
+            step: `llm:${purpose}`,
+            detail: `${route.provider_label} · ${route.model}`,
+            purpose,
+            attempt,
+            stage: route.stage,
+            workspace_id: run.workspace_id ?? null,
+          });
+      options?.onReceipt?.({ attempt, id: reply.llm_call_id });
       try {
-        return extractJsonObject(text);
+        return extractJsonObject(reply.text);
       } catch (error) {
         invalid = error instanceof Error ? error.message : String(error);
         run.note(`llm:${purpose}:invalid-json`, { attempt, error: invalid });

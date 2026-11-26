@@ -1,3 +1,5 @@
+import { readLearningEntityProjection } from "./learning-entities";
+import { inEvaluationIsolation } from "./evaluation-isolation";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { isDemoModeWorkspace } from "@/lib/demo/mode";
 import { sql } from "drizzle-orm";
@@ -7,6 +9,7 @@ import { db, sharedDb } from "./db";
 import { newId, nowIso } from "./ids";
 import { isTestStub } from "./llm";
 import { canPrompt, completionFor, resolveRoute } from "./routing";
+import { priorityReviewExclusion } from "@/modules/stages/s8-prioritization/review-basis";
 import { originatingSnapshot } from "./decision-replay";
 import { getRun, openRun, RunRecorder } from "./observability";
 import { recordLearningRun } from "./learning-run";
@@ -56,6 +59,7 @@ export type DecisionExample = {
   actor_name?: string | null;
   replay_input?: Record<string, unknown> | null;
   replay_exclusion_reason?: string | null;
+  priority_review_hash?: string | null;
 };
 
 export type DecisionExampleDraft = {
@@ -73,6 +77,7 @@ export type DecisionExampleDraft = {
   actor?: Actor | null;
   replay_input?: Record<string, unknown> | null;
   replay_exclusion_reason?: string | null;
+  priority_review_hash?: string | null;
   /** Stable human-decision identity, shared by nested capture paths. */
   capture_key?: string;
   /** AI-only capture paths must prove their recorded run exists in this workspace. */
@@ -102,6 +107,7 @@ ALTER TABLE decision_examples ADD COLUMN IF NOT EXISTS prompt_version text;
 ALTER TABLE decision_examples ADD COLUMN IF NOT EXISTS actor jsonb;
 ALTER TABLE decision_examples ADD COLUMN IF NOT EXISTS replay_input jsonb;
 ALTER TABLE decision_examples ADD COLUMN IF NOT EXISTS replay_exclusion_reason text;
+ALTER TABLE decision_examples ADD COLUMN IF NOT EXISTS priority_review_hash text;
 ALTER TABLE decision_examples ADD COLUMN IF NOT EXISTS capture_key text;
 ALTER TABLE decision_examples ADD COLUMN IF NOT EXISTS actor_principal text;
 ALTER TABLE decision_examples ADD COLUMN IF NOT EXISTS actor_name text;
@@ -131,13 +137,18 @@ const asRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 
 function toExample(row: Row): DecisionExample {
+  let exclusion = row.replay_exclusion_reason ?? null;
+  if (!row.replay_input) exclusion ??= "No frozen originating stage input is available.";
+  else if (row.kind === "s8_band" && !row.priority_review_hash) {
+    exclusion ??= priorityReviewExclusion(null, row.replay_input, row.subject_id);
+  }
   return {
     ...row,
     ai_input: asRecord(row.ai_input),
     ai_output: asRecord(row.ai_output),
     final: row.final == null ? null : asRecord(row.final),
     replay_input: row.replay_input == null ? null : asRecord(row.replay_input),
-    replay_exclusion_reason: row.replay_exclusion_reason ?? (row.replay_input == null ? "No frozen originating stage input is available." : null),
+    replay_exclusion_reason: exclusion,
   };
 }
 
@@ -148,6 +159,7 @@ function toExample(row: Row): DecisionExample {
  * afterwards, off the request.
  */
 export async function recordDecisionExample(draft: DecisionExampleDraft): Promise<string | null> {
+  if (inEvaluationIsolation()) return null;
   try {
     await ensureTable();
     const workspace_id = draft.workspace_id ?? (await scopedWorkspaceId()) ?? "default";
@@ -161,6 +173,8 @@ export async function recordDecisionExample(draft: DecisionExampleDraft): Promis
     const route = run?.route;
     const promptVersion = draft.prompt_version ?? (run?.steps.find(step => step.name === "prompt:variant")?.data as { version?: string } | undefined)?.version ?? null;
     const replay = draft.replay_input ?? (run?.status === "ok" ? await originatingSnapshot(run.id, workspace_id, draft.stage) : null);
+    const exclusion = draft.replay_exclusion_reason ?? (!replay ? "No frozen originating stage input is available."
+      : draft.kind === "s8_band" ? priorityReviewExclusion(draft.priority_review_hash, replay, draft.subject_id) : null);
     const captureKey = draft.capture_key ?? null;
     const who = await currentAttribution();
     const actorName = draft.actor?.name ?? who.name;
@@ -168,7 +182,7 @@ export async function recordDecisionExample(draft: DecisionExampleDraft): Promis
     const inserted = await sharedDb().execute(sql`
       insert into decision_examples
         (id, workspace_id, stage, kind, subject_id, ai_input, ai_output, outcome, final, rationale,
-         lesson, lesson_status, model, provider_id, created_at, run_id, prompt_version, actor, replay_input, replay_exclusion_reason, capture_key,
+         lesson, lesson_status, model, provider_id, created_at, run_id, prompt_version, actor, replay_input, replay_exclusion_reason, priority_review_hash, capture_key,
          actor_principal, actor_name)
       values
         (${id}, ${workspace_id}, ${draft.stage}, ${draft.kind}, ${draft.subject_id},
@@ -177,7 +191,7 @@ export async function recordDecisionExample(draft: DecisionExampleDraft): Promis
          ${draft.rationale?.trim() || null}, null, 'pending', ${route?.model ?? null},
          ${route?.provider_id ?? null}, ${nowIso()}, ${draft.run_id ?? null}, ${promptVersion},
          ${JSON.stringify(draft.actor ?? null)}::jsonb, ${replay == null ? null : JSON.stringify(replay)}::jsonb,
-         ${draft.replay_exclusion_reason ?? (replay ? null : "No frozen originating stage input is available.")}, ${captureKey},
+         ${exclusion}, ${draft.priority_review_hash ?? null}, ${captureKey},
          ${who.principal}, ${actorName})
       on conflict (workspace_id, capture_key) do nothing
       returning id
@@ -378,6 +392,7 @@ export async function deidentifyLesson(
  * stub, or with no connected route it stays pending, to be computed later.
  */
 export async function computeLesson(id: string, complete?: JsonCompletion): Promise<LessonStatus | null> {
+  if (inEvaluationIsolation()) return null;
   const example = await getDecisionExample(id);
   if (!example || example.lesson_status === "ok") return example?.lesson_status ?? null;
   try {
@@ -470,8 +485,13 @@ export type WorkedExample =
     }
   | { id: string; scope: "other_plans"; kind: DecisionKind; lesson: string };
 
+function textValues(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (!value || typeof value !== "object") return [];
+  return Object.values(value).flatMap(textValues);
+}
 function exampleText(example: DecisionExample): string {
-  return [JSON.stringify(example.ai_input), JSON.stringify(example.ai_output)].join(" ");
+  return textValues(example.ai_input).join(" ");
 }
 
 const STOP = new Set(["the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with", "by", "is", "are", "no", "not", "data", "evidence"]);
@@ -515,30 +535,80 @@ export async function similarExamples(args: {
   workspace_id: string;
   take?: number;
   exclude_ids?: string[];
+  subject_ids?: string[];
   allow_cross_workspace?: boolean;
 }): Promise<WorkedExample[]> {
+  if (inEvaluationIsolation()) return [];
   const take = args.take ?? 4;
   const excluded = new Set([...learningExclusions(), ...(args.exclude_ids ?? [])]);
   const { learningSharingEligible } = await import("@/modules/workspaces/store");
   const share = args.allow_cross_workspace === true && await learningSharingEligible(args.workspace_id);
   const pool: DecisionExample[] = [];
-  for (const example of await listDecisionExamples({ stage: args.stage, kinds: args.kinds })) {
-    if (excluded.has(example.id)) continue;
-    if (example.workspace_id === args.workspace_id) { pool.push(example); continue; }
-    if (!share || example.lesson_status !== "ok" || !example.lesson) continue;
-    try {
-      if (!await learningSharingEligible(example.workspace_id)) continue;
-      const entities = await entitiesForWorkspace(example.workspace_id);
-      const lesson = scrubLesson(example.lesson, rawTextsOf(example), entities);
-      if (lesson) pool.push({ ...example, lesson });
-    } catch (error) {
-      console.error("[learning] foreign lesson withheld: entity context unavailable", example.id, error);
+  const contexts = new Map<string,Promise<string[] | null>>();
+  const foreignContext = (workspace:string) => {
+    let pending=contexts.get(workspace);
+    if(!pending) {
+      pending=(async()=>{
+        if(!await learningSharingEligible(workspace))return null;
+        return inRecordedWorkspace(workspace,async()=>{
+          const {asset,names}=await readLearningEntityProjection();
+          const all=[asset?.name,asset?.inn,...namedStrings(asset?.planning_context),...names].filter((n):n is string=>typeof n==="string" && !!n.trim());
+          return all.length ? all : null;
+        });
+      })().catch(error=>{console.error("[learning] foreign workspace context unavailable",workspace,error);return null;});
+      contexts.set(workspace,pending);
     }
+    return pending;
+  };
+  await ensureTable();
+  const clauses = [sql`stage=${args.stage}`, sql`outcome in ('edited','rejected')`];
+  if (args.kinds?.length) clauses.push(sql`kind in (${sql.join(args.kinds.map(kind=>sql`${kind}`),sql`,`)})`);
+  const filter = sql.join(clauses,sql` and `);
+  // Bound each side independently so a foreign workspace cannot evict this plan's recent cases.
+  const rows = await sharedDb().execute(sql`
+    (select id,workspace_id,stage,kind,subject_id,ai_input,ai_output,final,rationale,outcome,lesson,lesson_status,created_at
+      from decision_examples where ${filter} and workspace_id=${args.workspace_id}
+      order by created_at desc,id desc limit 500)
+    union all
+    (select id,workspace_id,stage,kind,null,null,null,null,null,outcome,lesson,lesson_status,created_at
+      from decision_examples d where ${share} and ${filter} and workspace_id<>${args.workspace_id} and lesson_status='ok'
+      and exists(select 1 from workspaces w where w.id=d.workspace_id and w.learning_sharing_eligible=true)
+      order by created_at desc,id desc limit 128)
+    order by created_at desc,id desc`);
+  const subjects = new Set(args.subject_ids ?? []);
+  const query = wordsOf(args.text).join(" ");
+  for (const row of rows) {
+    const example = toExample(row as unknown as Row);
+    if (subjects.has(example.subject_id) || subjects.has(String(example.ai_input.source_id ?? ""))) continue;
+    if (args.subject_ids?.length && textValues(example.ai_input).some(value => {
+      const words = wordsOf(value);
+      return words.length >= 3 && (" "+query+" ").includes(" "+words.join(" ")+" ");
+    })) continue;
+    if (excluded.has(example.id)) continue;
+    pool.push(example);
   }
-  const ranked = rankBySimilarity(args.text, pool, example => example.workspace_id === args.workspace_id ? exampleText(example) : example.lesson!);
-  const own = ranked.filter((row) => row.item.workspace_id === args.workspace_id);
-  const others = ranked.filter((row) => row.item.workspace_id !== args.workspace_id);
-  return [...own, ...others].slice(0, take).map(({ item }) =>
+  const ranked = rankBySimilarity(args.text, pool, example=>example.workspace_id===args.workspace_id ? exampleText(example) : example.lesson ?? "");
+  // Scrub at most sixteen positively ranked foreign lessons across all sharing workspaces.
+  // Read the raw comparison fields in one query and never project them into the returned lesson.
+  const shortlist=ranked.filter(({item})=>item.workspace_id!==args.workspace_id && item.lesson).slice(0,16);
+  const rawRows=shortlist.length ? await sharedDb().execute(sql`select d.id,d.workspace_id,d.ai_input,d.ai_output,d.final,d.rationale,d.lesson
+    from decision_examples d where d.id in (${sql.join(shortlist.map(({item})=>sql`${item.id}`),sql`,`)})
+    and d.workspace_id<>${args.workspace_id} and d.lesson_status='ok'
+    and exists(select 1 from workspaces w where w.id=d.workspace_id and w.learning_sharing_eligible=true)
+    and exists(select 1 from workspaces w where w.id=${args.workspace_id} and w.learning_sharing_eligible=true)`) : [];
+  const rawById=new Map(rawRows.map(row=>[row.id,row]));
+  const selected:DecisionExample[]=[];
+  for(const {item} of ranked){
+    if(selected.length>=take)break;
+    if(item.workspace_id===args.workspace_id){ selected.push(item);continue; }
+    const raw=rawById.get(item.id);
+    if(!share || !item.lesson || !raw || raw.workspace_id!==item.workspace_id || raw.lesson!==item.lesson)continue;
+    const entities=await foreignContext(item.workspace_id);
+    if(!entities)continue;
+    const lesson=scrubLesson(item.lesson,rawTextsOf({...item,...raw} as DecisionExample),entities);
+    if(lesson)selected.push({...item,lesson});
+  }
+  return selected.map((item) =>
     item.workspace_id === args.workspace_id
       ? {
           id: item.id,

@@ -10,10 +10,11 @@ import "@/modules";
 import * as tables from "@/lib/iegp/schema";
 import { db } from "@/lib/iegp/db";
 import { buildSeed } from "@/lib/iegp/seed";
-import { assignTacticToGap, loadState, persistState, rejectMapping, lockCoverageOverall, lockCoverageDimension, saveMappingTableRow, splitPartialGap, rewritePartialGap, reviewRequirementBasis } from "@/lib/iegp/store";
+import { assignTacticToGap, createGap, loadState, persistState, readState, rejectMapping, lockCoverageOverall, lockCoverageDimension, overrideGapStatus, saveMappingTableRow, splitPartialGap, rewritePartialGap, reviewRequirementBasis } from "@/lib/iegp/store";
 import { acceptTacticExpansion, setExpansionStatus, tacticVersion } from "@/lib/iegp/tactic-expansions";
 import { runInWorkspace } from "@/modules/workspaces/context";
 import { POST } from "@/app/api/plan/route";
+import { POST as tacticPost } from "@/app/api/iegp/route";
 import { kgMappingModule } from "@/modules/stages/s4-kg-mapping/module";
 import type { ModuleContext } from "@/modules/kernel/contracts";
 import { computeGapStatus, unlocked, countingCoverages, relationshipFit } from "@/lib/iegp/engine";
@@ -54,6 +55,82 @@ beforeEach(async () => {
 });
 
 describe("canonical expansion acceptance", () => {
+  it("recalculates mapped gaps and override staleness when a tactic is rejected and restored", async () => {
+    const who = { actor_name: actor.name, actor_function: actor.function };
+    const child = await acceptTacticExpansion(args);
+    await setExpansionStatus({ expansion_id: child.id, status: "planned", rationale: "Funded child", actor, expected_version: child.version });
+    const childCoverage = (await loadState()).coverages.find(c => c.expansion_id === child.id)!;
+    await reviewPopulationRequirement(args.gap_id);
+    await lockCoverageDimension({ ...who, coverage_id: childCoverage.id, dimension: "population", value: "yes", rationale: "Community population fits" });
+    await lockCoverageOverall({ ...who, coverage_id: childCoverage.id, overall: "full", rationale: "This analysis covers the community population" });
+    await overrideGapStatus({ ...who, gap_id: args.gap_id, status: "validated_addressed", reason: "The reviewed analysis addresses this need" });
+
+    const directGapId = await createGap({ ...who, statement: "More evidence on outpatient treatment outcomes is needed." });
+    await assignTacticToGap({ ...who, gap_id: directGapId, tactic_id: args.tactic_id, coverage: "partial", human: true, note: "The cohort covers some outpatient outcomes" });
+    const before = await loadState();
+    const opening = (await tacticRecord(args.tactic_id))!;
+    const review = async (body: Record<string, unknown>) => tacticPost(new Request("http://localhost/api/iegp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...who, tactic_id: args.tactic_id, ...body }),
+    }));
+    expect(before.gaps.find(g => g.id === directGapId)).toMatchObject({ computed_status: "validated_partial" });
+    const held = before.gaps.find(g => g.id === args.gap_id)!;
+    expect(held).toMatchObject({ computed_status: "validated_addressed", status_override: { stale: false } });
+
+    const note = "The cohort no longer has usable data";
+    const rejected = await review({ action: "lock_tactic_review", expected_tactic: opening.version, review_status: "rejected", note });
+    expect(rejected.status, await rejected.text()).toBe(200);
+    // Read the saved state directly so the on-load repair cannot mask a missed update.
+    const after = await readState();
+    expect(after.gaps.find(g => g.id === directGapId)).toMatchObject({ status: "validated_open", computed_status: "validated_open" });
+    expect(after.gaps.find(g => g.id === args.gap_id)).toMatchObject({
+      status: "validated_addressed", computed_status: "validated_partial", status_override: { ...held.status_override, stale: true },
+    });
+    const independent = countingCoverages(before.coverages.filter(c => c.gap_id === args.gap_id), before.tactics, before.expansions)
+      .filter(c => c.tactic_id !== args.tactic_id);
+    const remaining = countingCoverages(after.coverages.filter(c => c.gap_id === args.gap_id), after.tactics, after.expansions);
+    expect(independent.length).toBeGreaterThan(0);
+    expect(remaining).toEqual(independent);
+    expect(after.coverages).toEqual(before.coverages);
+    expect(after.expansions).toEqual(before.expansions);
+    const reviewed = (await tacticRecord(args.tactic_id))!;
+    expect(reviewed.tactic).toMatchObject({ status: "ongoing", review_status: "rejected" });
+    expect(reviewed.history).toContainEqual(expect.objectContaining({ field: "review_status", before: "accepted", after: "rejected", rationale: note }));
+
+    const rationale = "The reviewers confirmed usable data are available again";
+    const restored = await review({ action: "restore_tactic", expected_tactic: reviewed.version, rationale });
+    expect(restored.status, await restored.text()).toBe(200);
+    const final = await readState();
+    expect(final.gaps.find(g => g.id === directGapId)).toMatchObject({ status: "validated_partial", computed_status: "validated_partial" });
+    expect(final.gaps.find(g => g.id === args.gap_id)).toMatchObject({
+      status: "validated_addressed", computed_status: "validated_addressed", status_override: held.status_override,
+    });
+    expect(final.coverages).toEqual(before.coverages);
+    expect((await tacticRecord(args.tactic_id))!.history).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "review_status", before: "accepted", after: "rejected", rationale: note }),
+      expect.objectContaining({ field: "review_status", before: "rejected", after: "accepted", rationale }),
+    ]));
+  });
+
+  it("repairs a pre-existing rejected tactic's stored gap status once on workspace load", async () => {
+    const who = { actor_name: actor.name, actor_function: actor.function };
+    const gapId = await createGap({ ...who, statement: "More evidence on treatment outcomes is needed." });
+    await assignTacticToGap({ ...who, gap_id: gapId, tactic_id: args.tactic_id, coverage: "partial", human: true, note: "The cohort covers some outcomes" });
+    const before = await loadState();
+    expect(before.gaps.find(gap => gap.id === gapId)).toMatchObject({ computed_status: "validated_partial" });
+    const history = (await tacticRecord(args.tactic_id))!.history;
+
+    // Older versions persisted the tactic decision without refreshing the gap calculation.
+    await db().update(tables.tactics).set({ review_status: "rejected" }).where(eq(tables.tactics.id, args.tactic_id));
+
+    const after = await loadState();
+    expect(after.gaps.find(gap => gap.id === gapId)).toMatchObject({ status: "validated_open", computed_status: "validated_open" });
+    expect(after.coverages).toEqual(before.coverages);
+    expect((await tacticRecord(args.tactic_id))!.history).toEqual(history);
+    expect((await loadState()).audit).toEqual(after.audit);
+  });
+
   it("rolls back inherited associations, gaps, coverage and audits when scoped split insertion fails", async () => {
     const child = await acceptTacticExpansion(args);
     await setExpansionStatus({expansion_id: child.id, status: "planned", rationale: "Funded child", actor, expected_version: child.version});

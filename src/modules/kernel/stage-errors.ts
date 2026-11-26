@@ -1,5 +1,5 @@
 /** Public error wording and stage metadata; unknown exceptions never reach users. */
-import { ProviderError, type ProviderErrorKind } from "@/modules/llm/provider-error";
+import { ModelAnswerError, ProviderError, type ProviderErrorKind } from "@/modules/llm/provider-error";
 import type { StageId } from "./contracts";
 
 /** A model that never returned a complete answer for every row a stage asked about. */
@@ -66,6 +66,11 @@ export function isAdminOnlyError(error: unknown): boolean {
 /** Safe wording shared by the API and historical failure summaries. */
 export function customerErrorMessage(error: unknown): string {
   if (error instanceof TrustedApplicationError) return error.message;
+  if (error instanceof ModelAnswerError) {
+    return error.kind === "refusal"
+      ? "The AI provider declined this request. Review the input before trying again."
+      : "The AI provider reached its output limit before finishing. Try a smaller request or ask your administrator to review the output limit.";
+  }
   if (error instanceof ProviderError) {
     if (error.info.daily_quota) return "The AI has reached its limit for today. Try again tomorrow, or contact your Synapse administrator.";
     return PROVIDER_CUSTOMER_MESSAGE[error.kind];

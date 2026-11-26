@@ -1,7 +1,7 @@
 /** Durable immutable execution manifests and atomic worker/call claims in the shared experiment schema. */
 import { randomUUID } from 'node:crypto';
 import { COST_DDL, type CostControls } from './cost-schema';
-import { getCostAccount, initializeCostAccount, type CostAccountSummary } from './cost-store';
+import { getCostAccount, initializeCostAccount, requireCostDispatch, type CostAccountSummary } from './cost-store';
 import { estimateDevelopmentCost } from './cost';
 import { redactSecrets } from '@/modules/llm/provider-error';
 import { redactPromptSecrets } from '@/modules/kernel/llm-calls';
@@ -30,8 +30,8 @@ export type ExecutionManifest = {
   retry_policy: { http_max_attempts: 1; uncertain_resend: false; user_rerun: 'fresh_attempt_may_charge' };
 };
 export type SectionAttempt = { id: string; execution_id: string; experiment_id: string; section: DevelopmentSection; ordinal: number; status: SectionStatus; result: DevelopmentSectionResult | null; error: string | null; created_at: string; started_at: string | null; finished_at: string | null; prerequisites: Partial<Record<DevelopmentSection, string>> };
-export type CallReceipt = { text: string; usage: LlmUsage | null; cost_usd: number | null; price_source: string | null; llm_call_id: string | null };
-export type ExecutionCall = { id: string; execution_id: string; section_id: string; ordinal: number; identity: string; request: RawCompletionCall; route: FrozenRoute; status: 'queued' | 'sending' | 'succeeded' | 'failed' | 'needs_attention'; receipt: CallReceipt | null; error: string | null; failure_accounting: Pick<CallReceipt, 'usage' | 'cost_usd' | 'price_source'> | null; created_at: string; sending_at: string | null; settled_at: string | null };
+export type CallReceipt = { billing?: import('./cost').UsageCost; text: string; usage: LlmUsage | null; cost_usd: number | null; price_source: string | null; llm_call_id: string | null };
+export type ExecutionCall = { id: string; execution_id: string; section_id: string; ordinal: number; identity: string; request: RawCompletionCall; route: FrozenRoute; status: 'queued' | 'sending' | 'succeeded' | 'failed' | 'needs_attention'; receipt: CallReceipt | null; error: string | null; failure_accounting: Pick<CallReceipt, 'usage' | 'cost_usd' | 'price_source' | 'billing'> | null; created_at: string; sending_at: string | null; settled_at: string | null };
 export type EvaluationStatus = 'unscored' | 'queued' | 'running' | 'succeeded' | 'failed' | 'blocked' | 'outdated' | 'not_applicable';
 export type EvaluationIdentity = { attempt_id: string; output_id: string; profile_id: string; evaluator_identity: string; reference_identity: string; reference_ids: string[] };
 export type EvaluationAssociation = EvaluationIdentity & { id: string; experiment_id: string; status: EvaluationStatus; created_at: string };
@@ -214,8 +214,11 @@ export async function checkpointCall(execution: Execution, token: string, sectio
 }
 /** CAS transition: at most one delivery may turn a queued request into a sending request. */
 export async function beginCall(id: string, token: string, callId: string): Promise<boolean> {
-  const rows = await sharedDb().execute(sql`with owner as (select id from development_executions where id=${id} and claim_token=${token} and claim_until>clock_timestamp() and generation_status='running' for update) update development_execution_calls set status='sending',sending_at=now() where id=${callId} and execution_id=${id} and status='queued' and exists(select 1 from owner) returning id`);
-  return Boolean(rows[0]);
+  return sharedDb().transaction(async tx => {
+    await requireCostDispatch(tx, id, callId, 'generation');
+    const rows = await tx.execute(sql`with owner as (select id from development_executions where id=${id} and claim_token=${token} and claim_until>clock_timestamp() and generation_status='running' for update) update development_execution_calls set status='sending',sending_at=now() where id=${callId} and execution_id=${id} and status='queued' and sending_at is null and exists(select 1 from owner) returning id`);
+    return Boolean(rows[0]);
+  });
 }
 /** Settle a receipt before replay is allowed to expose its text; storage failure leaves sending intact. */
 export async function settleCall(id: string, token: string, callId: string, receipt: CallReceipt | null, error: string | null = null, failure: ExecutionCall['failure_accounting'] = null): Promise<void> {

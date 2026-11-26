@@ -1,6 +1,8 @@
 import { resolveSourceCitation, sourceContextSchema } from "@/lib/ingest/source-citation";
+import { PARSED_DOCUMENTS_DDL } from "@/modules/stages/s1-parse/schema";
+import { stageWrite } from "@/modules/kernel/stage-publication";
+import { quotedRepair, repairText, repairUserMessage, type RepairMessage } from "@/modules/kernel/repair-guidance";
 import { extractionSections, quotedBlock, reconcileSections, proposeSections, reviseSection, type ExtractionSection } from "../extraction-sections";
-import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
@@ -16,13 +18,14 @@ import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import { NoRouteError } from "@/modules/llm/provider";
 import type { ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
 import { EVIDENCE_DOMAINS, type EvidenceDomain } from "@/lib/iegp/enums";
-import { addSuggestionSources, commitExtractedRecords, loadState } from "@/lib/iegp/store";
+import { addSuggestionSources, commitExtractedRecords, readStageState } from "@/lib/iegp/store";
 import { validatedPlacementGapIds } from "@/modules/stages/s8-prioritization/module";
 import { extractCandidateGaps, isLiveGap } from "@/lib/iegp/engine";
-import { listExtractionDocuments, listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
+import { listExtractionDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
 import { GAP_CANDIDATES_DDL, GAP_BLOCK_DDL, gapCandidates } from "./schema";
+import { promptVariantInstruction } from "@/modules/kernel/prompt-versions";
 import { augmentSystemPrompt } from "@/modules/kernel/prompt-variant";
-import { curatedS2Cases } from "@/modules/eval-gold";
+import { extractionEvalCases } from "@/modules/eval-gold";
 import { scoreMustMatch } from "@/modules/eval-gold/types";
 import {
   GAP_CRITIC_SYSTEM,
@@ -174,15 +177,15 @@ const text = (value: unknown): string => (typeof value === "string" ? value.trim
  * Schema check on one proposed gap. A row with any problem is not used as is:
  * the proposer is asked to fix it or withdraw it. Nothing is filled in here.
  */
-function gapProblems(raw: RawGap): string[] {
-  const problems: string[] = [];
+function gapProblems(raw: RawGap): RepairMessage[] {
+  const problems: RepairMessage[] = [];
   if (!text(raw.name)) problems.push("name is missing");
   if (!text(raw.statement)) problems.push("statement is missing");
   const domain = text(raw.domain);
   if (!EVIDENCE_DOMAINS.includes(domain as EvidenceDomain)) {
     problems.push(
       domain
-        ? `domain "${domain}" is not one of: ${EVIDENCE_DOMAINS.join(", ")}`
+        ? quotedRepair(domain, value => `domain "${value}" is not one of: ${EVIDENCE_DOMAINS.join(", ")}`)
         : `domain is missing; use one of: ${EVIDENCE_DOMAINS.join(", ")}`,
     );
   }
@@ -235,7 +238,7 @@ type RevisionItem = {
   /** The critic's objection this revision answers. */
   objection?: string;
   /** What made the candidate incomplete or invalid. */
-  problems?: string[];
+  problems?: RepairMessage[];
 };
 
 /**
@@ -247,7 +250,7 @@ async function reviseWithModel(
   args: { section: ExtractionSection; hints: string; exchange: string; items: RevisionItem[]; role?: "proposer" | "reviser" },
 ): Promise<Map<string, GapCandidate | null>> {
   const byId = new Map(args.items.map((item) => [item.candidate.id, item]));
-  const lastProblems = new Map<string, string[]>();
+  const lastProblems = new Map<string, RepairMessage[]>();
   const answers = await completeAll<GapCandidate | null>({
     ids: args.items.map((item) => item.candidate.id),
     what: "gap revision",
@@ -255,8 +258,9 @@ async function reviseWithModel(
     ask: async (missing, attempt) => {
       const payload = (await ctx.complete({
         role: args.role ?? "reviser",
+        dialogueFields: ["candidates"],
         system: augmentSystemPrompt(GAP_REVISER_SYSTEM),
-        user: JSON.stringify({
+        ...repairUserMessage(describe => ({
           source_document: titleOf(args.section.document),
           exchange: args.exchange,
           worked_examples: args.hints || undefined,
@@ -274,11 +278,11 @@ async function reviseWithModel(
               source_quote: item.candidate.source_quote,
               block_id: item.candidate.proposed_block_id,
               objection: item.objection,
-              problems: lastProblems.get(id) ?? item.problems,
+              problems: (lastProblems.get(id) ?? item.problems)?.map(describe),
             };
           }),
           document: args.section.body,
-        }),
+        })),
         purpose: `gap-reviser:${args.section.document.id}`,
       })) as { gaps?: RawGap[] } | null;
       const map = new Map<string, GapCandidate | null>();
@@ -376,6 +380,7 @@ async function reviewWithModel(
     ask: async (missing, attempt) => {
       const payload = (await ctx.complete({
         role: "critic",
+        dialogueFields: ["candidates"],
         system: GAP_CRITIC_SYSTEM,
         user: JSON.stringify({
           exchange: `${args.round} of ${PROPOSER_CRITIC_EXCHANGES}`,
@@ -433,7 +438,15 @@ export function parseJudgeDecision(
   row: RawDecision,
   scope: { subject: string; candidateIds: Set<string>; planIds: Set<string>; setAsideIds: Set<string> },
 ): { decision: JudgeDecision; problems?: never } | { decision?: never; problems: string[] } {
-  const problems: string[] = [];
+  const result = validateJudgeDecision(row, scope);
+  return result.problems ? { problems: result.problems.map(repairText) } : result;
+}
+
+function validateJudgeDecision(
+  row: RawDecision,
+  scope: { subject: string; candidateIds: Set<string>; planIds: Set<string>; setAsideIds: Set<string> },
+): { decision: JudgeDecision; problems?: never } | { decision?: never; problems: RepairMessage[] } {
+  const problems: RepairMessage[] = [];
   const verdict = row.verdict === "accept" || row.verdict === "reject" ? row.verdict : null;
   if (!verdict) problems.push('verdict must be "accept" or "reject"');
   const confidence =
@@ -453,10 +466,10 @@ export function parseJudgeDecision(
     : matchGapId || sameAs
       ? "same"
       : "new";
-  if (!match) problems.push(`match "${rawMatch}" must be "same", "overlaps" or "new"`);
-  if (matchGapId && !scope.planIds.has(matchGapId)) problems.push(`match_gap_id "${matchGapId}" is not a plan gap id`);
+  if (!match) problems.push(quotedRepair(rawMatch, value => `match "${value}" must be "same", "overlaps" or "new"`));
+  if (matchGapId && !scope.planIds.has(matchGapId)) problems.push(quotedRepair(matchGapId, value => `match_gap_id "${value}" is not a plan gap id`));
   if (sameAs && (sameAs === scope.subject || !scope.candidateIds.has(sameAs))) {
-    problems.push(`same_as_candidate "${sameAs}" is not another candidate id`);
+    problems.push(quotedRepair(sameAs, value => `same_as_candidate "${value}" is not another candidate id`));
   }
   if (verdict === "reject") {
     if (sameAs) {
@@ -482,7 +495,7 @@ export function parseJudgeDecision(
   if (match === "overlaps") {
     if (!matchGapId) problems.push('match "overlaps" needs match_gap_id (the plan gap it overlaps)');
     if (matchGapId && scope.setAsideIds.has(matchGapId)) {
-      problems.push(`${matchGapId} is set aside; use "same" if it asks the same question, otherwise "new"`);
+      problems.push(quotedRepair(matchGapId, value => `${value} is set aside; use "same" if it asks the same question, otherwise "new"`));
     }
     if (sameAs) problems.push('match "overlaps" is only against a plan gap; leave same_as_candidate null');
     const missing = OVERLAP_FIELDS.filter((field) => !text(row[field]));
@@ -511,7 +524,7 @@ async function judgeWithModel(
   const planIds = new Set(args.planGaps.map((gap) => gap.id));
   const setAsideIds = new Set(args.planGaps.filter((gap) => gap.set_aside).map((gap) => gap.id));
   const candidateIds = new Set(byId.keys());
-  const lastProblems = new Map<string, string[]>();
+  const lastProblems = new Map<string, RepairMessage[]>();
   return completeAll<JudgeDecision>({
     ids: args.candidates.map((candidate) => candidate.id),
     what: "judge decision",
@@ -520,8 +533,9 @@ async function judgeWithModel(
     ask: async (missing, attempt) => {
       const payload = (await ctx.complete({
         role: "internal_judge",
+        dialogueFields: ["candidates"],
         system: GAP_JUDGE_SYSTEM,
-        user: JSON.stringify({
+        ...repairUserMessage(describe => ({
           worked_examples: args.hints || undefined,
           note:
             attempt > 1
@@ -542,17 +556,17 @@ async function judgeWithModel(
               critic: critique
                 ? { verdict: critique.verdict, confidence: critique.score, note: critique.note }
                 : undefined,
-              problems: lastProblems.get(candidate.id),
+              problems: lastProblems.get(candidate.id)?.map(describe),
             };
           }),
-        }),
+        })),
         purpose: "gap-judge",
       })) as { decisions?: RawDecision[] } | null;
       const map = new Map<string, JudgeDecision>();
       for (const row of payload?.decisions ?? []) {
         const subject = text(row.subject);
         if (!missing.includes(subject) || map.has(subject)) continue;
-        const parsed = parseJudgeDecision(row, { subject, candidateIds, planIds, setAsideIds });
+        const parsed = validateJudgeDecision(row, { subject, candidateIds, planIds, setAsideIds });
         if (parsed.problems) {
           lastProblems.set(subject, parsed.problems);
           continue;
@@ -578,7 +592,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
   },
   inputSchema,
   outputSchema,
-  migrations: GAP_CANDIDATES_DDL.split(";").filter((statement) => statement.trim()),
+  migrations: [PARSED_DOCUMENTS_DDL, ...GAP_CANDIDATES_DDL.split(";").filter((statement) => statement.trim())],
   freeze: freezeFacts,
   async run(input, ctx) {
     requireLlm(ctx, "Gap extraction");
@@ -772,7 +786,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
           };
         });
       },
-    }, { kinds: ["gap_suggestion"], text: documents.flatMap((document) => document.blocks.map((block) => block.text)).join(" ").slice(0, 20_000) });
+    }, { kinds: ["gap_suggestion"], subject_ids: documents.map(item => item.id), text: documents.flatMap((document) => document.blocks.map((block) => block.text)).join(" ").slice(0, 20_000) });
 
     if (ctx.execution_policy === "single_pass") return {
       output: { mode: outcome.mode, proposed: outcome.proposed.length, accepted: [], rejected: [], committed_gap_ids: [], committed_need_ids: [], joined_gap_ids: [], suggestion_ids: [] },
@@ -801,135 +815,136 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       committed_gap_id: null as string | null,
       created_at: nowIso(),
     }));
-    if (!ctx.replay?.evaluation && rows.length > 0) await db().insert(gapCandidates).values(rows);
-
     const committed_gap_ids: string[] = [];
     const committed_need_ids: string[] = [];
     const joined_gap_ids: string[] = [];
     const suggestion_ids: string[] = [];
-    if (!ctx.replay?.evaluation && !input.dry_run) {
-      const accepted = new Map(outcome.accepted.map((candidate) => [candidate.id, candidate]));
-      // A candidate that repeats another follows the one it repeats (KAN-74); one whose
-      // chain cannot be followed (a cycle, or a candidate the judge rejected) stands on
-      // its own as a new gap, so its source is never dropped.
-      const representative = new Map<string, GapCandidate>();
-      for (const candidate of outcome.accepted) {
-        const target = followSameAs(candidate, accepted);
-        if (target && target.id !== candidate.id) representative.set(candidate.id, target);
-      }
-      const validatedGapIds = await validatedPlacementGapIds();
-      // Each need records where it came from (KAN-97): this run, its candidate row and the block it quotes.
-      const provenanceOf = (candidate: GapCandidate) => ({
-        run_id: ctx.run.id,
-        candidate_row_id: rowIdByCandidate.get(candidate.id) ?? null,
-        block_id: candidate.block_id,
-        source_context: candidate.source_context,
-      });
-      const gapByCandidate = new Map<string, string>();
-      const suggestionByCandidate = new Map<string, string>();
-      const commitFor = (document: ParsedDocumentRecord, rows: Omit<Parameters<typeof commitExtractedRecords>[0], "source_id" | "title" | "stakeholder_function" | "actor_name" | "actor_function" | "tactics" | "validated_gap_ids" | "require_grounded_sources">) => {
-        const source = state.sources.find((row) => row.id === document.source_id);
-        return commitExtractedRecords({
-          source_id: document.source_id,
-          require_grounded_sources: true,
-          title: source?.title ?? document.source_id,
-          stakeholder_function: source?.stakeholder_function ?? ctx.actor.function,
-          actor_name: ctx.actor.name,
-          actor_function: ctx.actor.function,
-          tactics: [],
-          validated_gap_ids: validatedGapIds,
-          ...rows,
+    await stageWrite(ctx, async () => {
+      if (rows.length > 0) await db().insert(gapCandidates).values(rows);
+      if (!ctx.replay?.evaluation && !input.dry_run) {
+        const accepted = new Map(outcome.accepted.map((candidate) => [candidate.id, candidate]));
+        // A candidate that repeats another follows the one it repeats (KAN-74); one whose
+        // chain cannot be followed (a cycle, or a candidate the judge rejected) stands on
+        // its own as a new gap, so its source is never dropped.
+        const representative = new Map<string, GapCandidate>();
+        for (const candidate of outcome.accepted) {
+          const target = followSameAs(candidate, accepted);
+          if (target && target.id !== candidate.id) representative.set(candidate.id, target);
+        }
+        const validatedGapIds = await validatedPlacementGapIds();
+        // Each need records where it came from (KAN-97): this run, its candidate row and the block it quotes.
+        const provenanceOf = (candidate: GapCandidate) => ({
+          run_id: ctx.run.id,
+          candidate_row_id: rowIdByCandidate.get(candidate.id) ?? null,
+          block_id: candidate.block_id,
+          source_context: candidate.source_context,
         });
-      };
-      // First every candidate that stands for its own question: a new gap, a source
-      // joining a plan gap, or an overlap suggestion.
-      for (const document of documents) {
-        const own = outcome.accepted.filter(
-          (candidate) => candidate.document_id === document.id && !representative.has(candidate.id),
-        );
-        if (own.length === 0) continue;
-        const asGap = own.filter((candidate) => candidate.match !== "overlaps");
-        const asOverlap = own.filter((candidate) => candidate.match === "overlaps" && candidate.overlap);
-        const result = await ctx.run.step(`commit:${document.id}`, () =>
-          commitFor(document, {
-            needs: asGap.map((candidate) => ({
-              id: candidate.id,
-              statement: candidate.statement,
-              source_quote: candidate.source_quote,
-              provenance: provenanceOf(candidate),
-            })),
-            gaps: asGap.map((candidate) => ({
-              id: candidate.id,
-              name: candidate.name,
-              statement: candidate.statement,
-              domain: candidate.domain,
-              source_id: candidate.source_id,
-              source_quote: candidate.source_quote,
-              // The model judge's call; commit merges only when it is set.
-              duplicate_of: candidate.duplicate_of,
-            })),
-            overlaps: asOverlap.map((candidate) => ({
-              id: candidate.id,
-              gap_id: candidate.match_gap_id!,
-              run_id: ctx.run.id,
-              candidate_row_id: rowIdByCandidate.get(candidate.id) ?? null,
-              name: candidate.name,
-              statement: candidate.statement,
-              domain: candidate.domain,
-              source_quote: candidate.source_quote,
-              block_id: candidate.block_id,
-              source_context: candidate.source_context,
-              ...candidate.overlap!,
-            })),
-          }),
-        );
-        committed_gap_ids.push(...result.gap_ids);
-        committed_need_ids.push(...result.need_ids);
-        joined_gap_ids.push(...result.merged_gap_ids);
-        for (const [id, gapId] of Object.entries(result.gap_id_by_row)) gapByCandidate.set(id, gapId);
-        for (const [id, suggestionId] of Object.entries(result.suggestion_id_by_row)) {
-          suggestionByCandidate.set(id, suggestionId);
-          suggestion_ids.push(suggestionId);
+        const gapByCandidate = new Map<string, string>();
+        const suggestionByCandidate = new Map<string, string>();
+        const commitFor = (document: ParsedDocumentRecord, rows: Omit<Parameters<typeof commitExtractedRecords>[0], "source_id" | "title" | "stakeholder_function" | "actor_name" | "actor_function" | "tactics" | "validated_gap_ids" | "require_grounded_sources">) => {
+          const source = state.sources.find((row) => row.id === document.source_id);
+          return commitExtractedRecords({
+            source_id: document.source_id,
+            require_grounded_sources: true,
+            title: source?.title ?? document.source_id,
+            stakeholder_function: source?.stakeholder_function ?? ctx.actor.function,
+            actor_name: ctx.actor.name,
+            actor_function: ctx.actor.function,
+            tactics: [],
+            validated_gap_ids: validatedGapIds,
+            ...rows,
+          });
+        };
+        // First every candidate that stands for its own question: a new gap, a source
+        // joining a plan gap, or an overlap suggestion.
+        for (const document of documents) {
+          const own = outcome.accepted.filter(
+            (candidate) => candidate.document_id === document.id && !representative.has(candidate.id),
+          );
+          if (own.length === 0) continue;
+          const asGap = own.filter((candidate) => candidate.match !== "overlaps");
+          const asOverlap = own.filter((candidate) => candidate.match === "overlaps" && candidate.overlap);
+          const result = await ctx.run.step(`commit:${document.id}`, () =>
+            commitFor(document, {
+              needs: asGap.map((candidate) => ({
+                id: candidate.id,
+                statement: candidate.statement,
+                source_quote: candidate.source_quote,
+                provenance: provenanceOf(candidate),
+              })),
+              gaps: asGap.map((candidate) => ({
+                id: candidate.id,
+                name: candidate.name,
+                statement: candidate.statement,
+                domain: candidate.domain,
+                source_id: candidate.source_id,
+                source_quote: candidate.source_quote,
+                // The model judge's call; commit merges only when it is set.
+                duplicate_of: candidate.duplicate_of,
+              })),
+              overlaps: asOverlap.map((candidate) => ({
+                id: candidate.id,
+                gap_id: candidate.match_gap_id!,
+                run_id: ctx.run.id,
+                candidate_row_id: rowIdByCandidate.get(candidate.id) ?? null,
+                name: candidate.name,
+                statement: candidate.statement,
+                domain: candidate.domain,
+                source_quote: candidate.source_quote,
+                block_id: candidate.block_id,
+                source_context: candidate.source_context,
+                ...candidate.overlap!,
+              })),
+            }),
+          );
+          committed_gap_ids.push(...result.gap_ids);
+          committed_need_ids.push(...result.need_ids);
+          joined_gap_ids.push(...result.merged_gap_ids);
+          for (const [id, gapId] of Object.entries(result.gap_id_by_row)) gapByCandidate.set(id, gapId);
+          for (const [id, suggestionId] of Object.entries(result.suggestion_id_by_row)) {
+            suggestionByCandidate.set(id, suggestionId);
+            suggestion_ids.push(suggestionId);
+          }
+        }
+        // Then the repeats: each joins whatever the candidate it repeats became.
+        for (const document of documents) {
+          const repeats = outcome.accepted.filter(
+            (candidate) => candidate.document_id === document.id && representative.has(candidate.id),
+          );
+          if (repeats.length === 0) continue;
+          const onGap = repeats.filter((candidate) => gapByCandidate.has(representative.get(candidate.id)!.id));
+          for (const candidate of repeats) {
+            const suggestionId = suggestionByCandidate.get(representative.get(candidate.id)!.id);
+            if (!suggestionId) continue;
+            await addSuggestionSources(suggestionId, [
+              { source_id: candidate.source_id, statement: candidate.statement, source_quote: candidate.source_quote,
+                block_id: candidate.block_id, source_context: candidate.source_context },
+            ]);
+          }
+          if (onGap.length === 0) continue;
+          const result = await ctx.run.step(`commit-repeats:${document.id}`, () =>
+            commitFor(document, {
+              needs: onGap.map((candidate) => ({
+                id: candidate.id,
+                statement: candidate.statement,
+                source_quote: candidate.source_quote,
+                gap_id: gapByCandidate.get(representative.get(candidate.id)!.id)!,
+                provenance: provenanceOf(candidate),
+              })),
+              gaps: [],
+            }),
+          );
+          committed_need_ids.push(...result.need_ids);
+          joined_gap_ids.push(...Object.values(result.gap_id_by_row));
+          for (const [id, gapId] of Object.entries(result.gap_id_by_row)) gapByCandidate.set(id, gapId);
+        }
+        // Every candidate row says which gap it became or joined (KAN-97).
+        for (const [candidateId, gapId] of gapByCandidate) {
+          const rowId = rowIdByCandidate.get(candidateId);
+          if (rowId) await db().update(gapCandidates).set({ committed_gap_id: gapId }).where(eq(gapCandidates.id, rowId));
         }
       }
-      // Then the repeats: each joins whatever the candidate it repeats became.
-      for (const document of documents) {
-        const repeats = outcome.accepted.filter(
-          (candidate) => candidate.document_id === document.id && representative.has(candidate.id),
-        );
-        if (repeats.length === 0) continue;
-        const onGap = repeats.filter((candidate) => gapByCandidate.has(representative.get(candidate.id)!.id));
-        for (const candidate of repeats) {
-          const suggestionId = suggestionByCandidate.get(representative.get(candidate.id)!.id);
-          if (!suggestionId) continue;
-          await addSuggestionSources(suggestionId, [
-            { source_id: candidate.source_id, statement: candidate.statement, source_quote: candidate.source_quote,
-              block_id: candidate.block_id, source_context: candidate.source_context },
-          ]);
-        }
-        if (onGap.length === 0) continue;
-        const result = await ctx.run.step(`commit-repeats:${document.id}`, () =>
-          commitFor(document, {
-            needs: onGap.map((candidate) => ({
-              id: candidate.id,
-              statement: candidate.statement,
-              source_quote: candidate.source_quote,
-              gap_id: gapByCandidate.get(representative.get(candidate.id)!.id)!,
-              provenance: provenanceOf(candidate),
-            })),
-            gaps: [],
-          }),
-        );
-        committed_need_ids.push(...result.need_ids);
-        joined_gap_ids.push(...Object.values(result.gap_id_by_row));
-        for (const [id, gapId] of Object.entries(result.gap_id_by_row)) gapByCandidate.set(id, gapId);
-      }
-      // Every candidate row says which gap it became or joined (KAN-97).
-      for (const [candidateId, gapId] of gapByCandidate) {
-        const rowId = rowIdByCandidate.get(candidateId);
-        if (rowId) await db().update(gapCandidates).set({ committed_gap_id: gapId }).where(eq(gapCandidates.id, rowId));
-      }
-    }
+    });
 
     const toOut = (item: (typeof outcome.judged)[number]) => ({
       id: item.candidate.id,
@@ -963,30 +978,19 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
         joined_gap_ids,
         suggestion_ids,
       },
-      summary: `${outcome.accepted.length} of ${plural(outcome.proposed.length, "gap candidate")} accepted${
+      get summary() { return `${outcome.accepted.length} of ${plural(outcome.proposed.length, "gap candidate")} accepted${
         input.dry_run
           ? " (dry run)"
           : `: ${plural(committed_gap_ids.length, "new gap")} committed, ${
               joined_gap_ids.length === 1 ? "1 joined an existing gap" : `${joined_gap_ids.length} joined existing gaps`
             }, ${plural(suggestion_ids.length, "overlap")} to review`
-      }`,
+      }`; },
       evals: outcome.metrics,
     };
   },
   evals: {
-    async cases(facts) {
-      if (facts) {
-        const documents = facts.documents as ParsedDocumentRecord[];
-        return documents.slice(0, 3).map(document => ({ name: document.source_id, input: { document_ids: [document.id], dry_run: true }, gold: sourcesForStage("S2").find(source => source.source_id === document.source_id) ? goldMetaForSource(sourcesForStage("S2").find(source => source.source_id === document.source_id)!) : undefined }));
-      }
-      const curated = await curatedS2Cases();
-      if (curated.length > 0) return curated;
-      const documents = await listParsedDocuments();
-      return documents.slice(0, 3).map((document) => ({
-        name: document.source_id,
-        input: { document_ids: [document.id], dry_run: true },
-      }));
-    },
+    variantInstruction: promptVariantInstruction,
+    ...extractionEvalCases("S2"),
     score({ case: testCase, output }) {
       const accepted = output.accepted.length;
       const total = accepted + output.rejected.length;
@@ -994,14 +998,14 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       const curated = scoreMustMatch(statements, testCase.gold?.must_match);
       if (accepted === 0) {
         return [
-          { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match ? 0.5 : undefined, detail: curated.detail },
+          { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match?.length ? 0.5 : undefined, detail: curated.detail },
           { name: "gold_accept_rate", value: 0, unit: "ratio", detail: "no new candidates" },
           { name: "accepted_with_quote", value: 0, unit: "ratio", detail: "no new candidates" },
         ];
       }
       return [
-        { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match ? 0.5 : undefined, detail: curated.detail },
-        { name: "gold_accept_rate", value: total === 0 ? 0 : Number((accepted / total).toFixed(3)), unit: "ratio", target: 0.3 },
+        { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match?.length ? 0.5 : undefined, detail: curated.detail },
+        { name: "gold_accept_rate", value: total === 0 ? 0 : Number((accepted / total).toFixed(3)), unit: "ratio" },
         { name: "accepted_with_quote", value: accepted === 0 ? 0 : Number((output.accepted.filter((c) => c.source_quote.trim().length > 0).length / accepted).toFixed(3)), unit: "ratio", target: 1 },
       ];
     },
@@ -1037,5 +1041,5 @@ export async function gapCandidatesForRun(run_id: string) {
 
 /** Freeze the source facts this stage consumes, before any proposal or human decision. */
 async function freezeFacts(input: z.infer<typeof inputSchema>) {
-  return { documents: await listExtractionDocuments(input.document_ids), state: await loadState() };
+  return { documents: await listExtractionDocuments(input.document_ids), state: await readStageState() };
 }

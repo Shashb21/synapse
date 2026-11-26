@@ -225,9 +225,19 @@ export type JsonCompletion = (args: {
   purpose: string;
   maxTokens?: number;
   requestBudget?: ProviderRequestBudget;
+  /** Top-level JSON fields populated by previous model replies, for diagnostic template identity. */
+  dialogueFields?: readonly string[];
+  /** Authored validation instructions embedded in those dialogue fields, with generated terms excluded. */
+  repairGuidance?: readonly string[];
 }) => Promise<unknown>;
 
 export type ModuleContext = {
+  /** Kernel collects model-derived writes until the complete output has passed validation. */
+  deferWrite?: (write: () => Promise<void>) => void;
+  /** The stage has committed its customer edits on its own workspace transaction. */
+  onMutationCommitted?: () => void;
+  /** Set by the owner evaluation routes for their dry runs. */
+  purpose?: "owner_evaluation";
   execution_policy?: "standard" | "single_pass";
   /** Enables source-only candidate eligibility, never customer acceptance. Requires evaluation replay. */
   execution_scope?: "development";
@@ -267,8 +277,12 @@ export type EvalCase<I> = {
 };
 
 export type EvalHarness<I, O> = {
+  /** Effective system instruction appended by this implementation for each sweep variant. */
+  variantInstruction?: (version: import("./prompt-versions").PromptVersionId) => string;
   /** Gold cases the stage scores itself against. */
   cases: (facts?: Record<string, unknown>) => Promise<EvalCase<I>[]>;
+  /** Attach gold only after checking the exact frozen input that will run. */
+  goldForCase?: (test: EvalCase<I>, facts: Record<string, unknown>) => EvalCase<I>["gold"];
   score: (args: { case: EvalCase<I>; output: O }) => EvalScore[];
   /** Stage-owned restricted gold context; preserve score semantics over this subject subset. */
   reserveGold?: (facts: Record<string, unknown>, subject_ids: string[]) => Promise<{
@@ -281,6 +295,8 @@ export interface SynapseModule<I, O> {
   manifest: ModuleManifest;
   inputSchema: ZodType<I>;
   outputSchema: ZodType<O>;
+  /** Transient capture for a run whose raw inputs must never become saved replay cases. */
+  captureForRun?(input: I): Promise<Record<string, unknown>>;
   /** Capture domain facts before computation; used unchanged by both evaluation arms. */
   freeze?(input: I): Promise<Record<string, unknown>>;
   /**

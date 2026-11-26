@@ -1,6 +1,6 @@
 import { ownerGate } from "@/modules/auth/owner";
 import { POST as runEvals } from "@/app/api/modules/evals/route";
-import { inAdminWorkspace, peekBody } from "../_shared";
+import { inSelectedDiagnosticWorkspace } from "../_shared";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -10,5 +10,5 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   const denied = await ownerGate();
   if (denied) return denied;
-  return inAdminWorkspace(await peekBody(request), () => runEvals(request));
+  return inSelectedDiagnosticWorkspace(request, () => runEvals(request));
 }

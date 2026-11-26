@@ -3,6 +3,7 @@ import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { sql } from "drizzle-orm";
 import * as schema from "./schema";
+import { inEvaluationIsolation } from "@/modules/kernel/evaluation-isolation";
 import { currentSchema, DEFAULT_SCHEMA } from "@/modules/workspaces/context";
 import { workspaceTableStatements } from "./workspace-tables";
 import { legacyPlanCarryOverStatements } from "./legacy-plan";
@@ -590,11 +591,14 @@ export function onWorkspaceBootstrap(hook: BootstrapHook): () => void {
 }
 
 const bootstrapped = new Map<string, Promise<void>>();
+const planCarryOver = new Map<string, Promise<void>>();
 
-/** Forgets that `name` (or every schema) was bootstrapped, so its DDL runs again on next use. */
+/** Forget schema setup and legacy plan migration so they run again on next use. */
 export function forgetSchemaBootstrap(name?: string) {
-  if (name) bootstrapped.delete(name);
-  else bootstrapped.clear();
+  for (const completed of [bootstrapped, planCarryOver]) {
+    if (name) completed.delete(name);
+    else completed.clear();
+  }
 }
 
 /**
@@ -608,23 +612,25 @@ async function loadModules() {
 async function bootstrap(run: RunStatement) {
   await run("set client_min_messages to warning");
   for (const stmt of iegpStatements()) await run(stmt);
-  // The retired priority board and roadmap carry over into S8 and mappings (KAN-17).
-  for (const stmt of legacyPlanCarryOverStatements()) await run(stmt);
   for (const hook of [...bootstrapHooks]) await hook(run);
+}
+
+async function carryOverLegacyPlan(run: RunStatement) {
+  for (const stmt of legacyPlanCarryOverStatements()) await run(stmt);
 }
 
 /**
  * Runs `build` once per schema per process. A failure is forgotten, so the
  * next call retries instead of one DB blip breaking the process for good.
  */
-function once(name: string, build: () => Promise<void>): Promise<void> {
-  let ready = bootstrapped.get(name);
+function once(completed: Map<string, Promise<void>>, name: string, build: () => Promise<void>): Promise<void> {
+  let ready = completed.get(name);
   if (!ready) {
     const attempt = build();
     ready = attempt;
-    bootstrapped.set(name, attempt);
+    completed.set(name, attempt);
     attempt.catch(() => {
-      if (bootstrapped.get(name) === attempt) bootstrapped.delete(name);
+      if (completed.get(name) === attempt) completed.delete(name);
     });
   }
   return ready;
@@ -633,11 +639,16 @@ function once(name: string, build: () => Promise<void>): Promise<void> {
 /** Creates a workspace schema and every table in it, once per process. */
 export async function ensureWorkspaceSchema(name: string): Promise<void> {
   if (!/^ws_[a-z0-9_]+$/.test(name)) throw new Error(`Not a workspace schema: ${name}`);
-  await once(name, async () => {
+  await once(bootstrapped, name, async () => {
     await loadModules();
     await client().unsafe(`CREATE SCHEMA IF NOT EXISTS "${name}"`);
     await onSchema(name, (pg) => bootstrap((statement) => pg.unsafe(statement)));
   });
+  // The legacy migration writes placements, mappings and audit rows. Defer it
+  // until ordinary workspace use even when a diagnostic applied the table DDL.
+  if (!inEvaluationIsolation()) {
+    await once(planCarryOver, name, () => onSchema(name, (pg) => carryOverLegacyPlan((statement) => pg.unsafe(statement))));
+  }
 }
 
 /**
@@ -647,10 +658,13 @@ export async function ensureWorkspaceSchema(name: string): Promise<void> {
 export async function ensureCurrentSchemaTables(): Promise<void> {
   const name = await currentSchemaName();
   if (name !== DEFAULT_SCHEMA) return ensureWorkspaceSchema(name);
-  await once(DEFAULT_SCHEMA, async () => {
+  await once(bootstrapped, DEFAULT_SCHEMA, async () => {
     await loadModules();
     await bootstrap((statement) => client().unsafe(statement));
   });
+  if (!inEvaluationIsolation()) {
+    await once(planCarryOver, DEFAULT_SCHEMA, () => carryOverLegacyPlan((statement) => client().unsafe(statement)));
+  }
 }
 
 /**

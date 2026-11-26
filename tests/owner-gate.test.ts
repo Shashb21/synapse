@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 const jar = vi.hoisted(() => ({ values: new Map<string, string>() }));
 
@@ -18,6 +18,10 @@ import { GET as controlGet, POST as controlPost } from "@/app/api/control/route"
 import { GET as modulesGet, POST as modulesPost } from "@/app/api/modules/route";
 import { POST as evalsPost } from "@/app/api/modules/evals/route";
 import { POST as hillclimbPost } from "@/app/api/modules/hillclimb/route";
+import { createGap, resetDemoSetup, validateGap } from "@/lib/iegp/store";
+import { listEvalRuns } from "@/modules/kernel/evals";
+import { listRuns } from "@/modules/kernel/observability";
+import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 import { GET as docGet } from "@/app/admin/docs/sdlc/[slug]/route";
 import nextConfig, { ADMIN_REDIRECTS } from "../next.config";
 
@@ -135,6 +139,72 @@ describe("admin APIs are owner only", () => {
     expect((await controlPost(post("/api/control", { action: "sign_out" }))).status).toBe(200);
     const axes = await controlPost(post("/api/control", { action: "save_axes", config: {} }));
     expect(axes.status).not.toBe(403);
+  });
+});
+
+describe("prioritization evaluations with an unready inventory", () => {
+  const actor = { actor_name: "Evaluation Reviewer", actor_function: "medical_affairs" as const };
+  let openGap: string;
+  let blocker: string;
+
+  beforeAll(async () => {
+    await resetDemoSetup();
+    openGap = await createGap({ ...actor, statement: "Comparative treatment safety is missing" });
+    await validateGap({ ...actor, gap_id: openGap });
+    blocker = await createGap({ ...actor, statement: "Evidence for a different population is awaiting review" });
+  });
+
+  afterAll(async () => {
+    await resetDemoSetup();
+  });
+
+  it.each([
+    ["evals", evalsPost],
+    ["hillclimb", hillclimbPost],
+  ] as const)("runs the owner %s harness without changing placements", async (name, handler) => {
+    const before = await listPlacements();
+    const liveRunsBefore = await listRuns({ stage: "S8" });
+    const response = await handler(post(`/api/modules/${name}`, { stage: "S8", ...actor }));
+
+    const body = await response.json();
+    expect(response.status, JSON.stringify(body)).toBe(200);
+    if (name === "evals") {
+      expect(body).toMatchObject({ ok: true, cases: expect.any(Number), group_id: expect.any(String) });
+      expect(body.cases).toBeGreaterThan(0);
+      const summaries = await listEvalRuns({ stage: "S8", kind: "harness_summary" });
+      expect(summaries).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: body.eval_run_id, group_id: body.group_id, passed: null }),
+      ]));
+    } else {
+      expect(body).toMatchObject({
+        ok: true,
+        variants: [],
+        champion: null,
+        reason: expect.stringMatching(/\S/),
+      });
+    }
+    expect(await listRuns({ stage: "S8" })).toEqual(liveRunsBefore);
+    expect(await listPlacements()).toEqual(before);
+  });
+
+  it("requires inventory readiness for a direct dry run with caller-supplied evaluation fields", async () => {
+    asCustomer();
+    const before = await listPlacements();
+    const response = await modulesPost(post("/api/modules", {
+      stage: "S8",
+      purpose: "owner_evaluation",
+      input: {
+        gap_ids: [openGap],
+        dry_run: true,
+        purpose: "owner_evaluation",
+        replay: { evaluation: true },
+      },
+    }));
+
+    const body = await response.json();
+    expect(response.status, JSON.stringify(body)).toBe(400);
+    expect(body).toMatchObject({ error: expect.stringMatching(new RegExp(`${blocker}.*confirm`, "i")) });
+    expect(await listPlacements()).toEqual(before);
   });
 });
 

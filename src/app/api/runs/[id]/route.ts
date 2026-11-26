@@ -26,7 +26,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const [edits, signals, evals] = await Promise.all([
     listEdits({ stage: run.stage, limit: 20 }),
     listSignals({ stage: run.stage, limit: 20 }),
-    listEvalRuns({ stage: run.stage, limit: 10 }),
+    listEvalRuns({ run_id: run.id, limit: 10 }),
   ]);
   return NextResponse.json({ run, llm_calls, llm_totals, edits, signals, evals });
 }
