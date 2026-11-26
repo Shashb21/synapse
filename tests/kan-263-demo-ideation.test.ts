@@ -19,7 +19,7 @@ import { POST as demoPost } from "@/app/api/demo/ideation-approvals/route";
 import { POST as planPost } from "@/app/api/plan/route";
 import { db } from "@/lib/iegp/db";
 import { suppliedJudgementRecords } from "@/lib/iegp/judgement-references";
-import { createGap, createProposedTactic, loadState } from "@/lib/iegp/store";
+import { createGap, createProposedTactic, loadState, validateGap } from "@/lib/iegp/store";
 import type { Role } from "@/modules/auth/roles";
 import { createSession } from "@/modules/auth/session";
 import { listAuditEvents } from "@/modules/kernel/audit";
@@ -118,6 +118,7 @@ beforeEach(async () => {
   await signIn();
   gap = await inDemo(async () => {
     const id = await createGap({ statement: "Comparative evidence is unavailable in the fictional population.", actor_name: actor.name, actor_function: actor.function });
+    await validateGap({ gap_id: id, actor_name: actor.name, actor_function: actor.function, note: "Confirmed the fixture evidence assessment" });
     await validatePlacement({ ...await priorityDecision(id, "This gap blocks the decision"), gap_id: id, band: "high", rationale: "This gap blocks the decision", actor });
     return id;
   });

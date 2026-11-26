@@ -149,6 +149,7 @@ describe("KAN-263 explicit customer demo routing", () => {
     vi.stubEnv("SYNAPSE_DEMO_RECORDING_ID", "b1d1d892-4f6f-46de-8ab0-4cab8f9eeef2");
     const route = await resolveRoute("S1", { ...config, stage: "S1" }, demoExecutionFor({ id: "demo", demo_mode: true }));
     const buffer = Buffer.from("The fictional evidence report describes a cost estimate.");
+    vi.spyOn(upload, "sourceFileVersions").mockResolvedValue([{ id: "sample", version: "fixture-version" }]);
     vi.spyOn(upload, "sourceFileContent").mockResolvedValue({
       buffer, record: {
         id: "sample", filename: "sample.txt", title: "Fictional evidence", source_type: "document",

@@ -45,11 +45,11 @@ describe("KAN-263 approved fictional fixture", () => {
   it.each([
     {
       stage: "S2", module: gapExtractModule, purpose: "gap-proposer", replyKey: "gaps",
-      blockRule: "- Include the block_id shown beside the heading when you can identify the quoted block.",
+      blockRule: " and give the containing block ID in block_id",
     },
     {
       stage: "S3", module: tacticExtractModule, purpose: "tactic-proposer", replyKey: "tactics",
-      blockRule: "- block_id: include the id shown beside the heading when you can identify the quoted block.",
+      blockRule: "- block_id: the ID of the block containing the full quotation.\n",
     },
   ] as const)("$stage refuses the current extraction request with fresh IDs and preserves the historical reply", async ({
     stage, module, purpose, replyKey, blockRule,
@@ -116,7 +116,7 @@ describe("KAN-263 approved fictional fixture", () => {
       currentRequests.push({ ...request, stage });
       const user = doc.blocks.reduce((prompt, { heading, id }) =>
         prompt.replace(`## ${heading} [block_id=${id}]\n`, `## ${heading}\n`), request.user);
-      const system = request.system.replace(`\n${blockRule}`, "");
+      const system = request.system.replace(blockRule, "").replace(',"block_id":""', "");
       const historicalReply = extractJsonObject(replayReply({ ...request, stage, user, system })) as Record<string, unknown>;
       expect(historicalReply[replyKey]).toHaveLength(11);
       expect(() => replayReply({ ...request, stage, user })).toThrow(DemoReplayMissError);

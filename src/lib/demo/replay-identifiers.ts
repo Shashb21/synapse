@@ -3,7 +3,7 @@ import type { StageId } from "@/modules/kernel/contracts";
 /** The property paths whose values are allocated workspace IDs in the stage's prompt contract. */
 const requestPaths: Partial<Record<StageId, string[]>> = {
   S2: ["candidates.*.id", "candidates.*.subject", "plan_gaps.*.id"],
-  S3: ["source", "rows.*.id", "library.*.id", "candidates.*.id", "candidates.*.source", "batch.*.id", "decide.*.id", "decide.*.source"],
+  S3: ["source", "rows.*.id", "library.*.id", "candidates.*.id", "candidates.*.source", "batch.*.id", "batch.*.source", "decide.*.id", "decide.*.source"],
   S4: [
     "gaps.*.id", "gaps.*.assigned_tactic_ids.*", "gaps.*.human_rejected_tactic_ids.*",
     "gaps.*.previous.mappings.*.tactic_id", "gaps.*.previous.mappings.*.references.*.entity_id",

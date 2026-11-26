@@ -2,7 +2,7 @@ import { resolveSourceCitation, sourceContextSchema } from "@/lib/ingest/source-
 import { PARSED_DOCUMENTS_DDL } from "@/modules/stages/s1-parse/schema";
 import { stageWrite } from "@/modules/kernel/stage-publication";
 import { quotedRepair, repairText, repairUserMessage, type RepairMessage } from "@/modules/kernel/repair-guidance";
-import { extractionSections, promptBlockId, quotedBlock, reconcileSections, proposeSections, reviseSection, usesExtractionHandles, type ExtractionSection } from "../extraction-sections";
+import { extractionSections, promptBlockId, quotedBlock, reconcileSections, proposeSections, reviseSection, sourceBlockId, usesExtractionHandles, type ExtractionSection } from "../extraction-sections";
 import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
 import { desc } from "drizzle-orm";
 import { z } from "zod";
@@ -637,7 +637,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
       const citation = resolveSourceCitation({
         source_id: candidate.source_id,
         quote: candidate.source_quote,
-        proposed_block_id: candidate.proposed_block_id,
+        proposed_block_id: sourceBlockId(section, candidate.proposed_block_id),
         displayed,
         retained: state.blocks,
       });

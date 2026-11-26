@@ -52,7 +52,7 @@ function context(stage: Stage, docs: ParsedDocumentRecord[], mode: "record" | "r
       params: { temperature: 0, max_tokens: 16000 }, fallbacks: [], degraded: false, reason: null,
       demo: { workspace_id: workspaceId, fixture: VELMARA_DEMO_FIXTURE, ...(mode === "record" ? { mode, recording_id: recordingId } : { mode }) },
     },
-    replay: { evaluation: false, input: {}, facts: { documents: docs, state }, module_id: "scripted", module_version: "1", prompt_version: "v1.0-baseline" },
+    replay: { evaluation: false, input: {}, facts: { documents: docs, state: { ...state, blocks: docs.flatMap(doc => doc.blocks) } }, module_id: "scripted", module_version: "1", prompt_version: "v1.0-baseline" },
     complete,
   };
 }
@@ -98,7 +98,9 @@ function answer(stage: Stage, request: Request) {
   }
   const candidates: Candidate[] = gap || request.role === "critic" ? body.candidates : body.decide;
   if (!gap) {
-    expect(candidates.map(({ block_id }) => block_id)).toEqual(["block-3", "block-2", null, "block-1"]);
+    expect(candidates.map(({ block_id }) => block_id)).toEqual(request.role === "critic"
+      ? ["block-3", "block-2", "block-1", "block-1"]
+      : ["block-3", "block-2", "block-1"]);
   }
   expect(candidates.every(row => row.source_quote === quote)).toBe(true);
   if (request.role === "critic") return {
@@ -142,7 +144,10 @@ describe("KAN-263 extraction capture and reset replay", () => {
     };
     await extractor.run({ dry_run: false }, context(stage, documents(false), "record", script));
     const fixture = buildDemoRecording(rows, interval, "2026-11-25T00:11:00Z");
-    expect(fixture.calls).toHaveLength(stage === "S3" ? 10 : 9);
+    const purposes = rows.map(call => call.purpose);
+    expect(purposes.filter(purpose => purpose.endsWith("-critic"))).toHaveLength(3);
+    const judge = stage === "S3" ? "tactic-judge" : "gap-judge";
+    expect(purposes.some(purpose => purpose.startsWith(judge))).toBe(true);
     expect(rows[0]!.user_prompt).toContain("Original [block_id=SRC-021-B01] [block_id=block-1]");
     expect(rows[0]!.user_prompt).toContain(authoredLine);
     expect(() => replayReply({
@@ -174,11 +179,12 @@ describe("KAN-263 extraction capture and reset replay", () => {
     const expected = [
       [`${reset[0]!.id}-${kind}001-W2`, "SRC-121-B03"],
       [`${reset[0]!.id}-${kind}002-W2`, "SRC-121-B02"],
-      [`${reset[0]!.id}-${kind}003-W2`, null],
       [`${reset[1]!.id}-${kind}001`, "SRC-122-B01"],
     ];
     expect(replayed.output.accepted.map(row => [row.id, row.block_id ?? null])).toEqual(expected);
-    expect(insert.mock.calls[0]?.[0].map((row: { block_id: string | null }) => row.block_id)).toEqual(expected.map(([, block]) => block));
+    const persisted = insert.mock.calls[0]?.[0] as { block_id: string | null; verdict: string }[];
+    expect(persisted.filter(row => row.verdict === "accept").map(row => row.block_id)).toEqual(expected.map(([, block]) => block));
+    expect(persisted).toContainEqual(expect.objectContaining({ block_id: null, verdict: "reject" }));
     expect(commit.mock.calls.flatMap(([args]) => stage === "S2"
       ? args.needs.map(row => [row.id, row.provenance?.block_id])
       : args.tactics.map(row => [row.id, row.block_id]))).toEqual(expected);

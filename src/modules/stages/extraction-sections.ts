@@ -76,6 +76,14 @@ export function quotedBlock(blocks: Readonly<ExtractionSection["blocks"]>, quote
   return matches.find(block => (block.handle ?? block.id) === reportedId)?.id ?? null;
 }
 
+/**
+ * Replace a displayed demo block handle with its workspace ID before validating a citation.
+ * Preserve unknown values so citation validation can reject them.
+ */
+export function sourceBlockId(section: ExtractionSection | undefined, reportedId: string | null): string | null {
+  return section?.blocks.find(block => block.handle === reportedId)?.id ?? reportedId;
+}
+
 /** Project only the block field of an already resolved candidate. */
 export function promptBlockId(section: ExtractionSection | undefined, id: string | null | undefined): string | null | undefined {
   return id ? section?.blocks.find(block => block.id === id)?.handle ?? id : id;

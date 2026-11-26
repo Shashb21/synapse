@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import historicalRecording from "@/lib/demo/recording.json";
 import { judgementReferenceSchema } from "@/lib/iegp/judgement-references";
 import { DemoReplayMissError, recordedCallFrom, replayReply, type Recording, type ReplayRequest } from "@/lib/demo/replay";
 import { VELMARA_DEMO_FIXTURE } from "@/lib/demo/replay-provider";
@@ -162,8 +162,7 @@ describe("demo document ids", () => {
 });
 
 it("records a supplied gap reference for each relevant demo mapping", () => {
-  const recording: Recording = JSON.parse(readFileSync(new URL("../src/lib/demo/recording.json", import.meta.url), "utf8"));
-  const calls = recording.calls.filter((call) => call.stage === "S4" && call.purpose === "mapping-table-proposer");
+  const calls = historicalRecording.calls.filter((call) => call.stage === "S4" && call.purpose === "mapping-table-proposer");
   expect(calls.length).toBeGreaterThan(0);
   for (const call of calls) {
     const { rows } = JSON.parse(call.reply);
