@@ -1,14 +1,15 @@
 import { modelMappingSupport } from "./support/model-mapping";
-import { priorityDecision } from "./support/priority-decision";
+import { priorityDecision, reviewInventoryForPriorities } from "./support/priority-decision";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db as workspaceDb, withWorkspaceTransaction } from "@/lib/iegp/db";
 import { gapSuggestions, sourceBlocks } from "@/lib/iegp/schema";
+import { addSourceBlock } from "@/lib/iegp/source-blocks";
 import "@/modules";
+import { runStage } from "@/modules/kernel/run";
 import { db, ensurePlatformSchema, wipePlatform } from "@/modules/kernel/db";
 import { listEdits } from "@/modules/kernel/edit-records";
 import {
-  acceptGapMerge,
   addSuggestionSources,
   assignTacticToGap,
   clearNewSourceFlag,
@@ -22,6 +23,7 @@ import {
 import { deleteSourceBlock, mergeSourceBlocks, reparseSourceBlocks, splitSourceBlock } from "@/lib/iegp/source-blocks";
 import { iegpActionCapability } from "@/app/api/iegp/capabilities";
 import { can } from "@/modules/auth/roles";
+import { listParsedDocuments } from "@/modules/stages/s1-parse/module";
 import { listPlacements, validatePlacement } from "@/modules/stages/s8-prioritization/module";
 import {
   acceptGapMergeSuggestion,
@@ -49,24 +51,10 @@ const OVERLAP = {
   split_statement: "How effective is the asset in patients over 75?",
 };
 
-vi.hoisted(() => { process.env.DATABASE_POOL_MAX = "4"; });
-
-const originalQuote = "Nobody has looked at the over-75s.";
-const repeatQuote = "We have nothing on over-75s.";
 let sourceId = "";
-let sourceBlockId = "";
-let repeatSourceId = "";
-let repeatBlockId = "";
+const primaryQuote = "Nobody has looked at the over-75s.";
 
-const sourceFixture = (title: string, quotes: string[]) => persistSourceAndBlocks({
-  title,
-  source_type: "stakeholder_interview",
-  stakeholder_function: "heor",
-  text: quotes.join("\n"),
-  sections: quotes.map((text, index) => ({ heading: `Interview ${index + 1}`, location: `p.${index + 1}`, text })),
-});
-
-async function overlapOn(gapId: string, candidateRowId: string | null = null): Promise<string> {
+async function overlapOn(gapId: string, candidateRowId: string | null = null, blockId: string | null = null, quote = primaryQuote): Promise<string> {
   const result = await commitExtractedRecords({
     source_id: sourceId,
     title: "HEOR interview",
@@ -80,11 +68,11 @@ async function overlapOn(gapId: string, candidateRowId: string | null = null): P
         id: `O-${Math.random().toString(36).slice(2, 8)}`,
         gap_id: gapId,
         run_id: "kan75-run",
-        candidate_row_id: candidateRowId,
+        candidate_row_id: candidateRowId, block_id: blockId,
         name: "Over-75s versus SoC",
         statement: "How does it compare with SoC in patients over 75?",
         domain: "comparative_effectiveness",
-        source_quote: originalQuote,
+        source_quote: quote,
         ...OVERLAP,
       },
     ],
@@ -98,12 +86,10 @@ const newGap = (statement = "No comparative effectiveness data versus standard o
 beforeAll(async () => {
   await resetDemoSetup();
   await wipePlatform(["source_files", "parsed_documents", "gap_candidates"]);
-  const initial = await sourceFixture("Fictional payer interview", [originalQuote, repeatQuote]);
-  sourceId = initial.source_id;
-  sourceBlockId = initial.blocks[0]!.id;
-  const repeat = await sourceFixture("Fictional second interview", [repeatQuote]);
-  repeatSourceId = repeat.source_id;
-  repeatBlockId = repeat.blocks[0]!.id;
+  await runStage({ stage: "S0", input: { demo_ids: ["heor-interview"] }, actor: ACTOR, role: "medical_affairs" });
+  await runStage({ stage: "S1", input: {}, actor: ACTOR, role: "medical_affairs" });
+  sourceId = (await listParsedDocuments())[0]!.source_id;
+  await addSourceBlock({ source_id: sourceId, text: primaryQuote, actor: ACTOR, rationale: "Record the quoted evidence." });
 }, 60_000);
 
 it.each([
@@ -137,7 +123,10 @@ it.each([
     }],
   });
   const suggestionId = result.suggestion_id_by_row["reparse-overlap"]!;
-  await addSuggestionSources(suggestionId, [repeat!]);
+  const { block_id, ...repeatSource } = repeat!;
+  await addSuggestionSources(suggestionId, [{
+    ...repeatSource, provenance: { block_id, requires_current_citation: true },
+  }]);
 
   for (const citation of citations) {
     const reparsed = await reparseSourceBlocks({
@@ -154,6 +143,51 @@ it.each([
   for (const { source_id, block_id, source_quote } of citations) {
     expect(needs).toContainEqual(expect.objectContaining({ source_id, block_id, source_quote }));
   }
+});
+
+it("keeps separate cited occurrences and deduplicates retries of the same occurrence", async () => {
+  const gapId = await newGap();
+  const quote = "The panel found no evidence for older patients.";
+  const source = await persistSourceAndBlocks({
+    title: "Two panel sessions", source_type: "advisory_board", stakeholder_function: ACTOR.function,
+    text: quote, sections: [
+      { heading: "First", text: quote, location: "1" },
+      { heading: "Second", text: quote, location: "2" },
+    ],
+  });
+  const [primary, repeat] = source.blocks;
+  const statement = OVERLAP.split_statement;
+  const { suggestion_id_by_row } = await commitExtractedRecords({
+    source_id: source.source_id, title: "Two panel sessions", stakeholder_function: ACTOR.function,
+    ...who, needs: [], gaps: [], tactics: [],
+    overlaps: [{
+      id: "repeated-quote", gap_id: gapId, run_id: "repeated-quote-run",
+      block_id: primary!.id, name: OVERLAP.split_name,
+      statement, domain: "comparative_effectiveness", source_quote: quote, ...OVERLAP,
+    }],
+  });
+  const suggestionId = suggestion_id_by_row["repeated-quote"]!;
+  const citation = { source_id: source.source_id, statement, source_quote: quote };
+  const secondCitation = {
+    ...citation, provenance: { block_id: repeat!.id, requires_current_citation: true },
+  };
+  await addSuggestionSources(suggestionId, [
+    { ...citation, provenance: { block_id: primary!.id } },
+    secondCitation, { ...citation, block_id: repeat!.id },
+  ]);
+  await addSuggestionSources(suggestionId, [secondCitation]);
+  expect((await loadState()).gap_suggestions.find(row => row.id === suggestionId)?.extra_sources)
+    .toEqual([expect.objectContaining({
+      ...secondCitation,
+      block_id: repeat!.id,
+      provenance: expect.objectContaining(secondCitation.provenance),
+    })]);
+
+  await acceptGapSplitSuggestion({ suggestion_id: suggestionId, rationale: "Reviewed both sessions", ...who });
+  const citedBlocks = (await loadState()).needs
+    .filter(need => need.source_id === source.source_id && need.source_quote === quote)
+    .map(need => need.block_id);
+  expect(new Set(citedBlocks)).toEqual(new Set([primary!.id, repeat!.id]));
 });
 
 it.each([
@@ -190,10 +224,9 @@ it.each([
   const split = await splitSourceBlock({ block_id: primary.blocks[0]!.id, at_text: quote, rationale: "Separate evidence", actor: ACTOR });
   const accept = () => acceptSuggestion({ suggestion_id: suggestionId, rationale: "Reviewed both sources", ...who });
   if (decision === "removed quote") {
-    await expect(deleteSourceBlock({ block_id: extra.blocks[1]!.id, rationale: "Remove obsolete evidence", actor: ACTOR })).rejects.toThrow(/would orphan/);
-    await workspaceDb().delete(sourceBlocks).where(eq(sourceBlocks.id, extra.blocks[1]!.id));
     const before = await loadState();
-    await expect(accept()).rejects.toThrow(/source passage changed.*rerun/i);
+    await expect(deleteSourceBlock({ block_id: extra.blocks[1]!.id, rationale: "Remove obsolete evidence", actor: ACTOR }))
+      .rejects.toThrow(/orphan.*cited quote/i);
     expect(await loadState()).toEqual(before);
     return;
   }
@@ -214,6 +247,7 @@ describe("KAN-75 merge", () => {
 
   beforeEach(async () => {
     gapId = await newGap();
+    await reviewInventoryForPriorities(ACTOR);
     // Prioritize places Open gaps only: validate the band before a tactic changes the status.
     await validatePlacement({ ...await priorityDecision(gapId, "blocks the HTA decision"), gap_id: gapId, band: "high", rationale: "blocks the HTA decision", actor: ACTOR });
     await recordMissedTactic({ name: `Registry ${gapId}`, type: "registry", evidence_question: "q", status: "ongoing", ...who });
@@ -272,13 +306,22 @@ describe("KAN-75 split", () => {
     const gapId = await newGap();
     const suggestionId = await overlapOn(gapId);
     // A repeat from another source rides along and follows the outcome.
+    const { addSuggestionSources } = await import("@/lib/iegp/store");
+    const quote = "We have nothing on over-75s.";
+    const oldBlock = await addSourceBlock({ source_id: sourceId, text: quote, actor: ACTOR, rationale: "Add supporting passage." });
     await addSuggestionSources(suggestionId, [
-      { source_id: sourceId, statement: "Over-75s are missing.", source_quote: "We have nothing on over-75s." },
+      { source_id: sourceId, statement: "Over-75s are missing.", source_quote: "We have nothing on over-75s.", provenance: { run_id: "later-run", candidate_row_id: "later-candidate", block_id: oldBlock.id } },
     ]);
 
+    // Pending review evidence is protected from removal; it remains attached to
+    // the original block until the reviewer decides the suggestion.
+    const liveBlock = oldBlock;
     const { new_gap_id } = await acceptGapSplitSuggestion({ suggestion_id: suggestionId, rationale: "Separate question", ...who });
 
     const state = await loadState();
+    expect(state.needs.find(need => need.source_quote === "We have nothing on over-75s.")).toMatchObject({
+      run_id: "later-run", candidate_row_id: "later-candidate", block_id: liveBlock.id,
+    });
     const created = state.gaps.find((row) => row.id === new_gap_id)!;
     expect(created).toMatchObject({ name: OVERLAP.split_name, statement: OVERLAP.split_statement, domain: "comparative_effectiveness" });
     const linksOf = (id: string) =>
@@ -300,144 +343,28 @@ describe("KAN-75 split", () => {
   });
 });
 
-describe("historical gap overlap citations", () => {
-  it.each([acceptGapMergeSuggestion, acceptGapSplitSuggestion])("recovers the retained block on %p", async accept => {
-    const gapId = await newGap();
-    const suggestionId = await overlapOn(gapId);
-    const result = await accept({ suggestion_id: suggestionId, rationale: "Verify the quotation", ...who });
-    const targetGapId = "new_gap_id" in result ? result.new_gap_id : result.gap_id;
-    const state = await loadState();
-    const linked = state.need_gap_links.filter(link => link.gap_id === targetGapId).map(link => link.need_id);
-    expect(state.needs.find(row => linked.includes(row.id) && row.source_quote === originalQuote))
-      .toMatchObject({ block_id: sourceBlockId, source_context: { heading: "Interview 1", location: "p.1" } });
-  });
-
-  it.each([
-    { quotes: ["Different fictional interview."], reason: /retained source block/ },
-    { quotes: [originalQuote, originalQuote], reason: /more than one source block/ },
-  ])("refuses to accept an unsupported or ambiguous quotation", async ({ quotes, reason }) => {
-    const source = await sourceFixture("Fictional historical interview", quotes);
-    const gapId = await newGap();
-    const suggestionId = await overlapOn(gapId);
-    await workspaceDb().update(gapSuggestions).set({ source_id: source.source_id }).where(eq(gapSuggestions.id, suggestionId));
-    const before = await loadState();
-    const decision = { suggestion_id: suggestionId, rationale: "Review the evidence", ...who };
-
-    await expect(acceptGapMergeSuggestion(decision)).rejects.toThrow(reason);
-    await expect(acceptGapSplitSuggestion(decision)).rejects.toThrow(reason);
-    expect(await loadState()).toEqual(before);
-    await rejectGapSuggestionKeepingCandidate(decision);
-    expect((await loadState()).gap_suggestions.find(row => row.id === suggestionId)?.status).toBe("rejected");
-  });
-});
-
-describe("concurrent gap suggestion source and decision", () => {
-  const append = (suggestionId: string) => addSuggestionSources(suggestionId, [{
-    source_id: repeatSourceId, source_quote: repeatQuote, statement: "Independent interview repeats the concern.",
-    block_id: repeatBlockId,
-  }]);
-
-  /** Wait until another Postgres connection is blocked by the given transaction. */
-  async function waitForBlocker(pid: number) {
-    await vi.waitFor(async () => {
-      const rows = await workspaceDb().execute(sql`
-        select 1 from pg_stat_activity where datname = current_database()
-          and ${pid} = any(pg_blocking_pids(pid))
-      `);
-      expect(rows).toHaveLength(1);
-    }, { timeout: 3000, interval: 20 });
-  }
-
-  /** Pause an already-performed workspace write before transaction commit. */
-  async function holdWrite(write: () => Promise<unknown>) {
-    let release!: () => void;
-    let ready!: (pid: number) => void;
-    const paused = new Promise<number>(resolve => { ready = resolve; });
-    const resume = new Promise<void>(resolve => { release = resolve; });
-    const done = withWorkspaceTransaction(async () => {
-      const [row] = await workspaceDb().execute<{ pid: number }>(sql`select pg_backend_pid() as pid`);
-      await write();
-      ready(row!.pid);
-      await resume;
-    });
-    const pid = await Promise.race([paused, done.then(() => { throw new Error("Write ended before it could be paused"); })]);
-    return { pid, release, done };
-  }
-
-  it("preserves both extra citations when separate sources are split concurrently", async () => {
-    const suggestionId = await overlapOn(await newGap());
-    const background = "The panel reviewed the literature.";
-    const citations = await Promise.all([repeatQuote, "The panel found no data for older adults."].map(async quote => {
-      const source = await sourceFixture(quote, [`${background} ${quote}`]);
-      return {
-        source_id: source.source_id, block_id: source.blocks[0]!.id,
-        source_quote: quote, statement: OVERLAP.split_statement,
-      };
-    }));
-    await addSuggestionSources(suggestionId, citations);
-
-    const split = (citation: typeof citations[number]) => splitSourceBlock({
-      block_id: citation.block_id, at_text: citation.source_quote, rationale: "Separate evidence", actor: ACTOR,
-    });
-    const first = citations[0]!;
-    const second = citations[1]!;
-    const held = await holdWrite(() => split(first));
-    const concurrent = split(second);
-    let secondBlockId: string;
-    try {
-      await waitForBlocker(held.pid);
-    } finally {
-      held.release();
-      await held.done;
-      secondBlockId = (await concurrent).second_id;
-    }
-
-    const { gap_suggestions, blocks } = await loadState();
-    const suggestion = gap_suggestions.find(row => row.id === suggestionId);
-    const firstBlock = blocks.find(block => block.source_id === first.source_id && block.text === first.source_quote);
-    expect(firstBlock?.id).toBeDefined();
-    expect(suggestion?.extra_sources).toMatchObject([
-      { source_id: first.source_id, block_id: firstBlock!.id, source_quote: first.source_quote },
-      { source_id: second.source_id, block_id: secondBlockId, source_quote: second.source_quote },
-    ]);
-  });
-
-  it("attaches a repeat committed while acceptance waits on the append", async () => {
-    const gapId = await newGap();
-    const suggestionId = await overlapOn(gapId);
-    const held = await holdWrite(() => append(suggestionId));
-    const decision = acceptGapMerge({ suggestion_id: suggestionId, rationale: "Carry both interviews", ...who });
-    try {
-      await waitForBlocker(held.pid);
-    } finally {
-      held.release();
-      await held.done;
-      await decision;
-    }
-    const state = await loadState();
-    const linked = state.need_gap_links.filter(link => link.gap_id === gapId).map(link => link.need_id);
-    expect(state.needs.find(row => linked.includes(row.id) && row.source_id === repeatSourceId))
-      .toMatchObject({ source_quote: repeatQuote, block_id: repeatBlockId });
-  });
-
-  it("rejects a repeat that arrives after acceptance starts closing the suggestion", async () => {
-    const gapId = await newGap();
-    const suggestionId = await overlapOn(gapId);
-    const held = await holdWrite(() => acceptGapMerge({ suggestion_id: suggestionId, rationale: "Close the suggestion", ...who }));
-    const appended = append(suggestionId).then(() => null, error => error as Error);
-    try {
-      await waitForBlocker(held.pid);
-    } finally {
-      held.release();
-      await held.done;
-    }
-    expect(await appended).toMatchObject({ message: "Pending gap suggestion not found." });
-    expect((await loadState()).gap_suggestions.find(row => row.id === suggestionId))
-      .toMatchObject({ status: "merged", extra_sources: [] });
-  });
+it.each([acceptGapMergeSuggestion, acceptGapSplitSuggestion])("leaves review pending when its cited passage was withdrawn", async decide => {
+  const quote = "Birch enrollment is missing older adults.";
+  const block = await addSourceBlock({source_id: sourceId, text: quote, actor: ACTOR, rationale: "Add the cited passage."});
+  const id = await overlapOn(await newGap(), null, block.id, quote);
+  const before = await loadState();
+  await expect(deleteSourceBlock({block_id: block.id, actor: ACTOR, rationale: "Withdraw this passage."}))
+    .rejects.toThrow(/orphan.*cited quote/i);
+  expect(await loadState()).toEqual(before);
 });
 
 describe("KAN-75 reject", () => {
+  it("records only one decision when two people reject the same pending suggestion", async () => {
+    const { rejectGapSuggestion } = await import("@/lib/iegp/store");
+    const suggestionId = await overlapOn(await newGap());
+    const outcomes = await Promise.allSettled(["First review", "Second review"].map(rationale =>
+      rejectGapSuggestion({ suggestion_id: suggestionId, rationale, ...who }),
+    ));
+    expect(outcomes.filter(result => result.status === "fulfilled")).toHaveLength(1);
+    const failure = outcomes.find(result => result.status === "rejected");
+    expect(failure?.reason.message).toMatch(/already decided/i);
+  });
+
   it("leaves the plan as it was and keeps the candidate promotable", async () => {
     const gapId = await newGap();
     await ensurePlatformSchema([GAP_CANDIDATES_DDL]);

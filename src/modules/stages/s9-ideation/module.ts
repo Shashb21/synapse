@@ -1,12 +1,15 @@
+import { stageWrite } from "@/modules/kernel/stage-publication";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { buildIdeationGapBrief, ideationAcceptanceBasis, type IdeationGapBrief } from "./context";
 import { ideationRecommendationSchema, ideationGapOutcomeSchema, type IdeationGapOutcome, type IdeationRecommendation } from "./recommendation-contract";
 import { relationshipVersion } from "@/lib/iegp/relationship-version";
 import { matchesSuppliedJudgementRecords, inspectJudgementReferences, inspectSuppliedJudgementReferences, judgementReferenceSchema, recordedJudgementReferences, suppliedJudgementRecords, suppliedJudgementRecordSchema, type JudgementReference } from "@/lib/iegp/judgement-references";
-import { withRelationshipChange } from "@/lib/iegp/relationship-change";
+import { lockRelationships, withRelationshipChange } from "@/lib/iegp/relationship-change";
 import { createHash } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, DrizzleQueryError, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
+import { allowsDemoExecution, type DemoExecution } from "@/lib/demo/mode";
+import { withWorkspaceTransaction } from "@/lib/iegp/db";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import * as t from "@/modules/kernel/schema";
 import * as core from "@/lib/iegp/schema";
@@ -19,6 +22,7 @@ import {
   type JudgedCandidate,
 } from "@/modules/kernel/agentic";
 import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
+import { modelRows } from "@/modules/kernel/model-rows";
 import { NoRouteError } from "@/modules/llm/provider";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import type { Actor, ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
@@ -27,12 +31,12 @@ import {
   type EvidenceDomain,
   type TacticType,
 } from "@/lib/iegp/enums";
-import { appendAudit, reuseTacticForGap, insertLibraryTactic, loadState, readState, syncComputedGapStatuses } from "@/lib/iegp/store";
+import { appendAudit, requireTacticReuse, reuseTacticForGap, insertLibraryTactic, loadState, readStageState, readState, syncComputedGapStatuses } from "@/lib/iegp/store";
 import { prioritizationContextFromState } from "@/lib/iegp/planning-context";
 import { displayedGapStatus, isLiveGap, emptyDimensions, unlocked } from "@/lib/iegp/engine";
-import { listPlacements } from "@/modules/stages/s8-prioritization/module";
+import { listPlacements, readPlacements } from "@/modules/stages/s8-prioritization/module";
 import { plural } from "@/lib/plural";
-import { acceptTacticExpansion, expansionScopeSchema, modelExpansionScope, tacticVersion, type ExpansionTransaction } from "@/lib/iegp/tactic-expansions";
+import { acceptTacticExpansion, checkTacticExpansionAcceptance, expansionScopeSchema, modelExpansionScope, tacticVersion, type ExpansionTransaction } from "@/lib/iegp/tactic-expansions";
 import type { ExpansionScope, IegpState, Tactic } from "@/lib/iegp/types";
 import { captureProposalDecision } from "@/lib/iegp/learning-capture";
 
@@ -125,7 +129,9 @@ export function ideationBandOrder(
 }
 type LibraryTactic = Tactic & { expansions?: {id:string; status:string; scope:ExpansionScope}[] };
 
-const DESIGN_FIELDS = `"population":"","comparator":"","outcomes":"","data_source":"","study_design":"","duration_months":0,"readout_lag_months":0,"timing_rationale":""`;
+const REFERENCE_EXAMPLE = `"references":[{"entity_type":"gap","entity_id":"supplied gap id","reason":"specific supported claim"}]`;
+const RECOMMENDATION_EXAMPLE = `{"remaining_need":"unresolved requirement","incremental_contribution":"contribution to that requirement","alternatives_rationale":"relevant trade-offs","feasibility":{"status":"conditional","required_checks":["confirm data access"]},"coverage_discrepancy":null,"deadline":{"status":"unknown","explanation":"confirm evidence availability"}}`;
+const DESIGN_FIELDS = `"population":"","comparator":"","outcomes":"","data_source":"","study_design":"","duration_months":6,"readout_lag_months":0,"timing_rationale":""`;
 
 const IDEATION_SYSTEM = `You recommend options that contribute to the remaining evidence need of a prioritized evidence gap in a pharma Integrated Evidence Generation Plan.
 
@@ -138,9 +144,9 @@ duration_months is how long the tactic runs from start to last data in; readout_
 
 Propose at most candidates_per_gap distinct useful candidates per gap; fewer or none may be appropriate. If no credible option or no timely option exists, return gap_outcomes with gap_id, status (no_credible_option or no_timely_option), and explanation. Preserve the evidence deadline; identify useful longer-term options separately. Fill in every field for returned candidates.
 
-When a gap carries revise requests, answer each one: return that tactic with its id, revised to meet the objection, or set "withdraw":true with a reason when it cannot be rescued.
+When a gap carries revise requests, answer each one: return that tactic with its id, revised to meet the objection, or set "withdraw":true with a reason when it cannot be rescued. If there is no credible or timely option after withdrawal, include one gap_outcomes entry for that gap.
 
-Return JSON only: {"tactics":[{"id":"","gap_id":"","name":"","type":"","evidence_question":"","rationale":"","proposal_kind":"new","target_tactic_id":null,"expansion_scope":null,"comparative_rationale":"","contract_version":2,"recommendation":{},${DESIGN_FIELDS},"withdraw":false,"withdraw_reason":""}],"gap_outcomes":[{"gap_id":"","status":"no_credible_option","explanation":""}]}`;
+Return JSON only: {"tactics":[{"id":"","gap_id":"","name":"","type":"","evidence_question":"","rationale":"","proposal_kind":"new","target_tactic_id":null,"expansion_scope":null,"comparative_rationale":"","contract_version":2,"recommendation":${RECOMMENDATION_EXAMPLE},${REFERENCE_EXAMPLE},${DESIGN_FIELDS},"withdraw":false,"withdraw_reason":""}],"gap_outcomes":[{"gap_id":"","status":"no_credible_option","explanation":""}]}`;
 
 const SUPPORT_CONTRACT = `Every tactic, critic review and judge decision must include references: [{"entity_type":"gap|objective|source","entity_id":"supplied id","reason":"specific claim supported by this record"}]. Cite at least one supplied record with a nonempty excerpt. Use only supporting_records supplied with the relevant gap. Do not invent references or URLs.`;
 
@@ -154,15 +160,15 @@ verdict is "keep" when the tactic is sound, "revise" when a specific change woul
 
 Review every tactic you are given.
 
-Return JSON only: {"reviews":[{"id":"","verdict":"keep","confidence":0,"note":"","issues":[],"duplicate_of":null}]}`;
+Return JSON only: {"reviews":[{"id":"","verdict":"keep","confidence":0,"note":"","issues":[],"duplicate_of":null,${REFERENCE_EXAMPLE}}]}`;
 
 const JUDGE_SYSTEM = `You are the judge for proposed evidence tactics in a pharma Integrated Evidence Generation Plan. The user will review the tactics you keep.
 
 Compare relevant reuse, expansion and new alternatives by their additional contribution toward the remaining need, evidence quality, incremental cost/effort, timing and feasibility; use the full target library status/design. For each gap, decide for every candidate tactic whether to accept or reject it, using the gap, the design and the critic's last review. Accept at most max_per_gap tactics for a gap, and only tactics you would put in front of the evidence team; accepting fewer, or none, is right when the candidates are weak. Rank the accepted tactics 1, 2, … in order of preference. confidence is a non-probabilistic 0–100 review rating, not a probability of success. reason says why it was kept or rejected, in one or two sentences.
 
-Decide every candidate of every gap you are given. Return an outcome object per gap with status options, no_credible_option or no_timely_option and an explicit explanation; if all credible options are late, state that the evidence need remains unresolved by the deadline.
+Return decisions only for entries in candidates. On retry, use accepted_ranks to avoid reusing a rank. Entries in completed_candidates contain fixed decisions from earlier calls. Use those decisions alongside the new decisions when assessing the gap outcome. When outcome_requested is true, include an outcome object with status options, no_credible_option or no_timely_option and an explicit explanation. Preserve the required checks for conditional options. If all credible options are late, state that the evidence need remains unresolved by the deadline.
 
-Return JSON only: {"gaps":[{"gap_id":"","outcome":{"status":"options","explanation":""},"decisions":[{"id":"","verdict":"accept","rank":1,"confidence":0,"reason":""}]}]}`;
+Return JSON only: {"gaps":[{"gap_id":"","outcome":{"status":"options","explanation":""},"decisions":[{"id":"","verdict":"accept","rank":1,"confidence":0,"reason":"",${REFERENCE_EXAMPLE}}]}]}`;
 
 /** Same reasoning safeguards apply during generation, revision, criticism and judgement. */
 const RECOMMENDATION_CONTRACT = `The per-gap brief is sourced context, not a new assessment. S4 recorded coverage remains authoritative: never close the gap or overwrite coverage. Keep missing/conflicting requirements explicit; a planning comparator is not a confirmed requirement. Any suggested requirement requires human confirmation. Separate studies cannot silently become comparative evidence; explain methodological feasibility and comparator availability/design compatibility checks. Surface apparent disagreement with recorded coverage as coverage_discrepancy, preserving the assessment and making the option conditional on review. Judge additional contribution toward the remaining need, not generic scientific plausibility. Unknown feasibility must remain conditional with required checks. Never silently relax evidence_needed_by or imply planned output is available today. Ratings are non-probabilistic review ratings.
@@ -415,6 +421,7 @@ function parseTactic(raw: Record<string, unknown>, library: LibraryTactic[], sup
   if (!text(raw.comparative_rationale)) problems.push("comparative_rationale must explicitly compare expansion and new alternatives for quality, time/cost and feasibility");
   const recommendationResult = ideationRecommendationSchema.safeParse(raw.recommendation);
   if (!recommendationResult.success) problems.push("recommendation must explain remaining need, incremental contribution, alternatives, feasibility checks, coverage discrepancy and deadline");
+  if (raw.contract_version !== 2) problems.push("contract_version must be 2");
   const kind = raw.proposal_kind;
   let scope: ExpansionScope | null = null;
   const target = typeof raw.target_tactic_id === "string" ? raw.target_tactic_id : null;
@@ -459,14 +466,16 @@ function parseTactic(raw: Record<string, unknown>, library: LibraryTactic[], sup
   };
 }
 
-type PromptGap = IdeationGap & {
+type PromptGap = Omit<IdeationGap, "supporting_context_basis"> & {
   supporting_records?: ReturnType<typeof suppliedJudgementRecords>;
   /** Tactics the critic asked to have revised, with its objection. */
-  revise?: { id: string; previous: Omit<Proposal, "score" | "critic_note" | "judge_note" | "rank">; objection: string }[];
+  revise?: { id: string; previous: Omit<Proposal, "score" | "critic_note" | "judge_note" | "rank" | "supporting_context_basis">; objection: string }[];
   /** What was wrong with the model's last answer for this gap. */
   problems?: string[];
   /** Stable anonymous output positions assigned before generation; contain no human answers. */
   proposal_slots?: string[];
+  repair_slots?: string[];
+  outcome_requested?: boolean;
 };
 
 /**
@@ -490,35 +499,26 @@ async function inBatches<T, R>(items: T[], size: number, ask: (slice: T[]) => Pr
 async function askProposer(
   ctx: ModuleContext,
   args: { gaps: PromptGap[]; perGap: number; hints: string; library: LibraryTactic[]; round: number; plan?: unknown },
-): Promise<{ tactics: Record<string, unknown>[]; gap_outcomes: IdeationGapOutcome[] }> {
-  const answers = await inBatches(args.gaps, PROPOSER_GAPS_PER_CALL, (gaps) => askProposerOnce(ctx, { ...args, gaps }));
-  return { tactics: answers.flatMap(answer => answer.tactics), gap_outcomes: answers.flatMap(answer => answer.gap_outcomes) };
-}
-
-async function askProposerOnce(
-  ctx: ModuleContext,
-  args: { gaps: PromptGap[]; perGap: number; hints: string; library: LibraryTactic[]; round: number; plan?: unknown },
-): Promise<{ tactics: Record<string, unknown>[]; gap_outcomes: IdeationGapOutcome[] }> {
-  const payload = (await ctx.complete({
-    system: `${IDEATION_SYSTEM}\n${SUPPORT_CONTRACT}\n${EXPANSION_CONTRACT}\n${RECOMMENDATION_CONTRACT}\nWhen a gap supplies proposal_slots, use tactic ids from that exact list, once only. You may leave slots unused when fewer useful options exist. Keep each returned id through all revisions. Never invent a different id.`,
-    user: JSON.stringify({
-      worked_examples: args.hints || undefined,
-      exchange: args.round === 1 ? undefined : `${args.round - 1} of ${PROPOSER_CRITIC_EXCHANGES}`,
-      candidates_per_gap: args.perGap,
-      // The IEGP context from setup: asset, objectives, key decisions, landscape.
-      plan_context: args.plan,
-      library: args.library,
-      gaps: args.gaps,
+): Promise<{ gaps: PromptGap[]; response: unknown }[]> {
+  return inBatches(args.gaps, PROPOSER_GAPS_PER_CALL, async (gaps) => ({
+    gaps,
+    response: await ctx.complete({
+      system: `${IDEATION_SYSTEM}
+${SUPPORT_CONTRACT}
+${EXPANSION_CONTRACT}
+${RECOMMENDATION_CONTRACT}
+Use only the supplied proposal_slots or revise ids, once each. Leave slots unused initially when fewer useful options exist. When repair_slots is supplied, answer each of those slots and keep its id. When outcome_requested is true, return one valid gap_outcomes entry for that gap with an explanation. When neither proposal_slots nor revise ids are supplied, return an empty tactics list. Never invent an id.`,
+      user: JSON.stringify({
+        worked_examples: args.hints || undefined,
+        exchange: args.round === 1 ? undefined : `${args.round - 1} of ${PROPOSER_CRITIC_EXCHANGES}`,
+        candidates_per_gap: args.perGap,
+        plan_context: args.plan,
+        library: args.library,
+        gaps,
+      }),
+      purpose: "ideation-proposer",
     }),
-    purpose: "ideation-proposer",
-  })) as { tactics?: unknown; gap_outcomes?: unknown[] };
-  return {
-    tactics: Array.isArray(payload?.tactics) ? (payload.tactics as unknown[]).filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object") : [],
-    gap_outcomes: (Array.isArray(payload?.gap_outcomes) ? payload.gap_outcomes : []).flatMap(raw => {
-      const parsed = ideationGapOutcomeSchema.safeParse(raw);
-      return parsed.success && args.gaps.some(gap => gap.id === parsed.data.gap_id) ? [parsed.data] : [];
-    }),
-  };
+  }));
 }
 
 type Review = { references: JudgementReference[]; verdict: Critique["verdict"]; confidence: number; note: string; issues: string[]; duplicate_of: string | null };
@@ -527,7 +527,6 @@ type Decision = { references: JudgementReference[]; verdict: "accept" | "reject"
 const promptTactic = (proposal: Proposal) => ({
   references: proposal.references,
   recommendation: proposal.recommendation,
-  supporting_context_basis: proposal.supporting_context_basis,
   id: proposal.id,
   gap_id: proposal.gap_id,
   name: proposal.name,
@@ -537,6 +536,8 @@ const promptTactic = (proposal: Proposal) => ({
   design: proposal.design,
   proposal_kind: proposal.proposal_kind, target_tactic_id: proposal.target_tactic_id, expansion_scope: proposal.expansion_scope, comparative_rationale: proposal.comparative_rationale,
 });
+const promptGap = ({ id, name, statement, domain, brief }: IdeationGap): Omit<IdeationGap, "supporting_context_basis"> =>
+  ({ id, name, statement, domain, brief });
 
 export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
   manifest: {
@@ -592,60 +593,120 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
     const library: LibraryTactic[] = state.tactics.map(tactic => ({...tactic, expansions: state.expansions.filter(child => child.tactic_id === tactic.id).map(child => ({id:child.id,status:child.status,scope:child.scope}))}));
     const libraryIds = new Set(library.map((tactic) => tactic.id));
     let reviewerHints = "";
-    let nextId = 0;
+    const report = (details: { field: string; id?: string; problem: string }) => ctx.run.note("answer:invalid", details);
+    const gapSlots = (gapId: string) => proposal_slots?.[gapId] ??
+      Array.from({ length: input.per_gap + 1 }, (_, index) => `${gapId}:proposal:${index + 1}`);
     const lastReview = new Map<string, Review>();
     /** The model judge's decisions on the final candidates, set after the last exchange. */
     let judgement: Map<string, Decision> | null = null;
     const gapOutcomes = new Map<string, IdeationGapOutcome>();
 
-    /** Round 1: every gap gets candidates; a gap with any invalid tactic is asked again. */
+    /** Generate candidates by gap, retaining valid slots across repairs. */
     const propose = async (hints: string): Promise<Proposal[]> => {
-      const problems = new Map<string, string[]>();
+      const problems = new Map<string, string>();
+      const slotProblems = new Map<string, string>();
+      const tacticReplyProblems = new Map<string, string>();
+      const outcomeReplyProblems = new Map<string, string>();
+      const accepted = new Map<string, Proposal>();
       const byGap = await completeAll<Proposal[]>({
         ids: gaps.map((gap) => gap.id),
         what: "set of tactic designs",
         describe: describeGap,
+        problems,
         remedy: REMEDY,
         ask: async (missing) => {
-          const answer = await askProposer(ctx, {
+          const answers = await askProposer(ctx, {
             plan: planContext,
             hints,
-            perGap: input.per_gap,
+            perGap: input.per_gap + 1,
             library,
             round: 1,
-            gaps: missing.map((id) => ({ ...gapById.get(id)!, supporting_records: supportFor(id), problems: problems.get(id), proposal_slots: proposal_slots?.[id] })),
+            gaps: missing.map((id) => {
+              const slots = gapSlots(id);
+              const repair = slots.filter(slot => slotProblems.has(slot));
+              const outcome = gapOutcomes.get(id);
+              const outcomeRequested = outcomeReplyProblems.has(id);
+              const needsOptions = !slots.some(slot => accepted.has(slot)) && (!outcome || outcome.status === "options");
+              const openSlots = slots.filter(slot => !accepted.has(slot));
+              return {
+                ...promptGap(gapById.get(id)!),
+                supporting_records: supportFor(id),
+                problems: problems.has(id) ? [problems.get(id)!] : undefined,
+                proposal_slots: repair.length ? repair : tacticReplyProblems.has(id) || (needsOptions && !outcomeRequested) ? openSlots : [],
+                ...(repair.length ? { repair_slots: repair } : {}),
+                ...(outcomeRequested ? { outcome_requested: true } : {}),
+              };
+            }),
           });
-          const found = new Map<string, Proposal[]>();
-          const bad = new Map<string, string[]>();
-          for (const outcome of answer.gap_outcomes) {
-            if (missing.includes(outcome.gap_id)) gapOutcomes.set(outcome.gap_id, outcome);
-          }
-          for (const raw of answer.tactics) {
-            const gapId = text(raw.gap_id);
-            if (!missing.includes(gapId)) continue;
-            const parsed = parseTactic(raw, library, supportFor(text(raw.gap_id)));
-            if ("problem" in parsed) {
-              bad.set(gapId, [...(bad.get(gapId) ?? []), `${text(raw.name) || "unnamed tactic"}: ${parsed.problem}`]);
-              continue;
-            }
-            const slots = proposal_slots?.[gapId];
-            const slotId = text(raw.id);
-            if (slots && (!slots.includes(slotId) || (found.get(gapId) ?? []).some(p => p.id === slotId))) {
-              bad.set(gapId, [...(bad.get(gapId) ?? []), "Return each supplied proposal slot id exactly once; unknown or duplicate slot."]);
-              continue;
-            }
-            nextId += 1;
-            found.set(gapId, [
-              ...(found.get(gapId) ?? []),
-              { ...parsed.tactic, id: slots ? slotId : `${gapId}-L${nextId}`, gap_id: gapId, supporting_context_basis: gapById.get(gapId)!.supporting_context_basis, score: 0, critic_note: "", judge_note: "", rank: null },
-            ]);
-          }
           const complete = new Map<string, Proposal[]>();
-          for (const id of missing) {
-            if (bad.has(id)) problems.set(id, bad.get(id)!);
-            else if (!found.has(id) && gapOutcomes.get(id)?.status !== "options" && gapOutcomes.has(id)) complete.set(id, []);
-            else if (!found.has(id)) problems.set(id, ["Return candidates or an explicit no_credible_option/no_timely_option outcome explaining the unresolved need"]);
-            else complete.set(id, found.get(id)!);
+          for (const { gaps: asked, response } of answers) {
+            const gap = asked[0]!;
+            const slots = gap.proposal_slots!;
+            const raw = response as { tactics?: Record<string, unknown>[]; gap_outcomes?: unknown } | null;
+            if (!Array.isArray(raw?.tactics)) {
+              const problem = "tactics must be a list, even if it is empty.";
+              tacticReplyProblems.set(gap.id, problem);
+              report({ field: "tactics", id: gap.id, problem });
+            } else {
+              tacticReplyProblems.delete(gap.id);
+              const returned = new Set(raw.tactics.map(row => text(row?.id)));
+              const unidentified: string[] = [];
+              const rows = modelRows({ payload: raw, field: "tactics", idField: "id", ids: slots, problems: slotProblems, report: details => {
+                unidentified.push(details.id ? `${details.id}: ${details.problem}` : details.problem);
+                report({ ...details, id: details.id ?? gap.id });
+              } });
+              const omitted = slots.filter(slot => !returned.has(slot));
+              // Unused optional slots are valid unless a malformed row needs a target.
+              for (const slot of omitted) if (!gap.repair_slots?.includes(slot)) slotProblems.delete(slot);
+              for (const [id, row] of rows) {
+                const parsed = parseTactic(row, library, supportFor(gap.id));
+                const problem = row.gap_id !== gap.id ? "gap_id must match the gap offered for this slot."
+                  : row.withdraw === true ? "A proposal slot requires a tactic, or omit the slot initially."
+                  : "problem" in parsed ? parsed.problem : undefined;
+                if (problem) {
+                  slotProblems.set(id, problem);
+                  report({ field: "tactics", id, problem });
+                } else if ("tactic" in parsed) {
+                  accepted.set(id, { ...parsed.tactic, id, gap_id: gap.id, supporting_context_basis: gapById.get(gap.id)?.supporting_context_basis, score: 0, critic_note: "", judge_note: "", rank: null });
+                }
+              }
+              for (const [index, problem] of unidentified.entries()) {
+                const slot = omitted[index];
+                if (slot) slotProblems.set(slot, `Unidentified tactic row (${problem}); use the offered id.`);
+              }
+              const excess = unidentified.slice(omitted.length);
+              if (excess.length) tacticReplyProblems.set(gap.id, `Discard extra tactic rows (${excess.join("; ")}).`);
+            }
+
+            const outcomeOffered = raw?.gap_outcomes !== undefined && !(Array.isArray(raw.gap_outcomes) && raw.gap_outcomes.length === 0);
+            if (gap.outcome_requested || (!gapOutcomes.has(gap.id) && outcomeOffered)) {
+              const outcomeProblems = new Map<string, string>();
+              const unexpected: string[] = [];
+              const outcome = modelRows({ payload: raw, field: "gap_outcomes", idField: "gap_id", ids: [gap.id], problems: outcomeProblems, report: details => {
+                unexpected.push(details.id ? `${details.id}: ${details.problem}` : details.problem);
+                report({ ...details, id: details.id ?? gap.id });
+              } }).get(gap.id);
+              const parsed = ideationGapOutcomeSchema.safeParse(outcome);
+              if (parsed.success && unexpected.length === 0) {
+                gapOutcomes.set(gap.id, parsed.data);
+                outcomeReplyProblems.delete(gap.id);
+              } else {
+                const problem = unexpected.join("; ") || outcomeProblems.get(gap.id) || "Return a valid gap outcome status and explanation.";
+                outcomeReplyProblems.set(gap.id, problem);
+                report({ field: "gap_outcomes", id: gap.id, problem });
+              }
+            }
+            const allSlots = gapSlots(gap.id);
+            const invalid = allSlots.flatMap(slot => slotProblems.has(slot) ? [`${slot}: ${slotProblems.get(slot)}`] : []);
+            const tacticReplyProblem = tacticReplyProblems.get(gap.id);
+            const outcomeReplyProblem = outcomeReplyProblems.get(gap.id);
+            if (tacticReplyProblem) invalid.push(tacticReplyProblem);
+            if (outcomeReplyProblem) invalid.push(outcomeReplyProblem);
+            const found = allSlots.flatMap(slot => accepted.has(slot) ? [accepted.get(slot)!] : []);
+            const outcome = gapOutcomes.get(gap.id);
+            if (invalid.length) problems.set(gap.id, invalid.join(" "));
+            else if (found.length || (outcome && outcome.status !== "options")) complete.set(gap.id, found);
+            else problems.set(gap.id, "Return candidates or an explicit no_credible_option/no_timely_option outcome explaining the unresolved need.");
           }
           return complete;
         },
@@ -661,21 +722,23 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
       const dropped = new Set(critiques.filter((critique) => critique.verdict === "drop").map((c) => c.subject));
       const byId = new Map(previous.map((proposal) => [proposal.id, proposal]));
       const problems = new Map<string, string>();
+      const revisionOutcomes = new Map<string, IdeationGapOutcome>();
       const answers = await completeAll<Proposal | "withdrawn">({
         ids: [...objections.keys()].filter((id) => byId.has(id)),
         what: "revision",
+        problems,
         describe: (id) => byId.get(id)?.name ?? id,
         remedy: REMEDY,
         ask: async (missing) => {
           const targets = missing.map((id) => byId.get(id)!);
-          const answer = await askProposer(ctx, {
+          const answers = await askProposer(ctx, {
             plan: planContext,
             hints,
             perGap: input.per_gap,
             library,
             round,
             gaps: [...new Set(targets.map((proposal) => proposal.gap_id))].map((gapId) => ({
-              ...gapById.get(gapId)!,
+              ...promptGap(gapById.get(gapId)!),
               supporting_records: supportFor(gapId),
               revise: targets
                 .filter((proposal) => proposal.gap_id === gapId)
@@ -685,109 +748,158 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
                 .map((proposal) => `${proposal.id}: ${problems.get(proposal.id)}`),
             })),
           });
-          for (const outcome of answer.gap_outcomes) gapOutcomes.set(outcome.gap_id, outcome);
           const done = new Map<string, Proposal | "withdrawn">();
-          for (const raw of answer.tactics) {
-            const id = text(raw.id);
-            const before = byId.get(id);
-            if (!before || !missing.includes(id)) continue;
-            if (raw.withdraw === true) {
-              done.set(id, "withdrawn");
-              continue;
+          for (const { gaps: asked, response } of answers) {
+            const ids = asked.flatMap(gap => (gap.revise ?? []).map(row => row.id));
+            for (const [id, raw] of modelRows({ payload: response, field: "tactics", idField: "id", ids, problems, report })) {
+              const before = byId.get(id)!;
+              if (raw.gap_id !== before.gap_id) {
+                problems.set(id, "gap_id must match the requested revision.");
+                continue;
+              }
+              if (raw.withdraw === true) {
+                if (!text(raw.withdraw_reason)) problems.set(id, "withdraw_reason is required when withdrawing a tactic.");
+                else done.set(id, "withdrawn");
+                continue;
+              }
+              const parsed = parseTactic(raw, library, supportFor(before.gap_id));
+              if ("problem" in parsed) problems.set(id, parsed.problem);
+              else done.set(id, { ...before, ...parsed.tactic });
             }
-            const parsed = parseTactic(raw, library, supportFor(before.gap_id));
-            if ("problem" in parsed) {
-              problems.set(id, parsed.problem);
-              continue;
+            const outcomes = response && typeof response === "object" && "gap_outcomes" in response ? response.gap_outcomes : undefined;
+            if (outcomes === undefined || (Array.isArray(outcomes) && !outcomes.length)) continue;
+            const outcomeProblems = new Map<string, string>();
+            const rows = modelRows({
+              payload: response, field: "gap_outcomes", idField: "gap_id", ids: asked.map(gap => gap.id), problems: outcomeProblems, report,
+            });
+            for (const [gapId, raw] of rows) {
+              const parsed = ideationGapOutcomeSchema.safeParse({ ...raw, gap_id: gapId });
+              if (parsed.success) {
+                if (parsed.data.status !== "options" && !revisionOutcomes.has(gapId)) revisionOutcomes.set(gapId, parsed.data);
+              } else outcomeProblems.set(gapId, "Return a valid gap outcome status and explanation.");
             }
-            done.set(id, { ...before, ...parsed.tactic });
+            for (const [id, problem] of outcomeProblems) report({ field: "gap_outcomes", id, problem });
           }
-          for (const id of missing) if (!done.has(id) && !problems.has(id)) problems.set(id, "no revision was returned");
           return done;
         },
       });
       // A tactic the critic dropped, or the proposer withdrew, leaves the dialogue.
-      return previous.flatMap((proposal) => {
+      const next = previous.flatMap((proposal) => {
         if (dropped.has(proposal.id)) return [];
         const answer = answers.get(proposal.id);
         if (answer === "withdrawn") return [];
         return [answer ?? proposal];
       });
+      const remaining = new Set(next.map(proposal => proposal.gap_id));
+      for (const [id, answer] of answers) {
+        if (answer !== "withdrawn") continue;
+        const gapId = byId.get(id)!.gap_id;
+        const revisionOutcome = revisionOutcomes.get(gapId);
+        if (revisionOutcome && !remaining.has(gapId)) gapOutcomes.set(gapId, revisionOutcome);
+      }
+      return next;
     };
 
-    /** The model judge: accept and rank at most per_gap tactics per gap. */
+    /** Judge individual candidates and gap outcomes without replacing completed decisions. */
     const judgeWithModel = async (candidates: Proposal[]): Promise<Map<string, Decision>> => {
       const decisions = new Map<string, Decision>();
-      const gapIds = [...new Set(candidates.map((proposal) => proposal.gap_id))];
+      const gapIds = [...new Set(candidates.map(proposal => proposal.gap_id))];
+      const outcomeKey = (gapId: string) => `outcome:${gapId}`;
+      const byId = new Map(candidates.map(proposal => [proposal.id, proposal]));
       const problems = new Map<string, string>();
       await completeAll<true>({
-        ids: gapIds,
+        ids: [...byId.keys(), ...gapIds.map(outcomeKey)],
         what: "judgement",
-        describe: describeGap,
+        describe: id => byId.get(id)?.name ?? describeGap(id.slice("outcome:".length)),
+        problems,
         remedy: REMEDY,
-        ask: async (missingAll) => {
+        ask: async (missing) => {
           const done = new Map<string, true>();
-          await inBatches(missingAll, JUDGE_GAPS_PER_CALL, async (missing) => {
-            const payload = (await ctx.complete({
-              system: `${JUDGE_SYSTEM}\n${SUPPORT_CONTRACT}\n${RECOMMENDATION_CONTRACT}`,
+          const missingSet = new Set(missing);
+          const pendingGaps = gapIds.filter(gapId => missingSet.has(outcomeKey(gapId)) ||
+            candidates.some(proposal => proposal.gap_id === gapId && missingSet.has(proposal.id)));
+          await inBatches(pendingGaps, JUDGE_GAPS_PER_CALL, async (batch) => {
+            const requested = (gapId: string) => candidates.filter(proposal => proposal.gap_id === gapId && missingSet.has(proposal.id));
+            const acceptedRanks = (gapId: string) => new Set(candidates
+              .filter(proposal => proposal.gap_id === gapId)
+              .flatMap(proposal => decisions.get(proposal.id)?.rank ?? []));
+            const completedCandidates = (gapId: string) => candidates.flatMap(proposal => {
+              const decision = decisions.get(proposal.id);
+              return proposal.gap_id === gapId && decision ? [{ ...promptTactic(proposal), decision }] : [];
+            });
+            const payload = await ctx.complete({
+              system: `${JUDGE_SYSTEM}
+${SUPPORT_CONTRACT}
+${RECOMMENDATION_CONTRACT}`,
               user: JSON.stringify({
                 worked_examples: reviewerHints || undefined,
                 max_per_gap: input.per_gap,
                 library,
-                gaps: missing.map((gapId) => ({
-                  ...gapById.get(gapId)!,
+                gaps: batch.map(gapId => ({
+                  ...promptGap(gapById.get(gapId)!),
                   supporting_records: supportFor(gapId),
-                  problem: problems.get(gapId),
-                  candidates: candidates
-                    .filter((proposal) => proposal.gap_id === gapId)
-                    .map((proposal) => {
-                      const review = lastReview.get(proposal.id);
-                      return {
-                        ...promptTactic(proposal),
-                        critic: review ? { verdict: review.verdict, confidence: review.confidence, note: review.note } : undefined,
-                      };
-                    }),
+                  outcome_requested: missingSet.has(outcomeKey(gapId)),
+                  accepted_ranks: [...acceptedRanks(gapId)],
+                  completed_candidates: completedCandidates(gapId),
+                  problem: [problems.get(outcomeKey(gapId)), ...requested(gapId).map(proposal => problems.get(proposal.id))].filter(Boolean).join(" ") || undefined,
+                  candidates: requested(gapId).map(proposal => {
+                    const review = lastReview.get(proposal.id);
+                    return {
+                      ...promptTactic(proposal),
+                      critic: review ? { verdict: review.verdict, confidence: review.confidence, note: review.note } : undefined,
+                    };
+                  }),
                 })),
               }),
               purpose: "ideation-judge",
-            })) as { gaps?: { gap_id?: unknown; decisions?: unknown; outcome?: unknown }[] };
-            for (const row of Array.isArray(payload?.gaps) ? payload.gaps : []) {
-              const gapId = text(row?.gap_id);
-              if (!missing.includes(gapId)) continue;
-              const gapOutcome = ideationGapOutcomeSchema.safeParse(row.outcome && typeof row.outcome === "object" ? { ...row.outcome, gap_id: gapId } : null);
-              const ids = candidates.filter((proposal) => proposal.gap_id === gapId).map((proposal) => proposal.id);
-              const got = new Map<string, Decision>();
-              for (const raw of Array.isArray(row.decisions) ? (row.decisions as Record<string, unknown>[]) : []) {
-                const id = text(raw?.id);
-                const reason = text(raw?.reason);
+            });
+            const gapProblems = new Map<string, string>();
+            const rows = modelRows({ payload, field: "gaps", idField: "gap_id", ids: batch, problems: gapProblems, report });
+            for (const gapId of batch) {
+              const row = rows.get(gapId);
+              const outcomeId = outcomeKey(gapId);
+              const ids = requested(gapId).map(proposal => proposal.id);
+              if (!row) {
+                const problem = gapProblems.get(gapId)!;
+                for (const id of [...ids, ...(missingSet.has(outcomeId) ? [outcomeId] : [])]) problems.set(id, problem);
+                continue;
+              }
+              const ranks = acceptedRanks(gapId);
+              for (const [id, raw] of modelRows({ payload: row, field: "decisions", idField: "id", ids, problems, report })) {
+                const reason = text(raw.reason);
                 const references = inspectSuppliedJudgementReferences(supportFor(gapId), raw.references);
-                if (!references.length) continue;
-                if (!ids.includes(id) || !reason || !finite(raw.confidence)) continue;
-                if (raw.verdict !== "accept" && raw.verdict !== "reject") continue;
-                if (raw.verdict === "accept" && !finite(raw.rank)) continue;
-                got.set(id, {
-                  references: references.map(({ entity_type, entity_id, reason }) => ({ entity_type, entity_id, reason })),
-                  verdict: raw.verdict,
-                  rank: raw.verdict === "accept" ? (raw.rank as number) : null,
-                  confidence: Math.max(0, Math.min(100, Math.round(raw.confidence))),
-                  reason,
-                });
+                const rank = raw.verdict === "accept" && finite(raw.rank) ? raw.rank : null;
+                if (!references.length) problems.set(id, "Supporting references must cite only supplied records for this gap.");
+                else if (!reason || !finite(raw.confidence) || (raw.verdict !== "accept" && raw.verdict !== "reject")) {
+                  problems.set(id, "Return a verdict, confidence and reason for this candidate.");
+                } else if (raw.verdict === "accept" && (rank === null || !Number.isInteger(rank) || rank < 1 || rank > input.per_gap || ranks.has(rank))) {
+                  problems.set(id, `Use a unique integer rank from 1 to ${input.per_gap}; accept at most ${input.per_gap} candidates per gap.`);
+                } else {
+                  if (rank !== null) ranks.add(rank);
+                  decisions.set(id, {
+                    references: references.map(({ entity_type, entity_id, reason }) => ({ entity_type, entity_id, reason })),
+                    verdict: raw.verdict,
+                    rank,
+                    confidence: Math.max(0, Math.min(100, Math.round(raw.confidence))),
+                    reason,
+                  });
+                  done.set(id, true);
+                }
               }
-              const undecided = ids.filter((id) => !got.has(id));
-              const accepted = [...got.values()].filter((decision) => decision.verdict === "accept").length;
-              if (undecided.length > 0) {
-                problems.set(gapId, `An earlier answer left ${undecided.join(", ")} without a complete decision. Decide every candidate.`);
+              if (!missingSet.has(outcomeId)) continue;
+              // The gap outcome describes the whole judgement, so it needs all candidate decisions.
+              if (ids.some(id => !done.has(id))) {
+                problems.set(outcomeId, "Return the gap outcome together with the remaining candidate decisions.");
                 continue;
               }
-              if (accepted > input.per_gap) {
-                problems.set(gapId, `An earlier answer accepted ${accepted} tactics; accept at most ${input.per_gap}.`);
-                continue;
-              }
-              if (gapOutcome.success) gapOutcomes.set(gapId, gapOutcome.data);
-              for (const [id, decision] of got) decisions.set(id, decision);
-              done.set(gapId, true);
+              const value = row.outcome;
+              const parsed = ideationGapOutcomeSchema.safeParse(value && typeof value === "object" ? { ...value, gap_id: gapId } : null);
+              if (parsed.success) {
+                gapOutcomes.set(gapId, parsed.data);
+                problems.delete(outcomeId);
+                done.set(outcomeId, true);
+              } else problems.set(outcomeId, "Return an outcome with a valid status and explanation.");
             }
-            for (const gapId of missing) if (!done.has(gapId) && !problems.has(gapId)) problems.set(gapId, "No judgement was returned for this gap.");
           });
           return done;
         },
@@ -823,49 +935,51 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
           }));
         }
         const byId = new Map(proposals.map((proposal) => [proposal.id, proposal]));
+        const problems = new Map<string, string>();
         const reviews = await completeAll<Review>({
           ids: proposals.map((proposal) => proposal.id),
           what: "review",
           describe: (id) => byId.get(id)?.name ?? id,
+          problems,
           remedy: REMEDY,
-          ask: async (missingAll, attempt) => {
+          ask: async (missingAll) => {
             const map = new Map<string, Review>();
             await inBatches(missingAll, CRITIC_TACTICS_PER_CALL, async (missing) => {
-              const payload = (await ctx.complete({
-                system: `${CRITIC_SYSTEM}\n${SUPPORT_CONTRACT}\n${EXPANSION_CONTRACT}\n${RECOMMENDATION_CONTRACT}`,
+              const payload = await ctx.complete({
+                system: `${CRITIC_SYSTEM}
+${SUPPORT_CONTRACT}
+${EXPANSION_CONTRACT}
+${RECOMMENDATION_CONTRACT}`,
                 user: JSON.stringify({
                   worked_examples: reviewerHints || undefined,
                   exchange: `${round} of ${PROPOSER_CRITIC_EXCHANGES}`,
-                  note: attempt > 1 ? "An earlier answer left these tactics without a complete review. Review each." : undefined,
                   library,
                   tactics: missing.map((id) => {
                     const proposal = byId.get(id)!;
                     const gap = gapById.get(proposal.gap_id)!;
-                    return { ...promptTactic(proposal), gap: { ...gap, supporting_records: supportFor(gap.id) } };
+                    return { ...promptTactic(proposal), problem: problems.get(id), gap: { ...promptGap(gap), supporting_records: supportFor(gap.id) } };
                   }),
                 }),
                 purpose: "ideation-critic",
-              })) as { reviews?: Record<string, unknown>[] };
-              for (const row of Array.isArray(payload?.reviews) ? payload.reviews : []) {
-                const id = text(row?.id);
-                if (!missing.includes(id)) continue;
-                if (row.verdict !== "keep" && row.verdict !== "revise" && row.verdict !== "drop") continue;
-                if (!finite(row.confidence)) continue;
+              });
+              for (const [id, row] of modelRows({ payload, field: "reviews", idField: "id", ids: missing, problems, report })) {
                 const note = text(row.note);
-                if (!note) continue;
                 const duplicate = row.duplicate_of == null || row.duplicate_of === "" ? null : text(row.duplicate_of);
-                // A duplicate must name a tactic that is actually in the library.
-                if (duplicate !== null && !libraryIds.has(duplicate)) continue;
                 const references = inspectSuppliedJudgementReferences(supportFor(byId.get(id)!.gap_id), row.references);
-                if (!references.length) continue;
-                map.set(id, {
-                  references: references.map(({ entity_type, entity_id, reason }) => ({ entity_type, entity_id, reason })),
-                  verdict: row.verdict,
-                  confidence: Math.max(0, Math.min(100, Math.round(row.confidence))),
-                  note,
-                  issues: Array.isArray(row.issues) ? row.issues.map(text).filter(Boolean) : [],
-                  duplicate_of: duplicate,
-                });
+                if (!references.length) problems.set(id, "Supporting references must cite only supplied records for this gap.");
+                else if (duplicate !== null && !libraryIds.has(duplicate)) problems.set(id, "duplicate_of must identify a tactic supplied in the library.");
+                else if (!finite(row.confidence) || !note || (row.verdict !== "keep" && row.verdict !== "revise" && row.verdict !== "drop")) {
+                  problems.set(id, "Return a verdict, confidence and actionable note for this review.");
+                } else {
+                  map.set(id, {
+                    references: references.map(({ entity_type, entity_id, reason }) => ({ entity_type, entity_id, reason })),
+                    verdict: row.verdict,
+                    confidence: Math.max(0, Math.min(100, Math.round(row.confidence))),
+                    note,
+                    issues: Array.isArray(row.issues) ? row.issues.map(text).filter(Boolean) : [],
+                    duplicate_of: duplicate,
+                  });
+                }
               }
             });
             return map;
@@ -929,7 +1043,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
             };
           });
       },
-    }, { kinds: ["s9_proposal"], text: gaps.map((gap) => `${gap.name} ${gap.statement}`).join(" ") });
+    }, { kinds: ["s9_proposal"], subject_ids: gaps.map(item => item.id), text: gaps.map((gap) => `${gap.name} ${gap.statement}`).join(" ") });
 
     // Hash-only rejection memory is pre-generation provenance, never human answer text.
     // Explicit restore removes that source row from the rejected set.
@@ -938,41 +1052,43 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
       outcome.withdrawn.push({subject:p.id,score:p.score,note:"Human rejection memory: restore this expansion target/scope before reconsidering it."});
       return false;
     });
-    if (!ctx.replay?.evaluation && !input.dry_run && outcome.accepted.length > 0) {
-      await ensurePlatformSchema();
-      for (const proposal of outcome.accepted) {
-        const values = {
-          proposal_kind: proposal.proposal_kind, target_tactic_id: proposal.target_tactic_id, expansion_scope: proposal.expansion_scope, comparative_rationale: proposal.comparative_rationale,
-          reviewed_parent: proposal.target_tactic_id ? state.tactics.find(t => t.id === proposal.target_tactic_id) : null,
-          id: newId("idea"),
-          gap_id: proposal.gap_id,
-          name: proposal.name,
-          type: proposal.type,
-          rationale: proposal.rationale,
-          evidence_question: proposal.evidence_question,
-          design: { ...proposal.design, recommendation: proposal.recommendation, supporting_context_basis: proposal.supporting_context_basis, write_version: newId("IPV"), supporting_references: proposal.references, supplied_records: supportFor(proposal.gap_id), rank: proposal.rank, origin: "ai", run_id: ctx.run.id,
-            slot_id: proposal_slots?.[proposal.gap_id]?.includes(proposal.id) ? proposal.id : null,
-            original_ai: { recommendation: proposal.recommendation, supporting_context_basis: proposal.supporting_context_basis, proposal_kind: proposal.proposal_kind, comparative_rationale: proposal.comparative_rationale, ...(proposal.proposal_kind !== "new" ? {target_tactic_id: proposal.target_tactic_id, expansion_scope: proposal.expansion_scope} : {}), name: proposal.name, type: proposal.type, rationale: proposal.rationale, evidence_question: proposal.evidence_question, design: proposal.design },
-          },
-          status: "proposed",
-          critic_note: [proposal.critic_note, proposal.judge_note && `Judge: ${proposal.judge_note}`]
-            .filter(Boolean)
-            .join(" — "),
-          judge_score: Math.round(proposal.score),
-          created_at: nowIso(),
-        };
-        await db().transaction(async tx => {
-          const references = inspectSuppliedJudgementReferences(supportFor(proposal.gap_id), proposal.references);
-          if (!references.length || !inspectJudgementReferences(await readState(tx), [proposal.gap_id], proposal.references).length) throw new TrustedApplicationError("Supporting references are missing, inaccessible or unrelated to this option.");
-          await tx.insert(t.ideationProposals).values(values);
-          await recordEdit({ stage: "S9", entity_type: "ideation_proposal", entity_id: values.id,
-            field: "model_suggestion", action: "add", before: null, after: JSON.stringify(proposal),
-            rationale: proposal.judge_note || proposal.rationale, references: proposal.references, reference_gap_ids: [proposal.gap_id],
-            actor: { name: isTestStub() ? "S9 test fixture (no model called)" : "S9 model", function: ctx.actor.function },
-          }, tx);
-        });
+    await stageWrite(ctx, async () => {
+      if (!ctx.replay?.evaluation && !input.dry_run && outcome.accepted.length > 0) {
+        await ensurePlatformSchema();
+        for (const proposal of outcome.accepted) {
+          const values = {
+            proposal_kind: proposal.proposal_kind, target_tactic_id: proposal.target_tactic_id, expansion_scope: proposal.expansion_scope, comparative_rationale: proposal.comparative_rationale,
+            reviewed_parent: proposal.target_tactic_id ? state.tactics.find(t => t.id === proposal.target_tactic_id) : null,
+            id: newId("idea"),
+            gap_id: proposal.gap_id,
+            name: proposal.name,
+            type: proposal.type,
+            rationale: proposal.rationale,
+            evidence_question: proposal.evidence_question,
+            design: { ...proposal.design, recommendation: proposal.recommendation, supporting_context_basis: proposal.supporting_context_basis, write_version: newId("IPV"), supporting_references: proposal.references, supplied_records: supportFor(proposal.gap_id), rank: proposal.rank, origin: "ai", run_id: ctx.run.id,
+              slot_id: proposal_slots?.[proposal.gap_id]?.includes(proposal.id) ? proposal.id : null,
+              original_ai: { recommendation: proposal.recommendation, supporting_context_basis: proposal.supporting_context_basis, proposal_kind: proposal.proposal_kind, comparative_rationale: proposal.comparative_rationale, ...(proposal.proposal_kind !== "new" ? {target_tactic_id: proposal.target_tactic_id, expansion_scope: proposal.expansion_scope} : {}), name: proposal.name, type: proposal.type, rationale: proposal.rationale, evidence_question: proposal.evidence_question, design: proposal.design },
+            },
+            status: "proposed",
+            critic_note: [proposal.critic_note, proposal.judge_note && `Judge: ${proposal.judge_note}`]
+              .filter(Boolean)
+              .join(" — "),
+            judge_score: Math.round(proposal.score),
+            created_at: nowIso(),
+          };
+          await db().transaction(async tx => {
+            const references = inspectSuppliedJudgementReferences(supportFor(proposal.gap_id), proposal.references);
+            if (!references.length || !inspectJudgementReferences(await readState(tx), [proposal.gap_id], proposal.references).length) throw new TrustedApplicationError("Supporting references are missing, inaccessible or unrelated to this option.");
+            await tx.insert(t.ideationProposals).values(values);
+            await recordEdit({ stage: "S9", entity_type: "ideation_proposal", entity_id: values.id,
+              field: "model_suggestion", action: "add", before: null, after: JSON.stringify(proposal),
+              rationale: proposal.judge_note || proposal.rationale, references: proposal.references, reference_gap_ids: [proposal.gap_id],
+              actor: { name: isTestStub() ? "S9 test fixture (no model called)" : "S9 model", function: ctx.actor.function },
+            }, tx);
+          });
+        }
       }
-    }
+    });
 
     return {
       output: {
@@ -1454,11 +1570,15 @@ function validateExpansion(parent: Tactic | undefined, scope: ExpansionScope, co
 async function eligibleGap(id: string, tx?: ExpansionTransaction) {
     const state = tx ? await readState(tx) : await loadState();
     const placements = tx ? await tx.select().from(t.priorityPlacements).where(eq(t.priorityPlacements.gap_id, id)).for("update") : await listPlacements();
+    requireEligibleIdeationGap(state, placements as Parameters<typeof ideationAcceptanceBasis>[2], id);
+    return state;
+}
+
+function requireEligibleIdeationGap(state: IegpState, placements: Parameters<typeof ideationAcceptanceBasis>[2], id: string) {
     const gap = state.gaps.find(g => g.id === id);
-    if (!gap || !isLiveGap(gap) || displayedGapStatus(gap) !== "validated_open" || !ideationBandOrder(placements as Parameters<typeof ideationBandOrder>[0]).has(id)) {
+    if (!gap || !isLiveGap(gap) || displayedGapStatus(gap) !== "validated_open" || !ideationBandOrder(placements).has(id)) {
         throw new TrustedApplicationError("Ideation requires an open gap with human-validated High priority.");
     }
-    return state;
 }
 
 function proposalVersion(row: ProposalRow): string {
@@ -1472,18 +1592,25 @@ function requireProposalVersion(row: ProposalRow, expected?: string) {
 }
 
 /** Validate the original supplied records; never reconstruct missing model provenance. */
-async function optionSupport(row: ProposalRow, tx: ExpansionTransaction): Promise<JudgementReference[]> {
-  const { meta } = splitDesign(row.design);
+function optionSupportContext(meta: DesignMeta) {
   const records = meta.supplied_records ?? [];
   const references = meta.supporting_references ?? [];
   if (!records.length || !inspectSuppliedJudgementReferences(records, references).length) throw new TrustedApplicationError("Supporting references or the original supplied context are missing. Make an explicit manual judgement with a reason instead.");
-  for (const [kind, table] of [["objective", core.objectives], ["source", core.sources], ["gap", core.gaps]] as const) {
-    for (const id of [...new Set(records.filter(record => record.entity_type === kind).map(record => record.entity_id))].sort()) await tx.select({ id: table.id }).from(table).where(eq(table.id, id)).for("update");
-  }
-  const state = await readState(tx);
+  return { records, references };
+}
+
+function validateOptionSupport(row: ProposalRow, { records, references }: ReturnType<typeof optionSupportContext>, state: IegpState): JudgementReference[] {
   if (!inspectJudgementReferences(state, [row.gap_id], references).length) throw new TrustedApplicationError("Supporting references are missing, inaccessible or unrelated to this option. Make a manual judgement with a reason instead.");
   if (!matchesSuppliedJudgementRecords(state, [row.gap_id], records)) throw new TrustedApplicationError("Model option context changed. Regenerate it or make a manual judgement with a reason.");
   return references;
+}
+
+async function optionSupport(row: ProposalRow, meta: DesignMeta, tx: ExpansionTransaction): Promise<JudgementReference[]> {
+  const support = optionSupportContext(meta);
+  for (const [kind, table] of [["objective", core.objectives], ["source", core.sources], ["gap", core.gaps]] as const) {
+    for (const id of [...new Set(support.records.filter(record => record.entity_type === kind).map(record => record.entity_id))].sort()) await tx.select({ id: table.id }).from(table).where(eq(table.id, id)).for("update");
+  }
+  return validateOptionSupport(row, support, await readState(tx));
 }
 
 /** Apply edits without refreshing the immutable reviewed parent or original AI baseline. */
@@ -1633,22 +1760,112 @@ export async function addIdeationProposal(args: {
   return recordById(id);
 }
 
+type IdeationDecision = {
+  id: string;
+  decision: "accept" | "reject";
+  expected_version?: string;
+  judgement_origin?: "model" | "manual";
+  reviewed_context_basis?: string;
+  rationale: string;
+  actor: Actor;
+  workspace_id?: string;
+  fields?: ProposalFields;
+};
+
+type PreparedAcceptance = { renewedBasis?: string } & (
+  | { kind: "reuse"; tactic_id: string }
+  | { kind: "expansion"; tactic_id: string; scope: ExpansionScope; expected_tactic_version: string }
+  | { kind: "new"; design: StoredDesign }
+);
+
+function assertPendingProposal(row: ProposalRow, expected?: string) {
+  requireProposalVersion(row, expected);
+  if (row.status !== "proposed") {
+    throw new TrustedApplicationError(row.status === "accepted"
+      ? "This idea was already accepted. Open the linked tactic to make further changes."
+      : "This idea was already decided. Refresh the idea list before making another decision.");
+  }
+}
+
+/** Shared acceptance checks for single decisions and one-snapshot demo decisions. */
+function prepareIdeationAcceptance(
+  proposal: ProposalRow, meta: DesignMeta, state: IegpState, placements: Parameters<typeof ideationAcceptanceBasis>[2],
+  review: Pick<IdeationDecision, "judgement_origin" | "reviewed_context_basis">,
+): PreparedAcceptance {
+  const target = state.tactics.find(tactic => tactic.id === proposal.target_tactic_id);
+  if (proposal.proposal_kind !== "new" && !target) throw new TrustedApplicationError("Proposal target not found in this workspace.", "not_found", 404);
+  const currentBasis = ideationAcceptanceBasis(state, proposal.gap_id, placements);
+  const renewedBasis = meta.supporting_context_basis && meta.supporting_context_basis !== currentBasis ? currentBasis : undefined;
+  if (renewedBasis && (review.judgement_origin !== "manual" || review.reviewed_context_basis !== currentBasis)) {
+    throw new TrustedApplicationError("Ideation context changed; this proposal is stale. Review the current requirements, coverage, priority and tactic lifecycle, then submit its current review token with a manual judgement.");
+  }
+
+  const { design } = splitDesign(proposal.design);
+  if (proposal.proposal_kind === "reuse") {
+    assertReuseDesign({ ...proposal, design }, target);
+    requireTacticReuse(state, proposal.gap_id, target!.id);
+    return { kind: "reuse", tactic_id: target!.id, renewedBasis };
+  }
+  if (proposal.proposal_kind === "expansion") {
+    const parent = proposal.reviewed_parent as Tactic | null;
+    if (!parent || parent.id !== proposal.target_tactic_id) throw new TrustedApplicationError("Reviewed expansion target snapshot is unavailable.");
+    if (design.duration_months === null || design.duration_months <= 0 || design.readout_lag_months === null || design.readout_lag_months < 0) {
+      throw new TrustedApplicationError("Expansion requires valid numeric duration and readout lag.");
+    }
+    const scope = expansionScopeSchema.parse(proposal.expansion_scope);
+    assertExpansionDesign({ ...proposal, design }, scope);
+    const acceptedScope = expansionScopeSchema.parse({ ...scope, type: proposal.type, comparator: design.comparator, data_source: design.data_source });
+    validateExpansion(target, scope, proposal.comparative_rationale);
+    const expected_tactic_version = tacticVersion(renewedBasis ? target! : parent);
+    checkTacticExpansionAcceptance(state, { proposal_id: proposal.id, tactic_id: parent.id, gap_id: proposal.gap_id, expected_tactic_version }, acceptedScope);
+    return { kind: "expansion", tactic_id: parent.id, scope: acceptedScope, expected_tactic_version, renewedBasis };
+  }
+  if (!proposal.name.trim()) throw new TrustedApplicationError("Tactic name is required.");
+  if (!proposal.evidence_question.trim()) throw new TrustedApplicationError("Evidence question is required.");
+  if (!TACTIC_TYPES.includes(proposal.type as TacticType)) throw new TrustedApplicationError("Tactic type is required.");
+  return { kind: "new", design, renewedBasis };
+}
+
+async function applyIdeationDecision(
+  args: Pick<IdeationDecision, "actor" | "decision" | "judgement_origin" | "rationale" | "workspace_id">, proposal: ProposalRow,
+  originalMeta: DesignMeta, state: IegpState, prepared: PreparedAcceptance | undefined,
+  references: JudgementReference[], tx: ExpansionTransaction,
+) {
+  const { rationale, actor, workspace_id } = args;
+  let tactic_id: string | null = null;
+  let expansion_id: string | null = null;
+  if (prepared?.renewedBasis) {
+    proposal.design = { ...(proposal.design as Record<string, unknown>), renewed_review: { basis: prepared.renewedBasis, actor: actor.name, at: nowIso(), rationale } };
+    await recordEdit({ workspace_id, stage: "S9", entity_type: "ideation_proposal", entity_id: proposal.id, field: "renewed_context_review", action: "validate", before: originalMeta.supporting_context_basis!, after: prepared.renewedBasis, rationale, actor }, tx);
+  }
+  if (prepared?.kind === "reuse") {
+    tactic_id = prepared.tactic_id;
+    await reuseTacticForGap({ tactic_id, gap_id: proposal.gap_id, actor_name: actor.name, actor_function: actor.function, rationale }, tx);
+  } else if (prepared?.kind === "expansion") {
+    const child = await acceptTacticExpansion({
+      proposal_id: proposal.id, tactic_id: prepared.tactic_id, gap_id: proposal.gap_id, scope: prepared.scope,
+      expected_tactic_version: prepared.expected_tactic_version, rationale, actor,
+    }, tx);
+    tactic_id = child.tactic_id;
+    expansion_id = child.id;
+  } else if (prepared?.kind === "new") {
+    const { design } = prepared;
+    tactic_id = await insertLibraryTactic({ name: proposal.name, type: proposal.type as TacticType, description: `Ideated for ${proposal.gap_id}. ${proposal.rationale}`, evidence_question: proposal.evidence_question, population: design.population, intervention: state.asset.name, comparator: design.comparator, outcomes: design.outcomes, study_design: design.study_design, data_source: design.data_source, geography: state.asset.geography, owner: actor.name, function: actor.function, residual_ids: [], status: "proposed", lifecycle_stage: "proposed", actor_name: actor.name, actor_function: actor.function, audit_action: "create_proposed", audit_reason: rationale }, tx);
+    await tx.insert(core.coverages).values({ id: newId("COV"), gap_id: proposal.gap_id, tactic_id, dimensions: emptyDimensions(), overall: "unassessed", overall_rationale: rationale, overall_lock: unlocked(), stale: false, needs_review: false });
+    await syncComputedGapStatuses(proposal.gap_id, undefined, tx);
+  }
+  const status = args.decision === "accept" ? "accepted" : "rejected";
+  await tx.update(t.ideationProposals).set({ design: { ...(proposal.design as Record<string, unknown>), write_version: newId("IPV") }, status, decided_by: actor.name, decided_at: nowIso(), decision_rationale: rationale, tactic_id, expansion_id }).where(eq(t.ideationProposals.id, proposal.id));
+  const edit = await recordEdit({ workspace_id, stage: "S9", entity_type: "ideation_proposal", entity_id: proposal.id, field: args.judgement_origin === "manual" ? "manual_status" : references.length ? "supported_model_status" : "status", references, reference_gap_ids: [proposal.gap_id], action: args.decision, before: "proposed", after: status, rationale, actor }, tx);
+  return { tactic_id, expansion_id, edit };
+}
+
 /**
  * The S9 human gate: create a new proposed tactic or a proposed child scope
  * on its reviewed parent, atomically with the source decision. `fields` lets the person accept an edited version in one step;
  * the edit is audited before the decision.
  */
-export async function decideIdeationProposal(args: {
-    id: string;
-    decision: "accept" | "reject";
-    expected_version?: string;
-    judgement_origin?: "model" | "manual";
-    reviewed_context_basis?: string;
-    rationale: string;
-    actor: Actor;
-    workspace_id?: string;
-    fields?: ProposalFields;
-}): Promise<{
+export async function decideIdeationProposal(args: IdeationDecision): Promise<{
     tactic_id: string | null;
     expansion_id: string | null;
 }> {
@@ -1656,63 +1873,28 @@ export async function decideIdeationProposal(args: {
     const rationale = requireRationale(args.rationale);
     const result = await withRelationshipChange({ actor_name: args.actor.name, actor_function: args.actor.function, rationale }, () => db().transaction(async (tx) => {
         const [pending] = await tx.select().from(t.ideationProposals).where(eq(t.ideationProposals.id, args.id)).for("update");
-        if (!pending)
-            throw new Error(`Unknown proposal ${args.id}`);
-        requireProposalVersion(pending, args.expected_version);
-        if (pending.status !== "proposed")
-            throw new TrustedApplicationError(pending.status === "accepted" ? "This idea was already accepted. Open the linked tactic to make further changes." : "This idea was already decided. Refresh the idea list before making another decision.");
+        if (!pending) throw new Error(`Unknown proposal ${args.id}`);
+        assertPendingProposal(pending, args.expected_version);
         const originalMeta = splitDesign(pending.design).meta;
         const original = originalMeta.original_ai;
         // Match the relationship owner's scientific lock order: tactic, then supplied context.
-        if (args.decision === "accept" && pending.proposal_kind !== "new" && pending.target_tactic_id)
+        if (args.decision === "accept" && pending.proposal_kind !== "new" && pending.target_tactic_id) {
             await tx.select().from(core.tactics).where(eq(core.tactics.id, pending.target_tactic_id)).for("update");
-        const manual = args.judgement_origin === "manual";
-        const references = args.decision === "accept" && originalMeta.origin !== "human" && !manual ? await optionSupport(pending, tx) : [];
+        }
+        const references = args.decision === "accept" && originalMeta.origin !== "human" && args.judgement_origin !== "manual" ? await optionSupport(pending, originalMeta, tx) : [];
         const proposal = args.decision === "accept" && args.fields ? await editPending(pending, args.fields, rationale, args.actor, args.workspace_id, tx) : pending;
-        let tactic_id: string | null = null, expansion_id: string | null = null;
-        let state = await readState(tx);
+        let state: IegpState;
+        let prepared: PreparedAcceptance | undefined;
         if (args.decision === "accept") {
             await tx.select().from(core.gaps).where(eq(core.gaps.id, proposal.gap_id)).for("update");
             state = await eligibleGap(proposal.gap_id, tx);
-            if (proposal.proposal_kind !== "new" && !state.tactics.some(tactic => tactic.id === proposal.target_tactic_id)) throw new TrustedApplicationError("Proposal target not found in this workspace.", "not_found", 404);
             const placements = await tx.select().from(t.priorityPlacements).for("update");
-            const currentBasis = ideationAcceptanceBasis(state, proposal.gap_id, placements as Parameters<typeof ideationAcceptanceBasis>[2]);
-            const stale = originalMeta.supporting_context_basis && originalMeta.supporting_context_basis !== currentBasis;
-            if (stale && (!manual || args.reviewed_context_basis !== currentBasis)) throw new TrustedApplicationError("Ideation context changed; this proposal is stale. Review the current requirements, coverage, priority and tactic lifecycle, then submit its current review token with a manual judgement.");
-            if (stale) {
-              proposal.design = { ...(proposal.design as Record<string, unknown>), renewed_review: { basis: currentBasis, actor: args.actor.name, at: nowIso(), rationale } };
-              await recordEdit({workspace_id: args.workspace_id, stage: "S9", entity_type: "ideation_proposal", entity_id: proposal.id, field: "renewed_context_review", action: "validate", before: originalMeta.supporting_context_basis!, after: currentBasis, rationale, actor: args.actor}, tx);
-            }
-            if (proposal.proposal_kind === "reuse") {
-                assertReuseDesign({...proposal, design: splitDesign(proposal.design).design}, state.tactics.find(tactic => tactic.id === proposal.target_tactic_id));
-                tactic_id = proposal.target_tactic_id!;
-                await reuseTacticForGap({tactic_id, gap_id: proposal.gap_id, actor_name: args.actor.name, actor_function: args.actor.function, rationale}, tx);
-            }
-            else if (proposal.proposal_kind === "expansion") {
-                const parent = proposal.reviewed_parent as Tactic | null;
-                if (!parent || parent.id !== proposal.target_tactic_id)
-                    throw new TrustedApplicationError("Reviewed expansion target snapshot is unavailable.");
-                const timing = splitDesign(proposal.design).design;
-                if (timing.duration_months === null || timing.duration_months <= 0 || timing.readout_lag_months === null || timing.readout_lag_months < 0)
-                    throw new TrustedApplicationError("Expansion requires valid numeric duration and readout lag.");
-                const scope = expansionScopeSchema.parse(proposal.expansion_scope);
-                assertExpansionDesign({...proposal, design: timing}, scope);
-                const acceptedScope = {...scope, type: proposal.type as TacticType, comparator: timing.comparator, data_source: timing.data_source};
-                validateExpansion(state.tactics.find(t => t.id === proposal.target_tactic_id), scope, proposal.comparative_rationale);
-                const child = await acceptTacticExpansion({ proposal_id: proposal.id, tactic_id: parent.id, gap_id: proposal.gap_id, scope: acceptedScope, expected_tactic_version: tacticVersion(stale ? state.tactics.find(tactic => tactic.id === parent.id)! : parent), rationale, actor: args.actor }, tx);
-                tactic_id = child.tactic_id;
-                expansion_id = child.id;
-            }
-            else {
-                const { design } = splitDesign(proposal.design);
-                tactic_id = await insertLibraryTactic({ name: proposal.name, type: proposal.type as TacticType, description: `Ideated for ${proposal.gap_id}. ${proposal.rationale}`, evidence_question: proposal.evidence_question, population: design.population, intervention: state.asset.name, comparator: design.comparator, outcomes: design.outcomes, study_design: design.study_design, data_source: design.data_source, geography: state.asset.geography, owner: args.actor.name, function: args.actor.function, residual_ids: [], status: "proposed", lifecycle_stage: "proposed", actor_name: args.actor.name, actor_function: args.actor.function, audit_action: "create_proposed", audit_reason: rationale }, tx);
-                await tx.insert(core.coverages).values({ id: newId("COV"), gap_id: proposal.gap_id, tactic_id, dimensions: emptyDimensions(), overall: "unassessed", overall_rationale: rationale, overall_lock: unlocked(), stale: false, needs_review: false });
-                await syncComputedGapStatuses(proposal.gap_id, undefined, tx);
-            }
+            prepared = prepareIdeationAcceptance(proposal, originalMeta, state, placements as Parameters<typeof ideationAcceptanceBasis>[2], args);
+        } else {
+            state = await readState(tx);
         }
-        await tx.update(t.ideationProposals).set({ design: { ...(proposal.design as Record<string, unknown>), write_version: newId("IPV") }, status: args.decision === "accept" ? "accepted" : "rejected", decided_by: args.actor.name, decided_at: nowIso(), decision_rationale: rationale, tactic_id, expansion_id }).where(eq(t.ideationProposals.id, args.id));
-        const edit = await recordEdit({ workspace_id: args.workspace_id, stage: "S9", entity_type: "ideation_proposal", entity_id: args.id, field: manual ? "manual_status" : references.length ? "supported_model_status" : "status", references, reference_gap_ids: [proposal.gap_id], action: args.decision, before: "proposed", after: args.decision === "accept" ? "accepted" : "rejected", rationale, actor: args.actor }, tx);
-        return { tactic_id, expansion_id, proposal, originalMeta, original, edit, gap: state.gaps.find(g => g.id === proposal.gap_id) };
+        const applied = await applyIdeationDecision({ ...args, rationale }, proposal, originalMeta, state, prepared, references, tx);
+        return { ...applied, proposal, originalMeta, original, gap: state.gaps.find(g => g.id === proposal.gap_id) };
     }));
     // Shared learning storage runs after the workspace commit, never while its connection is held.
     if (result.originalMeta.origin !== "human" && !result.original)
@@ -1720,6 +1902,126 @@ export async function decideIdeationProposal(args: {
     if (result.originalMeta.origin !== "human" && result.original)
         await captureProposalDecision({ proposal: { id: result.proposal.id, ...result.original, slot_id: result.originalMeta.slot_id }, capture_key: result.edit.id, run_id: result.originalMeta.run_id, actor: args.actor, gap: result.gap ? { name: result.gap.name, statement: result.gap.statement } : null, decision: args.decision, final: args.decision === "accept" ? { name: result.proposal.name, type: result.proposal.type, evidence_question: result.proposal.evidence_question, rationale: result.proposal.rationale, design: splitDesign(result.proposal.design).design, recommendation: splitDesign(result.proposal.design).meta.recommendation, supporting_context_basis: splitDesign(result.proposal.design).meta.supporting_context_basis, proposal_kind: result.proposal.proposal_kind as "new" | "expansion" | "reuse", comparative_rationale: result.proposal.comparative_rationale, ...(result.proposal.proposal_kind !== "new" ? { target_tactic_id: result.proposal.target_tactic_id, expansion_scope: result.proposal.expansion_scope } : {}) } : null, rationale, workspace_id: args.workspace_id });
     return { tactic_id: result.tactic_id, expansion_id: result.expansion_id };
+}
+
+type DemoIdeationSelection = { id: string; expected_version: string };
+
+function demoIdeationError(message: string, code: "selection" | "context" | "busy" | "conflict") {
+  return new TrustedApplicationError(message, `demo_ideation_${code}`, code === "context" ? 403 : 409);
+}
+
+function assertCompatibleDemoIdeas(items: { proposal: ProposalRow; prepared: PreparedAcceptance }[]) {
+  const newDesigns = new Set<string>();
+  const expansionScopes = new Set<string>();
+  const reusedRelationships = new Set<string>();
+  const expandedRelationships = new Set<string>();
+  const conflict = () => demoIdeationError("The selection includes overlapping ideas. Review the ideas individually before accepting them.", "conflict");
+  const scientificKey = (fields: (string | boolean | undefined)[]) => JSON.stringify(fields.map(value =>
+    typeof value === "string" ? value.toLowerCase().trim().replace(/\s+/g, " ") : value ?? ""));
+
+  for (const { proposal, prepared } of items) {
+    if (prepared.kind === "new") {
+      const { population, comparator, outcomes, data_source, study_design } = prepared.design;
+      const key = scientificKey([proposal.type, proposal.evidence_question, population, comparator, outcomes, data_source, study_design]);
+      if (newDesigns.has(key)) throw conflict();
+      newDesigns.add(key);
+      continue;
+    }
+    const relationship = JSON.stringify([proposal.gap_id, prepared.tactic_id]);
+    if (reusedRelationships.has(relationship)) throw conflict();
+    if (prepared.kind === "reuse") {
+      if (expandedRelationships.has(relationship)) throw conflict();
+      reusedRelationships.add(relationship);
+      continue;
+    }
+    const scope = prepared.scope;
+    const key = JSON.stringify([prepared.tactic_id, scientificKey([
+      scope.type, scope.evidence_question, scope.population, scope.comparator, scope.outcomes, scope.geography,
+      scope.data_cut, scope.analysis, scope.instrument, scope.study_design, scope.data_source,
+      scope.post_hoc, scope.prospective_enrolment, scope.protocol_amendment,
+    ])]);
+    if (expansionScopes.has(key)) throw conflict();
+    expansionScopes.add(key);
+    expandedRelationships.add(relationship);
+  }
+}
+
+/**
+ * The presenter explicitly selected this set of opening versions. Validate them
+ * against one scientific snapshot before any selected idea can change that basis.
+ */
+export async function acceptDemoIdeationProposals(args: {
+  workspace_id: string;
+  demo: DemoExecution | undefined;
+  proposals: DemoIdeationSelection[];
+  rationale: string;
+  actor: Actor;
+}): Promise<number> {
+  const contextError = () => demoIdeationError("Only the Velmara client demo has this approval shortcut.", "context");
+  if (!args.demo || !(await allowsDemoExecution(args.demo, args.workspace_id))) throw contextError();
+  const rationale = requireRationale(args.rationale);
+  const versions = new Map(args.proposals.map(({ id, expected_version }) => [id, expected_version]));
+  if (!versions.size || versions.size !== args.proposals.length) {
+    throw demoIdeationError("Select each idea only once before accepting the demo ideas.", "selection");
+  }
+  if (args.proposals.some(({ id, expected_version }) => !id || !expected_version)) {
+    throw demoIdeationError("An opening proposal version is missing. Open the demo ideas again.", "selection");
+  }
+
+  await ensurePlatformSchema();
+  const changer = { actor_name: args.actor.name, actor_function: args.actor.function, rationale };
+  return withWorkspaceTransaction(async () => {
+    await lockRelationships();
+    try {
+      // Context hashes depend on the whole library and on newly linked or inserted
+      // records. Lock this workspace's input tables, including their membership,
+      // while leaving ordinary reads available. NOWAIT avoids lock-order cycles
+      // with the independent Setup, Priority and scientific owners.
+      await db().execute(sql`LOCK TABLE assets, gaps, tactics, tactic_expansions, objectives, sources,
+        source_blocks, needs, need_gap_links, coverages, mapping_suggestions, priority_placements, ideation_proposals
+        IN EXCLUSIVE MODE NOWAIT`);
+      // The platform owner can turn replay off. Hold only this workspace's row,
+      // following the same domain-then-workspace order as the demo reset.
+      const active = await db().execute(sql`SELECT id FROM public.workspaces
+        WHERE id = ${args.workspace_id} AND demo AND demo_mode FOR SHARE NOWAIT`);
+      if (!active.length) throw contextError();
+    } catch (error) {
+      const cause = error instanceof DrizzleQueryError ? error.cause : error;
+      if (cause instanceof Error && "code" in cause && cause.code === "55P03") {
+        throw demoIdeationError("Workspace changes are being saved. Open the demo ideas again once the changes finish.", "busy");
+      }
+      throw error;
+    }
+
+    const [state, placements, rows] = await Promise.all([
+      readState(),
+      db().select().from(t.priorityPlacements),
+      db().select().from(t.ideationProposals).where(inArray(t.ideationProposals.id, [...versions.keys()])),
+    ]);
+    if (!state.asset) throw contextError();
+    const byId = new Map(rows.map(row => [row.id, row]));
+    const items = [...versions].map(([id, version]) => {
+      const proposal = byId.get(id);
+      if (!proposal) throw demoIdeationError("A selected idea is no longer available. Open the demo ideas again.", "selection");
+      assertPendingProposal(proposal, version);
+      const meta = splitDesign(proposal.design).meta;
+      if (!meta.supporting_context_basis || !["new", "expansion", "reuse"].includes(proposal.proposal_kind)) {
+        throw demoIdeationError("A selected idea has no current review context. Review it individually on the Ideation page.", "selection");
+      }
+      const references = meta.origin === "human" ? [] : validateOptionSupport(proposal, optionSupportContext(meta), state);
+      requireEligibleIdeationGap(state, placements as Parameters<typeof ideationAcceptanceBasis>[2], proposal.gap_id);
+      return { proposal, meta, references, prepared: prepareIdeationAcceptance(proposal, meta, state, placements as Parameters<typeof ideationAcceptanceBasis>[2], {}) };
+    });
+    assertCompatibleDemoIdeas(items);
+
+    return withRelationshipChange(changer, () => db().transaction(async tx => {
+      for (const { proposal, meta, references, prepared } of items) {
+        await applyIdeationDecision({ decision: "accept", rationale, actor: args.actor, workspace_id: args.workspace_id },
+          proposal, meta, state, prepared, references, tx);
+      }
+      return items.length;
+    }));
+  });
 }
 
 /**
@@ -1757,7 +2059,8 @@ function expansionKey(gap_id: string, target: string | null, scope: unknown): st
 
 /** Freeze the source facts this stage consumes, before any proposal or human decision. */
 async function freezeFacts(input: z.infer<typeof inputSchema>) {
-  const [state, placements, proposals] = await Promise.all([loadState(), listPlacements(), db().select().from(t.ideationProposals)]);
+  const state = await readStageState();
+  const [placements, proposals] = await Promise.all([readPlacements(state), db().select().from(t.ideationProposals)]);
   // Capture the persisted acceptance linkage now, before generation. Library
   // provenance contains identities only, never another proposal's answer text.
   const proposal_lineage = proposals.map(proposal => {

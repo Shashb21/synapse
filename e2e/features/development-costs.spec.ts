@@ -47,7 +47,7 @@ test('shows uncertain preview, separate usage, explicit spending actions and pre
   await expect(costs.getByText('Allowance: USD 5')).toBeVisible();
   expect(actions.map(a => a.action)).toEqual(['increase']);
   await expect(costs.getByText(/Spending paused/)).toBeVisible();
-  await costs.getByRole('button', { name: 'Enable allowance override' }).click();
+  await costs.getByRole('button', { name: 'Record allowance override' }).click();
   await costs.getByRole('button', { name: 'Acknowledge unknown charges for this execution' }).click();
   expect(actions.map(a => a.action)).toEqual(['increase', 'override', 'acknowledge_unknown']);
   await costs.getByRole('button', { name: 'Resume spending' }).click();

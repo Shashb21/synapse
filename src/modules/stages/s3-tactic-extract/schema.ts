@@ -49,6 +49,7 @@ export const tacticSourceReferences = pgTable("tactic_source_references", {
   source_id: text("source_id").notNull(), source_quote: text("source_quote").notNull(),
   block_id: text("block_id"), source_context: jsonb("source_context").$type<SourceContext>(),
   observed_block_ids: jsonb("observed_block_ids").$type<string[]>(),
+  finding_keys: jsonb("finding_keys").$type<string[]>().notNull().default([]),
   quote_key: text("quote_key").notNull(), created_at: text("created_at").notNull(),
 });
 export const tacticSuggestions = pgTable("tactic_suggestions", {
@@ -68,6 +69,7 @@ CREATE TABLE IF NOT EXISTS tactic_source_references (
  id text PRIMARY KEY, tactic_id text NOT NULL, source_id text NOT NULL,
  source_quote text NOT NULL, quote_key text NOT NULL, created_at text NOT NULL
 );
+ALTER TABLE tactic_source_references ADD COLUMN IF NOT EXISTS finding_keys jsonb NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE tactic_source_references ADD COLUMN IF NOT EXISTS block_id text;
 ALTER TABLE tactic_source_references ADD COLUMN IF NOT EXISTS source_context jsonb;
 CREATE UNIQUE INDEX IF NOT EXISTS tactic_source_references_block_quote_idx

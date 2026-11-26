@@ -356,7 +356,7 @@ describe("hillclimb prompt variants", () => {
   it("composites targeted metrics for baseline comparison", () => {
     const high = compositeScore([{ name: "a", value: 0.9, target: 0.8 }]);
     const low = compositeScore([{ name: "a", value: 0.4, target: 0.8 }]);
-    expect(high).toBeGreaterThan(low);
+    expect(high).toBeGreaterThan(low!);
   });
 });
 
@@ -381,7 +381,7 @@ describe("rationale, evals and hillclimb plumbing", () => {
   it("passes an eval run only when every targeted score clears its target", () => {
     expect(scoresPassed([{ name: "a", value: 0.9, target: 0.8 }])).toBe(true);
     expect(scoresPassed([{ name: "a", value: 0.7, target: 0.8 }])).toBe(false);
-    expect(scoresPassed([{ name: "a", value: 0 }])).toBe(true);
+    expect(scoresPassed([{ name: "a", value: 0 }])).toBe(false);
   });
 });
 

@@ -7,6 +7,7 @@ import { listRuns, stageHealth } from "@/modules/kernel/observability";
 import { routeConfigs } from "@/modules/kernel/routing";
 import { readJsonBody, requireCustomerContext } from "@/modules/auth/api-guard";
 import { ownerGate } from "@/modules/auth/owner";
+import { demoExecutionFor } from "@/lib/demo/mode";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -39,10 +40,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ safe_error: true, error: "Choose an available AI task and try again." }, { status: 400 });
     }
     const result = await runStage({
+      signal: request.signal,
       stage,
       input: (body.input as unknown) ?? {},
       actor: identity.actor,
       role: identity.role,
+      demo: demoExecutionFor(identity.workspace),
     });
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {

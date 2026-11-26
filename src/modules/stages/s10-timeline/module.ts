@@ -1,4 +1,7 @@
+import { commitStageMutation } from "@/modules/kernel/stage-publication";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
+import { VELMARA_DEMO_ANCHOR } from "@/lib/demo/calendar";
+import { DemoReplayMissError } from "@/lib/demo/replay";
 /** Builds and edits workspace timelines, preserving human decisions and attributable history. */
 import { tacticEditVersion } from "@/lib/iegp/tactic-edit-version";
 import { expansionScopeSchema } from "@/lib/iegp/tactic-expansions";
@@ -58,6 +61,12 @@ const inputSchema = z.object({
   anchor: z.string().optional(),
   persist: z.boolean().default(true),
 });
+
+export function timelineAnchor(requested: string | undefined, clientDemo: boolean, now = nowIso()): string {
+  if (!clientDemo) return (requested ?? now).slice(0, 10);
+  if (requested !== undefined && requested !== VELMARA_DEMO_ANCHOR) throw new DemoReplayMissError();
+  return VELMARA_DEMO_ANCHOR;
+}
 
 const sourceSchema = z.enum(["human", "saved", "tactic", "design", "model"]);
 
@@ -430,7 +439,7 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
   inputSchema,
   outputSchema,
   async run(input, ctx) {
-    const anchor = (input.anchor ?? new Date().toISOString()).slice(0, 10);
+    const anchor = timelineAnchor(input.anchor, Boolean(ctx.route?.demo));
     const [state, placements, overrides, designs] = await Promise.all([
       loadState(),
       listPlacements(),
@@ -540,7 +549,7 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
     if (input.persist) {
       // Model calls happen before locking. Refuse stale output rather than
       // replacing metadata a person changed while the model was running.
-      await withTimelineMutation(async () => {
+      await commitStageMutation(ctx, async (markWritten) => {
         if (timelineRevision(await storedActivities()) !== timelineRevision(overrides)) {
           throw new TrustedApplicationError("The timeline changed while this rebuild was running. Rebuild again to include the latest edits.");
         }
@@ -582,8 +591,9 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
                 updated_at: values.updated_at,
               },
             });
+          markWritten();
         }
-      });
+      }, withTimelineMutation);
     }
     ctx.run.note("timeline", {
       activities: model.activities.length,
@@ -1240,7 +1250,10 @@ export async function savePlan(args: {
   return withWorkspaceTransaction(async () => {
     const schema = await currentSchemaName();
     await db().execute(sql`select pg_advisory_xact_lock(hashtext(${`iegp_plans:${schema}`}))`);
-    const [model, state, proposals] = await Promise.all([timelineModel(), loadState(), listIdeationProposals()]);
+    // A signed package freezes the persisted gap numbers. Repair before any
+    // other snapshot reads so their views of gap numbers agree.
+    const state = await loadState({ backfillGapNumbers: args.status === "final" });
+    const [model, proposals] = await Promise.all([timelineModel(), listIdeationProposals()]);
     if (args.status === "final" && model.activities.length === 0) {
       throw new TrustedApplicationError("There is nothing to save as final yet: date at least one activity on the timeline first.");
     }

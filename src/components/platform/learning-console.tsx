@@ -18,11 +18,12 @@ const percent = (share: number | null) => share === null ? "—" : `${(share * 1
 /** Display UTC periods with counts, an equivalent textual table, and candidate provenance. */
 export function LearningConsole({ initial }: { initial: LearningReport }) {
   const [report, setReport] = useState(initial);
-  const [stage, setStage] = useState<typeof STAGES[number]>("S2");
+  const [stage, setStage] = useState<typeof STAGES[number]>("S8");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [checkRequired, setCheckRequired] = useState(false);
   const [created, setCreated] = useState<{ id: string; instruction_text: string } | null>(null);
+  const supportsTargets = stage === "S8";
   const rows = report.agreement.filter(row => row.stage === stage);
   async function load(bucket: "day" | "week") {
     const response = await postJson<LearningReport>(`/api/admin/learning?bucket=${bucket}`, undefined, { method: "GET" });
@@ -81,7 +82,7 @@ export function LearningConsole({ initial }: { initial: LearningReport }) {
       </div>
       {rows.length === 0 ? <p className="py-4 text-sm text-muted-foreground">No decisions recorded for {stage}.</p> : <>
         <figure aria-labelledby="agreement-chart-caption" className="mb-4 border border-border p-3 rounded-lg">
-          <figcaption id="agreement-chart-caption" className="mb-3 text-sm">{stage} decision shares by {report.bucket}. Accepted, edited and rejected values appear in the table below.</figcaption>
+          <figcaption id="agreement-chart-caption" className="mb-3 text-sm">{stage} decision shares by {report.bucket}. Acceptance includes unchanged suggestions. Only attributed corrections with independent targets can qualify for promotion.</figcaption>
           <div className="space-y-2" role="img" aria-label={`${stage} agreement chart; exact counts and percentages in the agreement table`}>
             {rows.map(row => <div key={row.period} className="flex items-center gap-3 text-xs"><span className="w-20 shrink-0">{row.period}</span><div className="flex h-4 flex-1 bg-muted" aria-hidden="true"><span className="bg-emerald-600" style={{ width: `${(row.accepted_share ?? 0) * 100}%` }} /><span className="bg-amber-500" style={{ width: `${(row.edited_share ?? 0) * 100}%` }} /><span className="bg-destructive" style={{ width: `${(row.rejected_share ?? 0) * 100}%` }} /></div><span className="w-6 text-right">{row.total}</span></div>)}
           </div>
@@ -92,7 +93,8 @@ export function LearningConsole({ initial }: { initial: LearningReport }) {
     <section aria-labelledby="candidate-heading" className="border-t border-border pt-5">
       <h2 id="candidate-heading" className="text-base font-semibold">Prompt candidates</h2>
       <p className="my-2 text-sm text-muted-foreground">Create a version from validated disagreement lessons in this workspace. Decisions reserved for evaluation stay excluded. A candidate needs evaluation and approval before use.</p>
-      <Button onClick={() => void propose()} disabled={busy || checkRequired}>{busy ? "Working…" : `Create ${TASK_NAMES[stage]} candidate`}</Button>
+      {!supportsTargets && <p className="my-2 text-sm">{stage === "S9" ? "Generated proposal slots can hold different designs. Promotion needs a review of the same proposition." : stage === "S4" ? "Mapping promotion needs verified source lineage for the tactics and expansions used by each case." : "This stage has no independent human target for evaluating a candidate."}</p>}
+      <Button onClick={() => void propose()} disabled={busy || checkRequired || !supportsTargets}>{busy ? "Working…" : `Create ${TASK_NAMES[stage]} candidate`}</Button>
       {created && <div role="status" className="mt-3 text-sm" data-testid="learning-created"><p>Candidate created: {created.id}. The active prompt is unchanged.</p><p className="mt-2 whitespace-pre-wrap">{created.instruction_text}</p></div>}
       {report.revisions.length === 0 ? <p className="mt-4 text-sm text-muted-foreground">No prompt candidates created.</p> : <div className="mt-4 overflow-x-auto"><table className="w-full text-left text-sm"><caption className="sr-only">Prompt revision history</caption><thead><tr className="border-b border-border">{["Version", "Stage", "State", "Parent", "Training / held out", "Creator / time"].map(label => <th scope="col" key={label} className="p-2 font-medium">{label}</th>)}</tr></thead><tbody>{report.revisions.map(revision => <tr key={revision.id} className="border-b border-border"><th scope="row" className="p-2 font-mono text-xs font-normal">{revision.id}</th><td className="p-2">{revision.stage}</td><td className="p-2">{revision.state}</td><td className="p-2 text-xs">{revision.parent_revision}</td><td className="p-2">{revision.training_count} / {revision.heldout_count}</td><td className="p-2">{revision.creator.name}<br />{revision.created_at.slice(0, 16).replace("T", " ")} UTC</td></tr>)}</tbody></table></div>}
       <p className="mt-4 text-sm text-muted-foreground">A sweep champion is only the best score in a sweep. Only an explicitly approved active revision changes live instructions.</p>
@@ -104,15 +106,17 @@ export function LearningConsole({ initial }: { initial: LearningReport }) {
           <div className="mt-3 space-y-3 text-sm">
             <p>Previous additional instructions</p><pre className="whitespace-pre-wrap break-words font-sans">{parent?.instruction_text || "Baseline — no additional approved instructions."}</pre>
             <p>Candidate additional instructions</p><pre className="whitespace-pre-wrap break-words font-sans">{revision.instruction_text}</pre>
-            <div className="flex flex-wrap gap-2"><Button disabled={busy || checkRequired} onClick={()=>void act({action:"evaluate",revision_id:revision.id})}>Evaluate {revision.id}</Button>
+            <div className="flex flex-wrap gap-2"><Button disabled={busy || checkRequired || !supportsTargets || !!evaluation && evaluation.retryable === false} onClick={()=>void act({action:"evaluate",revision_id:revision.id})}>Evaluate {revision.id}</Button>
               {revision.state==='active' ? <Button disabled={busy || checkRequired} variant="outline" onClick={()=>void act({action:"rollback",stage:revision.stage,expected_active_id:revision.id})}>Roll back {revision.id}</Button> : <Button disabled={busy || checkRequired || !evaluation?.eligible} variant="outline" onClick={()=>void act({action:"approve",revision_id:revision.id,evaluation_id:evaluation!.id,expected_active_id:evaluation!.baseline_revision_id})}>Approve {revision.id}</Button>}
             </div>
             {evaluation && <div aria-label={`Evaluation ${revision.id}`}>
-              <p>{evaluation.eligible ? "Eligible for explicit approval" : "Not eligible for approval"}. Gold cases: {evaluation.baseline.gold_count} / {evaluation.candidate.gold_count}; replay cases: {evaluation.baseline.replay_count} / {evaluation.candidate.replay_count} (baseline / candidate).</p>
-              <p>Combined score: {evaluation.baseline.combined.toFixed(4)} → {evaluation.candidate.combined.toFixed(4)}. Equal weight for gold and replay composites.</p>
+              <p>{evaluation.eligible ? "Eligible for explicit approval" : "Not eligible for approval"}. {evaluation.protocol ? `Reviewed cases: ${evaluation.baseline.gold_count} baseline, ${evaluation.candidate.gold_count} candidate. ${evaluation.protocol.repeats} paired repeats per case.` : "Historical evaluation without verified paired human targets."}</p>
+              <p>{evaluation.protocol ? "Human-target agreement" : "Historical composite"}: {evaluation.baseline.combined.toFixed(4)} → {evaluation.candidate.combined.toFixed(4)}. {evaluation.protocol && "Each scored target field receives equal weight."}</p>
+              <p>{evaluation.retryable === false && "This batch binds the candidate."}{evaluation.retryable === true && "A provider interruption permits another attempt."}</p>
+              <p>Frozen cohort {evaluation.cohort_id} · {evaluation.module_id} {evaluation.module_version}</p>
               <p>Model: {evaluation.route.model} · {evaluation.route.provider_id}</p>
               {evaluation.reasons.map(reason=><p key={reason}>{reason}</p>)}
-              <div className="overflow-x-auto"><table className="w-full text-left text-sm"><caption className="sr-only">Individual evaluation metrics</caption><thead><tr><th className="p-2">Evidence / metric</th><th className="p-2">Baseline</th><th className="p-2">Candidate</th><th className="p-2">Scored cases</th></tr></thead><tbody>{(['gold','replay'] as const).flatMap(kind=>evaluation.baseline[kind].map(metric=>{const candidate=evaluation.candidate[kind].find(m=>m.name===metric.name);return <tr key={`${kind}-${metric.name}`} className="border-t border-border"><th className="p-2 font-normal">{kind} / {metric.name}</th><td className="p-2">{metric.value.toFixed(4)}</td><td className="p-2">{candidate?.value.toFixed(4)??'Missing'}</td><td className="p-2">{metric.denominator} / {candidate?.denominator??0}</td></tr>}))}</tbody></table></div>
+              <div className="overflow-x-auto"><table className="w-full text-left text-sm"><caption className="sr-only">Individual evaluation metrics</caption><thead><tr><th className="p-2">Evidence / metric</th><th className="p-2">Baseline</th><th className="p-2">Candidate</th><th className="p-2">Scored observations</th></tr></thead><tbody>{(['gold','replay'] as const).flatMap(kind=>evaluation.baseline[kind].map(metric=>{const candidate=evaluation.candidate[kind].find(m=>m.name===metric.name);return <tr key={`${kind}-${metric.name}`} className="border-t border-border"><th className="p-2 font-normal">{kind} / {metric.name}</th><td className="p-2">{metric.value.toFixed(4)}</td><td className="p-2">{candidate?.value.toFixed(4)??'Missing'}</td><td className="p-2">{metric.denominator} / {candidate?.denominator??0}</td></tr>}))}</tbody></table></div>
               <p>Excluded cases: {Object.keys(evaluation.excluded).length}</p>{Object.entries(evaluation.excluded).map(([id,reason])=><p key={id} className="break-words">{id}: {reason}</p>)}
               {evaluation.failures.map((_,i)=><p key={i} className="break-words">{"An evaluation case could not finish. Check AI settings and rerun evaluation before approval."}</p>)}
             </div>}

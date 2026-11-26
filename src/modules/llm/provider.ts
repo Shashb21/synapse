@@ -1,4 +1,5 @@
-import { fetchProvider, ProviderError, parseProviderErrorBody, redactSecrets } from "./provider-error";
+import { providerBaseUrl } from "./provider-endpoint";
+import { fetchProvider, ModelAnswerError, ProviderError, parseProviderErrorBody, redactSecrets } from "./provider-error";
 
 /**
  * LLM provider contract. Every cloud provider authenticates with a server-side
@@ -22,13 +23,23 @@ export type LlmRequest = {
  * Token usage from raw provider parsing or resolved call recording. Raw parsers
  * leave missing counts null. Successful recorded calls fill missing counts from
  * text estimates and label their origin; failed calls retain reported counts only.
- * Input includes cached prompt tokens; output includes billed reasoning tokens.
+ * Input includes cached prompt and tool-use prompt tokens. Output includes billed reasoning tokens.
  * Origin fields are optional so historical records remain readable. Estimates
  * describe approximate usage, not confirmed provider billing.
  */
 export type LlmUsage = {
   /** Count origin; absent on historical records and raw provider payloads. */
   source?: "provider" | "estimated" | "mixed";
+  /** Earlier HTTP attempts may have incurred unreported charges. */
+  prior_charge_unknown?: boolean;
+  /** Present total or reasoning metadata failed numeric or structural validation. */
+  malformed_token_details?: true;
+  /** Reported by adapters whose service tier can affect billing. */
+  service_tier?: string;
+  inference_geo?: string;
+  cached_input_tokens?: number | null;
+  cache_written_input_tokens?: number | null;
+  cost_in_usd_ticks?: number | null;
   input_tokens_source?: "provider" | "estimated";
   output_tokens_source?: "provider" | "estimated";
   input_tokens: number | null;
@@ -44,14 +55,20 @@ export type ProviderRequestBudget = {
   consume(): void;
 };
 
-/** Optional observers of one call. The reply is still returned as plain text. */
+/** Optional controls and observers of one call. The reply is still returned as plain text. */
 export type LlmCallHooks = {
   requestBudget?: ProviderRequestBudget;
+  run?: { signal: AbortSignal; deadline: number; checkAttempt(): void; dispatch<T>(send: () => Promise<T>, reserve?: () => void, beforeRequest?: () => Promise<void>): Promise<T> };
+  onDispatch?: () => void;
+  /** Revalidate authorization before each HTTP dispatch, including retries. */
+  beforeRequest?: () => Promise<void>;
   onUsage?: (usage: LlmUsage) => void;
   /** Per-call HTTP bound; omitted preserves ordinary provider retry policy. */
   maxAttempts?: number;
   /** Check that the caller still owns the work before another HTTP send. */
   beforeRetry?: () => Promise<void>;
+  /** Prevent account defaults from selecting a premium tier on a reserved send. */
+  standardBilling?: boolean;
 };
 
 /** The provider's API key, read on the server and sent only to that provider. */
@@ -79,7 +96,7 @@ export type LlmProvider = {
 
 export class NoRouteError extends Error {}
 
-export { ProviderError } from "./provider-error";
+export { ModelAnswerError, ProviderError } from "./provider-error";
 
 function env(name: string, fallback = ""): string {
   return process.env[name]?.trim() || fallback;
@@ -104,13 +121,22 @@ export const RETRY = {
   attempts: 4,
   base_ms: 2_000,
   max_wait_ms: 60_000,
-  sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+  sleep: (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
+    signal?.throwIfAborted();
+    const abort = () => { clearTimeout(timer); reject(signal?.reason); };
+    const timer = setTimeout(() => { signal?.removeEventListener("abort", abort); resolve(); }, ms);
+    signal?.addEventListener("abort", abort, { once: true });
+  }),
 };
 
 /** How long the provider asked us to wait, in ms, or null. */
 function requestedWait(res: Response, text: string): number | null {
-  const header = Number(res.headers.get("retry-after"));
-  if (Number.isFinite(header) && header > 0) return header * 1_000;
+  const header = res.headers.get("retry-after")?.trim();
+  if (header) {
+    if (/^\d+(?:\.\d+)?$/.test(header)) return Number(header) * 1_000;
+    const at = Date.parse(header);
+    if (Number.isFinite(at)) return Math.max(0, at - Date.now());
+  }
   const delay = /"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/.exec(text);
   return delay ? Number(delay[1]) * 1_000 : null;
 }
@@ -119,21 +145,25 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
   const maxAttempts = hooks?.maxAttempts ?? RETRY.attempts;
   for (let attempt = 1; ; attempt += 1) {
     // Time-limited (SYNAPSE_LLM_TIMEOUT_MS); a timeout is "unavailable" and not retried (KAN-20).
-    hooks?.requestBudget?.consume();
-    const { res, text } = await fetchProvider(
-      url,
-      {
+    const reserve = () => hooks?.requestBudget?.consume();
+    const send = () => {
+      hooks?.onDispatch?.();
+      return fetchProvider(url, {
         method: "POST",
         headers: { "content-type": "application/json", ...headers },
         body: JSON.stringify(body),
-        // An automatic redirect could resend the prompt without consuming an allowance.
-        ...(hooks?.requestBudget ? { redirect: "manual" as const } : {}),
-      },
-      target,
-    );
+        redirect: "manual",
+        signal: hooks?.run?.signal,
+      }, target);
+    };
+    if (!hooks?.run) {
+      await hooks?.beforeRequest?.();
+      reserve();
+    }
+    const { res, text } = await (hooks?.run ? hooks.run.dispatch(send, reserve, hooks.beforeRequest) : send());
     if (res.ok) return JSON.parse(text) as Record<string, unknown>;
     // A typed, classified error instead of the raw body; the key never appears in it.
-    const redirected = hooks?.requestBudget && res.status >= 300 && res.status < 400;
+    const redirected = res.status >= 300 && res.status < 400;
     const parsed = redirected ? { error_type: null, message: null } : parseProviderErrorBody(text);
     const error = new ProviderError({
       provider_id: target.provider_id,
@@ -153,43 +183,92 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
     if (!transient || attempt >= maxAttempts) throw error;
     // When a retry cannot be sent, retain only the safe classification from the paid attempt.
     hooks?.requestBudget?.check({ kind: error.kind, status: error.status });
-    const wait = requestedWait(res, text) ?? RETRY.base_ms * 2 ** (attempt - 1);
-    await RETRY.sleep(Math.min(wait, RETRY.max_wait_ms));
+    hooks?.run?.checkAttempt();
+    const wait = requestedWait(res, text) ?? Math.min(RETRY.base_ms * 2 ** (attempt - 1), RETRY.max_wait_ms);
+    if (wait > RETRY.max_wait_ms || (hooks?.run && Date.now() + wait >= hooks.run.deadline)) throw error;
+    await RETRY.sleep(wait, hooks?.run?.signal);
     await hooks?.beforeRetry?.();
   }
 }
 
 const count = (value: unknown): number | null =>
-  typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
-const sum = (...values: (number | null)[]): number | null =>
-  values.every((value) => value === null) ? null : values.reduce<number>((total, value) => total + (value ?? 0), 0);
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+
+/** Optional billed components may be absent. A missing or invalid base count is unknown. */
+function billedCount(base: unknown, ...extras: unknown[]): number | null {
+  let total = count(base);
+  if (total === null) return null;
+  for (const extra of extras) {
+    if (extra === undefined) continue;
+    const component = count(extra);
+    if (component === null) return null;
+    total += component;
+  }
+  return count(total);
+}
 
 /** The provider's token counts from a reply payload, whatever its shape; null when it sent none. */
 export function usageFromPayload(payload: Record<string, unknown>): LlmUsage | null {
   const gemini = payload.usageMetadata as Record<string, unknown> | undefined;
   if (gemini && typeof gemini === "object") {
-    const input = count(gemini.promptTokenCount);
-    const reasoning = count(gemini.thoughtsTokenCount);
-    const output = sum(count(gemini.candidatesTokenCount), reasoning);
-    return { input_tokens: input, output_tokens: output, total_tokens: count(gemini.totalTokenCount) ?? sum(input, output), reasoning_tokens: reasoning };
+    // GenerateContent's total includes tool-use prompts and thoughts. Cached
+    // tokens are already in promptTokenCount.
+    const prompt = count(gemini.promptTokenCount);
+    const input = billedCount(prompt, gemini.toolUsePromptTokenCount);
+    const output = billedCount(gemini.candidatesTokenCount, gemini.thoughtsTokenCount);
+    const total = count(gemini.totalTokenCount);
+    const hasCacheCount = Object.hasOwn(gemini, "cachedContentTokenCount");
+    const cached = count(gemini.cachedContentTokenCount);
+    const reconciled = total !== null && total === billedCount(input, output)
+      && (!hasCacheCount || (cached !== null && prompt !== null && cached <= prompt));
+    const tier = typeof gemini.serviceTier === "string" ? gemini.serviceTier.toLowerCase() : "";
+    return {
+      input_tokens: reconciled ? input : null,
+      output_tokens: reconciled ? output : null,
+      total_tokens: reconciled ? total : null,
+      reasoning_tokens: reconciled ? count(gemini.thoughtsTokenCount) : null,
+      ...(hasCacheCount ? { cached_input_tokens: cached } : {}),
+      ...(Object.hasOwn(gemini, "serviceTier") ? {
+        service_tier: ["standard", "unspecified", "flex", "priority"].includes(tier) ? tier : "unknown",
+      } : {}),
+    };
   }
   const usage = payload.usage as Record<string, unknown> | undefined;
   if (!usage || typeof usage !== "object") return null;
+  const charge = Object.hasOwn(usage, "cost_in_usd_ticks") ? { cost_in_usd_ticks: count(usage.cost_in_usd_ticks) } : {};
   if ("input_tokens" in usage || "output_tokens" in usage) {
     // Anthropic: cached prompt tokens are reported apart from input_tokens.
-    const input = sum(count(usage.input_tokens), count(usage.cache_creation_input_tokens), count(usage.cache_read_input_tokens));
+    const input = billedCount(usage.input_tokens, usage.cache_creation_input_tokens, usage.cache_read_input_tokens);
     const output = count(usage.output_tokens);
-    return { input_tokens: input, output_tokens: output, total_tokens: sum(input, output), reasoning_tokens: null };
+    return {
+      input_tokens: input, output_tokens: output, total_tokens: billedCount(input, output), reasoning_tokens: null,
+      ...charge,
+      ...(Object.hasOwn(usage, "cache_read_input_tokens") ? { cached_input_tokens: count(usage.cache_read_input_tokens) } : {}),
+      ...(Object.hasOwn(usage, "cache_creation_input_tokens") ? { cache_written_input_tokens: count(usage.cache_creation_input_tokens) } : {}),
+      ...(typeof usage.inference_geo === "string" ? { inference_geo: usage.inference_geo } : {}),
+      ...(typeof usage.service_tier === "string" ? { service_tier: usage.service_tier } : {}),
+    };
   }
   // OpenAI-compatible (OpenAI, OpenRouter, xAI).
   const input = count(usage.prompt_tokens);
   const output = count(usage.completion_tokens);
-  const details = usage.completion_tokens_details as Record<string, unknown> | undefined;
+  const total = count(usage.total_tokens);
+  const details = usage.completion_tokens_details;
+  const breakdown = details && typeof details === "object" && !Array.isArray(details) ? details as Record<string, unknown> : null;
+  const reasoning = count(breakdown?.reasoning_tokens);
+  const malformedDetails = (Object.hasOwn(usage, "total_tokens") && total === null)
+    || (Object.hasOwn(usage, "completion_tokens_details") && !breakdown)
+    || (breakdown && Object.hasOwn(breakdown, "reasoning_tokens") && reasoning === null);
+  const promptDetails = usage.prompt_tokens_details as Record<string, unknown> | undefined;
   return {
     input_tokens: input,
     output_tokens: output,
-    total_tokens: count(usage.total_tokens) ?? sum(input, output),
-    reasoning_tokens: count(details?.reasoning_tokens),
+    total_tokens: total ?? billedCount(input, output),
+    reasoning_tokens: reasoning,
+    ...(malformedDetails ? { malformed_token_details: true } : {}),
+    ...(promptDetails && Object.hasOwn(promptDetails, "cached_tokens") ? { cached_input_tokens: count(promptDetails.cached_tokens) } : {}),
+    ...charge,
+    ...(typeof payload.service_tier === "string" ? { service_tier: payload.service_tier } : {}),
   };
 }
 
@@ -267,10 +346,12 @@ async function chatCompletions(args: {
       model: args.request.model,
       temperature: args.request.temperature,
       max_tokens: args.request.max_tokens,
+      ...(args.hooks?.standardBilling && ["openai", "xai-grok"].includes(args.target.provider_id) ? { service_tier: "default" } : {}),
       messages: [
         { role: "system", content: args.request.system },
         { role: "user", content: args.request.user },
       ],
+      ...(args.target.provider_id === "openrouter" ? { provider: { allow_fallbacks: false } } : {}),
       ...(args.json ? { response_format: { type: "json_object" } } : {}),
     },
     { ...args.target, api_key: args.auth.api_key },
@@ -299,8 +380,12 @@ export function chatText(payload: Record<string, unknown>, target: CallTarget): 
     });
   }
   const finish = (payload.choices as { finish_reason?: string }[] | undefined)?.[0]?.finish_reason;
+  const choice = (payload.choices as { message?: { refusal?: string } }[] | undefined)?.[0];
+  if (finish === "content_filter" || choice?.message?.refusal) {
+    throw new ModelAnswerError("refusal", `${target.provider_name} declined this request.`);
+  }
   if (finish === "length") {
-    throw new Error(
+    throw new ModelAnswerError("truncation",
       `${target.provider_name}'s reply was cut off at its max_tokens limit. Raise Max tokens for this stage in AI & routing.`,
     );
   }
@@ -319,7 +404,7 @@ export const xaiGrok: LlmProvider = {
   async complete(request, auth, hooks) {
     if (!auth) throw new NoRouteError("xai-grok has no API key: set XAI_API_KEY");
     return chatCompletions({
-      base: env("XAI_BASE_URL", "https://api.x.ai/v1"),
+      base: providerBaseUrl("xai-grok"),
       request,
       auth,
       hooks,
@@ -347,15 +432,15 @@ export function anthropicText(payload: Record<string, unknown>): string {
   const stop = payload.stop_reason;
   if (stop === "refusal") {
     const details = payload.stop_details as { category?: string | null } | null | undefined;
-    throw new Error(`Claude declined this request${details?.category ? ` (${details.category})` : ""}.`);
+    throw new ModelAnswerError("refusal", `Claude declined this request${details?.category ? ` (${details.category})` : ""}.`);
   }
   const content = Array.isArray(payload.content) ? (payload.content as { type?: string; text?: string }[]) : [];
   const text = content
     .filter((block) => block.type === "text")
     .map((block) => block.text ?? "")
     .join("");
-  if (stop === "max_tokens") {
-    throw new Error(
+  if (stop === "max_tokens" || stop === "model_context_window_exceeded") {
+    throw new ModelAnswerError("truncation",
       text.trim()
         ? "Claude's reply was cut off at its max_tokens limit before it finished. Raise Max tokens for this stage in AI & routing."
         : "Claude used its whole max_tokens budget before answering. Raise Max tokens for this stage in AI & routing.",
@@ -387,11 +472,12 @@ export const anthropicClaude: LlmProvider = {
       headers["anthropic-workspace-id"] = anthropicWorkspaceId;
     }
     const payload = await postJson(
-      `${env("ANTHROPIC_BASE_URL", "https://api.anthropic.com")}/v1/messages`,
+      `${providerBaseUrl("anthropic-claude").replace(/\/$/, "")}/v1/messages`,
       headers,
       {
         model: request.model,
         max_tokens: request.max_tokens,
+        ...(hooks?.standardBilling ? { service_tier: "standard_only" } : {}),
         // Claude 5 models (and Opus 4.7/4.8) reject sampling parameters with a 400.
         ...(anthropicAcceptsTemperature(request.model) ? { temperature: request.temperature } : {}),
         system: request.system,
@@ -415,7 +501,7 @@ export const openAi: LlmProvider = {
   async complete(request, auth, hooks) {
     if (!auth) throw new NoRouteError("openai has no API key: set OPENAI_API_KEY");
     return chatCompletions({
-      base: env("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+      base: providerBaseUrl("openai"),
       request,
       auth,
       hooks,
@@ -436,11 +522,12 @@ export const googleGemini: LlmProvider = {
   async complete(request, auth, hooks) {
     if (!auth) throw new NoRouteError("google-gemini has no API key: set GEMINI_API_KEY");
     const payload = await postJson(
-      `${env("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta")}/models/${request.model}:generateContent`,
+      `${providerBaseUrl("google-gemini").replace(/\/$/, "")}/models/${request.model}:generateContent`,
       { "x-goog-api-key": auth.api_key },
       {
         systemInstruction: { parts: [{ text: request.system }] },
         contents: [{ role: "user", parts: [{ text: request.user }] }],
+        ...(hooks?.standardBilling ? { serviceTier: "standard" } : {}),
         generationConfig: {
           temperature: request.temperature,
           maxOutputTokens: request.max_tokens,
@@ -464,13 +551,16 @@ export const googleGemini: LlmProvider = {
 export function geminiText(payload: Record<string, unknown>): string {
   const candidate = (payload.candidates as { finishReason?: string }[] | undefined)?.[0];
   const blocked = (payload.promptFeedback as { blockReason?: string } | undefined)?.blockReason;
-  if (blocked) throw new Error(`Gemini blocked the prompt (${blocked}). Nothing was saved.`);
+  if (blocked) throw new ModelAnswerError("refusal", `Gemini blocked the prompt (${blocked}). Nothing was saved.`);
   if (candidate?.finishReason === "MAX_TOKENS") {
-    throw new Error(
+    throw new ModelAnswerError("truncation",
       "Gemini's reply was cut off at its max_tokens limit (its thinking counts toward it). Raise Max tokens for this stage in AI & routing.",
     );
   }
   if (candidate?.finishReason && !["STOP", "FINISH_REASON_UNSPECIFIED"].includes(candidate.finishReason)) {
+    if (["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT"].includes(candidate.finishReason)) {
+      throw new ModelAnswerError("refusal", `Gemini stopped early (${candidate.finishReason}). Nothing was saved.`);
+    }
     throw new Error(`Gemini stopped early (${candidate.finishReason}). Nothing was saved.`);
   }
   return textFromPayload(payload);
@@ -492,7 +582,7 @@ export const openRouter: LlmProvider = {
   async complete(request, auth, hooks) {
     if (!auth) throw new NoRouteError("openrouter has no API key: set OPENROUTER_API_KEY");
     return chatCompletions({
-      base: env("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+      base: providerBaseUrl("openrouter"),
       request,
       auth,
       hooks,

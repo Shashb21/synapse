@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { firstOpenGap, runStage, seedMapped, validateBandHigh } from "../support/synapse";
+import { firstOpenGap, runStage, seedPrioritizable, validateBandHigh } from "../support/synapse";
 
 /**
  * Long dialogs fit a laptop screen: the dialog is capped to the viewport and
@@ -11,7 +11,7 @@ test.describe("Dialogs fit the viewport", () => {
   test.use({ viewport: { width: 1280, height: 720 } });
 
   test.beforeAll(async ({ request }) => {
-    await seedMapped(request);
+    await seedPrioritizable(request);
     await runStage(request, "S8");
     const gap = await firstOpenGap(request);
     await validateBandHigh(request, gap.gap_id, "Blocks the EU5 submission, so it is High");

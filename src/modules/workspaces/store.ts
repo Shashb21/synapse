@@ -243,7 +243,11 @@ export async function setWorkspaceDemo(workspaceId: string, demo: boolean, write
 }
 
 /** Turns client demo mode on or off (KAN-138). The caller checks it is the platform owner and audits it. */
-export async function setWorkspaceDemoMode(workspaceId: string, on: boolean): Promise<void> {
+export async function setWorkspaceDemoMode(workspaceId: string, on: boolean, writer?: SqlWriter): Promise<void> {
+  if (writer) {
+    await writer.execute(sql`update public.workspaces set demo_mode = ${on} where id = ${workspaceId}`);
+    return;
+  }
   await rows(sql`update workspaces set demo_mode = ${on} where id = ${workspaceId}`);
 }
 

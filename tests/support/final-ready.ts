@@ -8,12 +8,9 @@ import { priorityDecision } from "./priority-decision";
 import { listPlacements, validatePlacement } from "@/modules/stages/s8-prioritization/module";
 
 /**
- * Brings a seeded plan to where a complete final may be saved (KAN-86): every
- * Partially Addressed gap rewritten (Addressed with its mapped tactics, else
- * Open), every live gap confirmed, and every Open gap given a validated band.
- * Tests that exercise the roadmap call this before saving as final.
+ * Reviews a seeded inventory so each live gap has a confirmed Open or Addressed status.
  */
-export async function makeFinalReady(actor: { name: string; function: ActorFunction }) {
+export async function reviewInventoryForFinal(actor: { name: string; function: ActorFunction }) {
   let state = await loadState();
   for (const gap of state.gaps.filter(isLiveGap)) {
     if (displayedGapStatus(gap) !== "validated_partial") continue;
@@ -72,7 +69,12 @@ export async function makeFinalReady(actor: { name: string; function: ActorFunct
       await validateGap({ gap_id: gap.id, actor_name: actor.name, actor_function: actor.function, note: "Confirmed for the final plan" });
     }
   }
-  state = await loadState();
+}
+
+/** Confirms the inventory and assigns missing priorities before saving a complete final plan. */
+export async function makeFinalReady(actor: { name: string; function: ActorFunction }) {
+  await reviewInventoryForFinal(actor);
+  const state = await loadState();
   const banded = new Set((await listPlacements()).filter((p) => p.validated && p.band).map((p) => p.gap_id));
   for (const gap of state.gaps.filter(isLiveGap)) {
     if (displayedGapStatus(gap) !== "validated_open" || banded.has(gap.id)) continue;

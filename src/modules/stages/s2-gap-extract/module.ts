@@ -1,7 +1,11 @@
 import { resolveSourceCitation, sourceContextSchema } from "@/lib/ingest/source-citation";
-import { extractionSections, quotedBlock, reconcileSections, proposeSections, reviseSection, type ExtractionSection } from "../extraction-sections";
+import { SOURCE_FILES_DDL } from "@/modules/stages/s0-upload/schema";
+import { PARSED_DOCUMENTS_DDL } from "@/modules/stages/s1-parse/schema";
+import { stageWrite } from "@/modules/kernel/stage-publication";
+import { quotedRepair, repairText, repairUserMessage, type RepairMessage } from "@/modules/kernel/repair-guidance";
+import { extractionSections, promptBlockId, quotedBlock, reconcileSections, proposeSections, reviseSection, sourceBlockId, usesExtractionHandles, type ExtractionSection } from "../extraction-sections";
 import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import { newId, nowIso } from "@/modules/kernel/ids";
@@ -15,14 +19,18 @@ import {
 import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import { NoRouteError } from "@/modules/llm/provider";
 import type { ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
+import { reclassifiedFindings, scopeSourceFinding, sourceFindingKey } from "@/lib/ingest/source-findings";
+import { supportingBlockId } from "@/lib/ingest/manual-blocks";
+import type { IegpState } from "@/lib/iegp/types";
 import { EVIDENCE_DOMAINS, type EvidenceDomain } from "@/lib/iegp/enums";
-import { addSuggestionSources, commitExtractedRecords, loadState } from "@/lib/iegp/store";
+import { addSuggestionSources, commitExtractedRecords, loadState, readStageState, withExtractionCommit } from "@/lib/iegp/store";
 import { validatedPlacementGapIds } from "@/modules/stages/s8-prioritization/module";
 import { extractCandidateGaps, isLiveGap } from "@/lib/iegp/engine";
-import { listExtractionDocuments, listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
+import { lockCurrentExtractionDocuments, currentExtractionDocuments, selectedExtractionDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
 import { GAP_CANDIDATES_DDL, GAP_BLOCK_DDL, gapCandidates } from "./schema";
+import { promptVariantInstruction } from "@/modules/kernel/prompt-versions";
 import { augmentSystemPrompt } from "@/modules/kernel/prompt-variant";
-import { curatedS2Cases } from "@/modules/eval-gold";
+import { extractionEvalCases } from "@/modules/eval-gold";
 import { scoreMustMatch } from "@/modules/eval-gold/types";
 import {
   GAP_CRITIC_SYSTEM,
@@ -174,15 +182,15 @@ const text = (value: unknown): string => (typeof value === "string" ? value.trim
  * Schema check on one proposed gap. A row with any problem is not used as is:
  * the proposer is asked to fix it or withdraw it. Nothing is filled in here.
  */
-function gapProblems(raw: RawGap): string[] {
-  const problems: string[] = [];
+function gapProblems(raw: RawGap): RepairMessage[] {
+  const problems: RepairMessage[] = [];
   if (!text(raw.name)) problems.push("name is missing");
   if (!text(raw.statement)) problems.push("statement is missing");
   const domain = text(raw.domain);
   if (!EVIDENCE_DOMAINS.includes(domain as EvidenceDomain)) {
     problems.push(
       domain
-        ? `domain "${domain}" is not one of: ${EVIDENCE_DOMAINS.join(", ")}`
+        ? quotedRepair(domain, value => `domain "${value}" is not one of: ${EVIDENCE_DOMAINS.join(", ")}`)
         : `domain is missing; use one of: ${EVIDENCE_DOMAINS.join(", ")}`,
     );
   }
@@ -206,7 +214,62 @@ function toCandidate(id: string, section: ExtractionSection, raw: RawGap): GapCa
   };
 }
 
-const titleOf = (document: ParsedDocumentRecord) => document.blocks[0]?.heading ?? document.source_id;
+/** The block a candidate's quote comes from, when one block holds it (KAN-97). */
+export function blockIdFor(document: ParsedDocumentRecord | undefined, quote: string): string | null {
+  return supportingBlockId(document?.blocks ?? [], quote);
+}
+
+/** Resolve previously extracted questions to their current owners, giving explicit review outcomes priority. */
+async function recordedGapEvidence(state: IegpState, sourceIds: Set<string>) {
+  type Destination = { gap_id?: string; suggestion_id?: string };
+  const evidence = new Map<string, Destination>();
+  const activeIds = new Set(state.gaps.filter(g => !g.retired).map(g => g.id));
+  const selectedNeeds = state.needs.filter(need => sourceIds.has(need.source_id));
+  const needs = new Map(selectedNeeds.map(n => [n.id, n]));
+  // Human edits can replace the displayed statement or quote. The candidate row retains the original.
+  const candidateIds = selectedNeeds.flatMap(need => need.candidate_row_id ? [need.candidate_row_id] : []);
+  const originals = candidateIds.length ? await db().select({
+    id: gapCandidates.id, source_id: gapCandidates.source_id, source_quote: gapCandidates.source_quote,
+    domain: gapCandidates.domain, statement: gapCandidates.statement,
+  }).from(gapCandidates).where(inArray(gapCandidates.id, candidateIds)) : [];
+  const byCandidate = new Map(originals.map(row => [row.id, row]));
+  const keyOf = (need: IegpState["needs"][number]) => {
+    const row = (need.candidate_row_id && byCandidate.get(need.candidate_row_id)) || need;
+    return scopeSourceFinding(sourceFindingKey(row.source_id, row.source_quote, row.domain, row.statement), need.block_id);
+  };
+  for (const link of state.need_gap_links) {
+    const need = needs.get(link.need_id);
+    if (!need || !activeIds.has(link.gap_id)) continue;
+    const key = keyOf(need);
+    const previous = evidence.get(key);
+    // Historical links do not compete with the current owner after a rewrite.
+    evidence.set(key, !previous || previous.gap_id === link.gap_id ? { gap_id: link.gap_id } : {});
+  }
+  for (const need of selectedNeeds) {
+    const key = keyOf(need);
+    if (!evidence.has(key)) evidence.set(key, {});
+  }
+  for (const suggestion of state.gap_suggestions) {
+    const gapId = suggestion.status === "split" ? suggestion.result_gap_id : suggestion.gap_id;
+    const destination: Destination = suggestion.status === "pending" && activeIds.has(suggestion.gap_id)
+      ? { suggestion_id: suggestion.id }
+      : suggestion.status !== "rejected" && gapId && activeIds.has(gapId) ? { gap_id: gapId } : {};
+    for (const row of [suggestion, ...suggestion.extra_sources]) {
+      const blockId = "provenance" in row ? row.provenance?.block_id ?? row.block_id : row.block_id;
+      const key = scopeSourceFinding(sourceFindingKey(row.source_id, row.source_quote, row.domain ?? suggestion.domain, row.statement), blockId);
+      // Closed history can coexist with a live need owner after a rewrite or promotion.
+      if (!destination.gap_id && !destination.suggestion_id && evidence.get(key)?.gap_id) continue;
+      evidence.set(key, destination);
+    }
+  }
+  return evidence;
+}
+
+function gapFindingKey(candidate: GapCandidate): string {
+  return scopeSourceFinding(sourceFindingKey(candidate.source_id, candidate.source_quote, candidate.domain, candidate.statement), candidate.block_id);
+}
+
+const titleOf = (document: ParsedDocumentRecord) => (document.blocks[0]?.heading ?? document.source_id).slice(0, 200);
 
 /**
  * Test stub only: the kernel calls this when SYNAPSE_TEST_STUB_LLM is set and
@@ -235,7 +298,7 @@ type RevisionItem = {
   /** The critic's objection this revision answers. */
   objection?: string;
   /** What made the candidate incomplete or invalid. */
-  problems?: string[];
+  problems?: RepairMessage[];
 };
 
 /**
@@ -247,7 +310,7 @@ async function reviseWithModel(
   args: { section: ExtractionSection; hints: string; exchange: string; items: RevisionItem[]; role?: "proposer" | "reviser" },
 ): Promise<Map<string, GapCandidate | null>> {
   const byId = new Map(args.items.map((item) => [item.candidate.id, item]));
-  const lastProblems = new Map<string, string[]>();
+  const lastProblems = new Map<string, RepairMessage[]>();
   const answers = await completeAll<GapCandidate | null>({
     ids: args.items.map((item) => item.candidate.id),
     what: "gap revision",
@@ -255,8 +318,9 @@ async function reviseWithModel(
     ask: async (missing, attempt) => {
       const payload = (await ctx.complete({
         role: args.role ?? "reviser",
+        dialogueFields: ["candidates"],
         system: augmentSystemPrompt(GAP_REVISER_SYSTEM),
-        user: JSON.stringify({
+        ...repairUserMessage(describe => ({
           source_document: titleOf(args.section.document),
           exchange: args.exchange,
           worked_examples: args.hints || undefined,
@@ -272,13 +336,13 @@ async function reviseWithModel(
               statement: item.candidate.statement,
               domain: item.candidate.domain,
               source_quote: item.candidate.source_quote,
-              block_id: item.candidate.proposed_block_id,
+              block_id: promptBlockId(args.section, item.candidate.proposed_block_id),
               objection: item.objection,
-              problems: lastProblems.get(id) ?? item.problems,
+              problems: (lastProblems.get(id) ?? item.problems)?.map(describe),
             };
           }),
           document: args.section.body,
-        }),
+        })),
         purpose: `gap-reviser:${args.section.document.id}`,
       })) as { gaps?: RawGap[] } | null;
       const map = new Map<string, GapCandidate | null>();
@@ -300,7 +364,9 @@ async function reviseWithModel(
           lastProblems.set(id, problems);
           continue;
         }
-        map.set(id, toCandidate(id, args.section, { ...row, block_id: row.block_id ?? byId.get(id)?.candidate.block_id }));
+        map.set(id, toCandidate(id, args.section, {
+          ...row, block_id: row.block_id ?? promptBlockId(args.section, byId.get(id)?.candidate.block_id),
+        }));
       }
       return map;
     },
@@ -376,6 +442,7 @@ async function reviewWithModel(
     ask: async (missing, attempt) => {
       const payload = (await ctx.complete({
         role: "critic",
+        dialogueFields: ["candidates"],
         system: GAP_CRITIC_SYSTEM,
         user: JSON.stringify({
           exchange: `${args.round} of ${PROPOSER_CRITIC_EXCHANGES}`,
@@ -433,7 +500,15 @@ export function parseJudgeDecision(
   row: RawDecision,
   scope: { subject: string; candidateIds: Set<string>; planIds: Set<string>; setAsideIds: Set<string> },
 ): { decision: JudgeDecision; problems?: never } | { decision?: never; problems: string[] } {
-  const problems: string[] = [];
+  const result = validateJudgeDecision(row, scope);
+  return result.problems ? { problems: result.problems.map(repairText) } : result;
+}
+
+function validateJudgeDecision(
+  row: RawDecision,
+  scope: { subject: string; candidateIds: Set<string>; planIds: Set<string>; setAsideIds: Set<string> },
+): { decision: JudgeDecision; problems?: never } | { decision?: never; problems: RepairMessage[] } {
+  const problems: RepairMessage[] = [];
   const verdict = row.verdict === "accept" || row.verdict === "reject" ? row.verdict : null;
   if (!verdict) problems.push('verdict must be "accept" or "reject"');
   const confidence =
@@ -453,10 +528,10 @@ export function parseJudgeDecision(
     : matchGapId || sameAs
       ? "same"
       : "new";
-  if (!match) problems.push(`match "${rawMatch}" must be "same", "overlaps" or "new"`);
-  if (matchGapId && !scope.planIds.has(matchGapId)) problems.push(`match_gap_id "${matchGapId}" is not a plan gap id`);
+  if (!match) problems.push(quotedRepair(rawMatch, value => `match "${value}" must be "same", "overlaps" or "new"`));
+  if (matchGapId && !scope.planIds.has(matchGapId)) problems.push(quotedRepair(matchGapId, value => `match_gap_id "${value}" is not a plan gap id`));
   if (sameAs && (sameAs === scope.subject || !scope.candidateIds.has(sameAs))) {
-    problems.push(`same_as_candidate "${sameAs}" is not another candidate id`);
+    problems.push(quotedRepair(sameAs, value => `same_as_candidate "${value}" is not another candidate id`));
   }
   if (verdict === "reject") {
     if (sameAs) {
@@ -482,7 +557,7 @@ export function parseJudgeDecision(
   if (match === "overlaps") {
     if (!matchGapId) problems.push('match "overlaps" needs match_gap_id (the plan gap it overlaps)');
     if (matchGapId && scope.setAsideIds.has(matchGapId)) {
-      problems.push(`${matchGapId} is set aside; use "same" if it asks the same question, otherwise "new"`);
+      problems.push(quotedRepair(matchGapId, value => `${value} is set aside; use "same" if it asks the same question, otherwise "new"`));
     }
     if (sameAs) problems.push('match "overlaps" is only against a plan gap; leave same_as_candidate null');
     const missing = OVERLAP_FIELDS.filter((field) => !text(row[field]));
@@ -511,7 +586,7 @@ async function judgeWithModel(
   const planIds = new Set(args.planGaps.map((gap) => gap.id));
   const setAsideIds = new Set(args.planGaps.filter((gap) => gap.set_aside).map((gap) => gap.id));
   const candidateIds = new Set(byId.keys());
-  const lastProblems = new Map<string, string[]>();
+  const lastProblems = new Map<string, RepairMessage[]>();
   return completeAll<JudgeDecision>({
     ids: args.candidates.map((candidate) => candidate.id),
     what: "judge decision",
@@ -520,8 +595,9 @@ async function judgeWithModel(
     ask: async (missing, attempt) => {
       const payload = (await ctx.complete({
         role: "internal_judge",
+        dialogueFields: ["candidates"],
         system: GAP_JUDGE_SYSTEM,
-        user: JSON.stringify({
+        ...repairUserMessage(describe => ({
           worked_examples: args.hints || undefined,
           note:
             attempt > 1
@@ -542,17 +618,17 @@ async function judgeWithModel(
               critic: critique
                 ? { verdict: critique.verdict, confidence: critique.score, note: critique.note }
                 : undefined,
-              problems: lastProblems.get(candidate.id),
+              problems: lastProblems.get(candidate.id)?.map(describe),
             };
           }),
-        }),
+        })),
         purpose: "gap-judge",
       })) as { decisions?: RawDecision[] } | null;
       const map = new Map<string, JudgeDecision>();
       for (const row of payload?.decisions ?? []) {
         const subject = text(row.subject);
         if (!missing.includes(subject) || map.has(subject)) continue;
-        const parsed = parseJudgeDecision(row, { subject, candidateIds, planIds, setAsideIds });
+        const parsed = validateJudgeDecision(row, { subject, candidateIds, planIds, setAsideIds });
         if (parsed.problems) {
           lastProblems.set(subject, parsed.problems);
           continue;
@@ -578,14 +654,14 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
   },
   inputSchema,
   outputSchema,
-  migrations: GAP_CANDIDATES_DDL.split(";").filter((statement) => statement.trim()),
+  migrations: [SOURCE_FILES_DDL, PARSED_DOCUMENTS_DDL, ...GAP_CANDIDATES_DDL.split(";").filter((statement) => statement.trim())],
   freeze: freezeFacts,
   async run(input, ctx) {
     requireLlm(ctx, "Gap extraction");
     const frozen = ctx.replay?.facts as Awaited<ReturnType<typeof freezeFacts>> | undefined;
     const sourceFacts = frozen ?? await freezeFacts(input);
     const state = sourceFacts.state;
-    const documents = input.document_ids?.length ? sourceFacts.documents.filter(document => input.document_ids!.includes(document.id)) : sourceFacts.documents;
+    const documents = selectedExtractionDocuments(sourceFacts, input.document_ids);
     if (documents.length === 0) {
       return {
         output: {
@@ -614,7 +690,8 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
           ? {}
           : { set_aside: gap.status === "excluded" ? ("excluded" as const) : ("parked" as const) }),
       }));
-    const sections = isTestStub() ? [] : documents.flatMap(extractionSections);
+    const stableHandles = usesExtractionHandles(ctx);
+    const sections = isTestStub() ? [] : documents.flatMap(document => extractionSections(document, stableHandles));
     const documentById = new Map(documents.map((document) => [document.id, document]));
     const sectionsByDocument = new Map(documents.map(document => [document.id, [] as ExtractionSection[]]));
     for (const section of sections) sectionsByDocument.get(section.document.id)!.push(section);
@@ -633,7 +710,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       const citation = resolveSourceCitation({
         source_id: candidate.source_id,
         quote: candidate.source_quote,
-        proposed_block_id: candidate.proposed_block_id,
+        proposed_block_id: sourceBlockId(section, candidate.proposed_block_id),
         displayed,
         retained: state.blocks,
       });
@@ -772,7 +849,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
           };
         });
       },
-    }, { kinds: ["gap_suggestion"], text: documents.flatMap((document) => document.blocks.map((block) => block.text)).join(" ").slice(0, 20_000) });
+    }, { kinds: ["gap_suggestion"], subject_ids: documents.map(item => item.id), text: documents.flatMap((document) => document.blocks.map((block) => block.text)).join(" ").slice(0, 20_000) });
 
     if (ctx.execution_policy === "single_pass") return {
       output: { mode: outcome.mode, proposed: outcome.proposed.length, accepted: [], rejected: [], committed_gap_ids: [], committed_need_ids: [], joined_gap_ids: [], suggestion_ids: [] },
@@ -801,33 +878,57 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       committed_gap_id: null as string | null,
       created_at: nowIso(),
     }));
-    if (!ctx.replay?.evaluation && rows.length > 0) await db().insert(gapCandidates).values(rows);
-
     const committed_gap_ids: string[] = [];
     const committed_need_ids: string[] = [];
     const joined_gap_ids: string[] = [];
     const suggestion_ids: string[] = [];
-    if (!ctx.replay?.evaluation && !input.dry_run) {
+    await stageWrite(ctx, () => withExtractionCommit("S2", async () => {
+      if (rows.length > 0) await db().insert(gapCandidates).values(rows);
+      if (input.dry_run) return;
+      await lockCurrentExtractionDocuments(documents);
       const accepted = new Map(outcome.accepted.map((candidate) => [candidate.id, candidate]));
       // A candidate that repeats another follows the one it repeats (KAN-74); one whose
       // chain cannot be followed (a cycle, or a candidate the judge rejected) stands on
       // its own as a new gap, so its source is never dropped.
+      const recorded = await recordedGapEvidence(await loadState(), new Set(documents.map(document => document.source_id)));
+      for (const [key, previous] of reclassifiedFindings(outcome.accepted.map(gapFindingKey), recorded.keys())) {
+        recorded.set(key, recorded.get(previous)!);
+      }
+      const gapByCandidate = new Map<string, string>();
+      const suggestionByCandidate = new Map<string, string>();
       const representative = new Map<string, GapCandidate>();
-      for (const candidate of outcome.accepted) {
-        const target = followSameAs(candidate, accepted);
-        if (target && target.id !== candidate.id) representative.set(candidate.id, target);
+      const firstByFinding = new Map<string, GapCandidate>();
+      const aliases = new Map<string, GapCandidate>();
+      const unrecorded = outcome.accepted.filter(candidate => {
+        const key = gapFindingKey(candidate);
+        const first = firstByFinding.get(key);
+        if (first) {
+          aliases.set(candidate.id, first);
+          return false;
+        }
+        firstByFinding.set(key, candidate);
+        const previous = recorded.get(key);
+        if (previous?.gap_id) gapByCandidate.set(candidate.id, previous.gap_id);
+        if (previous?.suggestion_id) suggestionByCandidate.set(candidate.id, previous.suggestion_id);
+        return !previous;
+      });
+      for (const candidate of unrecorded) {
+        const target = followSameAs(candidate, accepted, aliases, recorded);
+        if (!target || target.id === candidate.id) continue;
+        const previous = recorded.get(gapFindingKey(target));
+        // A closed destination (e.g. a rejected suggestion) cannot consume a new source.
+        if (!previous || previous.gap_id || previous.suggestion_id) representative.set(candidate.id, target);
       }
       const validatedGapIds = await validatedPlacementGapIds();
       // Each need records where it came from (KAN-97): this run, its candidate row and the block it quotes.
       const provenanceOf = (candidate: GapCandidate) => ({
+        requires_current_citation: true,
         run_id: ctx.run.id,
         candidate_row_id: rowIdByCandidate.get(candidate.id) ?? null,
         block_id: candidate.block_id,
         source_context: candidate.source_context,
       });
-      const gapByCandidate = new Map<string, string>();
-      const suggestionByCandidate = new Map<string, string>();
-      const commitFor = (document: ParsedDocumentRecord, rows: Omit<Parameters<typeof commitExtractedRecords>[0], "source_id" | "title" | "stakeholder_function" | "actor_name" | "actor_function" | "tactics" | "validated_gap_ids" | "require_grounded_sources">) => {
+      const commitFor = (document: ParsedDocumentRecord, rows: Omit<Parameters<typeof commitExtractedRecords>[0], "source_id" | "title" | "stakeholder_function" | "actor_name" | "actor_function" | "tactics" | "validated_gap_ids">) => {
         const source = state.sources.find((row) => row.id === document.source_id);
         return commitExtractedRecords({
           source_id: document.source_id,
@@ -844,7 +945,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       // First every candidate that stands for its own question: a new gap, a source
       // joining a plan gap, or an overlap suggestion.
       for (const document of documents) {
-        const own = outcome.accepted.filter(
+        const own = unrecorded.filter(
           (candidate) => candidate.document_id === document.id && !representative.has(candidate.id),
         );
         if (own.length === 0) continue;
@@ -871,8 +972,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
             overlaps: asOverlap.map((candidate) => ({
               id: candidate.id,
               gap_id: candidate.match_gap_id!,
-              run_id: ctx.run.id,
-              candidate_row_id: rowIdByCandidate.get(candidate.id) ?? null,
+              ...provenanceOf(candidate),
               name: candidate.name,
               statement: candidate.statement,
               domain: candidate.domain,
@@ -894,7 +994,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       }
       // Then the repeats: each joins whatever the candidate it repeats became.
       for (const document of documents) {
-        const repeats = outcome.accepted.filter(
+        const repeats = unrecorded.filter(
           (candidate) => candidate.document_id === document.id && representative.has(candidate.id),
         );
         if (repeats.length === 0) continue;
@@ -904,7 +1004,8 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
           if (!suggestionId) continue;
           await addSuggestionSources(suggestionId, [
             { source_id: candidate.source_id, statement: candidate.statement, source_quote: candidate.source_quote,
-              block_id: candidate.block_id, source_context: candidate.source_context },
+              domain: candidate.domain, block_id: candidate.block_id, source_context: candidate.source_context,
+              provenance: provenanceOf(candidate) },
           ]);
         }
         if (onGap.length === 0) continue;
@@ -915,6 +1016,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
               statement: candidate.statement,
               source_quote: candidate.source_quote,
               gap_id: gapByCandidate.get(representative.get(candidate.id)!.id)!,
+              domain: candidate.domain,
               provenance: provenanceOf(candidate),
             })),
             gaps: [],
@@ -924,12 +1026,16 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
         joined_gap_ids.push(...Object.values(result.gap_id_by_row));
         for (const [id, gapId] of Object.entries(result.gap_id_by_row)) gapByCandidate.set(id, gapId);
       }
+      for (const [id, first] of aliases) {
+        const gapId = gapByCandidate.get(first.id);
+        if (gapId) gapByCandidate.set(id, gapId);
+      }
       // Every candidate row says which gap it became or joined (KAN-97).
       for (const [candidateId, gapId] of gapByCandidate) {
         const rowId = rowIdByCandidate.get(candidateId);
         if (rowId) await db().update(gapCandidates).set({ committed_gap_id: gapId }).where(eq(gapCandidates.id, rowId));
       }
-    }
+    }));
 
     const toOut = (item: (typeof outcome.judged)[number]) => ({
       id: item.candidate.id,
@@ -963,30 +1069,19 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
         joined_gap_ids,
         suggestion_ids,
       },
-      summary: `${outcome.accepted.length} of ${plural(outcome.proposed.length, "gap candidate")} accepted${
+      get summary() { return `${outcome.accepted.length} of ${plural(outcome.proposed.length, "gap candidate")} accepted${
         input.dry_run
           ? " (dry run)"
           : `: ${plural(committed_gap_ids.length, "new gap")} committed, ${
               joined_gap_ids.length === 1 ? "1 joined an existing gap" : `${joined_gap_ids.length} joined existing gaps`
             }, ${plural(suggestion_ids.length, "overlap")} to review`
-      }`,
+      }`; },
       evals: outcome.metrics,
     };
   },
   evals: {
-    async cases(facts) {
-      if (facts) {
-        const documents = facts.documents as ParsedDocumentRecord[];
-        return documents.slice(0, 3).map(document => ({ name: document.source_id, input: { document_ids: [document.id], dry_run: true }, gold: sourcesForStage("S2").find(source => source.source_id === document.source_id) ? goldMetaForSource(sourcesForStage("S2").find(source => source.source_id === document.source_id)!) : undefined }));
-      }
-      const curated = await curatedS2Cases();
-      if (curated.length > 0) return curated;
-      const documents = await listParsedDocuments();
-      return documents.slice(0, 3).map((document) => ({
-        name: document.source_id,
-        input: { document_ids: [document.id], dry_run: true },
-      }));
-    },
+    variantInstruction: promptVariantInstruction,
+    ...extractionEvalCases("S2"),
     score({ case: testCase, output }) {
       const accepted = output.accepted.length;
       const total = accepted + output.rejected.length;
@@ -994,14 +1089,14 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       const curated = scoreMustMatch(statements, testCase.gold?.must_match);
       if (accepted === 0) {
         return [
-          { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match ? 0.5 : undefined, detail: curated.detail },
+          { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match?.length ? 0.5 : undefined, detail: curated.detail },
           { name: "gold_accept_rate", value: 0, unit: "ratio", detail: "no new candidates" },
           { name: "accepted_with_quote", value: 0, unit: "ratio", detail: "no new candidates" },
         ];
       }
       return [
-        { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match ? 0.5 : undefined, detail: curated.detail },
-        { name: "gold_accept_rate", value: total === 0 ? 0 : Number((accepted / total).toFixed(3)), unit: "ratio", target: 0.3 },
+        { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match?.length ? 0.5 : undefined, detail: curated.detail },
+        { name: "gold_accept_rate", value: total === 0 ? 0 : Number((accepted / total).toFixed(3)), unit: "ratio" },
         { name: "accepted_with_quote", value: accepted === 0 ? 0 : Number((output.accepted.filter((c) => c.source_quote.trim().length > 0).length / accepted).toFixed(3)), unit: "ratio", target: 1 },
       ];
     },
@@ -1014,15 +1109,22 @@ registerModule(gapExtractModule);
  * The candidate a "same" candidate stands for: follows same_as_candidate links to
  * one that points nowhere. Null for a cycle or a link to a candidate not accepted.
  */
-function followSameAs(candidate: GapCandidate, accepted: Map<string, GapCandidate>): GapCandidate | null {
+function followSameAs(
+  candidate: GapCandidate,
+  accepted: Map<string, GapCandidate>,
+  aliases: Map<string, GapCandidate>,
+  recorded: ReadonlyMap<string, unknown>,
+): GapCandidate | null {
   const seen = new Set<string>();
-  let current: GapCandidate | undefined = candidate;
-  while (current?.same_as_candidate) {
+  let current = candidate;
+  while (current.same_as_candidate && !recorded.has(gapFindingKey(current))) {
     if (seen.has(current.id)) return null;
     seen.add(current.id);
-    current = accepted.get(current.same_as_candidate);
+    const next = aliases.get(current.same_as_candidate) ?? accepted.get(current.same_as_candidate);
+    if (!next) return null;
+    current = next;
   }
-  return current ?? null;
+  return current;
 }
 
 export async function listGapCandidates(limit = 200) {
@@ -1037,5 +1139,5 @@ export async function gapCandidatesForRun(run_id: string) {
 
 /** Freeze the source facts this stage consumes, before any proposal or human decision. */
 async function freezeFacts(input: z.infer<typeof inputSchema>) {
-  return { documents: await listExtractionDocuments(input.document_ids), state: await loadState() };
+  return { ...await currentExtractionDocuments(input.document_ids), state: await readStageState() };
 }

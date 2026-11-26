@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { DemoBadge } from "./demo-badge";
 import { sendJson, type WorkspaceTagModel } from "./model";
-import { acceptDemoStep, DEMO_STEP_LABELS, demoStepFor } from "@/lib/demo/accept-steps";
+import { acceptDemoIdeation, acceptDemoStep, DEMO_STEP_LABELS, demoStepFor, loadDemoIdeationReview, type DemoIdeationReview } from "@/lib/demo/accept-steps";
 
 /**
  * Shown on every page of a demo workspace (KAN-127): says it holds the Velmara
@@ -36,6 +36,7 @@ export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["curr
   const step = workspace.demo_mode ? demoStepFor(pathname, place) : null;
   const [accepting, setAccepting] = useState<string | null>(null);
   const [acceptError, setAcceptError] = useState<string | null>(null);
+  const [ideationReview, setIdeationReview] = useState<DemoIdeationReview | null>(null);
 
   // Client demo (KAN-138): the presenter can take this step's AI suggestions as they are, as the recording did.
   async function acceptAll() {
@@ -43,10 +44,28 @@ export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["curr
     setAccepting("Starting…");
     setAcceptError(null);
     try {
+      if (step === "ideation") {
+        setIdeationReview(await loadDemoIdeationReview());
+        setAccepting(null);
+        return;
+      }
       await acceptDemoStep(step, setAccepting);
       window.location.reload();
     } catch (err) {
       setAcceptError(requestErrorMessage(err, "Could not accept this step. Check the current state before trying again. If this continues, contact your Synapse administrator."));
+      setAccepting(null);
+    }
+  }
+
+  async function acceptIdeas(review: DemoIdeationReview) {
+    setAccepting("Accepting ideas…");
+    setAcceptError(null);
+    try {
+      await acceptDemoIdeation(review);
+      window.location.reload();
+    } catch (err) {
+      setIdeationReview(null);
+      setAcceptError(requestErrorMessage(err, "Could not accept the ideas. Check Ideation before trying again."));
       setAccepting(null);
     }
   }
@@ -92,6 +111,33 @@ export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["curr
           {accepting ? <Loader2 className="size-3 animate-spin" aria-hidden /> : <CheckCheck className="size-3" aria-hidden />}
           {accepting ?? "Accept all as in demo"}
         </Button>
+      ) : null}
+      {ideationReview && step === "ideation" && ideationReview.workspace_id === workspace.id ? (
+        <Dialog open onOpenChange={(next) => { if (!next && !accepting) setIdeationReview(null); }}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Accept demo ideas?</DialogTitle>
+              <DialogDescription>
+                {ideationReview.proposals.length ? "Choose Accept ideas to accept every proposal shown below." : "There are no proposals awaiting a decision."}
+              </DialogDescription>
+            </DialogHeader>
+            {ideationReview.proposals.length ? (
+              <ul className="max-h-64 list-disc space-y-1 overflow-y-auto pl-5 text-sm">
+                {ideationReview.proposals.map(proposal => <li key={proposal.id}>{proposal.name}</li>)}
+              </ul>
+            ) : null}
+            <DialogFooter>
+              <DialogClose render={<Button type="button" size="sm" variant="outline" disabled={Boolean(accepting)} />}>
+                {ideationReview.proposals.length ? "Cancel" : "Close"}
+              </DialogClose>
+              {ideationReview.proposals.length ? (
+                <Button type="button" size="sm" disabled={Boolean(accepting)} onClick={() => void acceptIdeas(ideationReview)}>
+                  {accepting ?? "Accept ideas"}
+                </Button>
+              ) : null}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       ) : null}
       {acceptError ? (
         <span role="alert" className="text-destructive">

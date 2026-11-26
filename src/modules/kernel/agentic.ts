@@ -1,3 +1,4 @@
+import { inEvaluationIsolation } from "./evaluation-isolation";
 import { saveReplaySnapshot } from "./decision-replay";
 import type { EvalScore, ModuleContext, StageId } from "./contracts";
 import { canPrompt } from "./routing";
@@ -108,6 +109,7 @@ function average(values: number[]): number {
 export type LearningInput = {
   /** The decision kinds this stage's output is later accepted, edited or rejected as. */
   kinds: DecisionKind[];
+  subject_ids?: string[];
   /** The case text this run works on (documents, gaps); similarity is measured against it. */
   text: string;
 };
@@ -118,14 +120,13 @@ export type LearningInput = {
  * failure never fails the stage: it runs without examples.
  */
 async function workedExamplesFor(ctx: ModuleContext, stage: StageId, learning: LearningInput | undefined): Promise<string> {
-  if (ctx.replay?.evaluation) {
-    const examples = ctx.replay.examples ?? [];
-    ctx.run.note("learning:worked-examples", { used: examples.map(e => ({ id: e.id, scope: e.scope, kind: e.kind })) });
-    return workedExamplesAsPrompt(examples);
+  if (ctx.replay?.evaluation || inEvaluationIsolation()) {
+    ctx.run.note("learning:worked-examples", { used: [], reason: "evaluation" });
+    return "";
   }
   // A client-demo workspace (KAN-138) never shows other plans' decisions: its prompts stay
   // the recorded ones, and no other workspace's lessons can end up in the recording.
-  if (await isDemoModeWorkspace(ctx.workspace_id)) {
+  if (ctx.route?.demo || await isDemoModeWorkspace(ctx.workspace_id)) {
     ctx.run.note("learning:worked-examples", { used: [], reason: "client demo mode" });
     return "";
   }
@@ -135,7 +136,7 @@ async function workedExamplesFor(ctx: ModuleContext, stage: StageId, learning: L
     return "";
   }
   try {
-    const examples = await similarExamples({ stage, kinds: learning.kinds, text: learning.text, workspace_id: ctx.workspace_id, exclude_ids: [...learningExclusions()], allow_cross_workspace: true });
+    const examples = await similarExamples({ stage, kinds: learning.kinds, subject_ids: learning.subject_ids, text: learning.text, workspace_id: ctx.workspace_id, exclude_ids: [...learningExclusions()], allow_cross_workspace: true });
     ctx.run.note(
       "learning:worked-examples",
       { used: examples.map((example) => ({ id: example.id, scope: example.scope, kind: example.kind })) },
@@ -147,6 +148,24 @@ async function workedExamplesFor(ctx: ModuleContext, stage: StageId, learning: L
     ctx.run.note("learning:worked-examples", { used: [], error: error instanceof Error ? error.message : String(error) });
     return "";
   }
+}
+
+type CriticObservation = Pick<Critique, "subject" | "score">;
+
+/** Only subjects scored once in both rounds support a paired change. */
+export function matchedCriticGain(first: CriticObservation[], last: CriticObservation[]): EvalScore | null {
+  function scores(rows: CriticObservation[]) {
+    const result = new Map<string, number>();
+    for (const row of rows) result.set(row.subject, result.has(row.subject) ? NaN : row.score);
+    return result;
+  }
+  const start = scores(first);
+  const differences = [...scores(last)].flatMap(([subject, end]) => {
+    const before = start.get(subject);
+    return before !== undefined && Number.isFinite(before) && Number.isFinite(end) ? [end - before] : [];
+  });
+  return differences.length ? { name: "critic_score_gain", unit: "ratio",
+    value: Number((average(differences) / 100).toFixed(3)), detail: `${differences.length} matched subject(s), first to final critique` } : null;
 }
 
 /**
@@ -195,7 +214,7 @@ export async function runAgenticCycle<C>(
   let usedLlm = first.via === "llm";
   let critiques: Critique[] = [];
   const rounds: AgenticRound[] = [];
-  const firstRoundScores: number[] = [];
+  let firstCritiques: Critique[] = [];
   const lastCritiqueBySubject = new Map<string, Critique>();
 
   for (let round = 1; round <= PROPOSER_CRITIC_EXCHANGES; round += 1) {
@@ -206,7 +225,7 @@ export async function runAgenticCycle<C>(
       `${incoming} candidate(s) under review`,
     );
     const scores = critiques.map((critique) => critique.score);
-    if (round === 1) firstRoundScores.push(...scores);
+    if (round === 1) firstCritiques = critiques;
     for (const critique of critiques) lastCritiqueBySubject.set(critique.subject, critique);
 
     // The proposer answers this critique. On the last exchange its answer is what
@@ -255,28 +274,23 @@ export async function runAgenticCycle<C>(
 
   const acceptRate = judged.length === 0 ? 0 : accepted.length / judged.length;
   const judgeConfidence = average(judged.map((item) => item.score)) / 100;
-  const firstAvg = average(firstRoundScores);
-  const lastAvg = rounds.at(-1)?.avg_score ?? 0;
+  const gain = matchedCriticGain(firstCritiques, critiques);
 
   const metrics: EvalScore[] = [
     { name: "proposed", value: proposed.length, unit: "count" },
-    { name: "exchanges", value: rounds.length, unit: "count", target: PROPOSER_CRITIC_EXCHANGES },
-    {
+    { name: "exchanges", value: rounds.length, unit: "count" },
+    ...(proposed.length ? [{
       name: "dialogue_retention",
-      value:
-        proposed.length === 0 ? 0 : Number((candidates.length / proposed.length).toFixed(3)),
-      unit: "ratio",
+      value: Number((candidates.length / proposed.length).toFixed(3)),
+      unit: "ratio" as const,
       detail: `${proposed.length} proposed, ${candidates.length} survived the dialogue`,
-    },
-    {
-      name: "critic_score_gain",
-      value: Number(((lastAvg - firstAvg) / 100).toFixed(3)),
-      unit: "ratio",
-      detail: `round 1 ${Math.round(firstAvg)} → round ${rounds.length} ${lastAvg}`,
-    },
+    }] : []),
+    ...(gain ? [gain] : []),
     { name: "withdrawn_in_dialogue", value: withdrawn.length, unit: "count" },
-    { name: "accept_rate", value: Number(acceptRate.toFixed(3)), unit: "ratio", target: 0.3 },
-    { name: "judge_confidence", value: Number(judgeConfidence.toFixed(3)), unit: "ratio", target: 0.5 },
+    ...(judged.length ? [
+      { name: "accept_rate", value: Number(acceptRate.toFixed(3)), unit: "ratio" as const },
+      { name: "judge_confidence", value: Number(judgeConfidence.toFixed(3)), unit: "ratio" as const },
+    ] : []),
   ];
 
   ctx.run.note("exchanges", rounds, `${rounds.length} proposer↔critic exchange(s) before the judge`);

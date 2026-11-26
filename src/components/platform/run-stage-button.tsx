@@ -19,6 +19,7 @@ export type StageRunResponse = {
   run_id?: string;
   summary?: string;
   mode?: "llm" | "deterministic";
+  execution_source?: "demo_replay";
 };
 
 /**
@@ -138,7 +139,7 @@ function StageButton({
       ) : result?.summary ? (
         <p className="text-[11px] text-muted-foreground">
           {result.summary}
-          {result.mode ? ` · ${result.mode === "llm" ? "LLM route" : "no model call"}` : ""}
+          {result.execution_source === "demo_replay" ? " · Recorded Velmara demo" : result.mode ? ` · ${result.mode === "llm" ? "LLM route" : "no model call"}` : ""}
         </p>
       ) : null}
     </div>

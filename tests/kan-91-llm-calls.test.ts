@@ -31,7 +31,7 @@ function reply(body: unknown, status = 200) {
 
 const anthropicReply = (text: string) => ({
   content: [{ type: "text", text }],
-  usage: { input_tokens: 1200, output_tokens: 300, cache_read_input_tokens: 100 },
+  usage: { input_tokens: 1200, output_tokens: 300, cache_read_input_tokens: 100, inference_geo: 'global' },
 });
 
 function route(): ResolvedRoute {
@@ -72,7 +72,7 @@ afterEach(() => {
 
 describe("KAN-91 provider usage", () => {
   it("reads Anthropic, OpenAI/OpenRouter and Gemini token counts", () => {
-    expect(usageFromPayload(anthropicReply("{}"))).toEqual({ input_tokens: 1300, output_tokens: 300, total_tokens: 1600, reasoning_tokens: null });
+    expect(usageFromPayload(anthropicReply("{}"))).toEqual({ input_tokens: 1300, output_tokens: 300, total_tokens: 1600, reasoning_tokens: null, cached_input_tokens: 100, inference_geo: 'global' });
     expect(
       usageFromPayload({
         choices: [],
@@ -103,7 +103,7 @@ describe("KAN-91 provider usage", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => reply({ candidates: [{ content: { parts: [{ text: "{}" }] }, finishReason: "STOP" }], usageMetadata: { promptTokenCount: 9, candidatesTokenCount: 1 } })),
+      vi.fn(async () => reply({ candidates: [{ content: { parts: [{ text: "{}" }] }, finishReason: "STOP" }], usageMetadata: { promptTokenCount: 9, candidatesTokenCount: 1, totalTokenCount: 10 } })),
     );
     const geminiUsage = vi.fn();
     await googleGemini.complete({ system: "s", user: "u", model: "gemini-3.8-flash", temperature: 0, max_tokens: 10 }, { api_key: "k" }, { onUsage: geminiUsage });
@@ -112,12 +112,12 @@ describe("KAN-91 provider usage", () => {
 
   it("estimates cost from the price table, and says unknown (null) rather than 0", () => {
     expect(priceKeyFor("anthropic-claude", "claude-sonnet-5-5")).toEqual({ provider_id: "anthropic", model: "claude-sonnet-5-5" });
-    expect(priceKeyFor("openrouter", "x-ai/grok-4")).toEqual({ provider_id: "xai", model: "grok-4" });
-    const known = estimateCallCost({ provider_id: "xai-grok", model: "grok-4", usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 } });
-    expect(known.cost_usd).toBe(18);
+    expect(priceKeyFor("openrouter", "x-ai/grok-4")).toEqual({ provider_id: "openrouter", model: "x-ai/grok-4" });
+    const known = estimateCallCost({ provider_id: "xai-grok", model: "grok-4.3", usage: { input_tokens: 1_000_000, output_tokens: 1_000_000, cost_in_usd_ticks: 75_000_000_000 } });
+    expect(known.cost_usd).toBe(7.5);
     expect(estimateCallCost({ provider_id: "openrouter", model: "mistral/large", usage: { input_tokens: 10, output_tokens: 10 } }).cost_usd).toBeNull();
     // An OpenRouter ":free" model is known to cost nothing, not unknown.
-    expect(estimateCallCost({ provider_id: "openrouter", model: "nvidia/nemotron-3-super-120b-a12b:free", usage: { input_tokens: 10, output_tokens: 10 } })).toEqual({ cost_usd: 0, price_source: "openrouter_free_model" });
+    expect(estimateCallCost({ provider_id: "openrouter", model: "nvidia/nemotron-3-super-120b-a12b:free", usage: { input_tokens: 10, output_tokens: 10 } })).toEqual({ cost_usd: 0, price_source: "https://openrouter.ai/collections/free-models/" });
     expect(estimateCallCost({ provider_id: "xai-grok", model: "grok-4", usage: { input_tokens: null, output_tokens: null } }).cost_usd).toBeNull();
   });
 

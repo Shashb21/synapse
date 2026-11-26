@@ -180,6 +180,10 @@ export async function POST(request: Request) {
       case "validate_band": {
         assertCan(identity.role, "prioritize");
         const placement = await validatePlacement({
+          x_axis: typeof body.x_axis === "string" ? body.x_axis : undefined,
+          y_axis: typeof body.y_axis === "string" ? body.y_axis : undefined,
+          displayed_axes: body.displayed_axes,
+          setting: typeof body.setting === "string" ? body.setting : undefined,
           accept_suggestion: body.action === "accept_priority_suggestion",
           reason: typeof body.reason === "string" ? body.reason : "",
           expected_version: body.expected_version === null ? null : field(z.string().trim().min(1), body.expected_version, "expected_version"),
@@ -238,6 +242,8 @@ export async function POST(request: Request) {
           expected_context_version: body.expected_context_version == null ? null : field(z.string().trim().min(1), body.expected_context_version, "expected_context_version"),
           gap_id: String(body.gap_id ?? ""),
           axis_scores,
+          displayed_axes: body.displayed_axes,
+          setting: typeof body.setting === "string" ? body.setting : undefined,
           x_axis: xAxis,
           y_axis: yAxis,
           band: body.band ? field(bandSchema, body.band, "band") : undefined,

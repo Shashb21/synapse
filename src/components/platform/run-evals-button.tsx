@@ -12,7 +12,7 @@ import { postJson } from "@/lib/post-json";
 type EvalResponse = {
   error?: string;
   cases?: number;
-  passed?: boolean;
+  passed?: boolean | null;
   metrics?: { name: string; value: number; target?: number }[];
 };
 
@@ -63,7 +63,7 @@ function EvalsButton({
         <p className="text-[11px] text-destructive">{result.error}</p>
       ) : result?.metrics ? (
         <p className="text-[11px] text-muted-foreground">
-          {result.cases} case(s) · {result.passed ? "passed" : "below target"} ·{" "}
+          {result.cases} case(s) · {result.passed == null ? "diagnostic only" : result.passed ? "curated target met" : "below curated target"} ·{" "}
           {result.metrics.map((metric) => `${metric.name} ${metric.value}`).join(", ")}
         </p>
       ) : null}

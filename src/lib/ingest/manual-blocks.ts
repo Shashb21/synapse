@@ -19,6 +19,15 @@ export function squashText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+/** Resolve a complete citation to one current block, giving a still-valid original block priority. */
+export function supportingBlockId(blocks: { id: string; text: string }[], quote: string, originalId?: string | null): string | null {
+  const needle = squashText(quote);
+  if (!needle) return null;
+  const matches = blocks.filter(block => containsQuote(block.text, needle));
+  if (originalId && matches.some(block => block.id === originalId)) return originalId;
+  return matches.length === 1 ? matches[0]!.id : null;
+}
+
 /** True when `quote` is a (whitespace-insensitive) span of `text`. */
 export function containsQuote(text: string, quote: string): boolean {
   const q = squashText(quote);

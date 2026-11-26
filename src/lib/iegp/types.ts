@@ -218,12 +218,22 @@ export type GapConfirmer = {
 export type GapSuggestionStatus = "pending" | "merged" | "split" | "rejected";
 
 /** A source sentence waiting on a suggestion: it follows the suggestion's outcome. */
+export type NeedProvenance = {
+  run_id?: string | null;
+  candidate_row_id?: string | null;
+  block_id?: string | null;
+  source_context?: SourceContext | null;
+  /** Current extraction can require a live citation even when no block was unique at proposal time. */
+  requires_current_citation?: boolean;
+};
 export type GapSuggestionSource = {
+  block_id?: string | null;
   source_id: string;
   statement: string;
   source_quote: string;
-  block_id?: string | null;
   source_context?: SourceContext | null;
+  domain?: EvidenceDomain;
+  provenance?: NeedProvenance;
 };
 
 /**
@@ -237,12 +247,13 @@ export type GapSuggestion = {
   run_id: string;
   /** The S2 candidate row (gap_candidates), so a rejected one can be promoted later. */
   candidate_row_id: string | null;
+  block_id?: string | null;
+  requires_current_citation?: boolean;
   source_id: string;
   name: string;
   statement: string;
   domain: EvidenceDomain;
   source_quote: string;
-  block_id?: string | null;
   source_context?: SourceContext | null;
   shared_part: string;
   new_part: string;
@@ -554,6 +565,7 @@ export type IegpState = {
 /** Source-owned overlap proposal; model baseline and human edits are retained separately. */
 export type TacticSuggestion = {
   id: string; version: string; run_id: string; document_id: string; source_id: string; source_quote: string;
+  finding_key?: string;
   block_id?: string | null;
   source_context?: SourceContext | null;
   target_tactic_id: string; expected_tactic_version: string; reviewed_parent: Tactic;

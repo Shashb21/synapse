@@ -29,6 +29,17 @@ describe("KAN-110 browser ingestion", () => {
     expect(await postIngest(payload, vi.fn())).toMatchObject({ ok: false, status: 502, json: { safe_error: true, error: "Mapping unavailable", stage: "S4" } });
   });
 
+  it("KAN-263 reports prior Velmara replay separately from the upcoming step", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(reply(progress(1, 3)))
+      .mockResolvedValueOnce(reply({ ...progress(2, 3), execution_source: "demo_replay" }))
+      .mockResolvedValueOnce(reply(progress(3, 3))));
+    const update = vi.fn();
+    expect(await postIngest(payload, update)).toMatchObject({ ok: true, json: { execution_source: "demo_replay" } });
+    expect(update).toHaveBeenNthCalledWith(2, "Reading document… (2 of 3)");
+    expect(update).toHaveBeenNthCalledWith(3, "Includes recorded Velmara steps so far · Extracting evidence gaps… (3 of 3)");
+  });
+
   it.each([
     null,
     { ...progress(5), stage: "S4" },

@@ -4,7 +4,7 @@ import { buildAiSummary, credentialFeedback } from "@/components/platform/ai-ava
 import { noAiSections } from "@/modules/kernel/ai-sections";
 import { STAGE_IDS, STAGES } from "@/modules/kernel/contracts";
 const keys = [
-  { id: "xai-grok", label: "xAI · Grok", auth: "api_key" as const, default_model: "grok-4", status: "missing" as const },
+  { id: "xai-grok", approved_fallbacks: ["anthropic-claude"], label: "xAI · Grok", auth: "api_key" as const, default_model: "grok-4", status: "missing" as const },
   { id: "anthropic-claude", label: "Anthropic · Claude", auth: "api_key" as const, default_model: "claude-sonnet", status: "configured" as const },
 ];
 const routes = STAGE_IDS.filter(stage => STAGES[stage].kind === "agentic").map(stage => ({ stage, provider_id: "xai-grok", model: "grok-4", fallbacks: ["anthropic-claude"] }));

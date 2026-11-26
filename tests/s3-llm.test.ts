@@ -1,9 +1,20 @@
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+// The decision and extraction must be able to hold independent database transactions.
+const previousPoolMax = vi.hoisted(() => {
+  const previous = process.env.DATABASE_POOL_MAX;
+  process.env.DATABASE_POOL_MAX = "3";
+  return previous;
+});
+afterAll(() => {
+  if (previousPoolMax === undefined) delete process.env.DATABASE_POOL_MAX;
+  else process.env.DATABASE_POOL_MAX = previousPoolMax;
+});
 import * as tables from "@/lib/iegp/schema";
 import { eq } from "drizzle-orm";
 import { db } from "@/modules/kernel/db";
 import { parsedDocuments } from "@/modules/stages/s1-parse/schema";
 import { tacticCandidates } from "@/modules/stages/s3-tactic-extract/schema";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/iegp/store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/iegp/store")>();
@@ -15,9 +26,10 @@ import { ensurePlatformSchema, wipePlatform } from "@/modules/kernel/db";
 import { runStage } from "@/modules/kernel/run";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { NoRouteError } from "@/modules/llm/provider";
-import { splitSourceBlock } from "@/lib/iegp/source-blocks";
+import { addSourceBlock, splitSourceBlock } from "@/lib/iegp/source-blocks";
 import { commitExtractedRecords, loadState, resetDemoSetup } from "@/lib/iegp/store";
 import { tacticExtractModule } from "@/modules/stages/s3-tactic-extract/module";
+import { listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
 
 /**
  * The model path of S3, with a scripted model in place of a provider: the
@@ -70,6 +82,7 @@ function context(script: Script, connected = true): { ctx: ModuleContext; calls:
 }
 
 const QUOTE = "The ongoing VELA registry follows 800 patients for five years.";
+const CLAIMS_QUOTE = "A claims analysis is planned.";
 const good = (overrides: Record<string, unknown> = {}) => ({
   name: "VELA registry",
   type: "registry",
@@ -105,8 +118,18 @@ describe("S3 on the model path", () => {
     await resetDemoSetup();
     await ensurePlatformSchema(tacticExtractModule.migrations ?? []);
     await wipePlatform(["source_files", "parsed_documents", "gap_candidates", "tactic_candidates"]);
-    await runStage({ stage: "S0", input: { files: [{ filename: "s3-llm.txt", title: "S3-LLM fictional source",
-      source_type: "stakeholder_interview", stakeholder_function: ACTOR.function, text: [QUOTE, "A claims analysis is planned.", "A systematic literature review was completed last year."].join("\n\n") }] }, actor: ACTOR, role: "medical_affairs" });
+    await runStage({
+      stage: "S0",
+      input: { files: [{
+        filename: "fictional-tactics.txt",
+        title: "Fictional activity descriptions",
+        source_type: "stakeholder_interview",
+        stakeholder_function: ACTOR.function,
+        text: `Fictional activity descriptions.\n\n${QUOTE}\n\n${CLAIMS_QUOTE}\n\nA systematic literature review was completed last year.`,
+      }] },
+      actor: ACTOR,
+      role: "medical_affairs",
+    });
     await runStage({ stage: "S1", input: {}, actor: ACTOR, role: "medical_affairs" });
     const state = await loadState();
     const source = state.sources[0]!;
@@ -150,6 +173,11 @@ describe("S3 on the model path", () => {
 
   const input = (dry_run = true) => tacticExtractModule.inputSchema.parse({ document_ids: [documentId], dry_run });
 
+  async function retainTestPassage(text: string) {
+    const [document] = await listParsedDocuments([documentId]);
+    await addSourceBlock({ source_id: document!.source_id, text, actor: ACTOR, rationale: "Add the excerpt used by the scripted model." });
+  }
+
   it("checks a revised quotation before it can become a tactic", async () => {
     let firstReview = true;
     const { ctx } = context((call) => {
@@ -164,9 +192,7 @@ describe("S3 on the model path", () => {
       }
       return acceptAll(call);
     });
-    const { output } = await tacticExtractModule.run(input(false), ctx);
-    expect(output.accepted).toEqual([]);
-    expect(output.rejected[0]?.critic_note).toMatch(/quote.*source/i);
+    await expect(tacticExtractModule.run(input(false), ctx)).rejects.toThrow(/source_quote.*verbatim/i);
     expect(commitExtractedRecords).not.toHaveBeenCalled();
   });
 
@@ -254,6 +280,142 @@ describe("S3 on the model path", () => {
     expect(output.accepted[0]).toMatchObject({ name: "VELA registry", status: "planned" });
   });
 
+  it("preserves accepted critic reviews when a duplicated review must be retried", async () => {
+    let first = true;
+    const { ctx, calls } = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) return { tactics: [good(), good({ name: "Second study" })] };
+      if (call.purpose === "tactic-judge") return acceptAll(call);
+      const answer = keepAll(call);
+      if (first) {
+        first = false;
+        answer.reviews.push(answer.reviews[1]!);
+      }
+      return answer;
+    });
+    await tacticExtractModule.run(input(), ctx);
+    const reviews = calls.filter(call => call.purpose === "tactic-critic");
+    expect(idsOf(reviews[1]!, "candidates")).toEqual([idsOf(reviews[0]!, "candidates")[1]]);
+    expect(reviews[1]!.body?.candidates).toEqual([expect.objectContaining({ problem: expect.stringMatching(/duplicate/i) })]);
+  });
+
+  it.each([true, false])("retries only the malformed document (repair succeeds: %s)", async repairSucceeds => {
+    const request = input(false);
+    const facts = await tacticExtractModule.freeze!(request) as { documents: ParsedDocumentRecord[] };
+    const first = facts.documents[0]!;
+    const second = {
+      ...first, id: "second-document", source_id: "second-source",
+      blocks: first.blocks.map(block => ({ ...block, id: `second-${block.id}`, source_id: "second-source" })),
+    };
+    const { state } = facts as typeof facts & { state: Awaited<ReturnType<typeof loadState>> };
+    state.blocks.push(...second.blocks);
+    facts.documents.push(second);
+    request.document_ids = [first.id, second.id];
+    let attempts = 0;
+    const { ctx, calls } = context(call => {
+      if (call.purpose === `tactic-proposer:${first.id}`) return { tactics: [good()] };
+      if (call.purpose === `tactic-proposer:${second.id}`) {
+        attempts += 1;
+        return repairSucceeds && attempts === 2
+          ? { tactics: [good({ name: "Second claims study", source_quote: CLAIMS_QUOTE })] }
+          : { tactics: null };
+      }
+      return call.purpose === "tactic-critic" ? keepAll(call) : acceptAll(call);
+    });
+    ctx.replay = { evaluation: true, input: request, facts, module_id: tacticExtractModule.manifest.id, module_version: tacticExtractModule.manifest.version, prompt_version: "base" };
+
+    if (repairSucceeds) {
+      const { output } = await tacticExtractModule.run(request, ctx);
+      expect(output.accepted.map(row => row.document_id)).toEqual([first.id, second.id]);
+    } else {
+      await expect(tacticExtractModule.run(request, ctx)).rejects.toThrow(/second-source.*tactics.*list.*3 attempts/i);
+      expect(attempts).toBe(3);
+    }
+    const proposals = calls.filter(call => call.purpose.startsWith("tactic-proposer:"));
+    expect(proposals.filter(call => call.purpose === `tactic-proposer:${first.id}`)).toHaveLength(1);
+    expect(proposals[2]?.user).toMatch(/second-source[\s\S]*tactics.*list/i);
+    expect(commitExtractedRecords).not.toHaveBeenCalled();
+  });
+
+  it("accepts an explicit empty tactic list without re-requesting the document", async () => {
+    const { ctx, calls } = context(() => ({ tactics: [] }));
+
+    const { output } = await tacticExtractModule.run(input(), ctx);
+
+    expect(output.accepted).toEqual([]);
+    expect(calls.map(call => call.purpose)).toEqual([`tactic-proposer:${documentId}`]);
+  });
+
+  it("retries a fabricated source quote without resending the grounded sibling", async () => {
+    const request = input();
+    const facts = await tacticExtractModule.freeze!(request) as { documents: ParsedDocumentRecord[] };
+    const fabricatedQuote = "The search report will include overall survival.";
+    const { ctx, calls } = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) {
+        return { tactics: [good(), good({ name: "Claims study", source_quote: fabricatedQuote })] };
+      }
+      if (call.purpose.startsWith("tactic-proposer-fix:")) {
+        return { tactics: idsOf(call, "rows").map(id => ({ id, ...good({ name: "Claims study", source_quote: CLAIMS_QUOTE }) })) };
+      }
+      return call.purpose === "tactic-critic" ? keepAll(call) : acceptAll(call);
+    });
+    ctx.replay = { evaluation: true, input: request, facts, module_id: tacticExtractModule.manifest.id, module_version: tacticExtractModule.manifest.version, prompt_version: "base" };
+    const { output } = await tacticExtractModule.run(request, ctx);
+    expect(calls[0]!.user).not.toContain(fabricatedQuote);
+    const repair = calls.find(call => call.purpose.startsWith("tactic-proposer-fix:"));
+    expect(repair?.body?.rows).toEqual([expect.objectContaining({
+      id: `${documentId}-LT002`,
+      problem: expect.stringMatching(/source_quote.*verbatim/i),
+    })]);
+    expect(output.accepted.map(row => row.source_quote)).toEqual([QUOTE, CLAIMS_QUOTE]);
+  });
+
+  it("retries a quote stitched across source blocks without resending a grounded sibling", async () => {
+    const request = input();
+    const facts = await tacticExtractModule.freeze!(request) as { documents: ParsedDocumentRecord[] };
+    const document = facts.documents[0]!;
+    const template = document.blocks[0]!;
+    const { state } = facts as typeof facts & { state: Awaited<ReturnType<typeof loadState>> };
+    const firstFragment = "The planned registry excludes";
+    const secondFragment = "patients without consent.";
+    const stitched = `${firstFragment} ${secondFragment}`;
+    document.blocks = [
+      { ...template, heading: "Registry", text: `${QUOTE} ${firstFragment}` },
+      { ...template, id: `${template.id}-claims`, heading: "Claims", text: `${secondFragment} ${CLAIMS_QUOTE}` },
+    ];
+    state.blocks = [...state.blocks.filter(block => block.source_id !== document.source_id), ...document.blocks];
+    const { ctx, calls } = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) {
+        return { tactics: [good(), good({ name: "Claims study", source_quote: stitched })] };
+      }
+      if (call.purpose.startsWith("tactic-proposer-fix:")) {
+        return { tactics: idsOf(call, "rows").map(id => ({ id, ...good({ name: "Claims study", source_quote: CLAIMS_QUOTE }) })) };
+      }
+      return call.purpose === "tactic-critic" ? keepAll(call) : acceptAll(call);
+    });
+    ctx.replay = { evaluation: true, input: request, facts, module_id: tacticExtractModule.manifest.id, module_version: tacticExtractModule.manifest.version, prompt_version: "base" };
+
+    const { output } = await tacticExtractModule.run(request, ctx);
+
+    expect(calls[0]!.user).toContain(`${firstFragment}\n\n## Claims [block_id=${template.id}-claims]\n${secondFragment}`);
+    const repair = calls.find(call => call.purpose.startsWith("tactic-proposer-fix:"));
+    expect(repair?.body?.rows).toEqual([expect.objectContaining({
+      id: `${documentId}-LT002`,
+      problem: expect.stringMatching(/source_quote.*verbatim/i),
+    })]);
+    expect(output.accepted.map(row => row.source_quote)).toEqual([QUOTE, CLAIMS_QUOTE]);
+  });
+
+  it("refuses to commit a revision that repeatedly fabricates a source quote", async () => {
+    const { ctx } = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) return { tactics: [good()] };
+      if (call.purpose === "tactic-critic") return { reviews: keepAll(call).reviews.map(row => ({ ...row, verdict: "revise" })) };
+      if (call.purpose === "tactic-judge") return acceptAll(call);
+      return { tactics: idsOf(call, "rows").map(id => ({ id, ...good({ source_quote: "There are 1,000 registry participants." }) })) };
+    });
+    await expect(tacticExtractModule.run(input(false), ctx)).rejects.toThrow(/source_quote.*verbatim/i);
+    expect(commitExtractedRecords).not.toHaveBeenCalled();
+  });
+
   it("re-asks for an invalid type and a missing quote instead of guessing them", async () => {
     let fixes = 0;
     const { ctx, calls } = context((call) => {
@@ -272,7 +434,7 @@ describe("S3 on the model path", () => {
         return {
           tactics: rows.map((row) => ({
             id: row.id,
-            ...good({ name: "HCRU claims study", type: "hcru_study", source_quote: "A claims analysis is planned." }),
+            ...good({ name: "HCRU claims study", type: "hcru_study", source_quote: CLAIMS_QUOTE }),
           })),
         };
       }
@@ -292,7 +454,7 @@ describe("S3 on the model path", () => {
     expect(secondRows[0]!.problem).toMatch(/source_quote is missing/);
     expect(output.accepted.map((row) => [row.type, row.source_quote])).toEqual([
       ["registry", QUOTE],
-      ["hcru_study", "A claims analysis is planned."],
+      ["hcru_study", CLAIMS_QUOTE],
     ]);
   });
 
@@ -388,14 +550,228 @@ describe("S3 on the model path", () => {
     await expect(tacticExtractModule.run(input(), ctx)).rejects.toThrow(/complete judge decision/);
   });
 
+  it("claims each tactic once and preserves different studies supported by one sentence", async () => {
+    const quote = "Finch sponsors an outcomes registry and an economic review.";
+    await retainTestPassage(quote);
+    const run = (withReview: boolean) => {
+      const { ctx } = context(call => {
+        if (call.purpose.startsWith("tactic-proposer:")) return { tactics: [
+          good({ source_quote: quote }), good({ source_quote: quote }),
+          ...(withReview ? [good({ name: "Economic review", type: "slr", evidence_question: "What are the costs?", source_quote: quote })] : []),
+        ] };
+        return call.purpose === "tactic-critic" ? keepAll(call) : acceptAll(call);
+      });
+      return tacticExtractModule.run(input(false), ctx);
+    };
+    expect((await run(false)).output.committed_tactic_ids).toHaveLength(1);
+    expect((await run(true)).output.committed_tactic_ids).toHaveLength(1);
+    expect((await run(true)).output.committed_tactic_ids).toEqual([]);
+  });
+
+  it.each([
+    { batch: "one batch", activities: ["Alpha", "Beta"] },
+    { batch: "separate batches", activities: ["Gamma", "Delta"] },
+  ])("persists named registries from a shared quotation in $batch", async ({ batch, activities }) => {
+    const quote = `The ${activities.join(" and ")} registries will evaluate long-term safety.`;
+    await retainTestPassage(quote);
+    const names = activities.map(activity => `${activity} registry`);
+    const run = (activityNames: string[], owners: string[] = []) => {
+      const { ctx } = context(call => {
+        if (call.purpose.startsWith("tactic-proposer:")) return { tactics:
+          activityNames.map(name => good({ name, status: "planned", source_quote: quote })),
+        };
+        if (call.purpose === "tactic-critic") return keepAll(call);
+        return { decisions: acceptAll(call).decisions.map((decision, i) => owners[i]
+          ? { ...decision, match: "same", target_tactic_id: owners[i] } : decision) };
+      });
+      return tacticExtractModule.run(input(false), ctx);
+    };
+    const batches = batch === "one batch" ? [names] : names.map(name => [name]);
+    const committed: string[] = [];
+    for (const activityNames of batches) {
+      const { output } = await run(activityNames);
+      expect(output.accepted.map(candidate => candidate.name)).toEqual(activityNames);
+      committed.push(...output.committed_tactic_ids);
+    }
+    const state = await loadState();
+    expect(state.tactics.filter(tactic => committed.includes(tactic.id)).map(tactic => tactic.name))
+      .toEqual(names);
+    expect((await run(names)).output.committed_tactic_ids).toEqual([]);
+    const recognised = await run(["First described activity", "Second described activity"], committed);
+    expect(recognised.output.accepted.map(candidate => candidate.target_tactic_id)).toEqual(committed);
+    expect(recognised.output.committed_tactic_ids).toEqual([]);
+    const { listTacticSourceReferences } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    for (const id of committed) {
+      const references = await listTacticSourceReferences(id);
+      expect(references).toHaveLength(1);
+      expect(references[0]!.finding_keys).toHaveLength(1);
+    }
+  });
+
+  it.each([true, false])("recovers a historical named registry while admitting a sibling (repeat original %s)", async repeatOriginal => {
+    const { db } = await import("@/lib/iegp/db");
+    const { sql } = await import("drizzle-orm");
+    const names = repeatOriginal ? ["Coral registry", "Opal registry"] : ["Pine registry", "Birch registry"];
+    const quote = `The ${names.join(" and ")} both follow treatment safety.`;
+    await retainTestPassage(quote);
+    const run = (activities: string[]) => {
+      const { ctx } = context(call => call.purpose.startsWith("tactic-proposer:")
+        ? { tactics: activities.map(name => good({ name, source_quote: quote })) }
+        : call.purpose === "tactic-critic" ? keepAll(call) : acceptAll(call));
+      return tacticExtractModule.run(input(false), ctx);
+    };
+    const [original] = (await run(names.slice(0, 1))).output.committed_tactic_ids;
+    // Historical sources may have a four-part key, or only the owning tactic and its quote.
+    await db().execute(sql`UPDATE tactic_source_references SET finding_keys =
+      CASE WHEN ${repeatOriginal} THEN jsonb_build_array(((finding_keys->>0)::jsonb - 4)::text) ELSE '[]'::jsonb END
+      WHERE tactic_id = ${original}`);
+    const added = (await run(repeatOriginal ? names : names.slice(1))).output.committed_tactic_ids;
+    expect(added).toHaveLength(1);
+    expect((await loadState()).tactics.find(tactic => tactic.id === added[0])?.name).toBe(names[1]);
+    expect((await run(names)).output.committed_tactic_ids).toEqual([]);
+  });
+
+  it.each([
+    { first: "North Registry", second: "North Extension Registry", repeatFirst: false, renamed: false },
+    { first: "Birch Registry", second: "Birch Registry 2", repeatFirst: true, renamed: false },
+    { first: "North Registry", second: "North Extension Registry", repeatFirst: false, renamed: true },
+  ])("reconciles the cited $first and $second on retry (renamed $renamed)", async ({first, second, repeatFirst, renamed}) => {
+    const quote = renamed
+      ? `The ${first} was renamed and is now called the ${second}. It tracks survival.`
+      : `${first} and the ${second} are separate registries tracking survival.`;
+    await retainTestPassage(quote);
+    const run = (names: string[]) => {
+      const { ctx } = context(call => call.purpose.startsWith("tactic-proposer:")
+        ? { tactics: names.map(name => good({ name, source_quote: quote, evidence_question: "What is survival?" })) }
+        : call.purpose === "tactic-critic" ? keepAll(call) : acceptAll(call));
+      return tacticExtractModule.run(input(false), ctx);
+    };
+    const original = (await run([first])).output.committed_tactic_ids;
+    expect(original).toHaveLength(1);
+    const added = (await run(repeatFirst ? [first, second] : [second])).output.committed_tactic_ids;
+    expect(added).toHaveLength(renamed ? 0 : 1);
+    if (!renamed) expect((await loadState()).tactics.find(row => row.id === added[0])?.name).toBe(second);
+    expect((await run([first, second])).output.committed_tactic_ids).toEqual([]);
+  });
+
+  it("lets a mapping transaction lock the source while extraction waits for its tactic", async () => {
+    const postgres = (await import("postgres")).default;
+    const { currentSchemaName } = await import("@/lib/iegp/db");
+    const { listParsedDocuments } = await import("@/modules/stages/s1-parse/module");
+    const { listTacticSourceReferences } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    const { source_id: sourceId } = (await listParsedDocuments([documentId]))[0]!;
+    const schema = await currentSchemaName();
+    const quote = "Aster's payer review confirms the existing comparative analysis.";
+    await retainTestPassage(quote);
+    const { ctx } = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) {
+        return { tactics: [good({ name: "Aster payer review", type: "slr", source_quote: quote })] };
+      }
+      if (call.purpose === "tactic-critic") return keepAll(call);
+      return { decisions: idsOf(call, "decide").map(id => ({
+        id, verdict: "accept", match: "same", target_tactic_id: libraryId, confidence: 90, reason: "Same review.",
+      })) };
+    });
+    const connection = postgres(process.env.DATABASE_URL!, { max: 1 });
+    let extraction: Promise<unknown> | undefined;
+    try {
+      await connection.begin(async tx => {
+        await tx`set local lock_timeout = '2s'`;
+        await tx`select id from ${tx(schema)}.tactics where id = ${libraryId} for update`;
+        extraction = tacticExtractModule.run(input(false), ctx);
+        void extraction.catch(() => {});
+        await vi.waitFor(async () => {
+          const [lock] = await tx`select exists (
+            select 1 from pg_stat_activity where pg_backend_pid() = any(pg_blocking_pids(pid))
+          ) as blocked`;
+          expect(lock?.blocked).toBe(true);
+        }, { timeout: 5_000, interval: 20 });
+        await tx`select id from ${tx(schema)}.sources where id = ${sourceId} for update`;
+      });
+      await extraction;
+      expect(await listTacticSourceReferences(libraryId)).toContainEqual(expect.objectContaining({ source_quote: quote }));
+    } finally {
+      await extraction?.catch(() => {});
+      await connection.end();
+    }
+  });
+
+  it("serializes extraction with a human decision before either takes conflicting rows", async () => {
+    const { createTacticSuggestion, decideTacticSuggestion, listTacticSourceReferences } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    const { listParsedDocuments } = await import("@/modules/stages/s1-parse/module");
+    const { currentSchemaName } = await import("@/lib/iegp/db");
+    const { tacticVersion } = await import("@/lib/iegp/tactic-expansions");
+    const postgres = (await import("postgres")).default;
+    const source = (await listParsedDocuments([documentId]))[0]!.source_id;
+    const parent = (await loadState()).tactics.find(tactic => tactic.id === libraryId)!;
+    const review = await createTacticSuggestion({ run_id: "decision-contention", document_id: documentId,
+      source_id: source, source_quote: "The review also examines costs.", target_tactic_id: libraryId,
+      expected_tactic_version: tacticVersion(parent), shared_scope: "Review", new_scope: "Costs", expansion: scope,
+      separate: {name: "Cost review", type: "slr", status: "planned", evidence_question: scope.evidence_question} });
+    const quote = "An independent passage confirms the existing payer review.";
+    await retainTestPassage(quote);
+    const { ctx } = context(call => call.purpose.startsWith("tactic-proposer:")
+      ? {tactics: [good({name: parent.name, type: parent.type, source_quote: quote})]}
+      : call.purpose === "tactic-critic" ? keepAll(call)
+      : {decisions: acceptAll(call).decisions.map(d => ({...d, match: "same", target_tactic_id: libraryId}))});
+    const schema = await currentSchemaName();
+    const connection = postgres(process.env.DATABASE_URL!, {max: 1});
+    const writers: Promise<unknown>[] = [];
+    try {
+      await connection.begin(async tx => {
+        await tx`select id from ${tx(schema)}.sources where id = ${source} for update`;
+        const waitForWriters = (count: number) => vi.waitFor(async () => {
+          await tx`select pg_stat_clear_snapshot()`;
+          const [locks] = await tx`select count(*)::int as waiting from pg_stat_activity
+            where datname = current_database() and cardinality(pg_blocking_pids(pid)) > 0`;
+          expect(locks?.waiting).toBe(count);
+        }, {timeout: 5_000, interval: 20});
+        writers.push(decideTacticSuggestion({id: review.id, decision: "reject", actor: ACTOR, rationale: "Cost review declined."}));
+        void writers[0]!.catch(() => {});
+        await waitForWriters(1);
+        writers.push(tacticExtractModule.run(input(false), ctx));
+        void writers[1]!.catch(() => {});
+        await waitForWriters(2);
+      });
+      const [decision] = await Promise.all(writers);
+      expect(decision).toMatchObject({ id: review.id, status: "rejected" });
+      expect(await listTacticSourceReferences(libraryId)).toContainEqual(expect.objectContaining({ source_quote: quote }));
+    } finally {
+      await Promise.allSettled(writers);
+      await connection.end();
+    }
+  });
+
+  it("rejects a tactic commit when a reviewer updates the source during judging", async () => {
+    const { editSourceBlock, listSourceBlocks } = await import("@/lib/iegp/source-blocks");
+    const { listParsedDocuments } = await import("@/modules/stages/s1-parse/module");
+    const sourceId = (await listParsedDocuments([documentId]))[0]!.source_id;
+    const block = (await listSourceBlocks(sourceId))[0]!;
+    const { ctx } = context(async call => {
+      if (call.purpose.startsWith("tactic-proposer:")) return { tactics: [good({ source_quote: block.text })] };
+      if (call.purpose === "tactic-critic") return keepAll(call);
+      await editSourceBlock({ block_id: block.id, text: block.text + " Revised.", actor: ACTOR, rationale: "Correct the source." });
+      return acceptAll(call);
+    });
+    const before = await loadState();
+    await expect(tacticExtractModule.run(input(false), ctx)).rejects.toThrow(/source.*changed/i);
+    expect((await loadState()).tactics).toEqual(before.tactics);
+  });
+
+  const scope = {name: "SLR subgroup", evidence_question: "What safety evidence exists in subgroup?", population: "Subgroup", outcomes: "", geography: "", data_cut: "", analysis: "Post-hoc subgroup", instrument: "", study_design: "Retrospective analysis", gap_coverage: "Subgroup evidence", cost_effort: "Source does not specify", timing: "Source does not specify", feasibility_risks: "Requires source review", post_hoc: true, prospective_enrolment: false, protocol_amendment: false, start_date: null, evidence_available: null};
+
   it("persists valid overlaps as source review only and retains edited review on rerun", async () => {
     const {listTacticSuggestions, editTacticSuggestion} = await import("@/modules/stages/s3-tactic-extract/suggestions");
     const scope = subgroupScope;
     const {ctx} = context(call => {
-      if (call.purpose.startsWith("tactic-proposer:")) return {tactics: [good({type: "slr", status: "planned"})]};
+      if (call.purpose.startsWith("tactic-proposer:")) return {tactics: [good({type: "slr", status: "planned", source_quote: "The Vega review includes a new subgroup."})]};
       if (call.purpose === "tactic-critic") return keepAll(call);
       return {decisions: idsOf(call, "decide").map(id => ({id, verdict: "accept", match: "overlaps", target_tactic_id: libraryId, shared_scope: "Existing SLR", new_scope: "Subgroup evidence", expansion: scope, separate: {name: "Independent subgroup SLR", type: "slr", status: "planned", evidence_question: scope.evidence_question}, confidence: 80, reason: "Shared SLR and added subgroup"}))};
     });
+    const { listParsedDocuments } = await import("@/modules/stages/s1-parse/module");
+    const { addSourceBlock, editSourceBlock } = await import("@/lib/iegp/source-blocks");
+    const doc = (await listParsedDocuments([documentId]))[0]!;
+    const block = await addSourceBlock({ source_id: doc.source_id, text: "The Vega review includes a new subgroup.", actor: ACTOR, rationale: "Record source review." });
     const before = await loadState();
     const {output} = await tacticExtractModule.run(input(false), ctx);
     expect(output.accepted[0]).toMatchObject({match: "overlaps", target_tactic_id: libraryId, expansion: scope});
@@ -404,6 +780,103 @@ describe("S3 on the model path", () => {
     const edited = await editTacticSuggestion({id: suggestion.id, expansion: {...scope, name: "Human subgroup review"}, rationale: "Source reviewed", actor: ACTOR});
     await tacticExtractModule.run(input(false), ctx);
     expect((await listTacticSuggestions()).find(r => r.id === suggestion.id)).toEqual(edited);
+    const {decideTacticSuggestion} = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    const decided = await decideTacticSuggestion({id: edited.id, decision: "reject", actor: ACTOR, rationale: "Subgroup review declined."});
+    process.env.SYNAPSE_TEST_STUB_LLM = "1";
+    try {
+      await runStage({ stage: "S1", input: { file_ids: [doc.file_id] }, actor: ACTOR, role: ACTOR.function });
+    } finally { delete process.env.SYNAPSE_TEST_STUB_LLM; }
+    const current = (await listParsedDocuments()).find(row => row.source_id === doc.source_id)!;
+    expect(current.id).not.toBe(documentId);
+    await editSourceBlock({ block_id: block.id, text: block.text + " A distinct Vega registry enrolls children.", actor: ACTOR, rationale: "Add the new registry." });
+    const rerun = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) return {tactics: [
+        good({name: "Vega subgroup", type: "registry", evidence_question: "What evidence is available on long-term real-world safety in treated patients?", source_quote: suggestion.source_quote}),
+        good({name: "New Vega registry", source_quote: "A distinct Vega registry enrolls children."}),
+        good({name: "Vega subgroup", type: "slr", source_quote: suggestion.source_quote}),
+      ]};
+      if (call.purpose === "tactic-critic") return keepAll(call);
+      return acceptAll(call);
+    });
+    rerun.ctx.run.id = "repeated-tactic-run";
+    const repeats = await Promise.all([tacticExtractModule.run(input(false), rerun.ctx), tacticExtractModule.run(input(false), rerun.ctx)]);
+    expect(repeats.flatMap(run => run.output.committed_tactic_ids)).toHaveLength(1);
+    expect(repeats[0]!.output.accepted.every(row => row.document_id === current.id)).toBe(true);
+    expect((await tacticExtractModule.run(input(false), rerun.ctx)).output.committed_tactic_ids).toEqual([]);
+    expect((await listTacticSuggestions()).find(r => r.id === suggestion.id)).toEqual(decided);
+    expect((await loadState()).tactics.length).toBe(before.tactics.length + 1);
+
+    // Historical suggestions predate the immutable key. Their candidate still records the source question.
+    const { db } = await import("@/lib/iegp/db");
+    const { sql } = await import("drizzle-orm");
+    await db().execute(sql`UPDATE tactic_suggestions SET payload = payload - 'finding_key' WHERE id = ${suggestion.id}`);
+    expect((await tacticExtractModule.run(input(false), rerun.ctx)).output.committed_tactic_ids).toEqual([]);
+
+  });
+
+  it("keeps a decided overlap and adds a newly recognised question for the same activity", async () => {
+    const { listTacticSuggestions, decideTacticSuggestion } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    const quote = "The Rowan registry is now called the Rowan Extension registry. It assesses survival and quality of life.";
+    const { listParsedDocuments } = await import("@/modules/stages/s1-parse/module");
+    const { addSourceBlock } = await import("@/lib/iegp/source-blocks");
+    const [document] = await listParsedDocuments([documentId]);
+    await addSourceBlock({ source_id: document!.source_id, text: quote, actor: ACTOR, rationale: "Record both registry outcomes." });
+    const questions = ["What is survival?", "What is quality of life?"];
+    const run = (runId: string, selected: string[], name = "Rowan registry") => {
+      const { ctx } = context(call => {
+        if (call.purpose.startsWith("tactic-proposer:")) return { tactics: selected.map(evidence_question =>
+          good({ name, status: "planned", evidence_question, source_quote: quote })) };
+        if (call.purpose === "tactic-critic") return keepAll(call);
+        return { decisions: idsOf(call, "decide").map((id, i) => ({
+          id, verdict: "accept", match: "overlaps", target_tactic_id: libraryId, shared_scope: "Registry outcomes",
+          new_scope: selected[i], expansion: { ...scope, evidence_question: selected[i] },
+          separate: { name, type: "registry", status: "planned", evidence_question: selected[i] },
+          confidence: 90, reason: "Source supports both outcomes.",
+        })) };
+      });
+      ctx.run.id = runId;
+      return tacticExtractModule.run(input(false), ctx);
+    };
+    await run("rowan-initial", questions.slice(0, 1));
+    const [first] = (await listTacticSuggestions()).filter(row => row.source_quote === quote);
+    const decided = await decideTacticSuggestion({id: first!.id, actor: ACTOR, decision: "reject", rationale: "Survival already covered."});
+    await run("rowan-more", questions);
+    await run("rowan-retry", questions, "Rowan Extension registry");
+    const rows = (await listTacticSuggestions()).filter(row => row.source_quote === quote);
+    expect(rows).toHaveLength(2);
+    expect(rows).toContainEqual(decided);
+    expect(rows).toContainEqual(expect.objectContaining({ status: "pending", new_scope: questions[1] }));
+  });
+
+  it.each(["slr", "registry"])("queues distinct same-run overlap alternatives supported by one passage and question (%s)", async secondType => {
+    const { listTacticSuggestions } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    const { addSourceBlock } = await import("@/lib/iegp/source-blocks");
+    const { listParsedDocuments } = await import("@/modules/stages/s1-parse/module");
+    const doc = (await listParsedDocuments([documentId]))[0]!;
+    const quote = `The Alder registry and the Hazel ${secondType} will both examine subgroup safety.`;
+    const alternatives = [
+      { name: "Alder registry", type: "registry", status: "planned", evidence_question: scope.evidence_question },
+      { name: "Hazel study", type: secondType, status: "planned", evidence_question: scope.evidence_question },
+    ];
+    await addSourceBlock({ source_id: doc.source_id, text: quote, actor: ACTOR, rationale: "Document both studies." });
+    const { ctx } = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) {
+        return { tactics: alternatives.map(option => good({ ...option, source_quote: quote })) };
+      }
+      if (call.purpose === "tactic-critic") return keepAll(call);
+      return { decisions: idsOf(call, "decide").map((id, i) => ({
+        id, verdict: "accept", match: "overlaps", target_tactic_id: libraryId, shared_scope: "Subgroup safety",
+        new_scope: alternatives[i]!.name, expansion: { ...scope, name: alternatives[i]!.name }, separate: alternatives[i],
+        confidence: 90, reason: "The passage documents both studies.",
+      })) };
+    });
+    const { output } = await tacticExtractModule.run(input(false), ctx);
+    expect(output.accepted.map(candidate => candidate.type)).toEqual(["registry", secondType]);
+    const rows = (await listTacticSuggestions()).filter(row => row.target_tactic_id === libraryId && row.source_quote === quote);
+    expect(rows).toHaveLength(2);
+    for (const option of alternatives) {
+      expect(rows).toContainEqual(expect.objectContaining({ new_scope: option.name, original_separate: option, status: "pending" }));
+    }
   });
 
   it("keeps repeated quotations distinct through tactic storage and human overlap review", async () => {
@@ -496,11 +969,13 @@ describe("S3 on the model path", () => {
         separate: { name: "Subgroup registry analysis", type: "registry", status: "ongoing", evidence_question: subgroupScope.evidence_question },
       })) };
     });
+    const { currentSourceParses } = await import("@/modules/stages/s1-parse/module");
+    const { headers: [current] } = await currentSourceParses({ document_ids: [documentId] });
     const { output } = await tacticExtractModule.run(input(false), ctx);
 
     expect(output.accepted).toMatchObject([{ block_id: split.second_id, source_quote: quote }]);
     expect((await listTacticSuggestions()).filter(row => row.source_quote === quote)).toMatchObject([
-      { block_id: split.second_id, document_id: documentId, status: "pending" },
+      { block_id: split.second_id, document_id: current.id, status: "pending" },
     ]);
   });
 });
