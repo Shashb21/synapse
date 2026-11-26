@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { judgementReferenceSchema } from "@/lib/iegp/judgement-references";
 import {
   DemoReplayMissError,
   findRecordedCall,
@@ -170,4 +172,24 @@ describe("demo document ids", () => {
       expect(demoSourceById(file.id)?.text).toBe(file.text);
     }
   });
+});
+
+it("records a supplied gap reference for each relevant demo mapping", () => {
+  const recording: Recording = JSON.parse(readFileSync(new URL("../src/lib/demo/recording.json", import.meta.url), "utf8"));
+  const calls = recording.calls.filter((call) => call.stage === "S4" && call.purpose === "mapping-table-proposer");
+  expect(calls.length).toBeGreaterThan(0);
+  for (const call of calls) {
+    const { rows } = JSON.parse(call.reply);
+    for (const row of rows) {
+      expect(call.ids).toContain(row.gap_id);
+      for (const mapping of row.mappings) {
+        if (mapping.coverage === "not_relevant") continue;
+        const [reference] = mapping.references ?? [];
+        expect(judgementReferenceSchema.parse(reference)).toMatchObject({
+          entity_type: "gap",
+          entity_id: row.gap_id,
+        });
+      }
+    }
+  }
 });
