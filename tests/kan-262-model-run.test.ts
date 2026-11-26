@@ -147,11 +147,13 @@ it("disables upstream fallback on the configured OpenRouter route", async () => 
   expect(JSON.parse(fetch.mock.calls[0][1].body as string).provider).toEqual({ allow_fallbacks: false });
 });
 
+// Gemini does not report the credential’s billing tier. An active Claude
+// rate can price a complete, explicitly zero-token receipt.
 it.each([
   { provider: "google-gemini", model: "gemini-2.5-pro", key: "GEMINI_API_KEY", response: { candidates: [{ content: { parts: [{ text: "{}" }] } }], usageMetadata: { promptTokenCount: 10, thoughtsTokenCount: 3 } }, cost: null },
   { provider: "anthropic-claude", model: "claude-sonnet-4-20250514", key: "ANTHROPIC_API_KEY", response: { content: [{ type: "text", text: "{}" }], usage: { output_tokens: 2, cache_read_input_tokens: 5 } }, cost: null },
-  { provider: "google-gemini", model: "gemini-2.5-pro", key: "GEMINI_API_KEY", response: { candidates: [{ content: { parts: [{ text: "{}" }] } }], usageMetadata: { promptTokenCount: 0, candidatesTokenCount: 0, thoughtsTokenCount: 0 } }, cost: 0 },
-  { provider: "anthropic-claude", model: "claude-sonnet-4-20250514", key: "ANTHROPIC_API_KEY", response: { content: [{ type: "text", text: "{}" }], usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0 } }, cost: 0 },
+  { provider: "google-gemini", model: "gemini-2.5-pro", key: "GEMINI_API_KEY", response: { candidates: [{ content: { parts: [{ text: "{}" }] } }], usageMetadata: { promptTokenCount: 0, candidatesTokenCount: 0, thoughtsTokenCount: 0 } }, cost: null },
+  { provider: "anthropic-claude", model: "claude-sonnet-5-5", key: "ANTHROPIC_API_KEY", response: { content: [{ type: "text", text: "{}" }], usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0 } }, cost: 0 },
 ])("meters $provider raw usage at $cost when base counts are partial or explicitly zero", async fixture => {
   vi.stubEnv(fixture.key, "fictional");
   vi.stubGlobal("fetch", vi.fn(async () => Response.json(fixture.response)));
