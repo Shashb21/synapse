@@ -99,6 +99,6 @@ describe("KAN-68 QA polish", () => {
 
   it("Gaps with no gaps says to add gaps first, not '0 gaps still unconfirmed'", () => {
     const workbench = src("src/components/gaps-workbench.tsx");
-    expect(workbench).toMatch(/cards\.length === 0 \? \([\s\S]*?Add gaps first/);
+    expect(workbench).toMatch(/cards\.length === 0 && !readiness\?\.liveCount \? \([\s\S]*?Add gaps first/);
   });
 });

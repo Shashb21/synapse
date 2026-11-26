@@ -13,7 +13,7 @@ import {
   planActionExpectingError,
   planState,
   runStage,
-  seedMapped,
+  seedPrioritizable,
   validateBandHigh,
 } from "../support/synapse";
 
@@ -33,15 +33,11 @@ type PrioritizationOutput = {
 test.describe.configure({ mode: "serial" });
 
 test.describe("S8 prioritization matrix", () => {
-  // Its own workspace: mapped demo gaps, every Open gap confirmed (Prioritize
-  // shows only confirmed Open gaps), and two axes chosen for "All settings".
+  // Its own workspace with reviewed inventory and two axes for "All settings".
   freshWorkspace({
     name: "S8",
     seed: async (request) => {
-      await seedMapped(request);
-      for (const gap of (await consolidate(request)).open) {
-        await iegpAction(request, { action: "validate_gap", gap_id: gap.gap_id });
-      }
+      await seedPrioritizable(request);
       const { axes } = (await planState(request)).axes;
       await planAction(request, { action: "save_scope_axes", scope: "all", x_axis: axes[0]!.id, y_axis: axes[1]!.id });
     },

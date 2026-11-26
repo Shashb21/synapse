@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { freshWorkspace } from "../support/session";
-import { firstOpenGap, runStage, seedMapped, validateBandHigh } from "../support/synapse";
+import { firstOpenGap, runStage, seedPrioritizable, validateBandHigh } from "../support/synapse";
 import { openIdeationCard } from "../support/ideation";
 
 test.describe.configure({ mode: "serial" });
@@ -11,7 +11,7 @@ test.describe("custom tactic types", () => {
   freshWorkspace({
     name: "KAN-51",
     seed: async (request) => {
-      await seedMapped(request);
+      await seedPrioritizable(request);
       await runStage(request, "S8");
       const gap = await firstOpenGap(request);
       gapId = gap.gap_id;

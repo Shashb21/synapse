@@ -36,7 +36,7 @@ function StatusSummary({ row }: { row: MappingTableViewRow }) {
       {view && view !== row.gap_status ? (
         <p className="text-[10px] text-muted-foreground">
           {row.source === "human" ? "Saved row" : "AI view"}: {STATUS_LABEL[view].toLowerCase()}
-          {STATUS_RANK[view] > STATUS_RANK[row.gap_status] ? " (proposed tactics don't count until planned)" : ""}
+          {STATUS_RANK[view] > STATUS_RANK[row.gap_status] ? " (coverage depends on eligible tactics and reviewed assessments)" : ""}
         </p>
       ) : null}
     </div>
@@ -164,14 +164,14 @@ function RationaleField({ placeholder }: { placeholder: string }) {
   );
 }
 
-/** Accept or reject each tactic of an S4 proposal row, one pair at a time. */
-function ProposalDecisions({ row }: { row: MappingTableViewRow }) {
-  const bearing = row.mappings.filter((mapping) => mapping.coverage !== "not_relevant");
-  if (bearing.length === 0) return null;
+/** Show S4 assessments with the review action available for each relationship. */
+function MappingAssessments({ row }: { row: MappingTableViewRow }) {
+  const visible = row.mappings.filter(mapping => mapping.review_only || mapping.coverage !== "not_relevant");
+  if (visible.length === 0) return null;
   return (
     <ul className="mt-2 grid gap-2">
-      {bearing.map((mapping) => {
-        if (mapping.expansion_id && mapping.parent_tactic_id) return <li key={mapping.expansion_id} className="border border-border/70 p-2">
+      {visible.map((mapping) => {
+        if (!mapping.review_only && mapping.expansion_id && mapping.parent_tactic_id) return <li key={mapping.expansion_id} className="border border-border/70 p-2">
           <p className="text-[11px]">Expansion: {mapping.tactic_name} · AI coverage {mapping.coverage.replaceAll("_", " ")}</p>
           <p className="text-[10px] text-muted-foreground">{mapping.rationale}</p>
           <Link href={`/tactics/${mapping.parent_tactic_id}`} className="text-[12px] underline">Review expansion scope and coverage</Link>
@@ -182,49 +182,62 @@ function ProposalDecisions({ row }: { row: MappingTableViewRow }) {
         return (
           <li key={mapping.tactic_id} className="border border-border/70 p-2">
             <p className="text-[11px] text-foreground">
-              {mapping.tactic_name} · AI coverage{" "}
+              {mapping.tactic_name} · {mapping.review_only ? "AI reassessment of stale coverage" : "AI coverage"}{" "}
               {mapping.coverage.replaceAll("_", " ")} ({mapping.confidence})
             </p>
             <p className="text-[10px] text-muted-foreground">{mapping.rationale}</p>
             {references.length ? <details className="mt-1 text-[11px]"><summary>Inspect supporting references</summary><ul>{references.map((reference, index) => <li key={index}>
               <Link href={reference.href}>{reference.title}</Link><p className="whitespace-pre-wrap">{reference.excerpt}</p><p>Supports: {reference.reason}</p>
             </li>)}</ul></details> : <p className="text-[11px] text-muted-foreground">{mapping.references?.length ? "Supporting references unavailable for this suggestion" : "Supporting references not recorded for this suggestion"}. Make a manual judgement with a reason on the gap record.</p>}
-            {decision ? (
-              <p className="mt-1 text-[10px] text-[var(--chart-3)]">
-                {decision.status === "accepted" ? "Accepted" : "Rejected"} by {decision.actor_name ?? "a person"}
-                {decision.note ? `: ${decision.note}` : ""}
-              </p>
-            ) : null}
-            <div className="mt-1 flex flex-wrap gap-1">
-              {decision?.status === "accepted" ? null : (
-                <LockForm
-                  label="Accept"
-                  action="accept_mapping"
-                  extra={{
-                    ...pair,
-                    judgement_origin: "model",
-                    expected_suggestion: relationshipVersion(mapping),
-                    overall: mapping.coverage,
-                    dimensions: JSON.stringify(mapping.dimensions ?? {}),
-                  }}
-                  confirmLabel="Accept mapping"
-                  description="Requires inspectable supporting records. Maps this tactic to the gap with the AI's coverage verdict (or marks an already committed pair as accepted). You can still edit coverage on the gap page."
-                >
-                  <RationaleField placeholder="Why this tactic bears on the gap" />
-                </LockForm>
-              )}
-              {decision?.status === "rejected" ? null : (
-                <LockForm
-                  label="Reject"
-                  action="reject_mapping"
-                  extra={pair}
-                  confirmLabel="Reject mapping"
-                  description="Records the pair as rejected (and removes it if the AI already mapped it). The AI will not map it again."
-                >
-                  <RationaleField placeholder="Why this tactic does not bear on the gap" />
-                </LockForm>
-              )}
-            </div>
+            {mapping.review_only ? (
+              <Link
+                href={mapping.expansion_id && mapping.parent_tactic_id
+                  ? `/tactics/${encodeURIComponent(mapping.parent_tactic_id)}`
+                  : `/gaps/${encodeURIComponent(row.gap_id)}#gap-coverage-actions`}
+                className="mt-1 inline-block text-[12px] underline"
+              >
+                {mapping.expansion_id ? "Review expansion scope and coverage" : "Review existing coverage"}
+              </Link>
+            ) : (
+              <>
+                {decision ? (
+                  <p className="mt-1 text-[10px] text-[var(--chart-3)]">
+                    {decision.status === "accepted" ? "Accepted" : "Rejected"} by {decision.actor_name ?? "a person"}
+                    {decision.note ? `: ${decision.note}` : ""}
+                  </p>
+                ) : null}
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {decision?.status === "accepted" ? null : (
+                    <LockForm
+                      label="Accept"
+                      action="accept_mapping"
+                      extra={{
+                        ...pair,
+                        judgement_origin: "model",
+                        expected_suggestion: relationshipVersion(mapping),
+                        overall: mapping.coverage,
+                        dimensions: JSON.stringify(mapping.dimensions ?? {}),
+                      }}
+                      confirmLabel="Accept mapping"
+                      description="Requires inspectable supporting records. Maps this tactic to the gap with the AI's coverage verdict (or marks an already committed pair as accepted). You can still edit coverage on the gap page."
+                    >
+                      <RationaleField placeholder="Why this tactic bears on the gap" />
+                    </LockForm>
+                  )}
+                  {decision?.status === "rejected" ? null : (
+                    <LockForm
+                      label="Reject"
+                      action="reject_mapping"
+                      extra={pair}
+                      confirmLabel="Reject mapping"
+                      description="Records the pair as rejected (and removes it if the AI already mapped it). The AI will not map it again."
+                    >
+                      <RationaleField placeholder="Why this tactic does not bear on the gap" />
+                    </LockForm>
+                  )}
+                </div>
+              </>
+            )}
           </li>
         );
       })}
@@ -314,7 +327,7 @@ function MappingRowEditor({
             <li key={line}>{line}</li>
           ))}
         </ul>
-        {row.source === "proposal" ? <ProposalDecisions row={row} /> : null}
+        <MappingAssessments row={row} />
         <Link href={`/gaps/${row.gap_id}`} className="mt-2 inline-block text-[10px] underline-offset-2 hover:underline">
           Set coverage and dimensions on the gap page
         </Link>

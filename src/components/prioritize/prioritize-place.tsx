@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { LockForm } from "@/components/lock-form";
+import { PrioritizationBlockers } from "@/components/inventory-readiness";
 import { GapPlanCard } from "@/components/plan-cards";
 import { AxisChooser, PrioritizeMatrix, type PrioritizeGap } from "@/components/prioritize/prioritize-matrix";
 import type { Band } from "@/components/matrix/bands";
@@ -7,6 +8,7 @@ import { cn } from "@/lib/utils";
 import {
   displayedGapStatus,
   gapInSetting,
+  gapPrioritizationReadiness,
   isLiveGap,
   mappedTactics,
   settingOptions,
@@ -48,7 +50,9 @@ export async function PrioritizePlace({
     actor_name: session.actor.name,
     actor_function: session.actor.function,
   };
-  const mayPrioritize = can(session.role, "prioritize");
+  const { blockers } = gapPrioritizationReadiness(state);
+  const ready = blockers.length === 0;
+  const mayPrioritize = ready && can(session.role, "prioritize");
   const placementByGap = new Map(placements.map((row) => [row.gap_id, row]));
 
   const openGaps = state.gaps.filter(
@@ -186,18 +190,19 @@ export async function PrioritizePlace({
                 {" "}{allCounts.open - allCounts.validated} remaining across the whole plan.
               </p>
             ) : null}
-            <p className="text-[12px] text-muted-foreground">
+            {ready || allCounts.open === 0 || state.asset.tactics_unlocked ? <p className="text-[12px] text-muted-foreground">
               {state.asset.tactics_unlocked
-                ? "Tactics is unlocked. You can keep adjusting priorities here."
+                ? ready ? "Tactics is unlocked. You can keep adjusting priorities here." : "Tactics is unlocked."
                 : allCounts.open === 0
                   ? "There are no Open gaps to prioritize. Review evidence assessments on Evidence Inventory before continuing."
                 : allCounts.validated === allCounts.open && allCounts.open > 0
                   ? "Every Open gap has a validated priority. Continue below to unlock Tactics."
                   : "Set and validate priority for every Open gap across the whole plan to unlock Tactics. Unknown context does not block validation."}
-            </p>
+            </p> : null}
           </div>
           {unlockTactics}
         </div>
+        <PrioritizationBlockers blockers={blockers} />
       </section>
       {scopeGaps.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">

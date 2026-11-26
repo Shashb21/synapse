@@ -5,6 +5,7 @@ import {
   runRecord,
   runStage,
   seedMapped,
+  seedPrioritizable,
   stageSignals,
   validateBandHigh,
 } from "../support/synapse";
@@ -21,7 +22,7 @@ test.describe.configure({ mode: "serial" });
 
 test.describe("Hillclimb from edit rationales", () => {
   test.beforeAll(async ({ request }) => {
-    await seedMapped(request);
+    await seedPrioritizable(request);
     await runStage(request, "S8");
   });
 
@@ -55,6 +56,7 @@ test.describe("Hillclimb from edit rationales", () => {
   });
 
   test("a split run records the worked examples it was shown", async ({ request }) => {
+    await seedMapped(request);
     const partial = await firstPartialGap(request);
     if (!partial) return;
     const correction = `Keep the comparator question out of the addressed slice ${Date.now()}`;
@@ -86,6 +88,7 @@ test.describe("Hillclimb from edit rationales", () => {
   });
 
   test("shows the rationale trail and the open signals on the runs page", async ({ page, request }) => {
+    await seedPrioritizable(request);
     const gap = await firstOpenGap(request);
     await runStage(request, "S8");
     await validateBandHigh(request, gap.gap_id, "Blocks the payer submission this cycle");
