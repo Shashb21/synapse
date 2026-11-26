@@ -1,3 +1,4 @@
+import { resolveSourceCitation, sourceContextSchema } from "@/lib/ingest/source-citation";
 import { extractionSections, quotedBlock, reconcileSections, proposeSections, reviseSection, type ExtractionSection } from "../extraction-sections";
 import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
 import { desc } from "drizzle-orm";
@@ -47,6 +48,8 @@ const candidateSchema = z.object({
   status: z.string(),
   evidence_question: z.string(),
   source_quote: z.string(),
+  source_context: sourceContextSchema.nullable().optional(),
+  citation_error: z.string().nullable().optional(),
   score: z.number(),
   verdict: z.string(),
   critic_note: z.string(),
@@ -71,7 +74,6 @@ export type TacticExtractOutput = z.infer<typeof outputSchema>;
 
 type TacticCandidate = {
   source_section?: number;
-  block_id?: string | null;
   id: string;
   document_id: string;
   source_id: string;
@@ -80,6 +82,10 @@ type TacticCandidate = {
   status: TacticStatus;
   evidence_question: string;
   source_quote: string;
+  proposed_block_id: string | null;
+  block_id?: string | null;
+  source_context?: z.infer<typeof sourceContextSchema> | null;
+  citation_error?: string | null;
   /** Set by the judge only; null until then and for a new tactic. */
   duplicate_of: string | null;
   match: "same" | "overlaps" | "new"; target_tactic_id: string | null;
@@ -102,8 +108,8 @@ const TACTIC_FIELDS = `Each tactic has:
 - type: exactly one of ${TACTIC_TYPES.join(", ")}.
 - status: exactly one of ${TACTIC_STATUSES.join(", ")}, reflecting what the document says about it.
 - evidence_question: the question the tactic answers, in one sentence.
-- source_quote: a verbatim sentence or passage from the document that describes the tactic. Never paraphrase and never leave it empty.
-- block_id: include the id shown beside the heading when you can identify the quoted block.`;
+- block_id: the ID of the block containing the full quotation.
+- source_quote: a verbatim sentence or passage from the document that describes the tactic. Never paraphrase and never leave it empty.`;
 
 const TACTIC_PROPOSER_SYSTEM = `You extract tactics already described in pharma evidence-planning source material.
 
@@ -111,7 +117,7 @@ A tactic is a study, analysis, publication or dissemination activity that exists
 
 ${TACTIC_FIELDS}
 
-Return JSON only: {"tactics":[{"name":"","type":"","status":"","evidence_question":"","source_quote":""}]}`;
+Return JSON only: {"tactics":[{"name":"","type":"","status":"","evidence_question":"","source_quote":"","block_id":""}]}`;
 
 const TACTIC_REVISER_SYSTEM = `You extracted tactics from pharma evidence-planning source material and now answer for specific rows.
 
@@ -121,7 +127,7 @@ ${TACTIC_FIELDS}
 
 Answer every row you are given.
 
-Return JSON only: {"tactics":[{"id":"","withdraw":false,"reason":"","name":"","type":"","status":"","evidence_question":"","source_quote":""}]}
+Return JSON only: {"tactics":[{"id":"","withdraw":false,"reason":"","name":"","type":"","status":"","evidence_question":"","source_quote":"","block_id":""}]}
 Set "withdraw": true with a "reason" to withdraw a row; the tactic fields are then ignored.`;
 
 const TACTIC_CRITIC_SYSTEM = `You review tactic candidates extracted from pharma evidence-planning source material before they enter the tactic library of an Integrated Evidence Generation Plan.
@@ -191,7 +197,6 @@ function toCandidate(section: ExtractionSection, id: string, raw: RawTactic): Ta
   return {
     id,
     source_section: section.number,
-    block_id: quotedBlock(section.blocks, text(raw.source_quote), raw.block_id),
     document_id: document.id,
     source_id: document.source_id,
     name: text(raw.name),
@@ -199,6 +204,7 @@ function toCandidate(section: ExtractionSection, id: string, raw: RawTactic): Ta
     status: text(raw.status) as TacticStatus,
     evidence_question: text(raw.evidence_question),
     source_quote: text(raw.source_quote),
+    proposed_block_id: text(raw.block_id) || null,
     duplicate_of: null,
     match: "new", target_tactic_id: null, shared_scope: null, new_scope: null, expansion: null, separate: null,
   };
@@ -210,7 +216,7 @@ const tacticFields = (candidate: TacticCandidate) => ({
   status: candidate.status,
   evidence_question: candidate.evidence_question,
   source_quote: candidate.source_quote,
-  block_id: candidate.block_id,
+  block_id: candidate.proposed_block_id,
 });
 
 type ProposerRow = {
@@ -557,6 +563,30 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
     }
 
     const sections = isTestStub() ? [] : documents.flatMap(extractionSections);
+    const documentById = new Map(documents.map((document) => [document.id, document]));
+    const sectionsByDocument = new Map(documents.map(document => [document.id, [] as ExtractionSection[]]));
+    for (const section of sections) sectionsByDocument.get(section.document.id)!.push(section);
+    const ground = (candidate: TacticCandidate): TacticCandidate => {
+      const documentBlocks = documentById.get(candidate.document_id)?.blocks ?? [];
+      const section = candidate.source_section ? sectionsByDocument.get(candidate.document_id)?.[candidate.source_section - 1] : undefined;
+      if (ctx.execution_scope === "development") {
+        return section
+          ? { ...candidate, block_id: quotedBlock(section.blocks, candidate.source_quote, candidate.proposed_block_id) }
+          : candidate;
+      }
+      const displayed = section ? section.blocks.flatMap(fragment => {
+        const block = documentBlocks.find(row => row.id === fragment.id);
+        return block ? [{ ...block, text: fragment.text }] : [];
+      }) : documentBlocks;
+      const citation = resolveSourceCitation({
+        source_id: candidate.source_id,
+        quote: candidate.source_quote,
+        proposed_block_id: candidate.proposed_block_id,
+        displayed,
+        retained: state.blocks,
+      });
+      return { ...candidate, ...citation };
+    };
     const library: LibraryTactic[] = state.tactics;
     // The kernel hands similar past reviewer decisions (worked examples, KAN-79) to the proposer; the critic and judge see them too.
     let reviewerHints = "";
@@ -582,9 +612,10 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
               status: tactic.status,
               evidence_question: tactic.evidence_question,
               source_quote: tactic.source_quote,
+              proposed_block_id: tactic.block_id ?? null,
               duplicate_of: null,
               match: "new" as const, target_tactic_id: null, shared_scope: null, new_scope: null, expansion: null, separate: null,
-            })),
+            })).map(ground),
           );
         },
         llm: async ({ hints, round, critiques, previous }) => {
@@ -592,7 +623,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
           const candidates = round === 1
             ? await proposeSections(ctx.run, sections, section => proposeSection(ctx, section, hints))
             : await llmRevisions(ctx, { sections, hints, round, previous, critiques });
-          return reconcileSections(candidates, row => [row.name, row.evidence_question, row.type, row.status]);
+          return reconcileSections(candidates.map(ground), row => [row.name, row.evidence_question, row.type, row.status]);
         },
       },
       critic: async (candidates, round) => {
@@ -647,19 +678,20 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
     };
 
     const survivors = outcome.judged.map((item) => item.candidate);
+    const grounded = survivors.filter((candidate) => !candidate.citation_error);
     const decisions = await ctx.run.step(
       "judge:model",
       () =>
         isTestStub()
-          ? Promise.resolve(stubDecisions(survivors, library))
+          ? Promise.resolve(stubDecisions(grounded, library))
           : completeAll({
-              ids: survivors.map((candidate) => candidate.id),
+              ids: grounded.map((candidate) => candidate.id),
               what: "judge decision",
-              describe: (id) => survivors.find((candidate) => candidate.id === id)?.name ?? id,
+              describe: (id) => grounded.find((candidate) => candidate.id === id)?.name ?? id,
               remedy: REMEDY,
               ask: (missing, attempt) =>
                 llmDecisions(ctx, {
-                  batch: survivors,
+                  batch: grounded,
                   ask: missing,
                   critiques: outcome.critiques,
                   library,
@@ -667,9 +699,12 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
                   retry: attempt > 1,
                 }),
             }),
-      `${survivors.length} candidate(s) for the model judge`,
+      `${grounded.length} candidate(s) for the model judge`,
     );
     const judged: JudgedCandidate<TacticCandidate>[] = survivors.map((candidate) => {
+      if (candidate.citation_error) {
+        return { candidate, subject: candidate.id, verdict: "reject", score: 0, note: candidate.citation_error };
+      }
       const decision = decisions.get(candidate.id)!;
       return {
         candidate: { ...candidate, duplicate_of: decision.duplicate_of, match: decision.match, target_tactic_id: decision.target_tactic_id, shared_scope: decision.shared_scope, new_scope: decision.new_scope, expansion: decision.expansion, separate: decision.separate },
@@ -693,6 +728,8 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
       evidence_question: item.candidate.evidence_question,
       source_quote: item.candidate.source_quote,
       block_id: item.candidate.block_id ?? null,
+      source_context: item.candidate.source_context ?? null,
+      citation_error: item.candidate.citation_error ?? null,
       score: item.score,
       verdict: item.verdict,
       critic_note: item.note,
@@ -713,6 +750,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
         const result = await ctx.run.step(`commit:${document.id}`, () =>
           commitExtractedRecords({
             source_id: document.source_id,
+            require_grounded_sources: true,
             title: source?.title ?? document.source_id,
             stakeholder_function: source?.stakeholder_function ?? ctx.actor.function,
             actor_name: ctx.actor.name,
@@ -728,6 +766,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
               source_id: candidate.source_id,
               source_quote: candidate.source_quote,
               block_id: candidate.block_id,
+              source_context: candidate.source_context,
               duplicate_of: candidate.duplicate_of,
             })),
             apply_mappings: false,
@@ -740,7 +779,8 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
     if (!ctx.replay?.evaluation && !input.dry_run) {
       for (const candidate of accepted.filter(c => c.match === "overlaps")) {
         const parent = state.tactics.find(t => t.id === candidate.target_tactic_id)!;
-        await createTacticSuggestion({block_id: candidate.block_id, run_id: ctx.run.id, document_id: candidate.document_id, source_id: candidate.source_id, source_quote: candidate.source_quote,
+        await createTacticSuggestion({require_grounded_source: true, run_id: ctx.run.id, document_id: candidate.document_id, source_id: candidate.source_id, source_quote: candidate.source_quote,
+          block_id: candidate.block_id, source_context: candidate.source_context,
           target_tactic_id: parent.id, expected_tactic_version: tacticVersion(parent), shared_scope: candidate.shared_scope!, new_scope: candidate.new_scope!, expansion: candidate.expansion!, separate: candidate.separate!});
       }
     }
@@ -755,6 +795,8 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
       status: item.candidate.status,
       evidence_question: item.candidate.evidence_question,
       source_quote: item.candidate.source_quote,
+      source_context: item.candidate.source_context ?? null,
+      citation_error: item.candidate.citation_error ?? null,
       score: item.score,
       verdict: item.verdict,
       critic_note: item.note,

@@ -11,7 +11,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/iegp/db";
 import type { IegpState } from "@/lib/iegp/types";
 import type { ComparisonOutcome } from "@/lib/ingest/comparison-types";
-import { sourceComparisons, sourceReviews } from "@/lib/iegp/schema";
+import { sourceBlocks, sourceComparisons, sourceReviews } from "@/lib/iegp/schema";
 import { acceptTacticExpansion, tacticVersion } from "@/lib/iegp/tactic-expansions";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -394,24 +394,30 @@ describe("KAN-146 incoming document comparison", () => {
   expect((await store.loadState()).source_reviews).toHaveLength(0);
  });
  it.each(["removed", "changed", "surrounding", "unrelated"] as const)("versions a standalone target's actual cited provenance (%s)", async change => {
-  const blockAction = async (body: Record<string, unknown>) => {
+  const blockAction = async (body: Record<string, unknown>, expectedStatus = 200) => {
    const response = await blockPost(new Request("http://localhost/api/sources/blocks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...fields, rationale: "Reviewed target source edit", ...body }) }));
-   const result = await response.json(); expect(response.status, JSON.stringify(result)).toBe(200); return result;
+   const result = await response.json(); expect(response.status, JSON.stringify(result)).toBe(expectedStatus); return result;
   };
   const quote = "The protocol enrols adults only.";
-  const source = await blockAction({ action: "manual_source", title: "Existing target protocol", source_type: "advisory_board", stakeholder_function: actor.function, blocks: [{ text: quote }, { text: "Unrelated administration." }] });
+  const source = await blockAction({ action: "manual_source", title: "Existing target protocol", source_type: "advisory_board", stakeholder_function: actor.function, blocks: [{ text: quote }, { text: "Unrelated administration." }, { text: quote }] });
   const standalone = await store.recordMissedTactic({ name: "Unmapped adult protocol", type: "rwe_study", evidence_question: "Adult outcomes", population: "Adults", status: "ongoing", ...fields });
-  await attachTacticSource({ tactic_id: standalone, source_id: source.source_id, source_quote: quote });
+  const citedBlockId = source.block_ids[0];
+  await attachTacticSource({ tactic_id: standalone, source_id: source.source_id, source_quote: quote, block_id: citedBlockId });
   expect((await store.loadState()).coverages.some(row => row.tactic_id === standalone)).toBe(false);
+  const changed = change === "removed" || change === "changed";
   respond = async input => {
    expect(input.tactic_source_provenance).toContainEqual({ tactic_id: standalone, source_id: source.source_id, passage: quote, retained: true });
    expect(input.provenance_source_ids).toContain(source.source_id);
    const text = change === "removed" ? "Administrative notes only." : change === "changed" ? "The protocol enrols children only." : change === "surrounding" ? `Updated preface. ${quote} Updated appendix.` : "Updated administration.";
-   await blockAction({ action: "edit", block_id: source.block_ids[change === "unrelated" ? 1 : 0], text });
+   const blockId = change === "unrelated" ? source.block_ids[1] : citedBlockId;
+   await blockAction({ action: "edit", block_id: blockId, text }, changed ? 409 : 200);
+   if (changed) {
+    // Simulate out-of-band drift after proving the normal editor rejects it.
+    await db().update(sourceBlocks).set({ text }).where(eq(sourceBlocks.id, citedBlockId));
+   }
    return { outcomes: [outcome(input, "conflict", { gap_id: null, tactic_id: standalone, coverage_id: null })] };
   };
   await parse();
-  const changed = change === "removed" || change === "changed";
   expect(await comparison()).toMatchObject({ status: changed ? "failed" : "completed", basis_current: !changed });
   expect((await store.loadState()).source_reviews).toHaveLength(changed ? 0 : 1);
   expect(await listParsedDocuments()).toHaveLength(1);

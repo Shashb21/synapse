@@ -19,6 +19,7 @@ import { scopedWorkspaceId } from "@/modules/workspaces/context";
 import type { Actor, ResolvedRoute } from "@/modules/kernel/contracts";
 import type { IegpState } from "@/lib/iegp/types";
 import type { ComparisonOutcome, SourceComparison, SourceComparisonView } from "./comparison-types";
+import { validateQuoteAgainstBlock } from "./quote-validator";
 
 const outcomeSchema = z.object({
   block_id: z.string().min(1), passage: z.string().trim().min(1),
@@ -45,7 +46,9 @@ async function facts(state: IegpState, sourceId: string) {
     .filter(reference => tactics.some(tactic => tactic.id === reference.tactic_id)));
   const provenance = references.map(reference => ({
     tactic_id: reference.tactic_id, source_id: reference.source_id, passage: normalize(reference.source_quote),
-    retained: state.blocks.some(block => block.source_id === reference.source_id && normalize(block.text).includes(normalize(reference.source_quote))),
+    retained: state.blocks.some(block => block.source_id === reference.source_id
+      && (!reference.block_id || block.id === reference.block_id)
+      && validateQuoteAgainstBlock({ block, quote: reference.source_quote }).ok),
   }));
   // Legacy tactics may identify their source by its exact ID/title rather than a reference row.
   // A concrete quote depends only on that passage; an uncited document conservatively depends on all its text.
@@ -56,7 +59,8 @@ async function facts(state: IegpState, sourceId: string) {
       const blocks = state.blocks.filter(block => block.source_id === candidate.id);
       const passage = normalize(tactic.source_quote ?? "");
       return { tactic_id: tactic.id, source_id: candidate.id, passage,
-        retained: Boolean(passage) && blocks.some(block => normalize(block.text).includes(passage)),
+        retained: blocks.some(block => (!tactic.block_id || block.id === tactic.block_id)
+          && validateQuoteAgainstBlock({ block, quote: passage }).ok),
         ...(!passage ? { uncited_source_text: blocks.map(block => normalize(block.text)).sort() } : {}),
       };
     }));

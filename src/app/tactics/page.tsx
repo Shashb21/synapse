@@ -67,12 +67,14 @@ export default async function TacticsPage() {
                   <p className="text-[13px] text-foreground">{row.name}</p>
                   <p className="mt-1 text-[12px] text-foreground">{row.evidence_question}</p>
                   <p className="mt-1 text-[12px] text-muted-foreground">
-                    “{row.source_quote}” · {source?.title ?? row.source_id}
+                    {row.source_quote ? <>“{row.source_quote}” · </> : null}
+                    {source?.title ?? row.source_id}
+                    {row.source_context ? <> · {row.source_context.heading ? `${row.source_context.heading} · ` : ""}{row.source_context.location}</> : null}
                   </p>
                   <p className="mt-1 text-[11px] text-muted-foreground">
-                    AI reason: {row.critic_note} · score {row.score}
+                    {row.citation_error ?? <>AI reason: {row.critic_note} · score {row.score}</>}
                   </p>
-                  <div className="mt-2">
+                  {!row.citation_error ? <div className="mt-2">
                     <ActionDialog
                       endpoint="/api/iegp"
                       payload={{ action: "promote_tactic_candidate", candidate_id: row.id }}
@@ -111,7 +113,7 @@ export default async function TacticsPage() {
                         { name: "gap_id", label: "Map onto gap", type: "select", defaultValue: "", options: gapOptions },
                       ]}
                     />
-                  </div>
+                  </div> : null}
                 </article>
               );
             })}

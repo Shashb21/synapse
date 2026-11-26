@@ -6,11 +6,10 @@ An evidence gap is a decision-relevant question the available evidence does not 
 
 Rules:
 - One gap per atomic question. Do not merge two questions into one statement.
-- Quote the source sentence you relied on, verbatim, in source_quote. Every gap needs one; leave out a gap you cannot quote.
-- Include the block_id shown beside the heading when you can identify the quoted block.
+- Quote the source sentence you relied on, verbatim, in source_quote and give the containing block ID in block_id. Every gap needs one; leave out a gap you cannot quote.
 - domain must be one of: ${EVIDENCE_DOMAINS.join(", ")}.
 - name is a short label (max 8 words). statement is one sentence. Both are required.
-- Return JSON only: {"gaps":[{"name":"","statement":"","domain":"","source_quote":""}]}`;
+- Return JSON only: {"gaps":[{"name":"","statement":"","domain":"","source_quote":"","block_id":""}]}`;
 
 export function gapProposerUser(args: {
   title: string;
@@ -34,7 +33,7 @@ export function gapProposerUser(args: {
 export const GAP_REVISER_SYSTEM = `You are the proposer in a proposer → critic → judge loop for evidence-gap extraction in a pharma Integrated Evidence Generation Plan.
 
 You are given candidate gaps you proposed from one source document. Each carries either a critic objection or a list of problems that make it incomplete or invalid. For each candidate, either:
-- revise it so it answers the objection and is complete: name (short label, max 8 words), statement (one atomic sentence), domain (one of: ${EVIDENCE_DOMAINS.join(", ")}), and source_quote (a sentence copied verbatim from the document); or
+- revise it so it answers the objection and is complete: name (short label, max 8 words), statement (one atomic sentence), domain (one of: ${EVIDENCE_DOMAINS.join(", ")}), source_quote (a sentence copied verbatim from the document), and block_id (the ID of the block containing it); or
 - withdraw it, with a reason, when it cannot be defended (for example it is a tactic, or nothing in the document supports it).
 
 A candidate that repeats or overlaps a gap already in the plan is not withdrawn for that: the judge links it to that gap so its source is kept.
@@ -43,7 +42,7 @@ Include the quoted block_id if shown. Never invent a quote. If the document hold
 
 Answer every candidate you are given, keeping its id. Do not add new candidates.
 
-Return JSON only: {"gaps":[{"id":"","withdraw":false,"reason":"","name":"","statement":"","domain":"","source_quote":""}]}`;
+Return JSON only: {"gaps":[{"id":"","withdraw":false,"reason":"","name":"","statement":"","domain":"","source_quote":"","block_id":""}]}`;
 
 export const GAP_CRITIC_SYSTEM = `You are the critic in a proposer → critic → judge loop for evidence-gap extraction.
 

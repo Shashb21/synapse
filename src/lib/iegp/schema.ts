@@ -1,3 +1,4 @@
+import type { SourceContext } from "@/lib/ingest/source-citation";
 import {
   boolean,
   integer,
@@ -81,6 +82,7 @@ export const needs = pgTable("needs", {
   timing: text("timing").notNull(),
   source_id: text("source_id").notNull(),
   source_quote: text("source_quote").notNull(),
+  source_context: jsonb("source_context").$type<SourceContext>(),
   /** Original cited block text retained through structural edits for legacy unquoted needs. */
   source_basis_text: text("source_basis_text"),
   /** Null until a model or a human scores it; never a placeholder. */
@@ -130,7 +132,6 @@ export const gaps = pgTable("gaps", {
 
 /** Overlap suggestions from the S2 judge, waiting on a person (KAN-74/75). */
 export const gapSuggestions = pgTable("gap_suggestions", {
-  block_id: text("block_id"),
   id: text("id").primaryKey(),
   gap_id: text("gap_id").notNull(),
   run_id: text("run_id").notNull(),
@@ -140,6 +141,8 @@ export const gapSuggestions = pgTable("gap_suggestions", {
   statement: text("statement").notNull(),
   domain: text("domain").notNull(),
   source_quote: text("source_quote").notNull(),
+  source_context: jsonb("source_context").$type<SourceContext>(),
+  block_id: text("block_id"),
   shared_part: text("shared_part").notNull(),
   new_part: text("new_part").notNull(),
   merged_name: text("merged_name").notNull(),
@@ -200,7 +203,6 @@ export const breakoutGroupGaps = pgTable(
 );
 
 export const tactics = pgTable("tactics", {
-  block_id: text("block_id"),
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   type: text("type").notNull(),
@@ -224,6 +226,8 @@ export const tactics = pgTable("tactics", {
   intended_use: text("intended_use").notNull(),
   lock: jsonb("lock").notNull(),
   source_quote: text("source_quote").notNull().default(""),
+  source_context: jsonb("source_context").$type<SourceContext>(),
+  block_id: text("block_id"),
   custom_type: jsonb("custom_type"),
 });
 

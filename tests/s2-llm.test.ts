@@ -18,6 +18,7 @@ import { runStage } from "@/modules/kernel/run";
 import { wipePlatform } from "@/modules/kernel/db";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { NoRouteError } from "@/modules/llm/provider";
+import { listRejectedGapCandidates, promoteGapCandidate } from "@/app/api/iegp/promote-candidates";
 import { isLiveGap } from "@/lib/iegp/engine";
 import { editSourceBlock, mergeSourceBlocks, reparseSourceBlocks } from "@/lib/iegp/source-blocks";
 import { commitExtractedRecords, createGap, loadState, persistSourceAndBlocks, resetDemoSetup } from "@/lib/iegp/store";
@@ -114,7 +115,8 @@ describe("S2 on the model path", () => {
     await resetDemoSetup();
     await wipePlatform(["source_files", "parsed_documents", "gap_candidates"]);
     const lead = { actor: ACTOR, role: "medical_affairs" as const };
-    await runStage({ stage: "S0", input: { demo_ids: ["heor-interview"] }, ...lead });
+    await runStage({ stage: "S0", input: { files: [{ filename: "s2-llm.txt", title: "S2-LLM fictional source",
+      source_type: "stakeholder_interview", stakeholder_function: ACTOR.function, text: [QUOTE_A, QUOTE_B].join("\n\n") }] }, ...lead });
     await runStage({ stage: "S1", input: {}, ...lead });
     documentId = (await listParsedDocuments())[0]!.id;
     await createGap({
@@ -138,6 +140,36 @@ describe("S2 on the model path", () => {
 
   const input = (dry_run = true) =>
     gapExtractModule.inputSchema.parse({ document_ids: [documentId], dry_run });
+
+  it("rejects a fabricated quotation even when the model would accept the candidate", async () => {
+    const { ctx } = context((call) => {
+      if (call.purpose.startsWith("gap-proposer:")) return { gaps: [{ ...gapA, source_quote: "The fictional committee asked for a blue binder." }] };
+      if (call.purpose === "gap-critic") return keepAll(call);
+      return { decisions: [{ subject: L1(), verdict: "accept", confidence: 99, reason: "Accept this gap", duplicate_of: null }] };
+    });
+    const { output } = await gapExtractModule.run(input(false), ctx);
+    expect(output.accepted).toEqual([]);
+    expect(output.rejected[0]?.critic_note).toMatch(/quote.*source/i);
+    expect(commitExtractedRecords).not.toHaveBeenCalled();
+  });
+
+  it("keeps an explicitly wrong block from rebinding to a matching block during promotion", async () => {
+    const name = "Gap with a wrong block";
+    const { ctx } = context((call) => {
+      if (call.purpose.startsWith("gap-proposer:")) return { gaps: [{ ...gapA, name, block_id: "different-block" }] };
+      if (call.purpose === "gap-critic") return keepAll(call);
+      return { decisions: [] };
+    });
+    const { output } = await gapExtractModule.run(input(false), ctx);
+    expect(output.rejected[0]?.critic_note).toMatch(/identified retained source block/);
+    const row = (await listRejectedGapCandidates()).find((candidate) => candidate.name === name)!;
+    await expect(promoteGapCandidate({
+      candidate_id: row.id,
+      rationale: "Reviewed by hand",
+      actor_name: ACTOR.name,
+      actor_function: ACTOR.function,
+    })).rejects.toThrow(/identified retained source block/);
+  });
 
   it("throws before doing anything when no LLM is connected", async () => {
     const { ctx, calls } = context(() => ({}), false);
@@ -341,19 +373,19 @@ describe("S2 on the model path", () => {
     expect((await loadState()).needs.find(n => n.id === need_ids[1])).toMatchObject({ block_id: null });
     await run();
     await reparseSourceBlocks({ source_id: document.source_id, sections: blocks });
-    await editSourceBlock({ block_id: "second", text: "Updated fictional passage.", rationale: "Revise passage", actor: ACTOR });
+    await expect(editSourceBlock({ block_id: "second", text: "Updated fictional passage.", rationale: "Revise passage", actor: ACTOR })).rejects.toThrow(/would orphan/);
     expect((await loadState()).needs.find(n => n.id === need_ids[1])).toMatchObject({
       block_id: null, observed_block_ids: ["first", "second"],
     });
-    await editSourceBlock({ block_id: "second", text: repeated, rationale: "Restore passage", actor: ACTOR });
     await run();
     await run();
     const state = await loadState();
     const needs = state.needs.filter(n => n.source_quote === unique || n.source_quote === repeated);
-    expect(needs).toHaveLength(2);
+    expect(needs).toHaveLength(4);
+    expect(needs.filter(n => n.source_quote === repeated && n.block_id).map(n => n.block_id).sort()).toEqual(["first", "second"]);
     expect(needs.find(n => n.id === need_ids[0])).toMatchObject({ statement: "Human-reviewed wording", block_id: "unique" });
     expect(needs.find(n => n.id === need_ids[1])).toMatchObject({ statement: "Human-reviewed wording", block_id: null, observed_block_ids: ["first", "second"] });
-    expect(state.gaps.find(g => g.id === planGapId)?.new_source_at).toBeNull();
+    expect(needs.filter(n => n.source_quote === repeated && n.block_id).map(n => n.id)).toContain(state.gaps.find(g => g.id === planGapId)?.new_source_need_id);
     const later = block("later", unique);
     blocks.push(later);
     await db().insert(tables.sourceBlocks).values(later);

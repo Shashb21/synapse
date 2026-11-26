@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 // Route handlers read the session cookie; outside a request scope, act as the demo typed actor.
@@ -12,8 +13,8 @@ vi.mock("@/modules/auth/request", () => ({
 import "@/modules";
 import { runStage } from "@/modules/kernel/run";
 import { wipePlatform, db } from "@/modules/kernel/db";
-import { listEdits } from "@/modules/kernel/edit-records";
-import { loadState, persistSourceAndBlocks, resetDemoSetup } from "@/lib/iegp/store";
+import { listEdits, recordEdit } from "@/modules/kernel/edit-records";
+import { loadState, commitExtractedRecords, editNeed, persistSourceAndBlocks, recordMissedTactic, resetDemoSetup } from "@/lib/iegp/store";
 import * as t from "@/lib/iegp/schema";
 import { GET as blocksGet, POST as blocksPost } from "@/app/api/sources/blocks/route";
 import {
@@ -25,8 +26,8 @@ import {
   listSourceBlocks,
   mergeSourceBlocks,
   persistDroppedSourceUnits,
-  reparseSourceBlocks,
   readSourceStakeholder,
+  reparseSourceBlocks,
   recordLlmSourceStakeholder,
   restoreDroppedSourceUnit,
   setSourceStakeholder,
@@ -126,6 +127,79 @@ describe("S1 source blocks: human edit, add, split, merge, delete", () => {
     // Delete of an uncited block works and is ordered out.
     await deleteSourceBlock({ block_id: blocks[2]!.id, rationale: "Not a need", actor: ACTOR });
     expect((await listSourceBlocks(source_id)).map((b) => b.id)).toEqual([blocks[0]!.id, blocks[1]!.id]);
+  });
+
+  it("protects the identified model need block even when its quote is repeated", async () => {
+    const { source_id, blocks } = await source("repeated need quote");
+    const quote = blocks[0]!.text;
+    const duplicate = await addSourceBlock({ source_id, text: quote, after_block_id: null, rationale: "Record a repeat", actor: ACTOR });
+    const id = `NEED-S2-${source_id}`;
+    await citeNeed(id, source_id, quote);
+    await db().update(t.needs).set({ block_id: blocks[0]!.id, run_id: "fictional-s2-run" }).where(eq(t.needs.id, id));
+    const human = { actor_name: ACTOR.name, actor_function: ACTOR.function, rationale: "Review the quote" };
+    await expect(editNeed({ need_id: id, source_quote: "An unrelated sentence.", ...human })).rejects.toThrow(/quote.*source block/i);
+    await editNeed({ need_id: id, source_quote: "OS data versus docetaxel", ...human });
+    await expect(deleteSourceBlock({ block_id: blocks[0]!.id, rationale: "Remove duplicate", actor: ACTOR })).rejects.toBeInstanceOf(SourceQuoteConflictError);
+    await deleteSourceBlock({ block_id: duplicate.id, rationale: "Remove uncited duplicate", actor: ACTOR });
+    expect((await loadState()).needs.find((row) => row.id === id)?.block_id).toBe(blocks[0]!.id);
+  });
+
+  it("keeps existing tactic citations through source edits and reparse", async () => {
+    const { source_id, blocks } = await source("legacy tactic quote");
+    const quote = blocks[2]!.text;
+    await commitExtractedRecords({
+      source_id, title: "Notes legacy tactic quote", stakeholder_function: ACTOR.function,
+      actor_name: ACTOR.name, actor_function: ACTOR.function, needs: [], gaps: [],
+      tactics: [{ id: "study", name: "Chart review", type: "rwe_study", status: "planned",
+        evidence_question: "What does routine care show?", source_id, source_quote: quote }],
+    });
+    await expect(editSourceBlock({ block_id: blocks[2]!.id, text: "The interview ended.", rationale: "Shorter notes", actor: ACTOR })).rejects.toBeInstanceOf(SourceQuoteConflictError);
+    const reparsed = await reparseSourceBlocks({ source_id, sections: [{ heading: "Wrap-up", text: "The interview ended.", location: "p.3" }] });
+    expect(reparsed.blocks.find((row) => row.id === blocks[2]!.id)).toMatchObject({ text: quote });
+  });
+
+  it.each(["id", "title"] as const)("protects a historical tactic's primary passage identified by source %s alongside a later reference", async identity => {
+    const { source_id, blocks } = await source(`legacy primary ${identity}`);
+    const [primary, secondary] = blocks;
+    const state = await loadState();
+    const storedSource = state.sources.find(row => row.id === source_id)!;
+    const result = await commitExtractedRecords({
+      source_id, title: storedSource.title, stakeholder_function: ACTOR.function,
+      actor_name: ACTOR.name, actor_function: ACTOR.function, needs: [], gaps: [],
+      tactics: [{ id: "study", name: "Fictional primary activity", type: "rwe_study", status: "planned",
+        evidence_question: "What does routine care show?", source_id, source_quote: "" }],
+    });
+    const tacticId = result.tactic_ids[0]!;
+    await db().update(t.tactics).set({ source_quote: primary!.text, data_source: storedSource[identity] }).where(eq(t.tactics.id, tacticId));
+    const { attachTacticSource } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    await attachTacticSource({ tactic_id: tacticId, source_id, source_quote: secondary!.text, block_id: secondary!.id });
+
+    await expect(editSourceBlock({ block_id: primary!.id, text: "A different passage.", rationale: "Edit main source", actor: ACTOR }))
+      .rejects.toBeInstanceOf(SourceQuoteConflictError);
+    const reparsed = await reparseSourceBlocks({ source_id, sections: [{ heading: "Other", text: "A different passage.", location: "p.3" }] });
+    expect(reparsed.blocks.map(row => row.id)).toEqual(expect.arrayContaining([primary!.id, secondary!.id]));
+  });
+
+  it.each(["id", "title"] as const)("protects a historically promoted tactic using source %s", async identity => {
+    const { source_id, blocks } = await source(`legacy promotion ${identity}`);
+    const block = blocks[2]!;
+    const storedSource = (await loadState()).sources.find(row => row.id === source_id)!;
+    const tacticId = await recordMissedTactic({
+      name: "Historically promoted chart review", type: "rwe_study", status: "ongoing",
+      evidence_question: "What does routine care show?", source_quote: block.text,
+      data_source: storedSource[identity], actor_name: ACTOR.name, actor_function: ACTOR.function,
+    });
+    await recordEdit({
+      stage: "S3", entity_type: "tactic_candidate", entity_id: `old-${tacticId}`, field: "verdict",
+      action: "accept", before: "reject", after: tacticId, rationale: "Confirmed from source", actor: ACTOR,
+    });
+
+    await expect(editSourceBlock({ block_id: block.id, text: "Interview concluded.", rationale: "Edit notes", actor: ACTOR }))
+      .rejects.toBeInstanceOf(SourceQuoteConflictError);
+    await expect(deleteSourceBlock({ block_id: block.id, rationale: "Delete notes", actor: ACTOR }))
+      .rejects.toBeInstanceOf(SourceQuoteConflictError);
+    const reparsed = await reparseSourceBlocks({ source_id, sections: [{ heading: "Other", text: "Interview concluded.", location: "p.3" }] });
+    expect(reparsed.blocks.find(row => row.id === block.id)).toMatchObject({ text: block.text });
   });
 
   it("splits, merges and adds in reading order, labelling human blocks", async () => {

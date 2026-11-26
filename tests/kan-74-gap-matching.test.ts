@@ -157,6 +157,105 @@ describe("KAN-74 commit", () => {
     expect(sameQuote).toHaveLength(1);
   });
 
+  it("keeps distinct named blocks and full passages on the same gap across reruns", async () => {
+    const repeated = "The fictional registry omitted the rural cohort.";
+    const prefix = "The fictional minutes restate the evidence question. ".repeat(7);
+    const firstQuote = prefix + "The first request concerns adults.";
+    const secondQuote = prefix + "The second request concerns teenagers.";
+    const { persistSourceAndBlocks } = await import("@/lib/iegp/store");
+    const fixture = await persistSourceAndBlocks({
+      title: "Fictional registry minutes",
+      source_type: "stakeholder_interview",
+      stakeholder_function: "heor",
+      text: "",
+      sections: [
+        { heading: "Session A", location: "p.1", text: repeated },
+        { heading: "Session B", location: "p.2", text: repeated },
+        { heading: "Session C", location: "p.3", text: firstQuote + "\n" + secondQuote },
+      ],
+    });
+    const [first, second, long] = fixture.blocks;
+    const passages = [[first!, repeated], [second!, repeated], [long!, firstQuote], [long!, secondQuote]] as const;
+    const rows = passages.map(([block, quote], index) => ({
+      ...sameRow(`cit-${index}`), source_id: fixture.source_id, block_id: block.id, source_quote: quote,
+    }));
+    const save = () => commit({ source_id: fixture.source_id, require_grounded_sources: true, gaps: rows });
+
+    expect((await save()).need_ids).toHaveLength(4);
+    expect((await save()).need_ids).toEqual([]);
+    const state = await loadState();
+    const linked = new Set(state.need_gap_links.filter(link => link.gap_id === gapId).map(link => link.need_id));
+    expect(state.needs.filter(need => linked.has(need.id) && need.source_id === fixture.source_id)
+      .map(need => [need.block_id, need.source_quote]))
+      .toEqual(passages.map(([block, quote]) => [block.id, quote]));
+  });
+
+  it.each([true, false])("preserves a historical linked need across grounded reruns (stored block %s)", async hasBlock => {
+    const { persistSourceAndBlocks } = await import("@/lib/iegp/store");
+    const quote = "The historical registry omitted patients from rural areas.";
+    const fixture = await persistSourceAndBlocks({
+      title: "Historical fictional registry", source_type: "stakeholder_interview", stakeholder_function: "heor", text: "",
+      sections: [
+        { heading: "Original minutes", location: "p.1", text: quote },
+        { heading: "Appendix", location: "p.4", text: hasBlock ? quote : "The appendix contains charts." },
+      ],
+    });
+    const original = fixture.blocks[0]!;
+    const attach = (runId: string, requireGrounding: boolean) => commit({
+      source_id: fixture.source_id, require_grounded_sources: requireGrounding,
+      validated_gap_ids: requireGrounding ? [gapId] : [],
+      needs: [{
+        id: runId, gap_id: gapId, statement: quote, source_quote: quote,
+        provenance: { run_id: runId, candidate_row_id: runId, block_id: requireGrounding || hasBlock ? original.id : null },
+      }],
+    });
+    const beforeFlag = (await loadState()).gaps.find(gap => gap.id === gapId)?.new_source_need_id;
+    const first = await attach("main-s2-run", false);
+    const [needId] = first.need_ids;
+    expect((await loadState()).needs.find(need => need.id === needId)).toMatchObject({
+      block_id: hasBlock ? original.id : null, run_id: "main-s2-run", source_context: null,
+    });
+
+    for (const runId of ["upgraded-first", "upgraded-second"]) {
+      expect(await attach(runId, true)).toMatchObject({ need_ids: [], flagged_gap_ids: [] });
+    }
+    const after = await loadState();
+    expect(after.needs.filter(need => need.source_id === fixture.source_id)).toMatchObject([{
+      id: needId, block_id: original.id, run_id: "main-s2-run",
+      source_context: { heading: original.heading, location: original.location },
+    }]);
+    expect(after.gaps.find(gap => gap.id === gapId)?.new_source_need_id).toBe(beforeFlag);
+  });
+
+  it("leaves an ambiguous historical need unassigned when attaching a verified passage", async () => {
+    const { persistSourceAndBlocks } = await import("@/lib/iegp/store");
+    const quote = "The registry omitted patients from rural areas.";
+    const fixture = await persistSourceAndBlocks({
+      title: "Two fictional interviews", source_type: "stakeholder_interview", stakeholder_function: "heor", text: "",
+      sections: [
+        { heading: "First interview", location: "p.1", text: quote },
+        { heading: "Second interview", location: "p.4", text: quote },
+      ],
+    });
+    const attach = (runId: string, blockId: string | null) => commit({
+      source_id: fixture.source_id, require_grounded_sources: blockId !== null,
+      needs: [{
+        id: runId, gap_id: gapId, statement: quote, source_quote: quote,
+        provenance: { run_id: runId, candidate_row_id: runId, block_id: blockId },
+      }],
+    });
+    const [historicalId] = (await attach("older-run", null)).need_ids;
+    const block = fixture.blocks[0]!;
+    const [verifiedId] = (await attach("verified-run", block.id)).need_ids;
+    expect(verifiedId).toBeDefined();
+    expect(verifiedId).not.toBe(historicalId);
+    expect((await attach("repeat-run", block.id)).need_ids).toEqual([]);
+    expect((await loadState()).needs.filter(need => need.source_id === fixture.source_id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: historicalId, block_id: null, source_context: null }),
+      expect.objectContaining({ id: verifiedId, block_id: block.id, source_context: { heading: block.heading, location: block.location } }),
+    ]));
+  });
+
   it("files an overlap as a pending suggestion and creates no gap", async () => {
     const before = (await loadState()).gaps.length;
     const result = await commit({
@@ -239,12 +338,19 @@ describe("KAN-74 S2 run across two documents", () => {
     await resetDemoSetup();
     await wipePlatform(["source_files", "parsed_documents", "gap_candidates"]);
     const lead = { actor: ACTOR, role: "medical_affairs" as const };
-    await runStage({ stage: "S0", input: { demo_ids: ["heor-interview", "medical-kol"] }, ...lead });
+    await runStage({ stage: "S0", input: { files: [
+      { filename: "matching-a.txt", title: "Fictional interview A", source_type: "stakeholder_interview",
+        stakeholder_function: ACTOR.function, text: "Persistence is unknown.\n\nPayers want SoC data." },
+      { filename: "matching-b.txt", title: "Fictional interview B", source_type: "stakeholder_interview",
+        stakeholder_function: ACTOR.function, text: "Persistence is unknown.\n\nOver-75s are a gap." },
+    ] }, ...lead });
     await runStage({ stage: "S1", input: {}, ...lead });
     const documents = await listParsedDocuments();
     expect(documents.length).toBeGreaterThanOrEqual(2);
-    [docA, docB] = [documents[0]!.id, documents[1]!.id];
-    [sourceA, sourceB] = [documents[0]!.source_id, documents[1]!.source_id];
+    const a = documents.find((doc) => doc.blocks.some((block) => block.text.includes("Payers want SoC data.")))!;
+    const b = documents.find((doc) => doc.blocks.some((block) => block.text.includes("Over-75s are a gap.")))!;
+    [docA, docB] = [a.id, b.id];
+    [sourceA, sourceB] = [a.source_id, b.source_id];
     planGapId = await createGap({
       statement: "No comparative effectiveness data versus standard of care.",
       domain: "comparative_effectiveness",
@@ -326,8 +432,14 @@ describe("KAN-74 S2 run across two documents", () => {
     expect(suggestion).toMatchObject({ gap_id: planGapId, status: "pending", source_id: sourceB, name: "Over-75s versus SoC" });
     expect(suggestion.candidate_row_id).toBeTruthy();
     expect(suggestion.extra_sources).toEqual([
-      { source_id: sourceB, statement: over75.statement, source_quote: over75.source_quote },
-      { source_id: sourceB, statement: groundedRepeat.statement, source_quote: groundedRepeat.source_quote, block_id: citedBlock.id },
+      expect.objectContaining({
+        source_id: sourceB, statement: over75.statement, source_quote: over75.source_quote,
+        block_id: suggestion.block_id, source_context: suggestion.source_context,
+      }),
+      expect.objectContaining({
+        source_id: sourceB, statement: groundedRepeat.statement, source_quote: groundedRepeat.source_quote,
+        block_id: citedBlock.id,
+      }),
     ]);
     expect(state.gaps.some((row) => row.name === "Over-75s versus SoC")).toBe(false);
   });
