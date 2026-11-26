@@ -17,7 +17,7 @@ export function scoreMustMatch(
   statements: string[],
   must_match: string[] | undefined,
 ): { value: number; detail: string } {
-  if (!must_match?.length) return { value: 1, detail: "no must_match" };
+  if (!must_match?.length) return { value: 0, detail: "no targets; unscored" };
   const haystack = statements.join(" ").toLowerCase();
   const hits = must_match.filter((needle) => haystack.includes(needle.toLowerCase()));
   const value = hits.length / must_match.length;

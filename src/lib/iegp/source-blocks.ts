@@ -217,6 +217,25 @@ async function quotesFor(source_id: string): Promise<SourceQuote[]> {
   return citations;
 }
 
+/** Read the current editor order without pruning rows from a prior source generation. */
+export async function listCurrentSourceBlocks(source_id: string): Promise<BlockRow[]> {
+  await ensureSourceBlocksSchema();
+  const rows = await db()
+    .select({ block: t.sourceBlocks, position: sourceBlockMeta.position })
+    .from(t.sourceBlocks)
+    .innerJoin(t.sources, eq(t.sources.id, t.sourceBlocks.source_id))
+    .leftJoin(sourceBlockMeta, and(
+      eq(sourceBlockMeta.block_id, t.sourceBlocks.id),
+      eq(sourceBlockMeta.source_id, t.sources.id),
+      eq(sourceBlockMeta.source_generation, t.sources.ingested_at),
+    ))
+    .where(eq(t.sourceBlocks.source_id, source_id));
+  return rows
+    .map(({ block, position }) => ({ block, position: position ?? idOrdinal(block.id) }))
+    .sort((a, b) => a.position - b.position || a.block.id.localeCompare(b.block.id))
+    .map(({ block }) => block);
+}
+
 /** Blocks of one source in reading order, with human/model provenance and citing needs. */
 export async function listSourceBlocks(source_id: string): Promise<SourceBlockView[]> {
   await ensureSourceBlocksSchema();

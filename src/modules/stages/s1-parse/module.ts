@@ -4,12 +4,14 @@ import { queueSourceComparison } from "@/lib/ingest/compare-source";
 import { desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
+import { inEvaluationIsolation } from "@/modules/kernel/evaluation-isolation";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { curatedS1Cases } from "@/modules/eval-gold";
 import { registerModule } from "@/modules/kernel/registry";
 import type { EvalScore, ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
 import { persistSourceAndBlocks } from "@/lib/iegp/store";
 import {
+  listCurrentSourceBlocks,
   listSourceBlocks,
   persistDroppedSourceUnits,
   recordLlmSourceStakeholder,
@@ -332,12 +334,12 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
       const clean = documents.filter((doc) => doc.quality.warnings.length === 0);
       const doc = documents[0];
       const blocksOk =
-        testCase.gold?.parse_min_blocks && doc
-          ? doc.quality.blocks >= testCase.gold.parse_min_blocks
+        testCase.gold?.parse_min_blocks
+          ? !!doc && doc.quality.blocks >= testCase.gold.parse_min_blocks
           : true;
       const cuesOk =
-        testCase.gold?.parse_min_need_cues && doc
-          ? doc.quality.need_cue_blocks >= testCase.gold.parse_min_need_cues
+        testCase.gold?.parse_min_need_cues
+          ? !!doc && doc.quality.need_cue_blocks >= testCase.gold.parse_min_need_cues
           : true;
       return [
         {
@@ -411,8 +413,9 @@ export async function listParsedDocuments(ids?: string[]): Promise<ParsedDocumen
 /** Load current editor blocks for extraction while retaining the selected parse IDs. */
 export async function listExtractionDocuments(ids?: string[]): Promise<ParsedDocumentRecord[]> {
   const documents: ParsedDocumentRecord[] = [];
+  const listBlocks = inEvaluationIsolation() ? listCurrentSourceBlocks : listSourceBlocks;
   for (const document of await listParsedDocuments(ids)) {
-    const blocks = (await listSourceBlocks(document.source_id)).map(({ id, source_id, heading, text, location }) =>
+    const blocks = (await listBlocks(document.source_id)).map(({ id, source_id, heading, text, location }) =>
       ({ id, source_id, heading, text, location }));
     if (blocks.length) documents.push({ ...document, blocks });
   }

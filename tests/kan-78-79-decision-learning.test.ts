@@ -330,7 +330,7 @@ describe("decision originating provenance", () => {
     const replay = { stage_input: { gap_ids: ["GAP-test"] }, context: { gaps: [{ id: "GAP-test", statement: "Original question" }] } };
     const id = await recordDecisionExample({ workspace_id: "unknown-origin-workspace", stage: "S8", kind: "s8_band", subject_id: unique(), ai_input: {}, ai_output: { band: "high" }, outcome: "accepted", replay_input: replay });
     const saved = (await getDecisionExample(id!))!;
-    expect(saved.replay_input).toEqual(replay); expect(saved.replay_exclusion_reason).toBeNull();
+    expect(saved.replay_input).toEqual(replay); expect(saved.replay_exclusion_reason).toMatch(/confirm the priority/i);
     expect(saved.model).toBeNull(); expect(saved.provider_id).toBeNull(); expect(saved.run_id).toBeNull(); expect(saved.prompt_version).toBeNull();
     expect(configuredRoute).not.toHaveBeenCalled(); configuredRoute.mockRestore();
     await vi.waitFor(async () => expect((await getDecisionExample(id!))?.lesson_status).toBe("failed"));

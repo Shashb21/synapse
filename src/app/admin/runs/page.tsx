@@ -12,7 +12,7 @@ import { listEdits } from "@/modules/kernel/edit-records";
 import { listSignals } from "@/modules/kernel/hillclimb";
 import { listEvalRuns } from "@/modules/kernel/evals";
 import { HillclimbSweepButton } from "@/components/platform/hillclimb-sweep-button";
-import { HILLCLIMB_STAGES } from "@/modules/kernel/prompt-versions";
+import { availableDiagnosticSweeps } from "@/modules/kernel/hillclimb-loop";
 import { aiEnabled } from "@/modules/kernel/ai-switch";
 import { withAdminWorkspace } from "@/modules/workspaces/admin-context";
 
@@ -27,7 +27,7 @@ function statusTone(status: string): string {
 export default async function RunsPage() {
   await requireOwnerPage();
   // Runs live in each workspace's own schema: this page reads the console's workspace (KAN-62).
-  const { workspace, runs, health, edits, signals, evals, ai, usage } = await withAdminWorkspace(async (workspace) => {
+  const { workspace, runs, health, edits, signals, evals, ai, usage, sweepStages } = await withAdminWorkspace(async (workspace) => {
     await recoverInterruptedRuns();
     const [runs, health, edits, signals, evals, ai, usage] = await Promise.all([
       listRuns({ limit: 40 }),
@@ -39,7 +39,7 @@ export default async function RunsPage() {
       // Tokens and estimated cost of every model call, per stage (KAN-91).
       llmTotalsByStage(workspace.id),
     ]);
-    return { workspace, runs, health, edits, signals, evals, ai, usage };
+    return { workspace, runs, health, edits, signals, evals, ai, usage, sweepStages: ai ? await availableDiagnosticSweeps(workspace.id) : [] };
   });
 
   return (
@@ -151,7 +151,7 @@ export default async function RunsPage() {
             Edit rationales
           </h2>
           <p className="text-[11px] text-muted-foreground">
-            Every user edit carries a rationale. These are the hillclimb inputs.
+            Reviewers record why they changed a decision.
           </p>
           {edits.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">No edits recorded yet.</p>
@@ -180,12 +180,12 @@ export default async function RunsPage() {
             Hillclimb loop
           </h2>
           <p className="text-[11px] text-muted-foreground">
-            Score registered prompt variants against curated gold, store per-version baselines, and promote
-            the winning variant when it beats its baseline.
+            Compare distinct S2 and S3 prompts on the same frozen curated cases. The highest score is advisory.
+            Changes from earlier comparable runs show historical drift. Activating a revision requires separate evaluation and explicit owner approval.
           </p>
-          {ai ? (
+          {sweepStages.length ? (
             <div className="flex flex-wrap gap-2">
-              {HILLCLIMB_STAGES.map((stage) => (
+              {sweepStages.map((stage) => (
                 <HillclimbSweepButton
                   key={stage}
                   stage={stage}
@@ -194,8 +194,8 @@ export default async function RunsPage() {
               ))}
             </div>
           ) : (
-            <p className="text-[11px] text-muted-foreground" data-testid="hillclimb-ai-off">
-              AI is off, so there are no prompts to tune. Past scores stay listed here.
+            <p className="text-[11px] text-muted-foreground" data-testid={ai ? "hillclimb-unavailable" : "hillclimb-ai-off"}>
+              {ai ? "No active stage has a routed sweep available on this workspace’s curated cases." : "AI is off. Historical observations remain available."}
             </p>
           )}
         </section>
@@ -205,7 +205,7 @@ export default async function RunsPage() {
             Hillclimb signals
           </h2>
           <p className="text-[11px] text-muted-foreground">
-            Scored in the hillclimb sweep. Runs learn from similar past decisions as worked examples, not from these rationales as rules.
+            Signals record feedback from live runs and reviewers. The sweep scores the stage’s curated targets.
           </p>
           {signals.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">No signals yet.</p>
@@ -228,7 +228,7 @@ export default async function RunsPage() {
             Eval runs
           </h2>
           <p className="text-[11px] text-muted-foreground">
-            Per-stage scores. A stage can hillclimb without touching its neighbours.
+            Live diagnostics, individual harness cases and aggregate results in this workspace.
           </p>
           {evals.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">No eval runs yet.</p>
@@ -237,7 +237,9 @@ export default async function RunsPage() {
               {evals.map((run) => (
                 <li key={run.id} className="border border-border bg-card p-2 rounded-lg">
                   <p className="text-[12px] text-foreground">
-                    {run.stage} · {run.module_id} v{run.module_version}
+                    {run.stage} · {run.module_id} v{run.module_version} · {run.kind?.replaceAll("_", " ")} · {run.lineage.execution}
+                    {run.lineage.case_name ? ` · ${run.lineage.case_name}` : ""}
+                    {run.group_id ? ` · ${run.group_id}` : ""}
                   </p>
                   <p className="mt-1 flex flex-wrap gap-1">
                     {run.metrics.map((metric) => (
@@ -245,7 +247,7 @@ export default async function RunsPage() {
                         key={metric.name}
                         variant="outline"
                         className={
-                          metric.target !== undefined && metric.value < metric.target
+                          run.passed !== null && metric.target !== undefined && metric.value < metric.target
                             ? "border-destructive/50 text-[10px]"
                             : "text-[10px]"
                         }

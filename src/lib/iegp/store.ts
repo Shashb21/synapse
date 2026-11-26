@@ -1,6 +1,7 @@
 import { lockSourceCitationOwner, requireRetainedSourceQuote, resolveRetainedSourceQuote } from "./source-citations";
 import type { SourceContext } from "@/lib/ingest/source-citation";
 import { squashText } from "@/lib/ingest/manual-blocks";
+import { inEvaluationIsolation } from "@/modules/kernel/evaluation-isolation";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { assessmentBasis, coverageReviewVersion, fullConfirmationIssues, getRequirementBasisReview, reviewedRequirementDimensions, type RequirementReviewInput } from "./requirement-basis";
 import type { RequirementBasis } from "./types";
@@ -177,6 +178,8 @@ export function normalizeGapMetadata(value: unknown): GapMetadata {
 export async function loadState({ backfillGapNumbers = false } = {}): Promise<IegpState> {
   await ensureSchema();
   let state = await readSnapshot();
+  // Diagnostics read the current facts without initializing or repairing a customer's plan.
+  if (inEvaluationIsolation()) return state.asset ? state : buildBlankWorkspace();
   // A schema with no asset row yet (a brand-new database) starts blank.
   if (!state.asset) {
     await persistState(buildBlankWorkspace());

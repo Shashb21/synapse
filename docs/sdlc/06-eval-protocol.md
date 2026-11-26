@@ -167,3 +167,13 @@ Full rules and the row-by-row inventory: [12-gold-set.md](./12-gold-set.md).
 - `theme_ids[0]` is the primary decision object; extra IDs are true multi-label membership.
 - Grounded `new` findings become gold only after a human accept. The sweep must not silently enlarge gold.
 - Expanding gold is allowed when a human asks; every new row must ground in its own source document (≥ 0.28) and keep `must_find` honest.
+
+## Workspace prompt revision evidence (KAN-265)
+
+An owner can propose a revision from at least two scrubbed disagreement lessons by distinct authenticated reviewers on separate case lineages. The promotion contract scores corrected S8 priority bands. S4 requires verified tactic and expansion provenance. S9 requires a stable reviewed proposition across generations. Both remain available for inspection and rollback while those conditions are unmet. Unchanged suggestions and prose-only edits do not supply a target.
+
+Before generation the server records the cohort identity, frozen-facts hash, target manifest, parent prompt, stage implementation and approved primary-model settings in the generation run. At least three independent reviewed cases are held out. Connected originating runs, historical worked decisions and their ancestors, related and versioned subjects, linked needs, upstream runs and normalized source document content stay in the same partition. The administrative manual-entry source groups independent entries by their actual subjects and needs. Previously used training cases cannot become new gold and previous holdouts cannot become training. Legacy rows without verified lineage remain historical.
+
+Both arms replay each frozen case three times without worked examples. Each binary agreement with a predeclared human target has weight one. The denominator is the number of scored target fields in the repeat. Each repeat must improve by at least ten percentage points, every individual target must avoid regression, and at least two independent cases must improve. The margin is a product decision threshold. These small samples do not provide an estimate of generalization to other workspaces.
+
+Activation revalidates the individual observations, the generation commitment, the frozen cohort, route, implementation and active pointer. The first completed comparable batch binds the candidate, including a failed quality gate. Interrupted executions can retry only while the candidate has no scored regression. The owner approves the eligible binding evaluation explicitly. Approval and rollback write pointer history and audit events in the same transaction.

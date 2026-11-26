@@ -72,7 +72,11 @@ export const evalRuns = pgTable("eval_runs", {
   module_id: text("module_id").notNull(),
   module_version: text("module_version").notNull(),
   run_id: text("run_id"),
-  passed: boolean("passed").notNull().default(true),
+  passed: boolean("passed"),
+  workspace_id: text("workspace_id"),
+  kind: text("kind"),
+  group_id: text("group_id"),
+  lineage: jsonb("lineage"),
   metrics: jsonb("metrics").notNull(),
   note: text("note"),
 });
@@ -93,6 +97,27 @@ export const promptBaselines = pgTable(
   (table) => ({
     stageVersion: unique().on(table.stage, table.prompt_version),
   }),
+);
+
+export const promptBaselineObservations = pgTable(
+  "prompt_baseline_observations",
+  {
+    id: text("id").primaryKey(),
+    stage: text("stage").notNull(),
+    workspace_id: text("workspace_id").notNull(),
+    comparison_key: text("comparison_key").notNull(),
+    previous_id: text("previous_id"),
+    group_id: text("group_id").notNull(),
+    route_hash: text("route_hash").notNull(),
+    prompt_hash: text("prompt_hash").notNull(),
+    case_hash: text("case_hash").notNull(),
+    prompt_version: text("prompt_version").notNull(),
+    module_id: text("module_id").notNull(),
+    module_version: text("module_version").notNull(),
+    metrics: jsonb("metrics").notNull(),
+    composite: numeric("composite").notNull(),
+    recorded_at: text("recorded_at").notNull(),
+  },
 );
 
 export const routingConfig = pgTable("routing_config", {
@@ -325,6 +350,8 @@ export const PROMPT_REVISION_DDL = [
 
 /** Immutable full replay/evaluation evidence and a workspace/stage active pointer. */
 export const PROMPT_EVALUATION_DDL = [
+ `CREATE TABLE IF NOT EXISTS prompt_revision_attempts (workspace_id text NOT NULL,revision_id text NOT NULL,token text,lease_until timestamptz NOT NULL,bound_id text,regression jsonb,PRIMARY KEY(workspace_id,revision_id))`,
+ `ALTER TABLE prompt_revision_attempts ADD COLUMN IF NOT EXISTS sealed_result jsonb`,
  `CREATE TABLE IF NOT EXISTS prompt_replay_snapshots (run_id text PRIMARY KEY, workspace_id text NOT NULL, stage text NOT NULL, snapshot jsonb NOT NULL)`,
  `CREATE TABLE IF NOT EXISTS prompt_revision_evaluations (id text PRIMARY KEY, workspace_id text NOT NULL, revision_id text NOT NULL, created_at text NOT NULL, evidence jsonb NOT NULL)`,
  `CREATE TABLE IF NOT EXISTS prompt_active_revisions (workspace_id text NOT NULL, stage text NOT NULL, revision_id text, generation integer NOT NULL DEFAULT 0, PRIMARY KEY(workspace_id,stage))`,

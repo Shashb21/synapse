@@ -34,13 +34,13 @@ function SweepButton({
         actor_function: "medical_affairs",
         ...(target.workspace_id ? { workspace_id: target.workspace_id } : {}),
       });
-    const json = res.json as { error?: string; champion?: string };
+    const json = res.json as { error?: string; champion?: string | null; reason?: string | null };
     setBusy(false);
     if (!res.ok) {
-      setError(json.error ?? "We couldn’t confirm the run cleanup. Reload the run list before repeating it.");
+      setError(json.error ?? "The prompt sweep could not finish.");
       return;
     }
-    setMessage(`Champion prompt: ${json.champion ?? "—"}`);
+    setMessage(json.champion ? `Highest diagnostic score: ${json.champion}` : json.reason ?? "No unique highest-scoring prompt.");
   }
 
   return (

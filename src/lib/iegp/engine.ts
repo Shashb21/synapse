@@ -401,25 +401,23 @@ export function needEvalMetrics(
   const wrong = pairs.filter((p) => p.kind === "wrong").length;
   const missed = pairs.filter((p) => p.kind === "missed").length;
   const must = gold.filter((g) => g.must_find);
-  const mustPaired = must.filter((g) =>
-    pairs.some(
-      (p) => p.gold_id === g.id && (p.kind === "exact" || p.kind === "partial"),
-    ),
-  ).length;
+  const mustIds = new Set(must.map(row => row.id));
+  const mustPaired = pairs.reduce((sum, pair) => {
+    if (!pair.gold_id || !mustIds.has(pair.gold_id)) return sum;
+    return sum + (pair.kind === "exact" ? 1 : pair.kind === "partial" ? 0.5 : 0);
+  }, 0);
   const precision =
-    extractedCount === 0 ? 0 : (exact + 0.5 * partial) / extractedCount;
+    gold.length && extractedCount > 0 ? (exact + 0.5 * partial) / extractedCount : null;
   // With no must-find gold there is nothing to recall: recall, F1 and the
   // composite are unscored (null), never a perfect 1 (KAN-62).
+  const wrongRate = precision === null ? null : wrong / extractedCount;
   if (must.length === 0) {
-    const wrongRate = extractedCount === 0 ? 0 : wrong / extractedCount;
     return { exact, partial, wrong, missed, precision, recall: null, f1: null, wrongRate, composite: null, scored: false as const };
   }
   const recall = mustPaired / must.length;
   const f1 =
-    precision + recall === 0 ? 0 : (2 * precision * recall) / (precision + recall);
-  const wrongRate = extractedCount === 0 ? 0 : wrong / extractedCount;
-  const composite =
-    0.4 * f1 + 0.3 * (1 - wrongRate) + 0.3 * recall;
+    precision === null || precision + recall === 0 ? 0 : (2 * precision * recall) / (precision + recall);
+  const composite = f1;
   return { exact, partial, wrong, missed, precision, recall, f1, wrongRate, composite, scored: true as const };
 }
 
@@ -442,7 +440,7 @@ export function coverageEval(
     exact,
     missed,
     wrong,
-    recall: gold.length === 0 ? 1 : exact / gold.length,
+    recall: gold.length === 0 ? null : exact / gold.length,
   };
 }
 

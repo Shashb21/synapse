@@ -54,7 +54,7 @@ class ModelRun {
   }
 
   /** Own a slot only during the outbound request and response-body read. */
-  async dispatch<T>(send: () => Promise<T>, reserve?: () => void): Promise<T> {
+  async dispatch<T>(send: () => Promise<T>, reserve?: () => void, beforeRequest?: () => Promise<void>): Promise<T> {
     this.checkAttempt();
     while (this.active >= this.concurrency) {
       await new Promise<void>(resolve => this.queue.add(resolve));
@@ -62,6 +62,10 @@ class ModelRun {
     }
     this.active++;
     try {
+      if (beforeRequest) {
+        await beforeRequest();
+        this.checkAttempt();
+      }
       // A narrower document allowance may reject work while it waits for a slot.
       reserve?.();
       this.sent++;

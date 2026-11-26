@@ -55,11 +55,13 @@ export type ProviderRequestBudget = {
   consume(): void;
 };
 
-/** Optional observers of one call. The reply is still returned as plain text. */
+/** Optional controls and observers of one call. The reply is still returned as plain text. */
 export type LlmCallHooks = {
   requestBudget?: ProviderRequestBudget;
-  run?: { signal: AbortSignal; deadline: number; checkAttempt(): void; dispatch<T>(send: () => Promise<T>, reserve?: () => void): Promise<T> };
+  run?: { signal: AbortSignal; deadline: number; checkAttempt(): void; dispatch<T>(send: () => Promise<T>, reserve?: () => void, beforeRequest?: () => Promise<void>): Promise<T> };
   onDispatch?: () => void;
+  /** Revalidate authorization before each HTTP dispatch, including retries. */
+  beforeRequest?: () => Promise<void>;
   onUsage?: (usage: LlmUsage) => void;
   /** Per-call HTTP bound; omitted preserves ordinary provider retry policy. */
   maxAttempts?: number;
@@ -154,8 +156,11 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
         signal: hooks?.run?.signal,
       }, target);
     };
-    if (!hooks?.run) reserve();
-    const { res, text } = await (hooks?.run ? hooks.run.dispatch(send, reserve) : send());
+    if (!hooks?.run) {
+      await hooks?.beforeRequest?.();
+      reserve();
+    }
+    const { res, text } = await (hooks?.run ? hooks.run.dispatch(send, reserve, hooks.beforeRequest) : send());
     if (res.ok) return JSON.parse(text) as Record<string, unknown>;
     // A typed, classified error instead of the raw body; the key never appears in it.
     const redirected = res.status >= 300 && res.status < 400;

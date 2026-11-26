@@ -1,8 +1,8 @@
 import { resolveSourceCitation, sourceContextSchema } from "@/lib/ingest/source-citation";
 import { PARSED_DOCUMENTS_DDL } from "@/modules/stages/s1-parse/schema";
 import { stageWrite } from "@/modules/kernel/stage-publication";
+import { quotedRepair, repairText, repairUserMessage, type RepairMessage } from "@/modules/kernel/repair-guidance";
 import { extractionSections, quotedBlock, reconcileSections, proposeSections, reviseSection, type ExtractionSection } from "../extraction-sections";
-import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
 import { desc } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
@@ -17,8 +17,9 @@ import {
 import { modelRows } from "@/modules/kernel/model-rows";
 import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import { NoRouteError } from "@/modules/llm/provider";
+import { promptVariantInstruction } from "@/modules/kernel/prompt-versions";
 import { augmentSystemPrompt } from "@/modules/kernel/prompt-variant";
-import { curatedS3Cases } from "@/modules/eval-gold";
+import { extractionEvalCases } from "@/modules/eval-gold";
 import { scoreMustMatch } from "@/modules/eval-gold/types";
 import type { EvalScore, ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
 import {
@@ -182,14 +183,14 @@ type RawTactic = {
 const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 
 /** What is wrong with a proposed row, in words the model can act on. Empty when valid. */
-function tacticProblems(raw: RawTactic, passages: string[]): string[] {
-  const problems: string[] = [];
+function tacticProblems(raw: RawTactic, passages: string[]): RepairMessage[] {
+  const problems: RepairMessage[] = [];
   if (!text(raw.name)) problems.push("name is missing");
   if (!TACTIC_TYPES.includes(text(raw.type) as TacticType)) {
-    problems.push(`type "${text(raw.type)}" is not one of ${TACTIC_TYPES.join(", ")}`);
+    problems.push(quotedRepair(text(raw.type), value => `type "${value}" is not one of ${TACTIC_TYPES.join(", ")}`));
   }
   if (!TACTIC_STATUSES.includes(text(raw.status) as TacticStatus)) {
-    problems.push(`status "${text(raw.status)}" is not one of ${TACTIC_STATUSES.join(", ")}`);
+    problems.push(quotedRepair(text(raw.status), value => `status "${value}" is not one of ${TACTIC_STATUSES.join(", ")}`));
   }
   if (!text(raw.evidence_question)) problems.push("evidence_question is missing");
   const quote = text(raw.source_quote);
@@ -230,7 +231,7 @@ const tacticFields = (candidate: TacticCandidate) => ({
 type ProposerRow = {
   id: string;
   previous?: RawTactic | ReturnType<typeof tacticFields>;
-  problem?: string;
+  problem?: RepairMessage[];
   objection?: string;
 };
 
@@ -255,8 +256,9 @@ async function answerRows(
     ask: async (missing, attempt) => {
       const payload = (await ctx.complete({
         role: args.role ?? "reviser",
+        dialogueFields: ["rows"],
         system: augmentSystemPrompt(TACTIC_REVISER_SYSTEM),
-        user: JSON.stringify({
+        ...repairUserMessage(describe => ({
           worked_examples: args.hints || undefined,
           source: args.section.document.source_id,
           library: args.library,
@@ -265,12 +267,17 @@ async function answerRows(
             attempt > 1
               ? "An earlier answer left these rows unanswered or invalid. Answer each, fixing the problem named."
               : undefined,
-          rows: missing.map((id) => ({ ...rowById.get(id)!, problem: problems.get(id) ?? rowById.get(id)!.problem })),
+          rows: missing.map(id => {
+            const row = rowById.get(id)!;
+            const problem = problems.get(id);
+            return { ...row, problem: (row.problem ?? (problem ? [problem] : undefined))?.map(describe).join("; ") };
+          }),
           document: args.section.body,
-        }),
+        })),
         purpose: `${args.purpose}:${args.section.document.id}`,
       })) as { tactics?: RawTactic[] } | null;
       const answers = new Map<string, ProposerAnswer>();
+      for (const id of missing) rowById.get(id)!.problem = undefined;
       for (const [id, raw] of modelRows({ payload, field: "tactics", idField: "id", ids: missing, problems, report: details => ctx.run.note("answer:invalid", details) })) {
         const row = rowById.get(id)!;
         if (raw.withdraw === true) {
@@ -282,7 +289,8 @@ async function answerRows(
         const issues = tacticProblems(raw, passages);
         if (issues.length > 0) {
           row.previous = raw;
-          problems.set(id, issues.join("; "));
+          row.problem = issues;
+          problems.set(id, issues.map(repairText).join("; "));
           continue;
         }
         answers.set(id, { kind: "tactic", tactic: toCandidate(args.section, id, { ...raw, block_id: raw.block_id ?? row.previous?.block_id }) });
@@ -328,7 +336,7 @@ async function proposeSection(
     const id = `${document.id}-LT${String(index + 1).padStart(3, "0")}${section.number > 1 ? `-W${section.number}` : ""}`;
     const issues = tacticProblems(raw, passages);
     if (issues.length > 0) {
-      invalid.push({ id, previous: raw, problem: issues.join("; ") });
+      invalid.push({ id, previous: raw, problem: issues });
       proposed.push({ id });
     } else {
       proposed.push({ id, candidate: toCandidate(section, id, raw) });
@@ -405,6 +413,7 @@ async function llmReviews(
 ): Promise<Map<string, Review>> {
   const payload = (await ctx.complete({
     role: "critic",
+    dialogueFields: ["candidates"],
     system: augmentSystemPrompt(TACTIC_CRITIC_SYSTEM),
     user: JSON.stringify({
       worked_examples: args.hints || undefined,
@@ -450,6 +459,7 @@ async function llmDecisions(
   const critiqueOf = (id: string) => args.critiques.find((critique) => critique.subject === id);
   const payload = (await ctx.complete({
     role: "internal_judge",
+    dialogueFields: ["batch", "decide"],
     system: augmentSystemPrompt(TACTIC_JUDGE_SYSTEM),
     user: JSON.stringify({
       worked_examples: args.hints || undefined,
@@ -703,7 +713,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
             note: critique?.note ?? "not reviewed",
           };
         }),
-    }, { kinds: ["tactic_suggestion"], text: documents.flatMap((document) => document.blocks.map((block) => block.text)).join(" ").slice(0, 20_000) });
+    }, { kinds: ["tactic_suggestion"], subject_ids: documents.map(item => item.id), text: documents.flatMap((document) => document.blocks.map((block) => block.text)).join(" ").slice(0, 20_000) });
 
     if (ctx.execution_policy === "single_pass") return {
       output: { mode: outcome.mode, proposed: outcome.proposed.length, accepted: [], rejected: [], committed_tactic_ids: [], suggestion_ids: [] },
@@ -860,19 +870,8 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
     };
   },
   evals: {
-    async cases(facts) {
-      if (facts) {
-        const documents = facts.documents as ParsedDocumentRecord[];
-        return documents.slice(0, 3).map(document => ({ name: document.source_id, input: { document_ids: [document.id], dry_run: true }, gold: sourcesForStage("S3").find(source => source.source_id === document.source_id) ? goldMetaForSource(sourcesForStage("S3").find(source => source.source_id === document.source_id)!) : undefined }));
-      }
-      const curated = await curatedS3Cases();
-      if (curated.length > 0) return curated;
-      const documents = await listParsedDocuments();
-      return documents.slice(0, 3).map((document) => ({
-        name: document.source_id,
-        input: { document_ids: [document.id], dry_run: true },
-      }));
-    },
+    variantInstruction: promptVariantInstruction,
+    ...extractionEvalCases("S3"),
     score({ case: testCase, output }) {
       const accepted = output.accepted;
       const real = accepted.filter((candidate) => candidate.status !== "proposed").length;
@@ -884,13 +883,13 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
       );
       if (accepted.length === 0) {
         return [
-          { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match ? 0.3 : undefined, detail: curated.detail },
+          { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match?.length ? 0.3 : undefined, detail: curated.detail },
           { name: "accepted_with_quote", value: 0, unit: "ratio", detail: "no new candidates" },
           { name: "real_inventory_share", value: 0, unit: "ratio", detail: "no new candidates" },
         ];
       }
       return [
-        { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match ? 0.3 : undefined, detail: curated.detail },
+        { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match?.length ? 0.3 : undefined, detail: curated.detail },
         {
           name: "accepted_with_quote",
           value:

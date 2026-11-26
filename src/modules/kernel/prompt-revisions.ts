@@ -11,191 +11,383 @@ import { recordAudit, recordAuditVia } from "./audit";
 import { assertAiEnabled } from "./ai-switch";
 import { sectionOfStage } from "./ai-sections";
 import { isTestStub } from "./llm";
-import { resolveRoute, completionFor, routeConfig, type RouteConfig } from "./routing";
+import { completionFor, routeConfigs, type RouteConfig } from "./routing";
 import { RunRecorder, openRun } from "./observability";
 import { recordLearningRun } from "./learning-run";
-import { activePromptVersion } from "./prompt-variant";
 import { DEFAULT_SCHEMA, DEFAULT_WORKSPACE_ID, runInWorkspace, scopedWorkspaceId } from "@/modules/workspaces/context";
+import { currentSchemaName } from "@/lib/iegp/db";
+import { assertDiagnosticWorkspace, lockDiagnosticWorkspace } from "./evals";
 import { getWorkspace } from "@/modules/workspaces/store";
 
 import { evidenceHash, frozenReplayCase, type FrozenReplayCase } from "./decision-replay";
-import { moduleById } from "./registry";
-
-/** Link S9 proposal IDs to their proven pre-generation gap slot, never inferred text. */
-function decisionSubjects(example: DecisionExample): string[] {
-  if (example.kind !== "s9_proposal") return [example.subject_id];
-  const slots = frozenReplayCase(example)?.facts.proposal_slots as Record<string, unknown> | undefined;
-  const gaps = Object.entries(slots ?? {}).filter(([, values]) => Array.isArray(values) && values.includes(example.ai_input.slot_id)).map(([id]) => id);
-  return gaps.length === 1 ? [example.subject_id, gaps[0]] : [example.subject_id];
-}
-
-/** Reserve the full execution scope of historical replay, including library provenance. */
-function replayLineage(examples: DecisionExample[], heldout: Set<string>) {
-  const subjects = new Set<string>(), runs = new Set<string>();
-  const exclusions: Record<string, string> = {};
-  for (const example of examples.filter(row => heldout.has(row.id))) {
-    const snapshot = frozenReplayCase(example);
-    if (!snapshot || !["S4", "S8", "S9"].includes(snapshot.stage)) continue;
-    runs.add(snapshot.run_id);
-    const state = snapshot.facts.state as { gaps: { id: string }[]; tactics?: { id: string }[] };
-    const input = snapshot.input as { gap_ids?: string[] };
-    // Broad runs include all frozen gap subjects, even if just one human target
-    // was captured. Explicit gap lists give a safe (possibly conservative) scope.
-    for (const id of input.gap_ids?.length ? input.gap_ids : state.gaps.map(gap => gap.id)) subjects.add(id);
-    if (snapshot.stage === "S9") {
-      const provenance = snapshot.facts.proposal_lineage as { subject_id: string; gap_id: string; tactic_id: string | null; run_id: string | null; origin: string }[] | undefined;
-      if (!Array.isArray(provenance)) {
-        exclusions[example.id] = "Frozen S9 replay library proposal lineage is unavailable.";
-        continue;
-      }
-      const library = new Set((state.tactics ?? []).map(tactic => tactic.id));
-      for (const row of provenance.filter(row => row.tactic_id && library.has(row.tactic_id))) {
-        subjects.add(row.subject_id); subjects.add(row.gap_id);
-        if (row.run_id) runs.add(row.run_id);
-        else if (row.origin !== "human") exclusions[example.id] = "Frozen S9 replay library has an unknown originating run.";
-      }
-    }
-  }
-  return { subjects, runs, exclusions };
-}
-
-/** Reserve only originating held-out facts, never today's workspace or arbitrary snapshots. */
-async function reserveGold(examples: DecisionExample[], heldout: Set<string>): Promise<GoldReservation> {
-  const result: GoldReservation = { version: 1, cases: [], excluded_ids: [], subject_ids: [], run_ids: [], reason: null };
-  const sources = examples.filter(example => heldout.has(example.id)).flatMap(example => {
-    const snapshot = frozenReplayCase(example);
-    return snapshot ? [snapshot] : [];
-  });
-  const source = sources.find(snapshot => {
-    const stageModule = moduleById(snapshot.module_id);
-    return stageModule?.manifest.version === snapshot.module_version && !!stageModule.evals;
-  });
-  if (!source) return { ...result, reason: "No held-out originating snapshot supports a gold reservation." };
-  const stageModule = moduleById(source.module_id)!;
-  const heldSubjects = examples.filter(example => heldout.has(example.id)).flatMap(decisionSubjects);
-  if (!stageModule.evals!.reserveGold) return { ...result, reason: "Stage has no complete gold subject-lineage reservation contract." };
-  const restricted = await stageModule.evals!.reserveGold(structuredClone(source.facts), heldSubjects);
-  const facts = restricted.facts;
-  const cases = restricted.cases;
-  result.reason = restricted.reason ?? null;
-  result.subject_ids = [...new Set([...restricted.subject_ids, ...(restricted.lineage_subject_ids ?? [])])];
-  const runs = new Set([source.run_id, ...(restricted.lineage_run_ids ?? [])]);
-  result.excluded_ids = examples.filter(example => heldout.has(example.id) || decisionSubjects(example).some(id => result.subject_ids.includes(id)) || !!example.run_id && runs.has(example.run_id)).map(example => example.id);
-  result.run_ids = [...new Set([...runs, ...examples.filter(example => result.excluded_ids.includes(example.id)).flatMap(example => example.run_id ? [example.run_id] : [])])];
-  result.cases = cases.map(testCase => ({ testCase: structuredClone(testCase), snapshot: { ...structuredClone(source), input: stageModule.inputSchema.parse(testCase.input), facts: structuredClone(facts), examples: [] } }));
-  if (!result.cases.length && !result.reason) result.reason = "No eligible held-out subjects remain for the stage gold harness.";
-  return result;
-}
+import { approvedEvaluationRoute } from "./approved-evaluation-route";
+import { activeModule } from "./registry";
+import {
+  lineageResolver,
+  identityKeys,
+  lineageGroups,
+  reservedTarget,
+  routeIdentity,
+  REVISION_PROTOCOL,
+  TARGET_STAGES,
+  targetMetrics,
+  type ReservedTarget,
+} from "./revision-policy";
+import { assertEvaluationRoute, withEvaluationIsolation } from "./evaluation-isolation";
+import type { ResolvedRoute } from "./contracts";
 
 export const REVISION_STAGES = ["S2", "S3", "S4", "S6", "S8", "S9"] as const;
-/** One latest lineage group in every five is reserved for testing, with at least one held out. */
-const HOLDOUT_GROUP_FRACTION = 0.2;
 export type PromptRevisionState = "candidate" | "evaluated" | "active" | "superseded";
 export type PromptRevision = {
-  id: string; workspace_id: string; stage: StageId; parent_revision: string; instruction_text: string;
-  creator: Actor; created_at: string; state: PromptRevisionState; cohort_id: string;
-  training_ids: string[]; heldout_ids: string[]; excluded_ids: string[];
-  generation_run_id: string; model: string | null; provider_id: string | null;
+  id: string;
+  workspace_id: string;
+  stage: StageId;
+  parent_revision: string;
+  instruction_text: string;
+  creator: Actor;
+  created_at: string;
+  state: PromptRevisionState;
+  cohort_id: string;
+  training_ids: string[];
+  heldout_ids: string[];
+  excluded_ids: string[];
+  generation_run_id: string;
+  model: string | null;
+  provider_id: string | null;
 };
 /** Exact cases and context reserved before generation; null marks legacy cohorts. */
 export type GoldReservation = {
-  version: 1; cases: { testCase: EvalCase<unknown>; snapshot: FrozenReplayCase }[];
-  excluded_ids: string[]; subject_ids: string[]; run_ids: string[]; reason: string | null;
+  version: 1 | 2;
+  policy?: typeof REVISION_PROTOCOL;
+  targets?: ReservedTarget[];
+  route_hash?: string;
+  parent_revision?: string;
+  pointer_generation?: number;
+  cases: { testCase: EvalCase<unknown>; snapshot: FrozenReplayCase }[];
+  excluded_ids: string[];
+  subject_ids: string[];
+  run_ids: string[];
+  reason: string | null;
 };
 export type RevisionCohort = {
-  id: string; workspace_id: string; stage: StageId; created_at: string;
-  training_ids: string[]; heldout_ids: string[]; excluded_ids: string[];
-  examples: DecisionExample[]; replay_exclusions: Record<string, string>;
+  id: string;
+  workspace_id: string;
+  stage: StageId;
+  created_at: string;
+  training_ids: string[];
+  heldout_ids: string[];
+  excluded_ids: string[];
+  examples: DecisionExample[];
+  replay_exclusions: Record<string, string>;
   gold_reservation: GoldReservation | null;
 };
 type CohortArgs = { stage: StageId; workspace_id: string; exclude_ids: string[] };
 
-/** Group connected originating runs and subjects, then persist the exact evidence before generation. */
-export async function freezeRevisionCohort(args: CohortArgs): Promise<RevisionCohort> {
-  await ensurePlatformSchema();
-  const examples = (await listDecisionExamples({ stage: args.stage, workspace_id: args.workspace_id, limit: null }))
-    .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
-  // A connected component keeps indirect links together: A shares run with B; B shares subject with C.
-  const groups: DecisionExample[][] = [];
-  for (const example of examples) {
-    const matches = groups.filter(group => group.some(other => (example.run_id && example.run_id === other.run_id) || (example.kind === other.kind && decisionSubjects(example).some(id => decisionSubjects(other).includes(id)))));
-    const joined = [...matches.flat(), example];
-    for (const match of matches) groups.splice(groups.indexOf(match), 1);
-    groups.push(joined);
+type ApprovedContext = {
+  route: ResolvedRoute;
+  module_id: string;
+  module_version: string;
+  parent: string;
+  generation: number;
+};
+
+type PreviousRoles = { training: Set<string>; heldout: Set<string> };
+
+async function previousRoles(workspace: string, stage: StageId): Promise<PreviousRoles> {
+  const rows = await sharedDb()
+    .select({
+      examples: tables.promptRevisionCohorts.examples,
+      training: tables.promptRevisionCohorts.training_ids,
+      heldout: tables.promptRevisionCohorts.excluded_ids,
+    })
+    .from(tables.promptRevisionCohorts)
+    .where(and(eq(tables.promptRevisionCohorts.workspace_id, workspace), eq(tables.promptRevisionCohorts.stage, stage)));
+  const roles: PreviousRoles = { training: new Set(), heldout: new Set() };
+  for (const row of rows) {
+    const resolve=lineageResolver(row.examples as DecisionExample[]);
+    for (const role of ["training", "heldout"] as const) {
+      const ids = new Set(row[role] as string[]);
+      for (const example of row.examples as DecisionExample[])
+        if (ids.has(example.id)) {
+          for (const key of resolve(example) ?? identityKeys(example)) roles[role].add(key);
+        }
+    }
   }
-  groups.sort((a, b) => a[a.length - 1].created_at.localeCompare(b[b.length - 1].created_at) || a[a.length - 1].id.localeCompare(b[b.length - 1].id));
-  const explicit = new Set(args.exclude_ids);
-  const heldout = new Set(groups.slice(-Math.max(1, Math.ceil(groups.length * HOLDOUT_GROUP_FRACTION))).flat().map(example => example.id));
-  // An explicit exclusion expands to the entire originating group; callers may only enlarge the holdout.
-  for (const group of groups) if (group.some(example => explicit.has(example.id))) for (const example of group) explicit.add(example.id);
-  const gold_reservation = await reserveGold(examples, heldout);
-  for (const id of gold_reservation.excluded_ids) explicit.add(id);
-  const replay = replayLineage(examples, heldout);
-  for (const example of examples) if (decisionSubjects(example).some(id => replay.subjects.has(id)) || !!example.run_id && replay.runs.has(example.run_id)) explicit.add(example.id);
-  gold_reservation.subject_ids.push(...replay.subjects);
-  gold_reservation.run_ids.push(...replay.runs);
-  // Gold reservations expand through the same complete connected lineage as replay.
-  for (const group of groups) if (group.some(example => explicit.has(example.id))) for (const example of group) explicit.add(example.id);
-  gold_reservation.excluded_ids = [...explicit].sort();
-  const goldLineage = examples.filter(example => explicit.has(example.id));
-  gold_reservation.subject_ids = [...new Set([...gold_reservation.subject_ids, ...goldLineage.flatMap(decisionSubjects)])].sort();
-  gold_reservation.run_ids = [...new Set([...gold_reservation.run_ids, ...goldLineage.flatMap(example => example.run_id ? [example.run_id] : [])])].sort();
-  const replay_exclusions: Record<string, string> = { ...replay.exclusions };
-  for (const example of examples) if (!example.replay_input || example.replay_exclusion_reason) replay_exclusions[example.id] = example.replay_exclusion_reason || "No frozen originating stage input is available.";
-  const cohort: RevisionCohort = {
-    id: newId("prc"), workspace_id: args.workspace_id, stage: args.stage, created_at: nowIso(),
-    training_ids: examples.filter(example => !heldout.has(example.id) && !explicit.has(example.id)).map(example => example.id),
-    heldout_ids: examples.filter(example => heldout.has(example.id)).map(example => example.id),
-    excluded_ids: [...new Set([...heldout, ...explicit])].sort(), examples, replay_exclusions, gold_reservation,
+  return roles;
+}
+
+export function selectRevisionCohort(
+  args: CohortArgs,
+  rows: DecisionExample[],
+  approved: ApprovedContext,
+  previous?: PreviousRoles,
+): RevisionCohort {
+  const examples = rows.filter((row) => row.workspace_id === args.workspace_id && row.stage === args.stage);
+  const resolve=lineageResolver(examples);
+  const groups = lineageGroups(examples);
+  const eligible = (example: DecisionExample) => {
+    const snapshot = frozenReplayCase(example);
+    return (
+      snapshot &&
+      resolve(example) &&
+      snapshot.module_id === approved.module_id &&
+      snapshot.module_version === approved.module_version &&
+      snapshot.prompt_version === approved.parent &&
+      snapshot.route.stage === approved.route.stage &&
+      routeIdentity(snapshot.route) === routeIdentity(approved.route) &&
+      example.prompt_version === snapshot.prompt_version &&
+      example.model === snapshot.route.model &&
+      example.provider_id === snapshot.route.provider_id &&
+      targetMetrics(example).length > 0
+    );
   };
-  await sharedDb().insert(tables.promptRevisionCohorts).values(cohort);
-  return cohort;
+  const explicit = new Set(args.exclude_ids);
+  const previouslyUsed = (group: DecisionExample[], role: keyof PreviousRoles) =>
+    previous &&
+    group.some((row) => [...(resolve(row) ?? identityKeys(row))].some((key) => previous[role].has(key)));
+  const units = groups
+    .filter(
+      (group) =>
+        !previouslyUsed(group, "training") &&
+        !previouslyUsed(group, "heldout") &&
+        !group.some((row) => explicit.has(row.id)),
+    )
+    .map((group) => group.find(eligible))
+    .filter((example): example is DecisionExample => !!example)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at) || a.id.localeCompare(b.id));
+  const held = units.slice(0, Math.max(REVISION_PROTOCOL.minimum_cases, Math.ceil(units.length / 5)));
+  if (held.length < REVISION_PROTOCOL.minimum_cases)
+    throw new TrustedApplicationError(
+      "Collect at least three independent, attributed human corrections on separate originating runs with the current prompt, stage implementation and primary model settings.",
+    );
+  const heldIds = new Set(held.map((row) => row.id));
+  const excluded = new Set(explicit);
+  for (const group of groups)
+    if (previouslyUsed(group, "heldout") || group.some((row) => heldIds.has(row.id) || explicit.has(row.id))) {
+      for (const row of group) excluded.add(row.id);
+    }
+  // Preserve all eligible alternatives until the lesson scrubber and reviewer deduplication run.
+  const train = groups
+    .filter((group) => group.every((row) => !excluded.has(row.id)))
+    .flatMap((group) => group.filter((row) => eligible(row) && row.lesson_status === "ok" && row.lesson));
+  const keys = new Set(held.flatMap((row) => [...resolve(row)!]));
+  const gold: GoldReservation = {
+    version: 2,
+    policy: REVISION_PROTOCOL,
+    route_hash: routeIdentity(approved.route),
+    parent_revision: approved.parent,
+    pointer_generation: approved.generation,
+    targets: [],
+    cases: [],
+    excluded_ids: [...excluded].sort(),
+    subject_ids: [...keys]
+      .filter((key) => key.startsWith("id:"))
+      .map((key) => key.slice(3))
+      .sort(),
+    run_ids: [...keys]
+      .filter((key) => key.startsWith("run:"))
+      .map((key) => key.slice(4))
+      .sort(),
+    reason: null,
+  };
+  for (const example of held) {
+    const snapshot = { ...structuredClone(frozenReplayCase(example)!), examples: [] };
+    gold.targets!.push(reservedTarget(example, snapshot));
+    gold.cases.push({ testCase: { name: example.id, input: snapshot.input }, snapshot });
+  }
+  return {
+    id: newId("prc"),
+    workspace_id: args.workspace_id,
+    stage: args.stage,
+    created_at: nowIso(),
+    training_ids: train.map((row) => row.id),
+    heldout_ids: [...heldIds],
+    excluded_ids: gold.excluded_ids,
+    examples,
+    replay_exclusions: {},
+    gold_reservation: gold,
+  };
+}
+
+/** Build the exact reservation committed by hash to the durable pre-generation run. */
+async function freezeRevisionCohort(args: CohortArgs, context: ApprovedContext): Promise<RevisionCohort> {
+  assertEvaluationRoute(context.route);
+  const examples = await listDecisionExamples({ stage: args.stage, workspace_id: args.workspace_id, limit: null });
+  return selectRevisionCohort(args, examples, context, await previousRoles(args.workspace_id, args.stage));
 }
 
 /** Retrieve persisted same-workspace frozen evidence for candidate evaluation. */
 export async function getRevisionCohort(id: string, workspace_id: string): Promise<RevisionCohort | null> {
   await ensurePlatformSchema();
-  const [row] = await sharedDb().select().from(tables.promptRevisionCohorts).where(and(eq(tables.promptRevisionCohorts.id, id), eq(tables.promptRevisionCohorts.workspace_id, workspace_id)));
-  return row ? row as RevisionCohort : null;
+  const [row] = await sharedDb()
+    .select()
+    .from(tables.promptRevisionCohorts)
+    .where(and(eq(tables.promptRevisionCohorts.id, id), eq(tables.promptRevisionCohorts.workspace_id, workspace_id)));
+  return row ? (row as RevisionCohort) : null;
+}
+
+/** Select scrubbed lessons from different lineages, reviewers and lesson texts. */
+export function selectTrainingLessons(
+  cohort: Pick<RevisionCohort, "examples" | "training_ids">,
+  entities: string[],
+): { id: string; lesson: string }[] {
+  const training = new Set(cohort.training_ids);
+  const candidates = lineageGroups(cohort.examples).flatMap((group, lineage) =>
+    group.flatMap((example) => {
+      const reviewer = example.actor_principal?.trim().toLowerCase();
+      if (!training.has(example.id) || !reviewer || !example.lesson) return [];
+      const lesson = scrubLesson(
+        example.lesson,
+        [
+          JSON.stringify(example.ai_input),
+          JSON.stringify(example.ai_output),
+          JSON.stringify(example.final ?? {}),
+          example.rationale ?? "",
+        ],
+        entities,
+      );
+      const text = lesson?.trim().toLowerCase();
+      return lesson && text ? [{ id: example.id, lineage, reviewer, lesson, text }] : [];
+    }),
+  );
+
+  type Candidate = (typeof candidates)[number];
+  const compatible = (a: Candidate, b: Candidate) =>
+    a.lineage !== b.lineage && a.reviewer !== b.reviewer && a.text !== b.text;
+  const fill = (seed: Candidate[] = []) => {
+    const selected = [...seed];
+    for (const candidate of candidates) {
+      if (selected.every((other) => compatible(candidate, other))) selected.push(candidate);
+    }
+    return selected;
+  };
+
+  const firstPass = fill();
+  if (firstPass.length >= REVISION_PROTOCOL.minimum_reviewers) return firstPass;
+
+  // The protocol requires two reviewers. Check compatible pairs before rejecting,
+  // including pairs where both choices differ from the first pass.
+  for (const [index, candidate] of candidates.entries()) {
+    for (let next = index + 1; next < candidates.length; next++) {
+      const alternative = candidates[next]!;
+      if (compatible(candidate, alternative)) return fill([candidate, alternative]);
+    }
+  }
+  throw new TrustedApplicationError(
+    "Collect distinct validated disagreement lessons from at least two identified reviewers on independent training cases outside the holdout.",
+  );
 }
 
 /** Generate another version; no generation outcome changes a live prompt pointer. */
 export async function proposePromptRevision(args: CohortArgs & { actor: Actor }): Promise<PromptRevision> {
-  if (!REVISION_STAGES.includes(args.stage as typeof REVISION_STAGES[number])) throw new TrustedApplicationError("This stage has no captured AI decision lessons.");
+  if (!TARGET_STAGES.some((stage) => stage === args.stage))
+    throw new TrustedApplicationError(
+      "This stage has no independent human target contract. Collect structured, attributable corrections before generating a candidate.",
+    );
   const workspace = await getWorkspace(args.workspace_id);
-  if (!workspace && args.workspace_id !== DEFAULT_WORKSPACE_ID) throw new TrustedApplicationError("Learning workspace is unavailable.");
+  if (!workspace && args.workspace_id !== DEFAULT_WORKSPACE_ID)
+    throw new TrustedApplicationError("Learning workspace is unavailable.");
   return runInWorkspace({ workspace_id: args.workspace_id, schema: workspace?.schema_name ?? DEFAULT_SCHEMA }, async () => {
+    await withEvaluationIsolation(() => assertDiagnosticWorkspace(args.workspace_id));
     await assertAiEnabled("Prompt revision generation", sectionOfStage(args.stage) ?? undefined);
-    const cohort = await freezeRevisionCohort(args);
+    const pointer = await activeRevisionPointer(args.workspace_id, args.stage);
+    const parent = pointer.revision_id ?? "v1.0-baseline";
+    const active = pointer.revision_id ? await getPromptRevision(pointer.revision_id, args.workspace_id) : null;
+    const route = await approvedEvaluationRoute(args.stage);
+    assertEvaluationRoute(route);
+    const stageModule = await activeModule(args.stage);
+    const history = await sharedDb()
+      .select({ id: tables.promptRevisions.id, stage: tables.promptRevisions.stage })
+      .from(tables.promptRevisions)
+      .where(eq(tables.promptRevisions.workspace_id, args.workspace_id));
+    const previousCandidates = history
+      .filter((row) => row.stage === args.stage)
+      .map((row) => row.id)
+      .sort();
+    const cohort = await freezeRevisionCohort(args, {
+      route,
+      module_id: stageModule.manifest.id,
+      module_version: stageModule.manifest.version,
+      parent,
+      generation: pointer.generation,
+    });
     const entities = await workspaceEntityNames();
     if (!entities.length) throw new TrustedApplicationError("Learning entity context is empty.");
-    const training = new Set(cohort.training_ids);
-    const lessons = cohort.examples.flatMap(example => {
-      if (!training.has(example.id) || example.outcome === "accepted" || example.lesson_status !== "ok" || !example.lesson) return [];
-      const lesson = scrubLesson(example.lesson, [JSON.stringify(example.ai_input), JSON.stringify(example.ai_output), JSON.stringify(example.final ?? {}), example.rationale ?? ""], entities);
-      return lesson ? [{ id: example.id, lesson }] : [];
+    const lessons = selectTrainingLessons(cohort, entities);
+    cohort.training_ids = lessons.map((item) => item.id);
+    if (isTestStub()) throw new TrustedApplicationError("Use a connected primary model to generate a production candidate.");
+    const recorder = new RunRecorder({
+      workspace_id: args.workspace_id,
+      stage: args.stage,
+      module_id: "learning.prompt-revision",
+      module_version: "1.0.0",
+      actor: args.actor,
+      input: {
+        cohort_id: cohort.id,
+        parent_revision: parent,
+        lesson_count: lessons.length,
+        route_hash: routeIdentity(route),
+        module_id: stageModule.manifest.id,
+        module_version: stageModule.manifest.version,
+        reservation_hash: evidenceHash(cohort.gold_reservation),
+        targets: cohort.gold_reservation!.targets,
+      },
     });
-    if (!lessons.length) throw new TrustedApplicationError("No validated disagreement lessons remain outside the held-out cohort.");
-    const pointer = await activeRevisionPointer(args.workspace_id, args.stage);
-    const parent = pointer.revision_id ?? activePromptVersion();
-    const stub = isTestStub();
-    const route = stub ? null : await resolveRoute(args.stage);
-    const recorder = new RunRecorder({ workspace_id: args.workspace_id, stage: args.stage, module_id: "learning.prompt-revision", module_version: "1.0.0", actor: args.actor, input: { cohort_id: cohort.id, parent_revision: parent, lesson_count: lessons.length } });
+    await assertDiagnosticWorkspace(args.workspace_id);
     await openRun(recorder);
     return recordLearningRun(recorder, route, async assertLive => {
       // No raw answers, customer metadata, example IDs, or held-out lessons enter the completion.
-      const response = stub ? { instruction_text: "[Test stub] Keep distinct decision questions separate and require supporting evidence." } : await completionFor(route!, recorder, { beforeSend: assertLive })({
-        system: "Draft concise additional instructions for an evidence-planning stage using only general reviewer lessons. Preserve human decisions and require source-grounded evidence. Return JSON only: {\"instruction_text\":\"\"}.",
-        user: JSON.stringify({ stage: args.stage, lessons: lessons.map(item => item.lesson) }), purpose: "prompt-revision",
+      const response = await completionFor(
+        route,
+        recorder,
+        { beforeSend: assertLive, beforeRequest: () => assertDiagnosticWorkspace(args.workspace_id) },
+      )({
+        system:
+          'Draft concise additional instructions for an evidence-planning stage using only general reviewer lessons. Preserve human decisions and require source-grounded evidence. Return JSON only: {"instruction_text":""}.',
+        user: JSON.stringify({ stage: args.stage, lessons: lessons.map((item) => item.lesson) }),
+        purpose: "prompt-revision",
       });
-      const parsed = z.object({ instruction_text: z.string().trim().min(1).max(8000) }).strict().parse(response);
+      const parsed = z
+        .object({ instruction_text: z.string().trim().min(1).max(8000) })
+        .strict()
+        .parse(response);
+      if (parsed.instruction_text.trim() === (active?.instruction_text ?? "").trim())
+        throw new TrustedApplicationError("The candidate repeats the approved instruction. Review the training lessons.");
       const revision: PromptRevision = {
-        id: newId("prv"), workspace_id: args.workspace_id, stage: args.stage, parent_revision: parent,
-        instruction_text: parsed.instruction_text, creator: args.actor, created_at: nowIso(), state: "candidate",
-        cohort_id: cohort.id, training_ids: lessons.map(item => item.id), heldout_ids: cohort.heldout_ids, excluded_ids: cohort.excluded_ids,
-        generation_run_id: recorder.id, model: route?.model ?? null, provider_id: route?.provider_id ?? null,
+        id: newId("prv"),
+        workspace_id: args.workspace_id,
+        stage: args.stage,
+        parent_revision: parent,
+        instruction_text: parsed.instruction_text,
+        creator: args.actor,
+        created_at: nowIso(),
+        state: "candidate",
+        cohort_id: cohort.id,
+        training_ids: lessons.map((item) => item.id),
+        heldout_ids: cohort.heldout_ids,
+        excluded_ids: cohort.excluded_ids,
+        generation_run_id: recorder.id,
+        model: route?.model ?? null,
+        provider_id: route?.provider_id ?? null,
       };
       const writer = db();
+      await lockDiagnosticWorkspace(args.workspace_id, workspace?.schema_name ?? DEFAULT_SCHEMA, writer);
+      await writer.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${"prompt-cohort:" + args.workspace_id + ":" + args.stage}))`,
+      );
+      const current = await writer.execute(sql`select id from public.prompt_revisions
+        where workspace_id = ${args.workspace_id} and stage = ${args.stage}`);
+      if (evidenceHash(current.map((row) => row.id).sort()) !== evidenceHash(previousCandidates))
+        throw new TrustedApplicationError(
+          "Another candidate reserved evidence during generation. Generate again using fresh cases.",
+        );
+      await writer.execute(sql`insert into public.prompt_revision_cohorts
+        (id, workspace_id, stage, created_at, training_ids, heldout_ids, excluded_ids,
+         examples, replay_exclusions, gold_reservation)
+        values (${cohort.id}, ${cohort.workspace_id}, ${cohort.stage}, ${cohort.created_at},
+         ${JSON.stringify(cohort.training_ids)}::jsonb, ${JSON.stringify(cohort.heldout_ids)}::jsonb,
+         ${JSON.stringify(cohort.excluded_ids)}::jsonb, ${JSON.stringify(cohort.examples)}::jsonb,
+         ${JSON.stringify(cohort.replay_exclusions)}::jsonb, ${JSON.stringify(cohort.gold_reservation)}::jsonb)`);
       await writer.execute(sql`insert into public.prompt_revisions
         (id, workspace_id, stage, parent_revision, instruction_text, creator, created_at, state,
          cohort_id, training_ids, heldout_ids, excluded_ids, generation_run_id, model, provider_id)
@@ -203,9 +395,21 @@ export async function proposePromptRevision(args: CohortArgs & { actor: Actor })
          ${JSON.stringify(args.actor)}::jsonb, ${revision.created_at}, ${revision.state}, ${cohort.id},
          ${JSON.stringify(revision.training_ids)}::jsonb, ${JSON.stringify(cohort.heldout_ids)}::jsonb,
          ${JSON.stringify(cohort.excluded_ids)}::jsonb, ${recorder.id}, ${revision.model}, ${revision.provider_id})`);
-      await recordAuditVia(writer, { category: "config", action: "prompt.generate", entity_type: "prompt_revision", entity_id: revision.id, workspace_id: args.workspace_id,
-          after: { stage: revision.stage, parent_revision: parent, state: revision.state, instruction_text: revision.instruction_text },
-          run_id: recorder.id, meta: { training_count: revision.training_ids.length, heldout_count: revision.heldout_ids.length } });
+      await recordAuditVia(writer, {
+        category: "config",
+        action: "prompt.generate",
+        entity_type: "prompt_revision",
+        entity_id: revision.id,
+        workspace_id: args.workspace_id,
+        after: {
+          stage: revision.stage,
+          parent_revision: parent,
+          state: revision.state,
+          instruction_text: revision.instruction_text,
+        },
+        run_id: recorder.id,
+        meta: { training_count: revision.training_ids.length, heldout_count: revision.heldout_ids.length },
+      });
       return { value: revision, output: { revision_id: revision.id, state: revision.state } };
     });
   });
@@ -239,19 +443,29 @@ export async function revisionHistory(workspace_id:string) {
 export async function activatePromptRevision(args: {revision_id:string;evaluation_id:string;expected_active_id:string|null;actor:Actor}):Promise<PromptRevision> {
  const workspace_id=await scopedWorkspaceId();
  if(!workspace_id) throw new TrustedApplicationError('An authorised workspace is required.');
+ const workspaceSchema = await withEvaluationIsolation(async () => {
+  await assertDiagnosticWorkspace(workspace_id);
+  return currentSchemaName();
+ });
  const revision=await getPromptRevision(args.revision_id,workspace_id);
  if(!revision) throw new TrustedApplicationError('Unknown candidate in this workspace.');
- const {getRevisionEvaluation,promotionEligibility,routeIdentity}=await import('./prompt-revision-evals');
+ const {getRevisionEvaluation,promotionEligibility,validateReservedCohort,verifyGenerationReservation}=await import('./prompt-revision-evals');
  const evaluation=await getRevisionEvaluation(args.evaluation_id,workspace_id);
  if(!evaluation||evaluation.revision_id!==revision.id||!promotionEligibility(evaluation).eligible) throw new TrustedApplicationError('Evaluation is missing or ineligible.');
  const cohort=await getRevisionCohort(revision.cohort_id,workspace_id);
- if(!cohort?.gold_reservation?.cases.length || evidenceHash(evaluation.gold_cases)!==evidenceHash(cohort.gold_reservation.cases)) throw new TrustedApplicationError('Gold facts were not reserved before generation. Generate a new candidate.');
- const configuredRoute=await routeConfig(revision.stage);
- const route=await resolveRoute(revision.stage,configuredRoute);
+ if(!cohort || revision.stage!==evaluation.stage || evaluation.cohort_id!==cohort.id || evaluation.workspace_id!==workspace_id ||
+    evaluation.case_hash!==evidenceHash(cohort.gold_reservation) || evidenceHash(evaluation.targets)!==evidenceHash(cohort.gold_reservation?.targets ?? []) ||
+    evidenceHash(evaluation.gold_cases)!==evidenceHash(cohort.gold_reservation?.cases ?? [])) throw new TrustedApplicationError('Frozen cohort or target lineage changed. Generate a new candidate.');
+ validateReservedCohort(cohort);
+ await withEvaluationIsolation(() => verifyGenerationReservation(revision, cohort));
+ const configuredRoute=(await routeConfigs({preserveStored:true})).find(row=>row.stage===revision.stage);
+ const route=await approvedEvaluationRoute(revision.stage,configuredRoute);
+ assertEvaluationRoute(route);
  if(routeIdentity(route)!==evaluation.route_hash) throw new TrustedApplicationError('Routing changed since evaluation. Evaluate again.');
- const {activeModule}=await import('./registry');const stageModule=await activeModule(revision.stage);
+ const stageModule=await activeModule(revision.stage);
  if(stageModule.manifest.id!==evaluation.module_id||stageModule.manifest.version!==evaluation.module_version) throw new TrustedApplicationError('Stage implementation changed since evaluation.');
  await sharedDb().transaction(async tx=>{
+  await lockDiagnosticWorkspace(workspace_id, workspaceSchema, tx);
   await tx.execute(sql`insert into prompt_active_revisions(workspace_id,stage) values(${workspace_id},${revision.stage}) on conflict do nothing`);
   const rows=await tx.execute(sql`select * from prompt_active_revisions where workspace_id=${workspace_id} and stage=${revision.stage} for update`);
   const pointer=rows[0];
@@ -259,15 +473,17 @@ export async function activatePromptRevision(args: {revision_id:string;evaluatio
   // Lock route config against simultaneous administrative updates through commit.
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`prompt-route:${revision.stage}`}))`);
   const routeRows=await tx.execute(sql`select * from routing_config where stage=${revision.stage}`);
-  const lockedConfig=routeRows[0] as RouteConfig | undefined ?? configuredRoute;
-  if(routeIdentity(await resolveRoute(revision.stage,lockedConfig))!==evaluation.route_hash) throw new TrustedApplicationError('Routing changed since evaluation.');
+  const lockedConfig=routeRows[0] as RouteConfig | undefined;
+  const currentConfig=lockedConfig ?? configuredRoute;
+  if(!currentConfig || routeIdentity({...route, provider_id:currentConfig.provider_id, model:currentConfig.model,
+      params:currentConfig.params, fallbacks:currentConfig.fallbacks})!==evaluation.route_hash) throw new TrustedApplicationError('Routing changed since evaluation.');
   if(revision.parent_revision!==(pointer.revision_id??'v1.0-baseline')) throw new TrustedApplicationError('Candidate was generated from a stale baseline.');
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`prompt-module:${revision.stage}`}))`);
   const moduleRows=await tx.execute(sql`select module_id from stage_modules where stage=${revision.stage}`);
   if((moduleRows[0]?.module_id??stageModule.manifest.id)!==evaluation.module_id) throw new TrustedApplicationError('Stage implementation changed since evaluation.');
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`prompt-evaluation:${revision.id}`}))`);
-  const latest=await tx.execute(sql`select id from prompt_revision_evaluations where workspace_id=${workspace_id} and revision_id=${revision.id} order by created_at desc,id desc limit 1`);
-  if(latest[0]?.id!==evaluation.id) throw new TrustedApplicationError('A newer evaluation exists. Review the latest evaluation.');
+  const binding=await tx.execute(sql`select bound_id from prompt_revision_attempts where workspace_id=${workspace_id} and revision_id=${revision.id} for update`);
+  if(binding[0]?.bound_id!==evaluation.id) throw new TrustedApplicationError("Only the original completed evaluation can approve this candidate.");
   const generation=Number(pointer.generation)+1;
   await tx.execute(sql`update prompt_active_revisions set revision_id=${revision.id}, generation=${generation} where workspace_id=${workspace_id} and stage=${revision.stage}`);
   if(pointer.revision_id) await tx.execute(sql`update prompt_revisions set state='superseded' where id=${pointer.revision_id}`);

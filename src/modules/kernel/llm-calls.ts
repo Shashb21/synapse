@@ -237,6 +237,8 @@ export async function tracedCompletion(args: {
   standardBilling?: boolean;
   requestBudget?: ProviderRequestBudget;
   beforeSend?: () => Promise<void>;
+  /** Provider dispatch hook. Runs for every HTTP request, even on retries. */
+  beforeRequest?: () => Promise<void>;
   /** Failed attempts still contribute reported usage or an explicitly unknown cost. */
   onFailure?: (attempt: Pick<LlmCallRecord, "usage" | "cost_usd" | "price_source">) => void;
 }): Promise<{ text: string; usage: LlmUsage | null; llm_call_id: string | null; cost_usd: number | null; price_source: string | null }> {
@@ -293,6 +295,7 @@ export async function tracedCompletion(args: {
             beforeRetry: args.beforeSend,
             onDispatch: () => { sends++; },
             onUsage: reported => { usage = sends > 1 ? { ...reported, prior_charge_unknown: true } : reported; },
+            ...(args.beforeRequest ? { beforeRequest: args.beforeRequest } : {}),
           });
         }
       } catch (error) {

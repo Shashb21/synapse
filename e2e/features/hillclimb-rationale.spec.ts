@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test";
+import { freshWorkspace } from "../support/session";
 import {
   firstOpenGap,
+  iegpAction,
+  planAction,
   firstPartialGap,
   runRecord,
   runStage,
@@ -21,10 +24,10 @@ async function workedExamplesFor(request: Parameters<typeof runRecord>[0], runId
 test.describe.configure({ mode: "serial" });
 
 test.describe("Hillclimb from edit rationales", () => {
-  test.beforeAll(async ({ request }) => {
+  freshWorkspace({ name: "hillclimb rationales", seed: async request => {
     await seedPrioritizable(request);
     await runStage(request, "S8");
-  });
+  } });
 
   test("an edit at the validation gate becomes an edit record and a stage signal", async ({ request }) => {
     const gap = await firstOpenGap(request);
@@ -43,16 +46,26 @@ test.describe("Hillclimb from edit rationales", () => {
     expect(signals[0]!.stage).toBe("S5");
   });
 
-  test("a band decision becomes a worked example for the next prioritization run, not a rule", async ({ request }) => {
-    const gap = await firstOpenGap(request);
-    await validateBandHigh(request, gap.gap_id, `Pricing questions are High when a dossier is in flight ${Date.now()}`);
+  test("shows a corrected band only to a related, independent gap", async ({ request }) => {
+    const matrix = { x_axis: "decision_impact", y_axis: "time_pressure" };
+    async function gap(name: string, statement: string) {
+      const created = await iegpAction(request, { action: "create_gap", name, statement, domain: "comparative_effectiveness" });
+      const id = String(created.id);
+      await iegpAction(request, { action: "validate_gap", gap_id: id });
+      return id;
+    }
+    const original = await gap("Dossier durability", "The dossier lacks durability comparisons for maintenance therapy.");
+    const related = await gap("Dossier safety", "Which adverse events belong in the updated dossier?");
+    const score = (id: string) => runStage<{ placements: { suggested_band: string }[] }>(request, "S8", { gap_ids: [id], ...matrix });
+    const suggestion = (await score(original)).output.placements[0]!;
+    await planAction(request, { action: "validate_band", gap_id: original, ...matrix,
+      band: suggestion.suggested_band === "high" ? "low" : "high", rationale: "Adjust the band for the dossier deadline." });
 
-    const rerun = await runStage(request, "S8");
-    const used = await workedExamplesFor(request, rerun.run_id);
-    expect(
-      used.some((example) => example.kind === "s8_band" && example.scope === "this_plan"),
-      "the decision on the model's band must come back as a similar past case",
-    ).toBe(true);
+    const relatedExamples = await workedExamplesFor(request, (await score(related)).run_id);
+    const corrected = relatedExamples.filter(example => example.kind === "s8_band" && example.scope === "this_plan");
+    expect(corrected).toHaveLength(1);
+    const originalExamples = await workedExamplesFor(request, (await score(original)).run_id);
+    expect(originalExamples.map(example => example.id)).not.toContain(corrected[0]!.id);
   });
 
   test("a split run records the worked examples it was shown", async ({ request }) => {
@@ -97,7 +110,7 @@ test.describe("Hillclimb from edit rationales", () => {
     await expect(page.getByRole("heading", { name: /^edit rationales$/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^hillclimb signals$/i })).toBeVisible();
     await expect(page.getByText(/Blocks the payer submission this cycle/).first()).toBeVisible();
-    await expect(page.getByText(/Runs learn from similar past decisions as worked examples/)).toBeVisible();
+    await expect(page.getByText(/Signals record feedback from live runs and reviewers/)).toBeVisible();
   });
 
   test("files an eval run for the stage that produced it", async ({ page, request }) => {

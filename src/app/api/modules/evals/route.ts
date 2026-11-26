@@ -3,10 +3,10 @@ import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { aiOffResponse, stageErrorResponse } from "@/app/api/modules/ai-off";
 import { aiEnabled } from "@/modules/kernel/ai-switch";
-import { runStage } from "@/modules";
+import "@/modules";
 import { STAGE_IDS, type StageId } from "@/modules/kernel/contracts";
 import { activeModule } from "@/modules/kernel/registry";
-import { recordEvalRun, runStageEvals } from "@/modules/kernel/evals";
+import { runOwnerDiagnostics } from "@/modules/kernel/hillclimb-loop";
 import { requestIdentity } from "@/modules/auth/request";
 import { apiErrorResponse, readJsonBody } from "@/modules/auth/api-guard";
 
@@ -43,31 +43,10 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    const { metrics, cases } = await withModelRun(request.signal, () => runStageEvals(implementation, async (input) => {
-      const result = await runStage({
-        stage,
-        evaluation: true,
-        input: { ...(input as Record<string, unknown>), dry_run: true },
-        actor: identity.actor,
-        role: identity.role,
-        purpose: "owner_evaluation",
-      });
-      return result.output as never;
-    }));
-    if (cases === 0) {
-      return NextResponse.json(
-        { safe_error: true, error: "No gold cases are available yet. Parse a source first." },
-        { status: 400 },
-      );
-    }
-    const record = await recordEvalRun({
-      stage,
-      module_id: implementation.manifest.id,
-      module_version: implementation.manifest.version,
-      metrics,
-      note: `${cases} gold case(s)`,
-    });
-    return NextResponse.json({ ok: true, cases, metrics, passed: record.passed, eval_run_id: record.id });
+    const harness = await withModelRun(request.signal, () => runOwnerDiagnostics(implementation, identity, body.workspace_id, false));
+    const summary = harness.variants[0];
+    if (!summary) return NextResponse.json({ safe_error: true, error: harness.reason }, { status: 400 });
+    return NextResponse.json({ ok: true, ...summary, group_id: harness.group_id });
   } catch (error) {
     return stageErrorResponse(error, "Eval run failed");
   }
