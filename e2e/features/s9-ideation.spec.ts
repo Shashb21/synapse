@@ -11,7 +11,7 @@ import {
   planActionExpectingError,
   planState,
   runStage,
-  seedMapped,
+  seedPrioritizable,
   validateBandHigh,
 } from "../support/synapse";
 
@@ -44,7 +44,7 @@ test.describe("S9 tactics ideation", () => {
   let lowGap: { gap_id: string; name: string } | null = null;
 
   test.beforeAll(async ({ request }) => {
-    await seedMapped(request);
+    await seedPrioritizable(request);
     await runStage(request, "S8");
     const gap = await firstOpenGap(request);
     await validateBandHigh(request, gap.gap_id, "Blocks the EU5 submission, so it is High");

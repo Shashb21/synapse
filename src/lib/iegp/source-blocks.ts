@@ -219,9 +219,12 @@ async function quotesFor(source_id: string): Promise<SourceQuote[]> {
 
 /** Blocks of one source in reading order, with human/model provenance and citing needs. */
 export async function listSourceBlocks(source_id: string): Promise<SourceBlockView[]> {
-  await pruneStale(source_id);
-  const [blocks, metas, quotes] = await Promise.all([rawBlocks(source_id), metasFor(source_id), quotesFor(source_id)]);
-  const metaById = new Map(metas.map((m) => [m.block_id, m]));
+  await ensureSourceBlocksSchema();
+  const [blocks, metas, quotes, generation] = await Promise.all([
+    rawBlocks(source_id), metasFor(source_id), quotesFor(source_id), generationOf(source_id),
+  ]);
+  const metaById = new Map(metas.filter((meta) => generation && meta.source_generation === generation)
+    .map((meta) => [meta.block_id, meta]));
   return blocks
     .map((block) => {
       const meta = metaById.get(block.id);
@@ -904,6 +907,7 @@ export const reparseSourceBlocks = assessmentSourceEdit(async function reparseSo
   sections: { heading: string; text: string; location: string; split_unit?: { index: number; text: string } }[];
 }): Promise<ReparseResult> {
   await requireSourceRow(args.source_id);
+  await pruneStale(args.source_id);
   const current = await listSourceBlocks(args.source_id);
   const metas = await metasFor(args.source_id);
   const quotes = await quotesFor(args.source_id);

@@ -29,6 +29,27 @@ function scenario(status: string = "proposed") {
 }
 
 describe("expansion-scoped coverage eligibility", () => {
+  it("excludes rejected parent and child rows while keeping independent accepted coverage", () => {
+    const state = buildSeed();
+    const { tactic, coverage, expansion } = scenario("planned");
+    const rejected = { ...tactic, review_status: "rejected" as const };
+    const accepted = { ...tactic, id: "INDEPENDENT", review_status: "accepted" as const };
+    expansion.scope = { name: "Added population" } as TacticExpansion["scope"];
+    const parent = { ...coverage, id: "PARENT", expansion_id: null, overall_lock: { ...coverage.overall_lock, locked: true } };
+    const independent = { ...parent, id: "INDEPENDENT-COVERAGE", tactic_id: accepted.id, overall: "limited" as const };
+    state.tactics = [rejected, accepted];
+    state.coverages = [parent, coverage, independent];
+    state.expansions = [expansion];
+
+    expect(countingCoverages(state.coverages, state.tactics, state.expansions)).toEqual([independent]);
+    expect(computeGapStatus(state.coverages, state.tactics, { expansions: state.expansions })).toBe("validated_partial");
+    expect(mappedTactics(state, coverage.gap_id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: rejected.id, status: "ongoing", counts_toward_addressing: false }),
+      expect.objectContaining({ id: rejected.id, expansion_id: expansion.id, status: "planned", counts_toward_addressing: false }),
+      expect.objectContaining({ id: accepted.id, counts_toward_addressing: true }),
+    ]));
+  });
+
   it("plan rows display independent child lifecycle and scoped identity", () => {
     const state = buildSeed();
     const {tactic, coverage, expansion} = scenario();

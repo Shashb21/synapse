@@ -1,3 +1,4 @@
+import { currentModelRun, withModelRun } from "@/modules/kernel/model-run";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { customerErrorMessage } from "@/modules/kernel/stage-errors";
 /** Recoverable ingestion: each request commits at most one stage and its checkpoint. */
@@ -11,10 +12,10 @@ import { demoSourceById } from "@/lib/iegp/demo-pack";
 import { tagStageError } from "@/modules/kernel/stage-errors";
 import { ingestionJobs, INGESTION_JOBS_DDL } from "@/lib/ingest/schema";
 import { uploadModule } from "@/modules/stages/s0-upload/module";
-import { listParsedDocuments } from "@/modules/stages/s1-parse/module";
 import { ApiGuardError } from "@/modules/auth/api-guard";
 import { aiSections, assertAiEnabled } from "@/modules/kernel/ai-switch";
 import { sectionOfStage, type AiSections } from "@/modules/kernel/ai-sections";
+import { modelRunTimeoutMs } from "@/modules/kernel/model-timeout";
 import { runStage } from "@/modules/kernel/run";
 import { isTestStub } from "@/modules/kernel/llm";
 import { resolveRoute } from "@/modules/kernel/routing";
@@ -67,7 +68,12 @@ async function requireLlmStages(sections: AiSections): Promise<void> {
   }
 }
 
+// The lease covers model execution plus snapshot and publication time.
+const MINIMUM_LEASE_MS = 300_000;
+const PUBLICATION_GRACE_MS = 120_000;
+
 type Checkpoint = {
+  attempt?: { token: string; expires_at: string };
   request_key: string;
   stages: StageId[];
   completed: number;
@@ -85,6 +91,7 @@ export type IngestProgress = {
 };
 
 type IngestArgs = {
+  signal?: AbortSignal;
   files?: IngestFile[];
   demo_ids?: string[];
   actor: Actor;
@@ -94,6 +101,10 @@ type IngestArgs = {
 
 /** Run or resume one ingestion stage, atomically saving its output and checkpoint. */
 export async function advanceIngest(args: IngestArgs): Promise<IngestProgress> {
+  return withModelRun(args.signal, () => advanceStage(args));
+}
+
+async function advanceStage(args: IngestArgs): Promise<IngestProgress> {
   const files = args.files ?? [];
   const demo_ids = args.demo_ids ?? [];
   uploadModule.inputSchema.parse({ files, demo_ids });
@@ -118,15 +129,11 @@ export async function advanceIngest(args: IngestArgs): Promise<IngestProgress> {
   if (!/^[a-f0-9]{64}$/.test(job_id)) throw new ApiGuardError(400, "invalid_request", "Invalid ingestion reference.");
   await ensurePlatformSchema([INGESTION_JOBS_DDL]);
   const schema = await currentSchemaName();
-  let comparisonSources: string[] = [];
-  let recordStageFailure: (() => Promise<void>) | undefined;
-  const progress = await withWorkspaceTransaction(async () => {
-    // A transaction lock is released even if a worker dies. No expiring lease can
-    // let a slow model call overlap with a retry. Scope includes the workspace.
-    const locked = await db().execute(sql`
-      select pg_try_advisory_xact_lock(hashtextextended(${`ingest:${schema}`}, 0)) as locked
-    `);
-    if (!locked[0]?.locked) throw new ApiGuardError(409, "ingest_busy", "An ingestion step is still running. Wait for it to finish, then retry.");
+  const token = randomBytes(32).toString("hex");
+  const busy = () => new ApiGuardError(409, "ingest_busy", "An ingestion step is still running. Wait for it to finish, then retry.");
+  const claim = await withWorkspaceTransaction(async () => {
+    const locked = await db().execute(sql`select pg_try_advisory_xact_lock(hashtextextended(${`ingest:${schema}`}, 0)) as locked`);
+    if (!locked[0]?.locked) throw busy();
     const [saved] = await db().select().from(ingestionJobs).where(args.job_id
       ? eq(ingestionJobs.id, job_id)
       : sql`${ingestionJobs.checkpoint}->>'request_key' = ${request_key}`).for("update");
@@ -153,68 +160,81 @@ export async function advanceIngest(args: IngestArgs): Promise<IngestProgress> {
       };
     }
     const stage = state.stages[state.completed];
-    const run = <O>(input: unknown) => runStage<O>({
+    if (!stage) return { state, claimed: false };
+    if (stage === "S0") {
+      // The upload and first checkpoint are short, and neither survives without the other.
+      const upload = await runStage<{ files: { id: string }[] }>({
+        stage, input: { files, demo_ids, reuse_existing: true }, actor: args.actor, role: args.role,
+      });
+      state.file_ids = [...new Set(upload.output.files.map(file => file.id))];
+      if (!state.file_ids.length) throw new TrustedApplicationError("Nothing was ingested. Choose a non-empty file.");
+      state.completed++;
+      await db().insert(ingestionJobs).values({ id: job_id, checkpoint: state });
+      return { state, claimed: false };
+    }
+    // Old checkpoints have no attempt. Only the current owner may publish;
+    // an interrupted invocation becomes reclaimable without holding a connection.
+    const leaseMs = Math.max(MINIMUM_LEASE_MS, modelRunTimeoutMs() + PUBLICATION_GRACE_MS);
+    const [clock] = await db().execute(sql`select extract(epoch from clock_timestamp()) * 1000 as now_ms`);
+    const nowMs = Number(clock.now_ms);
+    if (state.attempt && Date.parse(state.attempt.expires_at) > nowMs) throw busy();
+    state.attempt = { token, expires_at: new Date(nowMs + leaseMs).toISOString() };
+    await db().update(ingestionJobs).set({ checkpoint: state }).where(eq(ingestionJobs.id, job_id));
+    return { state, claimed: true };
+  });
+
+  const state = claim.state;
+  if (claim.claimed) {
+    const stage = state.stages[state.completed];
+    const owner = sql`${ingestionJobs.id} = ${job_id} and ${ingestionJobs.checkpoint}->'attempt'->>'token' = ${token}`;
+    const finish = async () => {
+      const next = { ...state, completed: state.completed + 1 };
+      delete next.attempt;
+      // Expiry allows another attempt to claim the job. The saved token still controls publication.
+      const changed = await db().update(ingestionJobs).set({ checkpoint: next })
+        .where(owner).returning({ id: ingestionJobs.id });
+      if (!changed.length) throw busy();
+      Object.assign(state, next);
+    };
+    const run = <O>(input: unknown, apply: (output: O) => void) => runStage<O>({
       stage, input, actor: args.actor, role: args.role,
-      deferFailureRecord: (persist) => { recordStageFailure = persist; },
+      onCommit: async output => { apply(output); await finish(); },
     });
     try {
-      if (stage === "S0") {
-        const upload = await run<{ files: { id: string }[] }>({ files, demo_ids, reuse_existing: true });
-        state.file_ids = [...new Set(upload.output.files.map((file) => file.id))];
-        if (!state.file_ids.length) throw new TrustedApplicationError("Nothing was ingested. Choose a non-empty file.");
-      } else if (stage === "S1") {
-        const existing = (await listParsedDocuments()).filter((doc) => state.file_ids.includes(doc.file_id));
-        const missing = state.file_ids.filter((id) => !existing.some((doc) => doc.file_id === id));
-        const parse = missing.length ? await run<{
-          documents: { id: string; source_id: string }[];
-          failures: { file_id: string; reason: string }[];
-        }>({ file_ids: missing }) : null;
-        if (parse?.output.failures.length) {
-          throw new TrustedApplicationError("Parsing failed. The uploaded files remain registered. Check the file format and retry parsing from this checkpoint; do not upload the files again.");
-        }
-        const documents = [...existing, ...(parse?.output.documents ?? [])];
-        if (!documents.length) throw new TrustedApplicationError("Parsing produced no documents. Try again.");
-        state.document_ids = documents.map((doc) => doc.id);
-        state.result.source_ids = documents.map((doc) => doc.source_id);
-        comparisonSources = state.result.source_ids;
+      if (stage === "S1") {
+        await run<{ documents: { id: string; source_id: string }[]; failures: unknown[] }>({
+          file_ids: state.file_ids, reuse_existing: true,
+        }, ({ documents, failures }) => {
+          if (failures.length) throw new TrustedApplicationError("Parsing failed. The uploaded files remain registered. Check the file format and retry parsing from this checkpoint; do not upload the files again.");
+          if (!documents.length) throw new TrustedApplicationError("Parsing produced no documents. Try again.");
+          state.document_ids = documents.map(doc => doc.id);
+          state.result.source_ids = documents.map(doc => doc.source_id);
+        });
       } else if (stage === "S2") {
-        const gaps = await run<{ committed_gap_ids: string[] }>({ document_ids: state.document_ids });
-        state.result.gap_ids = gaps.output.committed_gap_ids;
+        await run<{ committed_gap_ids: string[] }>({ document_ids: state.document_ids }, output => { state.result.gap_ids = output.committed_gap_ids; });
       } else if (stage === "S3") {
-        const tactics = await run<{ committed_tactic_ids: string[] }>({ document_ids: state.document_ids });
-        state.result.tactic_ids = tactics.output.committed_tactic_ids;
+        await run<{ committed_tactic_ids: string[] }>({ document_ids: state.document_ids }, output => { state.result.tactic_ids = output.committed_tactic_ids; });
       } else if (stage === "S4") {
-        const mapping = await run<{ committed: { gap_id: string }[] }>({});
-        state.result.mapped_gap_ids = mapping.output.committed.map((row) => row.gap_id);
+        await run<{ committed: { gap_id: string }[] }>({}, output => { state.result.mapped_gap_ids = output.committed.map(row => row.gap_id); });
       }
     } catch (error) {
-      if (stage) tagStageError(error, stage);
+      // Never release a replacement owner's claim or recreate a cleared job.
+      await db().update(ingestionJobs).set({ checkpoint: sql`${ingestionJobs.checkpoint} - 'attempt'` }).where(owner);
+      tagStageError(error, stage);
       throw error;
     }
-    if (stage) {
-      state.completed++;
-      await db().insert(ingestionJobs)
-        .values({ id: job_id, checkpoint: state })
-        .onConflictDoUpdate({ target: ingestionJobs.id, set: { checkpoint: state } });
-    }
-    return {
-      job_id,
-      done: state.completed === state.stages.length,
-      stage: state.stages[state.completed] ?? null,
-      completed: state.completed,
-      total: state.stages.length,
-    };
-  }).catch(async (error: unknown) => {
-    await recordStageFailure?.();
-    throw error;
-  });
-  // Comparison failure cannot roll back a successfully committed parse checkpoint.
-  await compareParsedSources(comparisonSources, args.actor);
-  return progress;
+    if (stage === "S1") await compareParsedSources(state.result.source_ids, args.actor);
+  }
+  return { job_id, done: state.completed === state.stages.length, stage: state.stages[state.completed] ?? null,
+    completed: state.completed, total: state.stages.length };
 }
 
 /** Compatibility entry point for callers that need the complete pipeline result. */
 export async function ingestThroughStages(args: IngestArgs): Promise<IngestResult> {
+  return withModelRun(args.signal, () => finishIngest(args));
+}
+
+async function finishIngest(args: IngestArgs): Promise<IngestResult> {
   let progress = await advanceIngest(args);
   while (!progress.done) progress = await advanceIngest({ ...args, job_id: progress.job_id });
   const [saved] = await db().select().from(ingestionJobs).where(eq(ingestionJobs.id, progress.job_id));

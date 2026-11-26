@@ -11,7 +11,7 @@ import { extractJsonObject } from "@/lib/llm/anthropic";
 import { tracedCompletion } from "./llm-calls";
 import { replaysDemo } from "@/lib/demo/mode";
 import { DEMO_REPLAY_PROVIDER, isDemoReplayProvider } from "@/lib/demo/replay-provider";
-import { missingKeyReason, providerApiKey, providerConfigured } from "@/modules/llm/api-keys";
+import { approvedProviderFallbacks, missingKeyReason, providerApiKey, providerConfigured } from "@/modules/llm/api-keys";
 import {
   DEFAULT_ROUTE_FALLBACKS,
   DEFAULT_ROUTE_PROVIDER,
@@ -252,7 +252,7 @@ export async function resolveRoute(stage: StageId, frozenConfig?: RouteConfig): 
     };
   }
   const { selected, rejected } = selectCredentialRoute(config, PROVIDERS.map(provider => ({
-    ...provider, status: providerConfigured(provider) ? "configured" : "missing",
+    ...provider, approved_fallbacks: approvedProviderFallbacks(provider.id), status: providerConfigured(provider) ? "configured" : "missing",
   })));
   const reasons = rejected.map(({ id, reason }) => {
     const provider = findProvider(id);

@@ -339,6 +339,7 @@ it.each(['standard', 'single_pass'] as const)('uses explicit actual role routes 
 it('retains explicit fallback identity immutably and never re-resolves shared routing on continuation', async () => {
   const e = await draft();
   vi.stubEnv('ANTHROPIC_API_KEY', '');
+  vi.stubEnv('SYNAPSE_APPROVED_FALLBACK_PAIRS', 'anthropic-claude>openai');
   vi.stubEnv('OPENAI_API_KEY', 'test-only-fake-key');
   const config = { mode: 'single_pass', stages: { gap_extraction: { route: { provider_id: 'anthropic-claude', model: 'claude-sonnet-5-5', fallbacks: ['openai'] } } } };
   const response = await POST(request({ revision: 2, target: 'gap_extraction', config, prerequisites: {} }), ctx(e.id));

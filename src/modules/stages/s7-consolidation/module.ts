@@ -2,7 +2,7 @@ import { z } from "zod";
 import { registerModule } from "@/modules/kernel/registry";
 import type { SynapseModule } from "@/modules/kernel/contracts";
 import { loadState } from "@/lib/iegp/store";
-import { countingCoverages, displayedGapStatus, isLiveGap, mappedTactics } from "@/lib/iegp/engine";
+import { countingCoverages, displayedGapStatus, gapsReadyForPrioritize, isLiveGap, mappedTactics } from "@/lib/iegp/engine";
 
 const inputSchema = z.object({}).default({});
 
@@ -109,7 +109,6 @@ export const consolidationModule: SynapseModule<ConsolidationInput, Consolidatio
     }
 
     ctx.run.note("lists", { open: open.length, addressed: addressed.length, flags: flags.length });
-    const ready = unresolved_partials.length === 0 && live.every((gap) => gap.human_validated);
 
     return {
       output: {
@@ -117,7 +116,7 @@ export const consolidationModule: SynapseModule<ConsolidationInput, Consolidatio
         addressed,
         unresolved_partials,
         flags,
-        ready_for_prioritization: ready,
+        ready_for_prioritization: gapsReadyForPrioritize(state),
       },
       summary: `${open.length} open, ${addressed.length} addressed, ${flags.length} flag(s)`,
       evals: [

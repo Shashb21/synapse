@@ -368,8 +368,13 @@ describe("audited direct gap edits", () => {
     expect((await post({ action: "validate_band", gap_id: gap.id, band: "high", reason: "Reconfirmed for the revised statement", expected_version: latest.version }, true)).status).toBe(200);
     expect(ideationBandOrder(await placements()).has(gap.id)).toBe(true);
     const id = await scoped(() => createGap({ ...auditActor, statement: "Unplaced gap", objective_id: ctx.objectives[0]!.id }));
+    expect((await post({ action: "validate_gap", gap_id: id, note: "Confirm the new evidence assessment" })).status).toBe(200);
     const unplaced = (await scoped(loadState)).gaps.find(row => row.id === id)!;
     expect((await post({ action: "modify_gap", gap_id: id, expected_gap: unplaced, statement: "Unplaced revised statement", rationale: "Clarify before the first priority review" })).status).toBe(200);
+    const revised = (await scoped(loadState)).gaps.find(row => row.id === id)!;
+    if (!revised.human_validated) {
+      expect((await post({ action: "validate_gap", gap_id: id, note: "Confirm the revised assessment" })).status).toBe(200);
+    }
     const stale = await post({ action: "set_placement", gap_id: id, band: "high", validate: true, reason: "First judgement on the previous statement", expected_version: null, expected_context_version: unplaced.priority_context_version ?? null }, true);
     expect(stale.status).toBe(400);
     expect(stale.body.error).toMatch(/context changed/i);
@@ -393,13 +398,16 @@ describe("audited direct gap edits", () => {
       await db().execute(sql.raw("CREATE FUNCTION fail_gap_gate() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'KAN131 gate history failure'; END $$"));
       await db().execute(sql.raw("CREATE TRIGGER fail_gap_gate BEFORE INSERT ON edit_records FOR EACH ROW WHEN (NEW.stage = 'S5') EXECUTE FUNCTION fail_gap_gate()"));
     });
+    const diagnostic = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const response = await scoped(() => modulePost(new Request("http://localhost/api/modules", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ stage: "S5", input: { action: "edit_gap", gap_id: gap.id, expected_gap: gap, statement: "Failed gate evidence edit", rationale: "Gate history must save with the change" } }) })));
       expect(response.ok).toBe(false);
       expect(await scoped(loadState)).toEqual(before);
       expect(await placements()).toEqual(prior);
       expect(await scoped(() => entityHistory([gap.id]))).toEqual(history);
+      expect(diagnostic.mock.calls).toEqual([["API action failed", { category: "unexpected", stage: "S5" }]]);
     } finally {
+      diagnostic.mockRestore();
       await scoped(async () => {
         await db().execute(sql.raw("DROP TRIGGER IF EXISTS fail_gap_gate ON edit_records"));
         await db().execute(sql.raw("DROP FUNCTION IF EXISTS fail_gap_gate()"));

@@ -51,11 +51,18 @@ export function missingKeyReason(provider: Pick<LlmProvider, "id" | "label">): s
     : `${provider.label}: no API key env var is defined for this provider`;
 }
 
+/** Directed processor substitutions certified for every workspace on this deployment. */
+export function approvedProviderFallbacks(primary: string): string[] {
+  const pairs = new Set((process.env.SYNAPSE_APPROVED_FALLBACK_PAIRS ?? "").split(",").map(pair => pair.trim()));
+  return PROVIDERS.filter(provider => provider.id !== primary && pairs.has(`${primary}>${provider.id}`)).map(provider => provider.id);
+}
+
 export type ProviderKeyStatus = "configured" | "missing";
 
 /** What the admin console may show about a provider's credential. Never the value. */
 export type ProviderKeyView = {
   provider_id: string;
+  approved_fallbacks: string[];
   label: string;
   summary: string;
   tier: LlmProvider["tier"];
@@ -71,6 +78,7 @@ export type ProviderKeyView = {
 export function listProviderKeys(): ProviderKeyView[] {
   return PROVIDERS.map((provider) => ({
     provider_id: provider.id,
+    approved_fallbacks: approvedProviderFallbacks(provider.id),
     label: provider.label,
     summary: provider.summary,
     tier: provider.tier,

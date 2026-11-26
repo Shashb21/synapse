@@ -1,4 +1,5 @@
 /** Bounded durable evaluator dispatch; raw receipt settlement precedes parsing and publication. */
+import { frozenRouteAllowed } from './routes';
 import { CostPause, CostSettlementPending, reserveCost, settleCost } from './cost-store';
 import { rawCallBound, developmentUsageCost } from './cost';
 import { PROVIDERS, findProvider, providerServes } from '@/modules/llm/provider';
@@ -43,7 +44,7 @@ export async function progressEvaluation(id?: string): Promise<EvaluationProgres
     if (!manifest.request || !manifest.route) return await done('succeeded', null, scoreEvaluation(manifest));
     if (!deliveryConfiguration().available) throw new DevelopmentError(503, 'delivery_unavailable', 'Durable evaluation delivery is unavailable.');
     const route = manifest.route.actual, provider = findProvider(route.provider_id), api_key = providerApiKey(route.provider_id);
-    if (!provider || !providerServes(provider, route.model) || !api_key) throw new DevelopmentError(409, 'route_unavailable', 'The frozen evaluator provider/model credentials are unavailable.');
+    if (!frozenRouteAllowed(manifest.route) || !provider || !providerServes(provider, route.model) || !api_key) throw new DevelopmentError(409, 'route_unavailable', 'The frozen evaluator provider/model credentials are unavailable.');
     await requireSectionAi(manifest.section); await requireEvaluationClaim(evaluation.id, token);
     await reserveCost(manifest.execution_id, evaluation.id, 'evaluation', rawCallBound(route.provider_id, manifest.request));
     await beginEvaluationSend(evaluation.id, token);
