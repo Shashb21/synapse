@@ -29,10 +29,10 @@ import {
   type EvidenceDomain,
   type TacticType,
 } from "@/lib/iegp/enums";
-import { appendAudit, reuseTacticForGap, insertLibraryTactic, loadState, readState, syncComputedGapStatuses } from "@/lib/iegp/store";
+import { appendAudit, reuseTacticForGap, insertLibraryTactic, loadState, readStageState, readState, syncComputedGapStatuses } from "@/lib/iegp/store";
 import { prioritizationContextFromState } from "@/lib/iegp/planning-context";
 import { displayedGapStatus, isLiveGap, emptyDimensions, unlocked } from "@/lib/iegp/engine";
-import { listPlacements } from "@/modules/stages/s8-prioritization/module";
+import { listPlacements, readPlacements } from "@/modules/stages/s8-prioritization/module";
 import { plural } from "@/lib/plural";
 import { acceptTacticExpansion, expansionScopeSchema, modelExpansionScope, tacticVersion, type ExpansionTransaction } from "@/lib/iegp/tactic-expansions";
 import type { ExpansionScope, IegpState, Tactic } from "@/lib/iegp/types";
@@ -1870,7 +1870,8 @@ function expansionKey(gap_id: string, target: string | null, scope: unknown): st
 
 /** Freeze the source facts this stage consumes, before any proposal or human decision. */
 async function freezeFacts(input: z.infer<typeof inputSchema>) {
-  const [state, placements, proposals] = await Promise.all([loadState(), listPlacements(), db().select().from(t.ideationProposals)]);
+  const state = await readStageState();
+  const [placements, proposals] = await Promise.all([readPlacements(state), db().select().from(t.ideationProposals)]);
   // Capture the persisted acceptance linkage now, before generation. Library
   // provenance contains identities only, never another proposal's answer text.
   const proposal_lineage = proposals.map(proposal => {

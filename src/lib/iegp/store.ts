@@ -167,7 +167,14 @@ export function normalizeGapMetadata(value: unknown): GapMetadata {
   };
 }
 
-export async function loadState(): Promise<IegpState> {
+/**
+ * Load the current workspace snapshot.
+ *
+ * To backfill legacy gap numbers inside a transaction, call this before taking
+ * any gap row locks or writing to gaps. Final plan saves use this option so
+ * their numbering and frozen snapshot commit together.
+ */
+export async function loadState({ backfillGapNumbers = false } = {}): Promise<IegpState> {
   await ensureSchema();
   let state = await readSnapshot();
   // A schema with no asset row yet (a brand-new database) starts blank.
@@ -175,12 +182,27 @@ export async function loadState(): Promise<IegpState> {
     await persistState(buildBlankWorkspace());
     state = await readSnapshot();
   }
-  if (state.gaps.some((gap) => !gap.number)) state = await numberGaps(state);
-  if (!inWorkspaceTransaction()) {
-    if (await repairNeedlessGapsOnce(state)) state = await readSnapshot();
-    if (await repairRejectedTacticCoverage(state)) state = await readSnapshot();
+  const standalone = !inWorkspaceTransaction();
+  if ((standalone || backfillGapNumbers) && state.gaps.some((gap) => !gap.number)) {
+    await numberGaps();
+    state = await readSnapshot();
   }
+  // Ordinary mutation reads may already hold gap row locks.
+  if (standalone && await repairNeedlessGapsOnce(state)) state = await readSnapshot();
+  if (standalone && await repairRejectedTacticCoverage(state)) state = await readSnapshot();
   return state;
+}
+
+/** Lock a gap before reading its eligibility and history for a decision. */
+export async function lockGapForDecision(gapId: string): Promise<void> {
+  if (!inWorkspaceTransaction()) throw new Error("Gap decision locks require a workspace transaction.");
+  await db().execute(sql`select id from gaps where id = ${gapId} for update`);
+}
+
+/** Read model inputs without initializing a workspace or repairing legacy rows. */
+export async function readStageState(): Promise<IegpState> {
+  const state = await readSnapshot();
+  return state.asset ? state : buildBlankWorkspace();
 }
 
 const repairedSchemas = new Set<string>();
@@ -216,22 +238,24 @@ function readSnapshot(): Promise<IegpState> {
 }
 
 /**
- * Gives every gap without one a number (KAN-56), in the order they were created.
+ * Gives every legacy gap without one a number (KAN-56).
  * Numbers are never reused within a plan; a reset starts them at 001 again. Ids
  * are never reissued (KAN-15), so a gap's number does not follow its id's digits:
  * after a reset GAP-051 is plan gap 001 (KAN-149).
  */
-async function numberGaps(state: IegpState): Promise<IegpState> {
-  const taken = new Set(state.gaps.map((gap) => gap.number).filter((n): n is number => Boolean(n)));
-  const floor = Math.max(0, ...taken) + 1;
-  for (const gap of state.gaps) {
-    if (gap.number) continue;
-    const number = await allocateNumber("gap_number", floor);
-    taken.add(number);
-    await db().update(t.gaps).set({ number }).where(eq(t.gaps.id, gap.id));
-    gap.number = number;
-  }
-  return state;
+async function numberGaps(): Promise<void> {
+  await withWorkspaceTransaction(async () => {
+    // Creation and reset both lock gaps before touching the counter. Wait for
+    // gap writers and other backfills here while allowing ordinary reads.
+    await db().execute(sql`LOCK TABLE gaps IN EXCLUSIVE MODE`);
+    const gaps = await db().select({ id: t.gaps.id, number: t.gaps.number }).from(t.gaps);
+    const floor = Math.max(0, ...gaps.map((gap) => gap.number ?? 0)) + 1;
+    for (const gap of gaps) {
+      if (gap.number) continue;
+      const number = await allocateNumber("gap_number", floor);
+      await db().update(t.gaps).set({ number }).where(eq(t.gaps.id, gap.id));
+    }
+  });
 }
 
 export { gapNumberLabel } from "./gap-number";
@@ -2431,6 +2455,13 @@ export async function completeLibraryLinkRequest(requestId: string, payload: str
   await db().insert(t.libraryLinkRequests).values({ request_id: requestId, payload, coverage_id: coverageId });
 }
 
+/** A repeated assignment leaves its previously saved assessment intact. */
+export class AlreadyAssignedError extends TrustedApplicationError {
+  constructor() {
+    super("That tactic is already assigned to this gap.");
+  }
+}
+
 /**
  * Writes one gap ↔ tactic coverage row. `coverage` and `dimensions` carry the
  * verdict of whoever decided the mapping (the S4 model, or a human). Without a
@@ -2498,7 +2529,7 @@ async function assignTacticToGapChange(args: {
     (c) => c.gap_id === args.gap_id && c.tactic_id === args.tactic_id && (c.expansion_id ?? null) === (args.expansion_id ?? null),
   );
   if (existing && !(args.expansion_id && existing.overall === "unassessed" && !existing.overall_lock.locked && Object.values(existing.dimensions).every((d) => !d.lock.locked))) {
-    throw new TrustedApplicationError("That tactic is already assigned to this gap.");
+    throw new AlreadyAssignedError();
   }
   if (args.require_preview_basis) {
     if (!args.expected_basis_version || args.expected_basis_version !== getRequirementBasisReview(state, args.gap_id).version) {
@@ -3766,7 +3797,10 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
     `Committed ${args.title}; ${createdNeedIds.length} need(s), ${createdGapIds.length} new gap(s), ${mergedGapIds.length} joined as duplicates, ${Object.keys(suggestionIdByRow).length} overlap(s) to review, ${createdTacticIds.length} tactic(s), ${skippedTacticIds.length} duplicate tactic(s) skipped.`,
   );
   await invalidateRelationshipAssessments({ before: state, gap_ids: assessmentGapIds, reason: "Accepted extracted supporting requirements changed.", ...args });
-  await syncComputedGapStatuses();
+  // Tactic extraction adds inventory without mapping it to any gap.
+  if (args.gaps.length || args.needs.length || args.overlaps?.length) {
+    await syncComputedGapStatuses();
+  }
   return {
     need_ids: createdNeedIds,
     gap_ids: createdGapIds,

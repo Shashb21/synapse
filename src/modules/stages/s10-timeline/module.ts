@@ -1242,7 +1242,10 @@ export async function savePlan(args: {
   return withWorkspaceTransaction(async () => {
     const schema = await currentSchemaName();
     await db().execute(sql`select pg_advisory_xact_lock(hashtext(${`iegp_plans:${schema}`}))`);
-    const [model, state, proposals] = await Promise.all([timelineModel(), loadState(), listIdeationProposals()]);
+    // A signed package freezes the persisted gap numbers. Repair before any
+    // other snapshot reads so their views of gap numbers agree.
+    const state = await loadState({ backfillGapNumbers: args.status === "final" });
+    const [model, proposals] = await Promise.all([timelineModel(), listIdeationProposals()]);
     if (args.status === "final" && model.activities.length === 0) {
       throw new TrustedApplicationError("There is nothing to save as final yet: date at least one activity on the timeline first.");
     }

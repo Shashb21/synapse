@@ -287,6 +287,8 @@ export interface SynapseModule<I, O> {
   manifest: ModuleManifest;
   inputSchema: ZodType<I>;
   outputSchema: ZodType<O>;
+  /** Transient capture for a run whose raw inputs must never become saved replay cases. */
+  captureForRun?(input: I): Promise<Record<string, unknown>>;
   /** Capture domain facts before computation; used unchanged by both evaluation arms. */
   freeze?(input: I): Promise<Record<string, unknown>>;
   /**

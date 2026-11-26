@@ -35,6 +35,7 @@ import {
   lockCoverageDimension,
   lockCoverageOverall,
   confirmCoverageReview,
+  lockGapForDecision,
   lockGapStatus,
   lockNeed,
   lockTactic,
@@ -428,9 +429,8 @@ async function handleAction(request: Request, prepared?: PreparedAction): Promis
       await lockRelationships();
       requireGapResolutionSnapshot(await loadState(), body.parent_gap_id || body.gap_id, body.expected_resolution);
     }
-    if (body.gap_id && (body.action === "classify_gap" || body.action === "override_gap_status")) {
-      // Capture the same pre-edit computation as the override when a tactic review is finishing.
-      await db().execute(sql`select id from gaps where id = ${body.gap_id} for update`);
+    if (["classify_gap", "override_gap_status", "validate_gap"].includes(body.action) && body.gap_id) {
+      await lockGapForDecision(body.gap_id);
     }
     const before = await gateBefore(body);
     // The id of a gap or tactic this action created, so the caller can address it without guessing (ids are never reissued).

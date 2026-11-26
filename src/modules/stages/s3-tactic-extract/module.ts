@@ -1,4 +1,6 @@
 import { resolveSourceCitation, sourceContextSchema } from "@/lib/ingest/source-citation";
+import { PARSED_DOCUMENTS_DDL } from "@/modules/stages/s1-parse/schema";
+import { stageWrite } from "@/modules/kernel/stage-publication";
 import { extractionSections, quotedBlock, reconcileSections, proposeSections, reviseSection, type ExtractionSection } from "../extraction-sections";
 import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
 import { desc } from "drizzle-orm";
@@ -28,7 +30,7 @@ import {
 import { tacticVersion, expansionScopeSchema } from "@/lib/iegp/tactic-expansions";
 import { createTacticSuggestion, separateTacticOptionSchema } from "./suggestions";
 import type { ExpansionScope, SeparateTacticOption, Tactic } from "@/lib/iegp/types";
-import { commitExtractedRecords, loadState } from "@/lib/iegp/store";
+import { commitExtractedRecords, readStageState } from "@/lib/iegp/store";
 import { extractCandidateTactics } from "@/lib/iegp/engine";
 import { listExtractionDocuments, listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
 import { validateQuoteAgainstBlock } from "@/lib/ingest/quote-validator";
@@ -570,7 +572,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
   },
   inputSchema,
   outputSchema,
-  migrations: [TACTIC_CANDIDATES_DDL, TACTIC_BLOCK_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL, ...TACTIC_MATCHING_DDL.split(";").filter(s => s.trim())],
+  migrations: [PARSED_DOCUMENTS_DDL, TACTIC_CANDIDATES_DDL, TACTIC_BLOCK_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL, ...TACTIC_MATCHING_DDL.split(";").filter(s => s.trim())],
   freeze: freezeFacts,
   async run(input, ctx) {
     requireLlm(ctx, "Tactic extraction");
@@ -774,51 +776,53 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
       proposer: outcome.mode,
       created_at: nowIso(),
     }));
-    if (!ctx.replay?.evaluation && rows.length > 0) await db().insert(tacticCandidates).values(rows);
-
     const committed_tactic_ids: string[] = [];
-    if (!ctx.replay?.evaluation && !input.dry_run) {
-      for (const document of documents) {
-        const fromDocument = accepted.filter((candidate) => candidate.document_id === document.id && candidate.match !== "overlaps");
-        if (fromDocument.length === 0) continue;
-        const source = state.sources.find((row) => row.id === document.source_id);
-        const result = await ctx.run.step(`commit:${document.id}`, () =>
-          commitExtractedRecords({
-            source_id: document.source_id,
-            require_grounded_sources: true,
-            title: source?.title ?? document.source_id,
-            stakeholder_function: source?.stakeholder_function ?? ctx.actor.function,
-            actor_name: ctx.actor.name,
-            actor_function: ctx.actor.function,
-            needs: [],
-            gaps: [],
-            tactics: fromDocument.map((candidate) => ({
-              id: candidate.id,
-              name: candidate.name,
-              type: candidate.type,
-              status: candidate.status,
-              evidence_question: candidate.evidence_question,
-              source_id: candidate.source_id,
-              source_quote: candidate.source_quote,
-              block_id: candidate.block_id,
-              source_context: candidate.source_context,
-              duplicate_of: candidate.duplicate_of,
-            })),
-            apply_mappings: false,
-          }),
-        );
-        committed_tactic_ids.push(...result.tactic_ids);
+    await stageWrite(ctx, async () => {
+      if (rows.length > 0) await db().insert(tacticCandidates).values(rows);
+      if (!ctx.replay?.evaluation && !input.dry_run) {
+        for (const document of documents) {
+          const fromDocument = accepted.filter((candidate) => candidate.document_id === document.id && candidate.match !== "overlaps");
+          if (fromDocument.length === 0) continue;
+          const source = state.sources.find((row) => row.id === document.source_id);
+          const result = await ctx.run.step(`commit:${document.id}`, () =>
+            commitExtractedRecords({
+              source_id: document.source_id,
+              require_grounded_sources: true,
+              title: source?.title ?? document.source_id,
+              stakeholder_function: source?.stakeholder_function ?? ctx.actor.function,
+              actor_name: ctx.actor.name,
+              actor_function: ctx.actor.function,
+              needs: [],
+              gaps: [],
+              tactics: fromDocument.map((candidate) => ({
+                id: candidate.id,
+                name: candidate.name,
+                type: candidate.type,
+                status: candidate.status,
+                evidence_question: candidate.evidence_question,
+                source_id: candidate.source_id,
+                source_quote: candidate.source_quote,
+                block_id: candidate.block_id,
+                source_context: candidate.source_context,
+                duplicate_of: candidate.duplicate_of,
+              })),
+              apply_mappings: false,
+            }),
+          );
+          committed_tactic_ids.push(...result.tactic_ids);
+        }
       }
-    }
 
-    if (!ctx.replay?.evaluation && !input.dry_run) {
-      for (const candidate of accepted.filter(c => c.match === "overlaps")) {
-        const parent = state.tactics.find(t => t.id === candidate.target_tactic_id)!;
-        await createTacticSuggestion({require_grounded_source: true, run_id: ctx.run.id, document_id: candidate.document_id, source_id: candidate.source_id, source_quote: candidate.source_quote,
-          block_id: candidate.block_id, source_context: candidate.source_context,
-          target_tactic_id: parent.id, expected_tactic_version: tacticVersion(parent), shared_scope: candidate.shared_scope!, new_scope: candidate.new_scope!, expansion: candidate.expansion!, separate: candidate.separate!});
+      if (!ctx.replay?.evaluation && !input.dry_run) {
+        for (const candidate of accepted.filter(c => c.match === "overlaps")) {
+          const parent = state.tactics.find(t => t.id === candidate.target_tactic_id)!;
+          await createTacticSuggestion({require_grounded_source: true, run_id: ctx.run.id, document_id: candidate.document_id, source_id: candidate.source_id, source_quote: candidate.source_quote,
+            block_id: candidate.block_id, source_context: candidate.source_context,
+            target_tactic_id: parent.id, expected_tactic_version: tacticVersion(parent), shared_scope: candidate.shared_scope!, new_scope: candidate.new_scope!, expansion: candidate.expansion!, separate: candidate.separate!});
+        }
+
       }
-    }
+    });
 
     const toOut = (item: JudgedCandidate<TacticCandidate>) => ({
       id: item.candidate.id,
@@ -849,9 +853,9 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
         rejected: rejected.map(toOut),
         committed_tactic_ids,
       },
-      summary: `${accepted.length} of ${plural(outcome.proposed.length, "tactic candidate")} accepted${
+      get summary() { return `${accepted.length} of ${plural(outcome.proposed.length, "tactic candidate")} accepted${
         input.dry_run ? " (dry run)" : `, ${committed_tactic_ids.length} added to the library`
-      }`,
+      }`; },
       evals: withJudgeMetrics(outcome.metrics, judged),
     };
   },
@@ -918,5 +922,5 @@ export async function listTacticCandidates(limit = 200) {
 
 /** Freeze the current source editor blocks while preserving each selected parse ID. */
 async function freezeFacts(input: z.infer<typeof inputSchema>) {
-  return { documents: await listExtractionDocuments(input.document_ids), state: await loadState() };
+  return { documents: await listExtractionDocuments(input.document_ids), state: await readStageState() };
 }

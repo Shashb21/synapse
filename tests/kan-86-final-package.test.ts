@@ -99,12 +99,18 @@ describe("KAN-86: the final plan is the complete, frozen IEGP", () => {
   it("freezes every part of the plan, with a fingerprint over the whole package", async () => {
     await makeFinalReady(ACTOR);
     await dateEverything();
+    const legacyGap = (await loadState()).gaps.find(isLiveGap)!;
+    await workspaceDb().update(iegp.gaps).set({ number: null }).where(eq(iegp.gaps.id, legacyGap.id));
+
     const plan = await savePlan({ status: "final", note: "Signed off in the Q1 review", actor: ACTOR });
     const pkg = plan.snapshot.package!;
+    const frozenNumber = pkg.evidence_gap_inventory.find((gap) => gap.id === legacyGap.id)!.number;
+    expect(frozenNumber).toBeGreaterThan(0);
     expect(pkg.schema_version).toBe(FINAL_PACKAGE_SCHEMA);
     expect(plan.snapshot.schema_version).toBe(FINAL_PACKAGE_SCHEMA);
     const state = await loadState();
     const live = state.gaps.filter(isLiveGap);
+    expect(live.find((gap) => gap.id === legacyGap.id)?.number).toBe(frozenNumber);
     // Every live gap, whatever its status or band.
     expect(pkg.evidence_gap_inventory.map((g) => g.id).sort()).toEqual(live.map((g) => g.id).sort());
     expect(pkg.evidence_gap_inventory.some((g) => g.effective_status === "validated_addressed")).toBe(true);
@@ -172,15 +178,20 @@ describe("KAN-86: the final plan is the complete, frozen IEGP", () => {
   it("writes nothing when the save fails part-way", async () => {
     const count = async () => (await db().select().from(t.iegpPlans)).length;
     const before = await count();
+    const legacyGap = (await loadState()).gaps.find(isLiveGap)!;
     // The edit record is the last write: make it fail and the plan row must go with it.
     await db().execute(sql.raw(`CREATE OR REPLACE FUNCTION kan86_fail() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN IF NEW.entity_type = 'iegp_plan' THEN RAISE EXCEPTION 'kan86 forced failure'; END IF; RETURN NEW; END $$`));
     await db().execute(sql.raw(`DROP TRIGGER IF EXISTS kan86_fail ON public.edit_records`));
     await db().execute(sql.raw(`CREATE TRIGGER kan86_fail BEFORE INSERT ON public.edit_records FOR EACH ROW EXECUTE FUNCTION kan86_fail()`));
     try {
+      await workspaceDb().update(iegp.gaps).set({ number: null }).where(eq(iegp.gaps.id, legacyGap.id));
       await expect(savePlan({ status: "final", note: "Should roll back", actor: ACTOR })).rejects.toThrow();
+      const [gap] = await workspaceDb().select({ number: iegp.gaps.number }).from(iegp.gaps).where(eq(iegp.gaps.id, legacyGap.id));
+      expect(gap?.number).toBeNull();
     } finally {
       await db().execute(sql.raw(`DROP TRIGGER IF EXISTS kan86_fail ON public.edit_records`));
+      await workspaceDb().update(iegp.gaps).set({ number: legacyGap.number }).where(eq(iegp.gaps.id, legacyGap.id));
     }
     expect(await count()).toBe(before);
   });

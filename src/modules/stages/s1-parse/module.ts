@@ -1,12 +1,13 @@
+import { stageWrite, staleStage } from "@/modules/kernel/stage-publication";
 import { customerErrorMessage } from "@/modules/kernel/stage-errors";
 import { queueSourceComparison } from "@/lib/ingest/compare-source";
-import { desc, eq, inArray } from "drizzle-orm";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { curatedS1Cases } from "@/modules/eval-gold";
 import { registerModule } from "@/modules/kernel/registry";
-import type { SynapseModule } from "@/modules/kernel/contracts";
+import type { EvalScore, ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
 import { persistSourceAndBlocks } from "@/lib/iegp/store";
 import {
   listSourceBlocks,
@@ -29,8 +30,11 @@ import {
   markFileFailed,
   markFileParsed,
   sourceFileContent,
+  sourceFileVersions,
+  type SourceFileRecord,
   unparsedFileIds,
 } from "@/modules/stages/s0-upload/module";
+import { SOURCE_FILES_DDL } from "@/modules/stages/s0-upload/schema";
 import { currentModelRun, ModelRunStop } from "@/modules/kernel/model-run";
 import { ModelAnswerError, ProviderError } from "@/modules/llm/provider-error";
 import {
@@ -44,6 +48,8 @@ import { plural } from "@/lib/plural";
 const inputSchema = z.object({
   /** Defaults to every uploaded file that has not been parsed yet. */
   file_ids: z.array(z.string()).optional(),
+  /** Ingestion may reuse the newest successful parse of each requested file. */
+  reuse_existing: z.boolean().optional(),
   /** Parse and score quality without writing the domain source. Used by evals. */
   dry_run: z.boolean().default(false),
 });
@@ -94,6 +100,71 @@ function qualityOf(blocks: ParsedDocumentBlock[]): ParseQuality {
   };
 }
 
+/** Capture reusable parse metadata and file versions without retaining raw uploads. */
+async function captureParseFiles(input: ParseInput) {
+  const requested = input.file_ids?.length ? [...new Set(input.file_ids)]
+    : input.dry_run ? undefined : await unparsedFileIds();
+  const versions = new Map((await sourceFileVersions(requested)).map(row => [row.id, row.version]));
+  const ids = requested ?? [...versions.keys()];
+  let documents: ParseOutput["documents"] = [];
+  if (input.reuse_existing && ids.length) {
+    documents = await db().selectDistinctOn([parsedDocuments.file_id], {
+      id: parsedDocuments.id, file_id: parsedDocuments.file_id, source_id: parsedDocuments.source_id,
+      parser: parsedDocuments.parser, blocks: sql<number>`jsonb_array_length(${parsedDocuments.blocks})`,
+      quality: sql<ParseQuality>`${parsedDocuments.quality}`,
+    }).from(parsedDocuments).where(inArray(parsedDocuments.file_id, ids))
+      .orderBy(parsedDocuments.file_id, desc(parsedDocuments.parsed_at), desc(parsedDocuments.id));
+  }
+  const reused = new Set(documents.map(doc => doc.file_id));
+  const files = ids.filter(id => !reused.has(id)).map(file_id => ({ file_id, version: versions.get(file_id) }));
+  return { files, documents };
+}
+
+/** Keep the raw buffer outside the closures retained for atomic publication. */
+async function parsePayload(ctx: ModuleContext, file_id: string, record: SourceFileRecord, buffer: Buffer) {
+  // The model decides the structure; only the test stub splits text by rule.
+  return ctx.run.step(
+    `parse:${file_id}`,
+    async () => {
+      if (isTestStub()) {
+        const text =
+          record.mime.startsWith("text/") || record.filename.endsWith(".txt")
+            ? buffer.toString("utf8")
+            : (await parseLocalDocument({ filename: record.filename, buffer, mime: record.mime })).blocks
+                .map((block) => block.text)
+                .join("\n\n");
+        return {
+          text,
+          sections: undefined,
+          parser: "local" as const,
+          dropped_units: [],
+          stakeholder: null,
+        };
+      }
+      const { document, dropped, dropped_units, stakeholder_rationale } = await parseWithLlm({
+        filename: record.filename,
+        buffer,
+        mime: record.mime,
+        ask: ctx.complete,
+      });
+      currentModelRun()?.check();
+      if (dropped.length > 0) ctx.run.note(`parse:dropped:${file_id}`, dropped);
+      return {
+        text: document.blocks.map((block) => block.text).join("\n\n"),
+        sections: document.blocks.map((block) => ({
+          heading: block.heading ?? block.location.ref,
+          text: block.text,
+          location: block.location.ref,
+        })),
+        parser: "llm" as const,
+        dropped_units,
+        stakeholder: { stakeholder_function: document.stakeholder_function as string, rationale: stakeholder_rationale },
+      };
+    },
+    record.mime,
+  );
+}
+
 export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
   manifest: {
     id: "s1-parse.llm",
@@ -108,68 +179,27 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
   },
   inputSchema,
   outputSchema,
-  migrations: [PARSED_DOCUMENTS_DDL],
+  migrations: [SOURCE_FILES_DDL, PARSED_DOCUMENTS_DDL],
+  captureForRun: captureParseFiles,
   async run(input, ctx) {
     requireLlm(ctx, "Parsing");
-    const ids = input.file_ids?.length
-      ? input.file_ids
-      : input.dry_run
-        ? (await listSourceFiles()).map((file) => file.id)
-        : await unparsedFileIds();
-    const documents: ParseOutput["documents"] = [];
+    const facts = (ctx.replay?.facts as Awaited<ReturnType<typeof captureParseFiles>> | undefined) ?? await captureParseFiles(input);
+    const documents: ParseOutput["documents"] = [...facts.documents];
+    const requestedCount = documents.length + facts.files.length;
     const failures: ParseOutput["failures"] = [];
 
-    for (const file_id of ids) {
+    for (const { file_id, version } of facts.files) {
       currentModelRun()?.check();
-      const loaded = await sourceFileContent(file_id);
-      if (!loaded) {
+      if (version === undefined) {
         failures.push({ file_id, reason: "file not found" });
         continue;
       }
+      const loaded = await sourceFileContent(file_id, version);
+      if (!loaded) throw staleStage();
       const began = Date.now();
       try {
         const { record, buffer } = loaded;
-        // The model decides the structure; only the test stub splits text by rule.
-        const parsed = await ctx.run.step(
-          `parse:${file_id}`,
-          async () => {
-            if (isTestStub()) {
-              const text =
-                record.mime.startsWith("text/") || record.filename.endsWith(".txt")
-                  ? buffer.toString("utf8")
-                  : (await parseLocalDocument({ filename: record.filename, buffer, mime: record.mime })).blocks
-                      .map((block) => block.text)
-                      .join("\n\n");
-              return {
-                text,
-                sections: undefined,
-                parser: "local" as const,
-                dropped_units: [],
-                stakeholder: null,
-              };
-            }
-            const { document, dropped, dropped_units, split_units, stakeholder_rationale } = await parseWithLlm({
-              filename: record.filename,
-              buffer,
-              mime: record.mime,
-              ask: ctx.complete,
-            });
-            if (dropped.length > 0) ctx.run.note(`parse:dropped:${file_id}`, dropped);
-            return {
-              text: document.blocks.map((block) => block.text).join("\n\n"),
-              sections: document.blocks.map((block, index) => ({
-                heading: block.heading ?? block.location.ref,
-                text: block.text,
-                location: block.location.ref,
-                split_unit: split_units[index],
-              })),
-              parser: "llm" as const,
-              dropped_units,
-              stakeholder: { stakeholder_function: document.stakeholder_function as string, rationale: stakeholder_rationale },
-            };
-          },
-          record.mime,
-        );
+        const parsed = await parsePayload(ctx, file_id, record, buffer);
         const sectionsFor = () =>
           parsed.sections ??
           splitSourceIntoBlocks(parsed.text, record.title).map((section) => ({ ...section, location: section.heading }));
@@ -196,83 +226,85 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
           ctx.run.note(`dry-parsed:${file_id}`, quality, `${sections.length} block(s), not persisted`);
           continue;
         }
-        // Re-parsing a file that already has a source updates that source in
-        // place: human-made and human-edited blocks survive, only model blocks
-        // are replaced. A first parse creates the source.
-        const existingSource = record.source_id
-          ? (await db().select({ id: iegp.sources.id }).from(iegp.sources).where(eq(iegp.sources.id, record.source_id)))[0]
-          : undefined;
-        const { source_id, blocks } = existingSource
-          ? await reparseSourceBlocks({ source_id: existingSource.id, sections: sectionsFor() }).then((result) => {
-              if (result.kept_human > 0 || result.kept_cited > 0) {
-                ctx.run.note(`parse:kept:${file_id}`, {
-                  kept_human: result.kept_human,
-                  kept_cited: result.kept_cited,
-                  skipped_duplicates: result.skipped_duplicates,
-                });
-              }
-              return result;
-            })
-          : await persistSourceAndBlocks({
-              title: record.title,
-              source_type: record.source_type as SourceType,
-              stakeholder_function: record.stakeholder_function as ActorFunction,
-              text: parsed.text,
-              filename: record.filename,
-              sections: parsed.sections,
-            });
-        await persistDroppedSourceUnits(source_id, parsed.dropped_units);
-        if (parsed.stakeholder) {
-          // Kept beside the source's function (chosen at upload or by a human override), never over it.
-          await recordLlmSourceStakeholder({ source_id, ...parsed.stakeholder });
-        }
-        const quality = qualityOf(blocks);
-        const id = newId("DOC");
-        await db().insert(parsedDocuments).values({
-          id,
-          file_id,
-          source_id,
-          parser: parsed.parser,
-          parser_version: PARSER_VERSION,
-          blocks,
-          quality,
-          parsed_at: nowIso(),
-          duration_ms: Date.now() - began,
+        await stageWrite(ctx, async () => {
+          // Re-parsing a file that already has a source updates that source in
+          // place: human-made and human-edited blocks survive, only model blocks
+          // are replaced. A first parse creates the source.
+          const existingSource = record.source_id
+            ? (await db().select({ id: iegp.sources.id }).from(iegp.sources).where(eq(iegp.sources.id, record.source_id)))[0]
+            : undefined;
+          const { source_id, blocks } = existingSource
+            ? await reparseSourceBlocks({ source_id: existingSource.id, sections: sectionsFor() }).then((result) => {
+                if (result.kept_human > 0 || result.kept_cited > 0) {
+                  ctx.run.note(`parse:kept:${file_id}`, {
+                    kept_human: result.kept_human,
+                    kept_cited: result.kept_cited,
+                    skipped_duplicates: result.skipped_duplicates,
+                  });
+                }
+                return result;
+              })
+            : await persistSourceAndBlocks({
+                title: record.title,
+                source_type: record.source_type as SourceType,
+                stakeholder_function: record.stakeholder_function as ActorFunction,
+                text: parsed.text,
+                filename: record.filename,
+                sections: parsed.sections,
+              });
+          await persistDroppedSourceUnits(source_id, parsed.dropped_units);
+          if (parsed.stakeholder) {
+            // Kept beside the source's function (chosen at upload or by a human override), never over it.
+            await recordLlmSourceStakeholder({ source_id, ...parsed.stakeholder });
+          }
+          const quality = qualityOf(blocks);
+          const id = newId("DOC");
+          await db().insert(parsedDocuments).values({
+            id,
+            file_id,
+            source_id,
+            parser: parsed.parser,
+            parser_version: PARSER_VERSION,
+            blocks,
+            quality,
+            parsed_at: nowIso(),
+            duration_ms: Date.now() - began,
+          });
+          await markFileParsed({ id: file_id, source_id, note: `${blocks.length} block(s)` });
+          await queueSourceComparison(source_id);
+          documents.push({ id, file_id, source_id, parser: parsed.parser, blocks: blocks.length, quality });
+          ctx.run.note(`parsed:${file_id}`, quality, `${blocks.length} block(s) → ${source_id}`);
         });
-        await markFileParsed({ id: file_id, source_id, note: `${blocks.length} block(s)` });
-        await queueSourceComparison(source_id);
-        documents.push({ id, file_id, source_id, parser: parsed.parser, blocks: blocks.length, quality });
-        ctx.run.note(`parsed:${file_id}`, quality, `${blocks.length} block(s) → ${source_id}`);
       } catch (error) {
         // A provider error (billing, key, rate limit, outage) fails every file the same
         // way: stop the stage so the run fails and the cause reaches the person (KAN-68).
         if (error instanceof ProviderError || error instanceof ModelAnswerError || error instanceof ModelRunStop) throw error;
         const reason = customerErrorMessage(error);
-        await markFileFailed({ id: file_id, note: reason });
+        if (!input.dry_run) await stageWrite(ctx, async () => { await markFileFailed({ id: file_id, note: reason }); });
         failures.push({ file_id, reason });
         ctx.run.note(`parse-failed:${file_id}`, { reason });
       }
     }
 
-    const cueRatio =
+    const cueRatio = () =>
       documents.length === 0
         ? 0
         : documents.filter((doc) => doc.quality.need_cue_blocks > 0).length / documents.length;
 
     return {
       output: { documents, failures },
-      summary: `${plural(documents.length, "document")} parsed, ${failures.length} failed`,
-      evals: [
+      get summary() { return `${plural(documents.length, "document")} parsed, ${failures.length} failed`; },
+      get evals(): EvalScore[] { return [
         { name: "documents_parsed", value: documents.length, unit: "count" },
-        { name: "with_need_language", value: Number(cueRatio.toFixed(3)), unit: "ratio", target: 0.5 },
+        { name: "with_need_language", value: Number(cueRatio().toFixed(3)), unit: "ratio", target: 0.5 },
         {
           name: "parse_success_rate",
-          value: ids.length === 0 ? 0 : Number((documents.length / ids.length).toFixed(3)),
+          value: requestedCount === 0 ? 0 : Number((documents.length / requestedCount).toFixed(3)),
           unit: "ratio",
           target: 1,
         },
-      ],
-      signals: documents
+      ]; },
+      get signals() { return documents.slice(facts.documents.length)
         .filter((doc) => doc.quality.warnings.length > 0)
         .map((doc) => ({
           stage: "S1" as const,
@@ -280,7 +312,7 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
           subject: `document:${doc.id}`,
           rationale: doc.quality.warnings.join("; "),
           payload: doc.quality,
-        })),
+        })); },
     };
   },
   evals: {

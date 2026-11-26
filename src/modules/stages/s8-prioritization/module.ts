@@ -675,8 +675,12 @@ export async function readPlacementSnapshot(gapId: string) {
 
 export async function listPlacements(): Promise<PlacementRecord[]> {
   await ensurePlacementSchema();
+  return readPlacements(await loadState());
+}
+
+/** Project placement rows against the same captured state as the model. */
+export async function readPlacements(state: IegpState): Promise<PlacementRecord[]> {
   const rows = await db().select().from(placementsTable);
-  const state = await loadState();
   return rows.map(row => toRecord(row, state));
 }
 
