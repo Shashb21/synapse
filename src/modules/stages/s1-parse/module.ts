@@ -147,7 +147,7 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
                 stakeholder: null,
               };
             }
-            const { document, dropped, dropped_units, stakeholder_rationale } = await parseWithLlm({
+            const { document, dropped, dropped_units, split_units, stakeholder_rationale } = await parseWithLlm({
               filename: record.filename,
               buffer,
               mime: record.mime,
@@ -156,10 +156,11 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
             if (dropped.length > 0) ctx.run.note(`parse:dropped:${file_id}`, dropped);
             return {
               text: document.blocks.map((block) => block.text).join("\n\n"),
-              sections: document.blocks.map((block) => ({
+              sections: document.blocks.map((block, index) => ({
                 heading: block.heading ?? block.location.ref,
                 text: block.text,
                 location: block.location.ref,
+                split_unit: split_units[index],
               })),
               parser: "llm" as const,
               dropped_units,

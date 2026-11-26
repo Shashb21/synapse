@@ -1,4 +1,5 @@
-import { integer, pgTable, text } from "drizzle-orm/pg-core";
+import type { SourceContext } from "@/lib/ingest/source-citation";
+import { integer, jsonb, pgTable, text } from "drizzle-orm/pg-core";
 
 /** Module-owned table: gap proposals with their critic score and judge verdict. */
 export const gapCandidates = pgTable("gap_candidates", {
@@ -11,6 +12,8 @@ export const gapCandidates = pgTable("gap_candidates", {
   domain: text("domain").notNull(),
   source_quote: text("source_quote").notNull(),
   block_id: text("block_id"),
+  source_context: jsonb("source_context").$type<SourceContext>(),
+  citation_error: text("citation_error"),
   score: integer("score").notNull(),
   verdict: text("verdict").notNull(),
   critic_note: text("critic_note").notNull(),
@@ -28,5 +31,8 @@ CREATE TABLE IF NOT EXISTS gap_candidates (
   domain text NOT NULL, source_quote text NOT NULL, score integer NOT NULL,
   verdict text NOT NULL, critic_note text NOT NULL, proposer text NOT NULL,
   committed_gap_id text, created_at text NOT NULL
-)
+);
+ALTER TABLE gap_candidates ADD COLUMN IF NOT EXISTS block_id text;
+ALTER TABLE gap_candidates ADD COLUMN IF NOT EXISTS source_context jsonb;
+ALTER TABLE gap_candidates ADD COLUMN IF NOT EXISTS citation_error text;
 `;

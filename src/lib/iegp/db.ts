@@ -14,6 +14,7 @@ const DEFAULT_URL =
 const globalForDb = globalThis as unknown as {
   pg?: ReturnType<typeof postgres>;
   platformPg?: ReturnType<typeof postgres>;
+  advisoryPg?: ReturnType<typeof postgres>;
   drizzle?: ReturnType<typeof drizzle<typeof schema>>;
   sharedDrizzle?: ReturnType<typeof drizzle<typeof schema>>;
   schemaLookup?: (workspaceId: string) => Promise<string | null>;
@@ -23,7 +24,46 @@ const globalForDb = globalThis as unknown as {
 };
 
 /** A workspace transaction the current async call chain runs inside (see `withWorkspaceTransaction`). */
-type AmbientTransaction = { tx: postgres.TransactionSql; schema: string; done: boolean };
+type AmbientTransaction = {
+  tx: postgres.TransactionSql;
+  schema: string;
+  done: boolean;
+  owner: TransactionOwner;
+};
+
+type TransactionOwner = {
+  assertActive: () => void;
+  run: <T>(fn: () => T | PromiseLike<T>) => Promise<T>;
+};
+
+/**
+ * postgres.js rejects begin on socket closure while its callback can still be
+ * awaiting external work. Guard queries and keep a detached callback from
+ * asking the driver to commit or roll back on a reused connection.
+ */
+async function withOwnedConnection<T>(
+  pool: ReturnType<typeof postgres>,
+  work: (tx: postgres.TransactionSql, owner: TransactionOwner) => Promise<T>,
+): Promise<T> {
+  let active = true;
+  const owner: TransactionOwner = {
+    assertActive() {
+      if (!active) throw new Error("The module run execution lock was lost.");
+    },
+    run: <R>(fn: () => R | PromiseLike<R>) => new Promise<R>((resolve, reject) => {
+      owner.assertActive();
+      Promise.resolve(fn()).then(
+        value => { if (active) resolve(value); },
+        error => { if (active) reject(error); },
+      );
+    }),
+  };
+  try {
+    return (await pool.begin(tx => owner.run(() => work(tx, owner)))) as T;
+  } finally {
+    active = false;
+  }
+}
 
 /** One store per process: Next bundles routes separately, like the workspace scope (context.ts). */
 const ambient: AsyncLocalStorage<AmbientTransaction> = (globalForDb.ambientTransaction ??=
@@ -186,6 +226,7 @@ const router = {
       const name = await resolveSchema();
       const open = transactionFor(name);
       if (open) {
+        open.owner.assertActive();
         const pending = open.tx.unsafe(query, params as never);
         return values ? pending.values() : pending;
       }
@@ -207,14 +248,18 @@ const router = {
     const name = await resolveSchema();
     const open = transactionFor(name);
     // Nested: a savepoint, so the inner block can fail alone and the outer one still commits.
-    if (open) return open.tx.savepoint((sp) => runAmbient({ tx: sp, schema: name, done: false }, () => fn(sp)));
+    if (open) {
+      open.owner.assertActive();
+      return open.tx.savepoint(sp => open.owner.run(() =>
+        runAmbient({ ...open, tx: sp, done: false }, () => fn(sp))));
+    }
     // Tables exist before the transaction opens: DDL rolled back with it would be
     // remembered as done, and the pool may have no second connection for it.
     if (name === DEFAULT_SCHEMA) await ensureCurrentSchemaTables();
-    return client().begin(async (tx) => {
+    return withOwnedConnection(client(), async (tx, owner) => {
       // SET LOCAL ends with the transaction, so the connection comes back clean.
       if (name !== DEFAULT_SCHEMA) await tx.unsafe(`set local search_path to ${quoteSchema(name)}`);
-      return runAmbient({ tx, schema: name, done: false }, () => fn(tx));
+      return runAmbient({ tx, schema: name, done: false, owner }, () => fn(tx));
     });
   },
 };
@@ -244,6 +289,39 @@ export async function withWorkspaceTransaction<T>(fn: () => Promise<T>): Promise
   // pool would wait on it while it waits on the DDL.
   if (!inWorkspaceTransaction()) await globalForDb.beforeWorkspaceTransaction?.();
   return (await router.begin(() => fn())) as T;
+}
+
+/** Capture this transaction so a send can verify its original PostgreSQL connection. */
+export function transactionLivenessCheck(): () => Promise<void> {
+  const store = ambient.getStore();
+  if (!store || store.done) throw new Error("An open workspace transaction is required.");
+  return async () => {
+    store.owner.assertActive();
+    if (store.done) throw new Error("The module run transaction ended.");
+    await store.tx`select 1`;
+    store.owner.assertActive();
+  };
+}
+
+type AdvisoryLock = {
+  assertLive: () => Promise<void>;
+  withOwnership: <T>(fn: () => Promise<T>) => Promise<T>;
+};
+
+/** Hold an advisory lock and allow specific writes to commit in its transaction. */
+export async function withIndependentAdvisoryLock<T>(name: string, key: string, fn: (lock: AdvisoryLock) => Promise<T>): Promise<T> {
+  // Comparison can overlap a newer attempt. Its lock must leave the workspace
+  // and platform pools free for both attempts to finish their short DB writes.
+  const options = connectOptions("workspace");
+  const pool = globalForDb.advisoryPg ??= postgres(DEFAULT_URL, { ...options, max: Math.max(2, options.max) });
+  return withOwnedConnection(pool, async (tx, owner) => {
+    const [lock] = await tx`select pg_try_advisory_xact_lock(hashtextextended(${key}, 0)) as locked`;
+    if (!lock?.locked) throw new Error("The module run execution lock is unavailable.");
+    await tx.unsafe(`set local search_path to ${name === DEFAULT_SCHEMA ? DEFAULT_SCHEMA : quoteSchema(name)}`);
+    const store = { tx, schema: name, done: false, owner };
+    const assertLive = ambient.run(store, transactionLivenessCheck);
+    return fn({ assertLive, withOwnership: (work) => runAmbient({ ...store }, work) });
+  });
 }
 
 /** Registered by the kernel: platform setup that must finish before a workspace transaction opens. */
@@ -466,6 +544,11 @@ function iegpStatements(): string[] {
     "ALTER TABLE gap_suggestions ADD COLUMN IF NOT EXISTS requires_current_citation boolean NOT NULL DEFAULT false",
     "ALTER TABLE needs ADD COLUMN IF NOT EXISTS observed_block_ids jsonb",
     "ALTER TABLE needs ADD COLUMN IF NOT EXISTS source_basis_text text",
+    "ALTER TABLE needs ADD COLUMN IF NOT EXISTS source_context jsonb",
+    "ALTER TABLE gap_suggestions ADD COLUMN IF NOT EXISTS block_id text",
+    "ALTER TABLE gap_suggestions ADD COLUMN IF NOT EXISTS source_context jsonb",
+    "ALTER TABLE tactics ADD COLUMN IF NOT EXISTS block_id text",
+    "ALTER TABLE tactics ADD COLUMN IF NOT EXISTS source_context jsonb",
     "ALTER TABLE gap_versions ADD COLUMN IF NOT EXISTS snapshot jsonb",
     // KAN-15: per-prefix id counters that only move up, so ids are never reissued.
     "CREATE TABLE IF NOT EXISTS id_counters (key text PRIMARY KEY, last bigint NOT NULL)",

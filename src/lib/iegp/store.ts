@@ -3407,6 +3407,8 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
   gaps: ExtractedGap[];
   tactics: (ExtractedTactic & { finding_key?: string })[];
   overlaps?: OverlapRow[];
+  /** Retained for source-citation callers; existing provenance validation remains authoritative. */
+  require_grounded_sources?: boolean;
   /** Gaps whose priority a person validated (S8 keeps those), so a new source on them is flagged. */
   validated_gap_ids?: string[];
   /** @deprecated Ignored. Mapping runs only as S4. */

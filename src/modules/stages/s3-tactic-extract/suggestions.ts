@@ -13,6 +13,7 @@ import { appendAudit, insertLibraryTactic, readState } from "@/lib/iegp/store";
 import { acceptTacticExpansion, expansionScopeSchema, tacticVersion, type ExpansionTransaction } from "@/lib/iegp/tactic-expansions";
 import { ACTOR_FUNCTIONS, TACTIC_STATUSES, TACTIC_TYPES } from "@/lib/iegp/enums";
 import type { Actor, ExpansionScope, SeparateTacticOption, Tactic, TacticSuggestion } from "@/lib/iegp/types";
+import type { SourceContext } from "@/lib/ingest/source-citation";
 import { requireRationale } from "@/modules/kernel/edit-records";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { captureTacticSuggestionDecision } from "@/lib/iegp/learning-capture";
@@ -32,7 +33,8 @@ function suggestionKey(sourceId: string, targetId: string, quote: string, blockI
 export async function moveTacticSourceCitations(
   sourceId: string,
   original: { id: string; text: string },
-  replacements: readonly { id: string; text: string }[],
+  replacements: readonly { id: string; text: string; heading?: string; location?: string }[],
+  recordConsolidation: (removedId: string, retainedId: string) => void = () => {},
 ) {
   const transaction = db();
   const references = await transaction.select().from(tacticSourceReferences)
@@ -50,6 +52,7 @@ export async function moveTacticSourceCitations(
       await transaction.update(tacticSourceReferences).set({ finding_keys: existing.finding_keys })
         .where(eq(tacticSourceReferences.id, existing.id));
       await transaction.delete(tacticSourceReferences).where(eq(tacticSourceReferences.id, reference.id));
+      recordConsolidation(reference.id, existing.id);
     } else {
       await transaction.update(tacticSourceReferences).set({ block_id: blockId, quote_key: updatedQuoteKey })
         .where(eq(tacticSourceReferences.id, reference.id));
@@ -208,6 +211,8 @@ export async function recordedTacticEvidence(sourceIds: string[], tactics: Tacti
 export async function createTacticSuggestion(args: {
   finding_key?: string; block_id?: string | null; run_id: string; document_id: string; source_id: string; source_quote: string; target_tactic_id: string;
   expected_tactic_version: string; shared_scope: string; new_scope: string; expansion: ExpansionScope; separate: SeparateTacticOption;
+  require_grounded_source?: boolean;
+  source_context?: SourceContext | null;
 }, representedPriorKeys?: ReadonlySet<string>): Promise<TacticSuggestion> {
   const expansion = expansionScopeSchema.parse(args.expansion), separate = separateTacticOptionSchema.parse(args.separate);
   if (![args.run_id, args.document_id, args.source_quote, args.shared_scope, args.new_scope].every(s => s.trim())) throw new TrustedApplicationError("Overlap requires source lineage, quote, shared and added scope.");

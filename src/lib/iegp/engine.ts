@@ -1,3 +1,5 @@
+import { validateQuoteAgainstBlock } from "@/lib/ingest/quote-validator";
+import type { SourceContext } from "@/lib/ingest/source-citation";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { assessmentDesignVersion, getRequirementBasisReview, hasSupportedFullConfirmation } from "./requirement-basis";
 import { gapResolutionVersion } from "./relationship-version";
@@ -50,10 +52,7 @@ export function reconcileHistoricalCitation(
   observedIds: string[] | null | undefined,
 ): { block_id: string } | { observed_block_ids: string[] } | null {
   if (observedIds?.includes(observedId)) return null;
-  const normalize = (value: string) => value.toLowerCase().replace(/\s+/g, " ").trim();
-  const needle = normalize(historicalQuote);
-  if (!needle) return null;
-  const matches = blocks.filter(block => normalize(block.text).includes(needle));
+  const matches = blocks.filter(block => validateQuoteAgainstBlock({ block, quote: historicalQuote }).ok);
   if (!matches.some(block => block.id === observedId)) return null;
   if (matches.length === 1 && !observedIds?.length) return { block_id: observedId };
   return { observed_block_ids: [...(observedIds ?? []), observedId] };
@@ -772,6 +771,8 @@ export type ExtractedGap = {
   domain: EvidenceDomain;
   source_id: string;
   source_quote: string;
+  block_id?: string | null;
+  source_context?: SourceContext | null;
   /**
    * Set by the stage's LLM judge: the id of the existing live gap this one is
    * the same as. Commit merges only when this is set; it never decides
@@ -797,6 +798,7 @@ export function extractCandidateGaps(
         domain: guessDomain(`${block.heading} ${statement}`),
         source_id: block.source_id,
         source_quote: sentence.slice(0, 280),
+        block_id: block.id,
       });
     }
   }
@@ -804,7 +806,6 @@ export function extractCandidateGaps(
 }
 
 export type ExtractedTactic = {
-  block_id?: string | null;
   id: string;
   name: string;
   type: TacticType;
@@ -812,6 +813,8 @@ export type ExtractedTactic = {
   evidence_question: string;
   source_id: string;
   source_quote: string;
+  block_id?: string | null;
+  source_context?: SourceContext | null;
   /**
    * Set by the stage's LLM judge: the id of the existing live tactic this one is
    * the same as. Commit merges only when this is set; it never decides
@@ -851,6 +854,7 @@ export function extractCandidateTactics(
         evidence_question: statement,
         source_id: block.source_id,
         source_quote: sentence.slice(0, 280),
+        block_id: block.id,
       });
     }
   }

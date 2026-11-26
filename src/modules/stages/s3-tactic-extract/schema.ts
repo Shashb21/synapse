@@ -1,3 +1,4 @@
+import type { SourceContext } from "@/lib/ingest/source-citation";
 import { index, integer, jsonb, pgTable, text } from "drizzle-orm/pg-core";
 
 /** Module-owned table: tactic proposals with critic score and judge verdict. */
@@ -12,6 +13,8 @@ export const tacticCandidates = pgTable("tactic_candidates", {
   evidence_question: text("evidence_question").notNull(),
   source_quote: text("source_quote").notNull(),
   block_id: text("block_id"),
+  source_context: jsonb("source_context").$type<SourceContext>(),
+  citation_error: text("citation_error"),
   score: integer("score").notNull(),
   verdict: text("verdict").notNull(),
   critic_note: text("critic_note").notNull(),
@@ -44,7 +47,7 @@ ALTER TABLE tactic_candidates ADD COLUMN IF NOT EXISTS duplicate_of text
 export const tacticSourceReferences = pgTable("tactic_source_references", {
   id: text("id").primaryKey(), tactic_id: text("tactic_id").notNull(),
   source_id: text("source_id").notNull(), source_quote: text("source_quote").notNull(),
-  block_id: text("block_id"),
+  block_id: text("block_id"), source_context: jsonb("source_context").$type<SourceContext>(),
   observed_block_ids: jsonb("observed_block_ids").$type<string[]>(),
   finding_keys: jsonb("finding_keys").$type<string[]>().notNull().default([]),
   quote_key: text("quote_key").notNull(), created_at: text("created_at").notNull(),
@@ -56,15 +59,22 @@ export const tacticSuggestions = pgTable("tactic_suggestions", {
   created_at: text("created_at").notNull(), updated_at: text("updated_at").notNull(),
 }, table => [index("tactic_suggestions_source_key_idx").on(table.source_key)]);
 export const TACTIC_MATCHING_DDL = `
+ALTER TABLE tactic_candidates ADD COLUMN IF NOT EXISTS block_id text;
+ALTER TABLE tactic_candidates ADD COLUMN IF NOT EXISTS source_context jsonb;
+ALTER TABLE tactic_candidates ADD COLUMN IF NOT EXISTS citation_error text;
 ALTER TABLE tactic_candidates ADD COLUMN IF NOT EXISTS match text NOT NULL DEFAULT 'new';
 ALTER TABLE tactic_candidates ADD COLUMN IF NOT EXISTS target_tactic_id text;
 ALTER TABLE tactic_candidates ADD COLUMN IF NOT EXISTS matching jsonb;
 CREATE TABLE IF NOT EXISTS tactic_source_references (
  id text PRIMARY KEY, tactic_id text NOT NULL, source_id text NOT NULL,
- source_quote text NOT NULL, quote_key text NOT NULL, created_at text NOT NULL,
- UNIQUE(tactic_id, source_id, quote_key)
+ source_quote text NOT NULL, quote_key text NOT NULL, created_at text NOT NULL
 );
 ALTER TABLE tactic_source_references ADD COLUMN IF NOT EXISTS finding_keys jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE tactic_source_references ADD COLUMN IF NOT EXISTS block_id text;
+ALTER TABLE tactic_source_references ADD COLUMN IF NOT EXISTS source_context jsonb;
+CREATE UNIQUE INDEX IF NOT EXISTS tactic_source_references_block_quote_idx
+ ON tactic_source_references (tactic_id, source_id, quote_key, coalesce(block_id, ''));
+ALTER TABLE tactic_source_references DROP CONSTRAINT IF EXISTS tactic_source_references_tactic_id_source_id_quote_key_key;
 ALTER TABLE tactic_source_references ADD COLUMN IF NOT EXISTS block_id text;
 ALTER TABLE tactic_source_references ADD COLUMN IF NOT EXISTS observed_block_ids jsonb;
 CREATE TABLE IF NOT EXISTS tactic_suggestions (

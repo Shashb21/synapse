@@ -17,6 +17,7 @@ import {
   lockTactic,
   makeLock,
   modifyGap,
+  persistSourceAndBlocks,
   resetDemoSetup,
   rewritePartialGap,
   setGapMetadata,
@@ -42,25 +43,31 @@ import { gapCandidates } from "@/modules/stages/s2-gap-extract/schema";
 
 const ACTOR = { name: "KAN-97 Test", function: "heor" as const };
 const who = { actor_name: ACTOR.name, actor_function: ACTOR.function };
-const SOURCE = "SRC-KAN97";
+const SOURCE_TITLE = "KAN-97 interview";
 
+/** Store the interview passages that the extraction fixtures cite. */
 async function addSource() {
-  await db().insert(t.sources).values({
-    id: SOURCE,
+  const sections = [
+    { heading: "Older patients", location: "p.1", text: "Nobody looked at the over-75s." },
+    { heading: "Trial eligibility", location: "p.2", text: `${"The over-75s are missing from every trial. ".repeat(12)}End.` },
+    { heading: "Caregiver interviews", location: "p.3", text: "Carers struggle." },
+  ];
+  const { source_id, blocks } = await persistSourceAndBlocks({
     filename: "kan97.txt",
-    title: "KAN-97 interview",
-    source_type: "interview",
+    title: SOURCE_TITLE,
+    source_type: "stakeholder_interview",
     stakeholder_function: "heor",
-    ingested_at: new Date().toISOString(),
-    full_text: "Interview",
-  }).onConflictDoNothing();
+    text: sections.map(({ text }) => text).join("\n\n"),
+    sections,
+  });
+  return { source_id, olderPatients: blocks[0]!, trialEligibility: blocks[1]!, caregivers: blocks[2]! };
 }
 
 async function makePartialGap() {
   // A reset clears module tables too (priority, ideas, timeline), as the app's reset does.
   await resetDemoSetup();
   await resetWorkspaceModules();
-  await addSource();
+  const source = await addSource();
   const gapId = await createGap({
     name: "Comparative effectiveness in elderly patients",
     statement: "Need comparative effectiveness versus regional standard of care in elderly patients.",
@@ -99,11 +106,11 @@ async function makePartialGap() {
   await syncComputedGapStatuses(gapId);
   const gap = (await loadState()).gaps.find((g) => g.id === gapId)!;
   expect(displayedGapStatus(gap)).toBe("validated_partial");
-  return { gapId, tacticId };
+  return { gapId, tacticId, source };
 }
 
 /** Everything a person can hang off a gap before it is split. */
-async function decorate(gapId: string, tacticId: string) {
+async function decorate(gapId: string, tacticId: string, source: Awaited<ReturnType<typeof addSource>>) {
   const at = new Date().toISOString();
   await db().insert(kernel.priorityPlacements).values({
     gap_id: gapId, axis_scores: {}, suggested_band: "high", suggested_rationale: "Model", band: "high",
@@ -122,11 +129,12 @@ async function decorate(gapId: string, tacticId: string) {
     gap_id: gapId, tactic_id: "TAC-REJECTED", status: "rejected", lock: makeLock(ACTOR.name, ACTOR.function, "Wrong population"),
   });
   const overlap = await commitExtractedRecords({
-    source_id: SOURCE, title: "KAN-97 interview", stakeholder_function: "heor", ...who, needs: [], gaps: [], tactics: [],
+    source_id: source.source_id, title: SOURCE_TITLE, stakeholder_function: "heor", ...who, needs: [], gaps: [], tactics: [],
+    require_grounded_sources: true,
     overlaps: [{
       id: "O-97", gap_id: gapId, run_id: "kan97-run", candidate_row_id: null,
       name: "Over-75s", statement: "Over-75s are unstudied.", domain: "comparative_effectiveness",
-      source_quote: "Nobody looked at the over-75s.", shared_part: "Shared", new_part: "New",
+      source_quote: source.olderPatients.text, block_id: source.olderPatients.id, shared_part: "Shared", new_part: "New",
       merged_name: "Merged", merged_statement: "Merged statement", split_name: "Split", split_statement: "Split statement",
     }],
   });
@@ -135,8 +143,8 @@ async function decorate(gapId: string, tacticId: string) {
 
 describe("KAN-97 split and rewrite carry the gap's record", () => {
   it("a split moves priority (to re-validate), ideas, timeline and the suggestion to the open child; groups and rejections to both", async () => {
-    const { gapId, tacticId } = await makePartialGap();
-    const { suggestionId } = await decorate(gapId, tacticId);
+    const { gapId, tacticId, source } = await makePartialGap();
+    const { suggestionId } = await decorate(gapId, tacticId, source);
     const before = (await loadState()).gaps.find((g) => g.id === gapId)!;
     const { addressedId, openId } = await splitPartialGap({
       expected_resolution: gapResolutionVersion(await loadState(), gapId), note: "Separate the covered and remaining evidence scope",
@@ -179,8 +187,8 @@ describe("KAN-97 split and rewrite carry the gap's record", () => {
   });
 
   it("an intended Addressed rewrite stays provisional and preserves carry/close behavior without orphans", async () => {
-    const { gapId, tacticId } = await makePartialGap();
-    await decorate(gapId, tacticId);
+    const { gapId, tacticId, source } = await makePartialGap();
+    await decorate(gapId, tacticId, source);
     const liveId = await rewritePartialGap({
       expected_resolution: gapResolutionVersion(await loadState(), gapId), note: "Separate the covered and remaining evidence scope",
       gap_id: gapId, name: "Covered by the chart review", status: "validated_addressed", tactic_id: tacticId, ...who,
@@ -200,7 +208,7 @@ describe("KAN-97 split and rewrite carry the gap's record", () => {
 describe("KAN-97 confirmation", () => {
   it("validating records who, when and why; a later edit keeps it; a merge reword clears it with a reason", async () => {
     await resetDemoSetup();
-    await addSource();
+    const { source_id, olderPatients } = await addSource();
     const gapId = await createGap({ name: "Versus SoC", statement: "No comparative data versus SoC.", domain: "comparative_effectiveness", ...who });
     await validateGap({ gap_id: gapId, ...who, note: "Both sources agree" });
     let gap = (await loadState()).gaps.find((g) => g.id === gapId)!;
@@ -212,18 +220,19 @@ describe("KAN-97 confirmation", () => {
     expect(gap.validated_at).toBe(confirmedAt);
 
     const result = await commitExtractedRecords({
-      source_id: SOURCE, title: "KAN-97 interview", stakeholder_function: "heor", ...who, needs: [], gaps: [], tactics: [],
+      source_id, title: SOURCE_TITLE, stakeholder_function: "heor", ...who, needs: [], gaps: [], tactics: [],
+      require_grounded_sources: true,
       overlaps: [{
         id: "O-M", gap_id: gapId, run_id: "kan97-merge", candidate_row_id: "gc-kan97-merge",
         name: "Over-75s", statement: "Over-75s are unstudied.", domain: "comparative_effectiveness",
-        source_quote: "Nobody looked at the over-75s.", shared_part: "Shared", new_part: "New",
+        source_quote: olderPatients.text, block_id: olderPatients.id, shared_part: "Shared", new_part: "New",
         merged_name: "Versus SoC incl. over-75s", merged_statement: "No comparative data versus SoC, including over-75s.",
         split_name: "Split", split_statement: "Split statement",
       }],
     });
     await db().insert(gapCandidates).values({
-      id: "gc-kan97-merge", run_id: "kan97-merge", document_id: "doc", source_id: SOURCE, name: "Over-75s",
-      statement: "Over-75s are unstudied.", domain: "comparative_effectiveness", source_quote: "Nobody looked at the over-75s.",
+      id: "gc-kan97-merge", run_id: "kan97-merge", document_id: "doc", source_id, name: "Over-75s",
+      statement: "Over-75s are unstudied.", domain: "comparative_effectiveness", source_quote: olderPatients.text, block_id: olderPatients.id,
       score: 80, verdict: "accept", critic_note: "Overlaps", proposer: "model", committed_gap_id: null, created_at: new Date().toISOString(),
     }).onConflictDoNothing();
     await acceptGapMergeSuggestion({ suggestion_id: Object.values(result.suggestion_id_by_row)[0]!, rationale: "Same question", ...who });
@@ -235,7 +244,7 @@ describe("KAN-97 confirmation", () => {
     expect(cleared).toMatchObject({ before: `Confirmed by ${ACTOR.name}`, after: "Needs confirming" });
     // The merged source's need knows its run and candidate, and the candidate knows its gap.
     const merged = state.needs.find((n) => n.candidate_row_id === "gc-kan97-merge")!;
-    expect(merged.run_id).toBe("kan97-merge");
+    expect(merged).toMatchObject({ run_id: "kan97-merge", block_id: olderPatients.id, source_quote: olderPatients.text });
     const [candidate] = await db().select().from(gapCandidates).where(eq(gapCandidates.id, "gc-kan97-merge"));
     expect(candidate!.committed_gap_id).toBe(gapId);
   });
@@ -244,27 +253,28 @@ describe("KAN-97 confirmation", () => {
 describe("KAN-97 S2 provenance and split suggestions", () => {
   it("keeps the whole quote and the need's provenance; a split suggestion's gap links back and inherits", async () => {
     await resetDemoSetup();
-    await addSource();
-    const longQuote = `${"The over-75s are missing from every trial. ".repeat(12)}End.`;
+    const { source_id, trialEligibility, caregivers } = await addSource();
+    const longQuote = trialEligibility.text;
     const committed = await commitExtractedRecords({
-      source_id: SOURCE, title: "KAN-97 interview", stakeholder_function: "heor", ...who, tactics: [],
-      needs: [{ id: "C1", statement: "Over-75s are unstudied.", source_quote: longQuote, provenance: { run_id: "kan97-s2", candidate_row_id: "gc-1", block_id: "blk-1" } }],
-      gaps: [{ id: "C1", name: "Over-75s", statement: "Over-75s are unstudied.", domain: "unmet_need", source_id: SOURCE, source_quote: longQuote, duplicate_of: null }],
+      source_id, title: SOURCE_TITLE, stakeholder_function: "heor", ...who, tactics: [], require_grounded_sources: true,
+      needs: [{ id: "C1", statement: "Over-75s are unstudied.", source_quote: longQuote, provenance: { run_id: "kan97-s2", candidate_row_id: "gc-1", block_id: trialEligibility.id } }],
+      gaps: [{ id: "C1", name: "Over-75s", statement: "Over-75s are unstudied.", domain: "unmet_need", source_id, source_quote: longQuote, block_id: trialEligibility.id, duplicate_of: null }],
     });
     const gapId = committed.gap_id_by_row.C1!;
     let state = await loadState();
     const need = state.needs.find((n) => state.need_gap_links.some((l) => l.need_id === n.id && l.gap_id === gapId))!;
     expect(need.source_quote).toBe(longQuote);
-    expect(need).toMatchObject({ run_id: "kan97-s2", candidate_row_id: "gc-1", block_id: "blk-1" });
+    expect(need).toMatchObject({ run_id: "kan97-s2", candidate_row_id: "gc-1", block_id: trialEligibility.id });
 
     await setGapSettings({ gap_id: gapId, expected_settings: (await loadState()).gaps.find(gap => gap.id === gapId)!.settings, settings: ["2L"], rationale: "Correct the setting", ...who });
     await setGapMetadata({ gap_id: gapId, expected_metadata: (await loadState()).gaps.find(gap => gap.id === gapId)!.metadata, metadata: { stakeholders: ["Payers"], geography: "EU5" }, ...who, rationale: "From the interview" });
     const overlap = await commitExtractedRecords({
-      source_id: SOURCE, title: "KAN-97 interview", stakeholder_function: "heor", ...who, needs: [], gaps: [], tactics: [],
+      source_id, title: SOURCE_TITLE, stakeholder_function: "heor", ...who, needs: [], gaps: [], tactics: [],
+      require_grounded_sources: true,
       overlaps: [{
         id: "O-S", gap_id: gapId, run_id: "kan97-split", candidate_row_id: null,
         name: "Caregivers", statement: "Caregiver burden is unknown.", domain: "caregiver_burden",
-        source_quote: "Carers struggle.", shared_part: "Shared", new_part: "New",
+        source_quote: caregivers.text, block_id: caregivers.id, shared_part: "Shared", new_part: "New",
         merged_name: "Merged", merged_statement: "Merged", split_name: "Caregiver burden in over-75s", split_statement: "Caregiver burden in over-75s is unknown.",
       }],
     });
@@ -311,8 +321,8 @@ describe("KAN-97 settings, metadata and objective edits", () => {
 
 describe("KAN-97 one record per gap", () => {
   it("gapRecord returns the gap's needs, coverages, priority, ideas, timeline and groups together", async () => {
-    const { gapId, tacticId } = await makePartialGap();
-    await decorate(gapId, tacticId);
+    const { gapId, tacticId, source } = await makePartialGap();
+    await decorate(gapId, tacticId, source);
     const record = (await gapRecord(gapId))!;
     expect(record.gap.id).toBe(gapId);
     expect(record.needs.length).toBeGreaterThan(0);

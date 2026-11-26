@@ -1,3 +1,4 @@
+import type { SourceContext } from "@/lib/ingest/source-citation";
 import type { CustomTacticType } from "./custom-tactic-type";
 import type {
   ActorFunction,
@@ -106,6 +107,7 @@ export type EvidenceNeed = {
   run_id?: string | null;
   candidate_row_id?: string | null;
   block_id?: string | null;
+  source_context?: SourceContext | null;
   /** Verified occurrences of an older quote whose original block is ambiguous. */
   observed_block_ids?: string[] | null;
 };
@@ -228,6 +230,7 @@ export type GapSuggestionSource = {
   source_id: string;
   statement: string;
   source_quote: string;
+  source_context?: SourceContext | null;
   domain?: EvidenceDomain;
   provenance?: NeedProvenance;
 };
@@ -250,6 +253,7 @@ export type GapSuggestion = {
   statement: string;
   domain: EvidenceDomain;
   source_quote: string;
+  source_context?: SourceContext | null;
   shared_part: string;
   new_part: string;
   merged_name: string;
@@ -345,7 +349,6 @@ export type BreakoutGroupGap = {
 };
 
 export type Tactic = {
-  block_id?: string | null;
   id: string;
   name: string;
   type: TacticType;
@@ -370,6 +373,8 @@ export type Tactic = {
   lock: Lock;
   /** The source sentence S3 extracted this tactic from. Empty for hand-created tactics. */
   source_quote?: string;
+  block_id?: string | null;
+  source_context?: SourceContext | null;
   /** A person's own type name and colour, shown over the standard type (KAN-51). */
   custom_type?: CustomTacticType | null;
 };
@@ -558,9 +563,10 @@ export type IegpState = {
 
 /** Source-owned overlap proposal; model baseline and human edits are retained separately. */
 export type TacticSuggestion = {
-  block_id?: string | null;
   id: string; version: string; run_id: string; document_id: string; source_id: string; source_quote: string;
   finding_key?: string;
+  block_id?: string | null;
+  source_context?: SourceContext | null;
   target_tactic_id: string; expected_tactic_version: string; reviewed_parent: Tactic;
   shared_scope: string; new_scope: string; expansion: ExpansionScope; original_expansion: ExpansionScope;
   separate: SeparateTacticOption; original_separate: SeparateTacticOption; gap_id: string | null;

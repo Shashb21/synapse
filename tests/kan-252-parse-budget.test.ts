@@ -106,11 +106,13 @@ describe("S1 per-document request limit", () => {
   });
 
   it("shares retry consumption across multiple structure groups and classification", async () => {
-    const second = "Long fictional panel observations. ".repeat(400);
-    const fetch = scriptedRequests(3, [{}, structure, {
+    const first = source.repeat(160);
+    const second = "Long fictional panel observations. ".repeat(180);
+    const firstStructure = { units: [{ unit: "u1", blocks: [{ text: first, kind: "paragraph" }] }] };
+    const fetch = scriptedRequests(3, [{}, firstStructure, {
       units: [{ unit: "u2", blocks: [{ text: second.trim(), kind: "paragraph" }] }],
     }]);
-    await expect(parse(`${source}\n\n${second}`)).rejects.toMatchObject({ code: "parse_limit" });
+    await expect(parse(`${first}\n\n${second}`)).rejects.toMatchObject({ code: "parse_limit" });
     const promptedUnits = fetch.mock.calls.map(([, init]) => {
       const prompt = JSON.parse(String(init.body)).messages[1].content;
       return JSON.parse(prompt).units.map((unit: { unit: string }) => unit.unit);
