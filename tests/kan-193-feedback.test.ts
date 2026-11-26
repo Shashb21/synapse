@@ -9,8 +9,8 @@ import { RoutingPanel, type StageRouteView } from "@/components/platform/routing
 import { ProviderPanel, type ProviderKeyCardView } from "@/components/platform/provider-panel";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const providers = [
-  { id: "xai-grok", label: "xAI · Grok", models: ["grok-4"], default_model: "grok-4", auth: "api_key" as const, status: "missing" as const },
-  { id: "anthropic-claude", label: "Anthropic · Claude", models: ["claude-sonnet"], default_model: "claude-sonnet", auth: "api_key" as const, status: "configured" as const },
+  { id: "xai-grok", approved_fallbacks: ["anthropic-claude"], label: "xAI · Grok", models: ["grok-4"], default_model: "grok-4", auth: "api_key" as const, status: "missing" as const },
+  { id: "anthropic-claude", approved_fallbacks: [] as string[], label: "Anthropic · Claude", models: ["claude-sonnet"], default_model: "claude-sonnet", auth: "api_key" as const, status: "configured" as const },
 ];
 const route: StageRouteView = {
   stage: "S2", stage_title: "S2 · Evidence gap extraction", module_id: "extract", module_version: "1", available_modules: [], agentic: true,

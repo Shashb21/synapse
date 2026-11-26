@@ -1,7 +1,7 @@
 /** Owner API integration proofs against the isolated KAN-201 database. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextResponse } from "next/server";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { canonicalParsedJson } from "@/modules/development/documents";
 import * as owner from "@/modules/auth/owner";
 import { GET as list, POST as create } from "@/app/api/admin/development/route";
@@ -41,7 +41,10 @@ async function draft(workspace: string | null = null) {
   expect(response.status).toBe(201);
   return (await response.json()).experiment;
 }
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
 describe("KAN-201 owner Development setup", () => {
   it("creates, lists, saves and reopens with stale writes refused", async () => {
     const initial = await draft();
@@ -492,7 +495,7 @@ describe("KAN-201 owner Development setup", () => {
       expect(response.status).toBe(400);
     },
   );
-  it("retains compatible PDF expected answers from the scripted production completion boundary", async () => {
+  it("retains compatible PDF expected answers from an authorized paid preparation", async () => {
     const initial = await draft();
     const uploaded = await upload(
       req({
@@ -504,18 +507,21 @@ describe("KAN-201 owner Development setup", () => {
     );
     const source = (await uploaded.json()).experiment.documents[0];
     vi.spyOn(llm, "isTestStub").mockReturnValue(false);
-    vi.spyOn(routing, "resolveRoute").mockResolvedValue({
+    vi.stubEnv("OPENAI_API_KEY", "fictional-openai-key");
+    vi.stubEnv("OPENAI_BASE_URL", "https://api.openai.com/v1");
+    const resolvedRoute = {
       stage: "S1",
-      provider_id: "scripted",
-      provider_label: "Scripted",
-      model: "scripted-model",
+      provider_id: "openai",
+      provider_label: "OpenAI",
+      model: "gpt-4.1",
       auth: "api_key",
       connected: true,
       params: { temperature: 0, max_tokens: 1000 },
       fallbacks: [],
       degraded: false,
       reason: null,
-    });
+    } satisfies Awaited<ReturnType<typeof routing.resolveRoute>>;
+    const route = vi.spyOn(routing, "resolveRoute").mockResolvedValue(resolvedRoute);
     const expected = {
       version: 1,
       section: "gap_extraction",
@@ -529,8 +535,11 @@ describe("KAN-201 owner Development setup", () => {
         },
       ],
     };
-    const ask = vi.fn().mockResolvedValue(expected);
-    vi.spyOn(routing, "completionFor").mockReturnValue(ask);
+    const transport = vi.spyOn(globalThis, "fetch").mockImplementation(async () => Response.json({
+      choices: [{ finish_reason: "stop", message: { content: JSON.stringify(expected) } }],
+      service_tier: "default",
+      usage: { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150, prompt_tokens_details: { cached_tokens: 0 } },
+    }));
     vi.spyOn(parsing, "extractRawUnits").mockResolvedValue([
       {
         text: "Need comparative evidence",
@@ -561,17 +570,25 @@ describe("KAN-201 owner Development setup", () => {
       split_units: {},
       stakeholder_rationale: "Test fixture",
     });
-    const response = await reference(
-      req({
-        revision: 2,
-        filename: "gold.pdf",
-        content_base64: encoded("%PDF-1.7 expert fixture"),
-        format: "pdf",
-        section: "gap_extraction",
-        source_document_ids: [source.id],
-      }),
-      ctx(initial.id),
-    );
+    const input = {
+      revision: 2,
+      filename: "gold.pdf",
+      content_base64: encoded("%PDF-1.7 expert fixture"),
+      format: "pdf",
+      section: "gap_extraction",
+      source_document_ids: [source.id],
+    };
+    const preparation = { id: randomUUID(), allowance_usd: 3 };
+    route.mockResolvedValueOnce({ ...resolvedRoute, model: "gpt-4.1-unsupported" });
+    const unpriced = await reference(req({ ...input, preparation }), ctx(initial.id));
+    expect(unpriced.status).toBe(409);
+    expect(await unpriced.json()).toMatchObject({ code: "unverified_preparation_cost" });
+    const unauthorized = await reference(req(input), ctx(initial.id));
+    expect(unauthorized.status).toBe(409);
+    expect(await unauthorized.json()).toMatchObject({ code: "preparation_not_authorized" });
+    expect(transport).not.toHaveBeenCalled();
+
+    const response = await reference(req({ ...input, preparation }), ctx(initial.id));
     expect(response.status).toBe(200);
     const gold = (await response.json()).experiment.documents.find(
       (document: { role: string }) => document.role === "reference",
@@ -591,9 +608,14 @@ describe("KAN-201 owner Development setup", () => {
         },
       ],
     });
-    expect(gold.parser.model).toBe("scripted-model");
-    expect(gold.parser.provider_id).toBe("scripted");
-    expect(ask).toHaveBeenCalledOnce();
+    expect(gold.parser.model).toBe("gpt-4.1");
+    expect(gold.parser.provider_id).toBe("openai");
+    expect(transport).toHaveBeenCalledOnce();
+    const reservations = await sharedDb().execute(sql`
+      select bound_usd::text, usage_cost, settled_at is not null as settled
+      from development_preparation_calls where preparation_id=${preparation.id}::uuid
+    `);
+    expect(reservations).toMatchObject([{ bound_usd: "2.357296", usage_cost: { cost_usd: 0.0006 }, settled: true }]);
   });
   it("gives an actionable provider gate and bounded-body response", async () => {
     const initial = await draft();

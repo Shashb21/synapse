@@ -1,3 +1,4 @@
+import { reviewInventoryForPriorities } from "./support/priority-decision";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/headers", () => ({
@@ -93,6 +94,7 @@ describe("server: nothing assumed", () => {
     const state = await loadState();
     expect(isLiveGap(state.gaps.find((g) => g.id === gapId)!)).toBe(true);
     expect(displayedGapStatus(state.gaps.find((g) => g.id === gapId)!)).toBe("validated_open");
+    await reviewInventoryForPriorities(ACTOR);
     const run = await runStage<{ placements: unknown[] }>({ stage: "S8", input: {}, actor: ACTOR, role: "medical_affairs" });
     expect(run.summary).toMatch(/no axis pair was chosen/);
     const unchosen = (await listPlacements()).find((row) => row.gap_id === gapId)!;

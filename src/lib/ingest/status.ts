@@ -2,20 +2,30 @@
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import { ingestionJobs, INGESTION_JOBS_DDL } from "./schema";
 
-/** Source references whose enabled ingestion steps have all completed. */
-export async function completedIngestSourceIds(): Promise<Set<string>> {
+/** Completed source IDs, with replay provenance from the same saved checkpoint. */
+export async function completedIngestSources(): Promise<{ ids: Set<string>; replayedIds: Set<string> }> {
   await ensurePlatformSchema([INGESTION_JOBS_DDL]);
   const jobs = await db().select().from(ingestionJobs);
   const ids = new Set<string>();
+  const replayedIds = new Set<string>();
   for (const job of jobs) {
     const state = job.checkpoint as {
       completed: number;
       stages: string[];
       result: { source_ids: string[] };
+      execution_source?: "demo_replay";
     };
     if (state.completed === state.stages.length) {
-      for (const id of state.result.source_ids) ids.add(id);
+      for (const id of state.result.source_ids) {
+        ids.add(id);
+        if (state.execution_source === "demo_replay") replayedIds.add(id);
+      }
     }
   }
-  return ids;
+  return { ids, replayedIds };
+}
+
+/** Source references whose enabled ingestion steps have all completed. */
+export async function completedIngestSourceIds(): Promise<Set<string>> {
+  return (await completedIngestSources()).ids;
 }

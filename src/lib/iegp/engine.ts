@@ -98,7 +98,10 @@ export function uncoveredDimensions(
   );
 }
 
-export type AddressingTactic = Pick<Tactic, "id" | "status" | "type" | "evidence_available">;
+type TacticAddressingStatus = Pick<Tactic, "status" | "type" | "evidence_available"> &
+  Partial<Pick<Tactic, "review_status">>;
+
+export type AddressingTactic = Pick<Tactic, "id"> & TacticAddressingStatus;
 
 const PUBLICATION_TYPES: ReadonlySet<TacticType> = new Set([
   "publication",
@@ -119,11 +122,9 @@ export function isPublishedLiterature(
   return Boolean(tactic.evidence_available?.trim());
 }
 
-/** Completed + ongoing + planned count; proposed does not (unless published literature). */
-export function tacticCountsTowardAddressing(
-  tactic: Pick<Tactic, "status" | "type" | "evidence_available">,
-): boolean {
-  if (tactic.status === "cancelled") return false;
+/** Rejected tactics contribute no evidence. Otherwise use the delivery lifecycle and publication evidence. */
+export function tacticCountsTowardAddressing(tactic: TacticAddressingStatus): boolean {
+  if (tactic.review_status === "rejected" || tactic.status === "cancelled") return false;
   if (tactic.status === "completed" || tactic.status === "ongoing" || tactic.status === "planned") {
     return true;
   }
@@ -138,13 +139,12 @@ export function countingCoverages(
   const byId = new Map(tactics.map((t) => [t.id, t]));
   return coverages.filter((c) => {
     const tactic = byId.get(c.tactic_id);
-    if (c.expansion_id) {
-      const child = expansions.find((e) => e.id === c.expansion_id);
-      return Boolean(tactic && child && child.tactic_id === c.tactic_id &&
-        child.gap_ids.includes(c.gap_id) &&
-        ["planned", "ongoing", "completed"].includes(child.status));
-    }
-    return Boolean(tactic && tacticCountsTowardAddressing(tactic));
+    if (!tactic) return false;
+    if (!c.expansion_id) return tacticCountsTowardAddressing(tactic);
+    if (tactic.review_status === "rejected") return false;
+    const child = expansions.find((e) => e.id === c.expansion_id);
+    return Boolean(child && child.tactic_id === c.tactic_id && child.gap_ids.includes(c.gap_id) &&
+      ["planned", "ongoing", "completed"].includes(child.status));
   });
 }
 
@@ -401,25 +401,23 @@ export function needEvalMetrics(
   const wrong = pairs.filter((p) => p.kind === "wrong").length;
   const missed = pairs.filter((p) => p.kind === "missed").length;
   const must = gold.filter((g) => g.must_find);
-  const mustPaired = must.filter((g) =>
-    pairs.some(
-      (p) => p.gold_id === g.id && (p.kind === "exact" || p.kind === "partial"),
-    ),
-  ).length;
+  const mustIds = new Set(must.map(row => row.id));
+  const mustPaired = pairs.reduce((sum, pair) => {
+    if (!pair.gold_id || !mustIds.has(pair.gold_id)) return sum;
+    return sum + (pair.kind === "exact" ? 1 : pair.kind === "partial" ? 0.5 : 0);
+  }, 0);
   const precision =
-    extractedCount === 0 ? 0 : (exact + 0.5 * partial) / extractedCount;
+    gold.length && extractedCount > 0 ? (exact + 0.5 * partial) / extractedCount : null;
   // With no must-find gold there is nothing to recall: recall, F1 and the
   // composite are unscored (null), never a perfect 1 (KAN-62).
+  const wrongRate = precision === null ? null : wrong / extractedCount;
   if (must.length === 0) {
-    const wrongRate = extractedCount === 0 ? 0 : wrong / extractedCount;
     return { exact, partial, wrong, missed, precision, recall: null, f1: null, wrongRate, composite: null, scored: false as const };
   }
   const recall = mustPaired / must.length;
   const f1 =
-    precision + recall === 0 ? 0 : (2 * precision * recall) / (precision + recall);
-  const wrongRate = extractedCount === 0 ? 0 : wrong / extractedCount;
-  const composite =
-    0.4 * f1 + 0.3 * (1 - wrongRate) + 0.3 * recall;
+    precision === null || precision + recall === 0 ? 0 : (2 * precision * recall) / (precision + recall);
+  const composite = f1;
   return { exact, partial, wrong, missed, precision, recall, f1, wrongRate, composite, scored: true as const };
 }
 
@@ -442,7 +440,7 @@ export function coverageEval(
     exact,
     missed,
     wrong,
-    recall: gold.length === 0 ? 1 : exact / gold.length,
+    recall: gold.length === 0 ? null : exact / gold.length,
   };
 }
 
@@ -876,13 +874,42 @@ export function isParked(gap: Pick<EvidenceGap, "parked_at">): boolean {
   return Boolean(gap.parked_at);
 }
 
-export function gapsReadyForPrioritize(state: IegpState): boolean {
+export type PrioritizationBlocker =
+  | { gapId: null; reason: string }
+  | { gapId: string; gapName: string; reason: string };
+
+export type GapPrioritizationReadiness = {
+  liveCount: number;
+  blockers: PrioritizationBlocker[];
+};
+
+/** Reports which live evidence assessments need human review before prioritization. */
+export function gapPrioritizationReadiness(state: Pick<IegpState, "gaps">): GapPrioritizationReadiness {
   const live = state.gaps.filter(isLiveGap);
-  if (live.length === 0) return false;
-  return live.every((gap) => {
+  const blockers: PrioritizationBlocker[] = [];
+  if (live.length === 0) {
+    blockers.push({ gapId: null, reason: "Add and confirm at least one live gap in Evidence Inventory." });
+  }
+  for (const gap of live) {
     const shown = displayedGapStatus(gap);
-    return gap.human_validated && shown !== "validated_partial" && shown !== "candidate";
-  });
+    let reason: string;
+    if (shown === "validated_partial") {
+      reason = "Coverage is Partially Addressed and still provisional. Split or rewrite this gap as Open or Addressed, then confirm the assessment.";
+    } else if (shown === "candidate") {
+      reason = "Review this Candidate. Add and confirm an Open or Addressed gap if it belongs in the inventory, then park the Candidate.";
+    } else if (!gap.human_validated) {
+      reason = "Confirm the evidence assessment with your reason. If the computed status needs an Open or Addressed override, record the override with a reason.";
+    } else {
+      continue;
+    }
+    blockers.push({ gapId: gap.id, gapName: gap.name, reason });
+  }
+  return { liveCount: live.length, blockers };
+}
+
+/** Whether every live assessment is settled and the inventory is nonempty. */
+export function gapsReadyForPrioritize(state: IegpState): boolean {
+  return gapPrioritizationReadiness(state).blockers.length === 0;
 }
 
 const ACCEPTED_GAP_FOR_MAPPING: GapStatus[] = ["validated_open", "validated_partial"];

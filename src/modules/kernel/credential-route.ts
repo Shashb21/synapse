@@ -8,6 +8,7 @@ export type CredentialProvider = {
   default_model: string;
   status: "configured" | "missing";
   models?: string[];
+  approved_fallbacks?: string[];
 };
 export type CredentialRoute = { provider_id: string; model: string; fallbacks: string[] };
 
@@ -19,7 +20,8 @@ export function stageHasRoute(stage: StageId): boolean {
 /** Select the first configured cloud provider in the saved, permitted order; never call it. */
 export function selectCredentialRoute(config: CredentialRoute, providers: CredentialProvider[]) {
   const rejected: { id: string; reason: "unknown" | "not_llm" | "missing" }[] = [];
-  const candidates = [config.provider_id, ...config.fallbacks].filter(id => id !== "deterministic-local");
+  const approved = providers.find(provider => provider.id === config.provider_id)?.approved_fallbacks ?? [];
+  const candidates = [config.provider_id, ...config.fallbacks.filter(id => approved.includes(id))];
   for (const [index, id] of candidates.entries()) {
     const provider = providers.find(candidate => candidate.id === id);
     if (!provider) rejected.push({ id, reason: "unknown" });

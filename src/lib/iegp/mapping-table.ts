@@ -110,6 +110,10 @@ export function buildMappingTableView(
     const unreviewed = locked.filter((id) => decisions[id]?.status !== "accepted");
     const human = humanMappingRow(state, gap.id);
     const gap_status = GAP_TO_MAPPING_STATUS[displayedGapStatus(gap)] ?? "open";
+    const proposal = proposedByGap.get(gap.id);
+    const reassessments = proposal?.mappings.filter(mapping => mapping.review_only) ?? [];
+    const inspectReferences = (mappings: MappingTableRow["mappings"]) =>
+      Object.fromEntries(mappings.map(mapping => [mapping.tactic_id, inspectJudgementReferences(state, [gap.id], mapping.references)]));
     if (human) {
       // The person's row wins over the latest S4 run.
       return {
@@ -120,7 +124,8 @@ export function buildMappingTableView(
         mapping_status: human.mapping_status,
         confidence: undefined,
         rationale: [human.rationale],
-        mappings: [],
+        mappings: reassessments,
+        supporting_references: inspectReferences(reassessments),
         review: null,
         source: "human" as const,
         locked_tactic_ids: locked,
@@ -130,11 +135,23 @@ export function buildMappingTableView(
         gap_status, relationship_versions, relationships_version,
       };
     }
-    const proposal = proposedByGap.get(gap.id);
     if (proposal) {
+      const reassessedIds = new Set(reassessments.map(mapping => mapping.tactic_id));
+      const proposedIds = proposal.tactic_ids.filter(id => !reassessedIds.has(id));
+      const tactic_ids = [...new Set([...proposedIds, ...locked.filter(id => reassessedIds.has(id))])];
+      const includedStaleCoverage = proposedIds.length !== proposal.tactic_ids.length;
+      // Older run outputs can include a reassessment in their proposed membership and status.
+      const needsReviewOnlyStatus = reassessments.length > 0 && proposedIds.length === 0;
+      const mapping_status = needsReviewOnlyStatus ? undefined :
+        includedStaleCoverage && proposal.mapping_status === "addressed" &&
+          !proposal.mappings.some(mapping => !mapping.review_only && mapping.coverage === "full")
+          ? "partially_addressed" : proposal.mapping_status;
       return {
         ...proposal,
-        supporting_references: Object.fromEntries(proposal.mappings.map(mapping => [mapping.tactic_id, inspectJudgementReferences(state, [gap.id], mapping.references)])),
+        tactic_ids,
+        tactic_names: tactic_ids.map(tacticName),
+        mapping_status,
+        supporting_references: inspectReferences(proposal.mappings),
         gap_name: gap.name,
         source: "proposal" as const,
         locked_tactic_ids: locked,

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { SourceComparisonStatus } from "@/components/source-comparison-status";
 import { listSourceComparisons } from "@/lib/ingest/compare-source";
-import { completedIngestSourceIds } from "@/lib/ingest/status";
+import { completedIngestSources } from "@/lib/ingest/status";
 import { LockForm } from "@/components/lock-form";
 import { AddSourceForm } from "@/components/add-source-form";
 import {
@@ -27,12 +27,13 @@ export async function IngestPanel({
   /** The workspace holds the Velmara demo: offer its demo source files. */
   demoFiles?: boolean;
 }) {
-  const completed = await completedIngestSourceIds();
+  const completed = await completedIngestSources();
   const comparisons = await listSourceComparisons();
   // Client demo mode (KAN-138): the full client documents, replayed from the recording.
   const clientDemo = demoFiles && (await isDemoModeWorkspace());
   const pack = clientDemo ? CLIENT_DEMO_PACK : DEMO_PACK;
-  const ingestedTitles = new Set(sources.filter((source) => completed.has(source.id)).map((source) => source.title));
+  const ingestedTitles = new Set(sources.filter((source) => completed.ids.has(source.id)).map((source) => source.title));
+  const replayedTitles = new Set(sources.filter((source) => completed.replayedIds.has(source.id)).map((source) => source.title));
   const savedTitles = new Set(sources.map((source) => source.title));
 
   return (
@@ -66,7 +67,9 @@ export async function IngestPanel({
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <p className="text-[13px] text-foreground">{file.title}</p>
                   <span className="text-[11px] text-muted-foreground">
-                    {ingested ? "Ingested" : savedTitles.has(file.title) ? "Source saved · ingest to finish extraction" : "Not ingested"}
+                    {ingested
+                      ? replayedTitles.has(file.title) ? "Ingested · Includes recorded Velmara steps" : "Ingested"
+                      : savedTitles.has(file.title) ? "Source saved · ingest to finish extraction" : "Not ingested"}
                   </span>
                 </div>
                 <p className="mt-1 text-[12px] text-muted-foreground">

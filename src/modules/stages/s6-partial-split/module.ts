@@ -1,3 +1,4 @@
+import { commitStageMutation } from "@/modules/kernel/stage-publication";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { gapResolutionVersion } from "@/lib/iegp/relationship-version";
 import { getRun } from "@/modules/kernel/observability";
@@ -447,7 +448,7 @@ async function applySplit(
   apply: NonNullable<SplitInput["apply"]>,
   ctx: ModuleContext,
 ): Promise<{ output: SplitOutput; summary: string }> {
-  const edit = await decidePartialSplit({ gap_id: gapId, apply, originating_run_id: apply.originating_run_id, decision: "accept", actor: ctx.actor, workspace_id: ctx.workspace_id });
+  const edit = await decidePartialSplit({ gap_id: gapId, apply, originating_run_id: apply.originating_run_id, decision: "accept", actor: ctx.actor, workspace_id: ctx.workspace_id }, ctx);
   return {
     output: {
       mode: isTestStub() ? "deterministic" : "llm",
@@ -472,7 +473,7 @@ export async function decidePartialSplit(args: {
   rationale?: string;
   actor: Actor;
   workspace_id?: string;
-}): Promise<{ edit_id: string }> {
+}, ctx?: ModuleContext): Promise<{ edit_id: string }> {
   const workspace_id = args.workspace_id ?? (await scopedWorkspaceId()) ?? "default";
   let original: Proposal | null = null;
   if (args.originating_run_id) {
@@ -510,23 +511,27 @@ export async function decidePartialSplit(args: {
   const suppliedRationale = (args.rationale ?? apply?.rationale ?? "").trim();
   if (original && (edited || args.decision === "reject") && suppliedRationale.length < 3) throw new TrustedApplicationError("Give a short reason for editing or rejecting the proposed split.");
   const rationale = requireRationale(suppliedRationale);
-  if (args.decision === "accept" && apply) {
-    await splitPartialGap({
-      parent_gap_id: gap.id,
-      expected_resolution: apply.expected_resolution,
-      ...(original ? { expected_proposal_resolution: original.expected_resolution ?? "" } : {}),
-      addressed_name: apply.addressed_name,
-      addressed_statement: apply.addressed_statement,
-      open_name: apply.open_name,
-      open_statement: apply.open_statement,
-      tactic_ids: apply.addressed_tactic_ids,
-      open_tactic_ids: apply.open_tactic_ids,
-      actor_name: args.actor.name,
-      actor_function: args.actor.function,
-      note: rationale,
-    });
-  }
-  const edit = await recordEdit({ workspace_id, stage: "S6", entity_type: "gap", entity_id: gap.id, field: "split", action: args.decision === "reject" ? "reject" : "split", before: original ? JSON.stringify(original) : gap.statement, after: args.decision === "reject" ? null : JSON.stringify(final), rationale, actor: args.actor });
+  const edit = await commitStageMutation(ctx, async (markWritten) => {
+    if (args.decision === "accept" && apply) {
+      await splitPartialGap({
+        parent_gap_id: gap.id,
+        expected_resolution: apply.expected_resolution,
+        ...(original ? { expected_proposal_resolution: original.expected_resolution ?? "" } : {}),
+        addressed_name: apply.addressed_name,
+        addressed_statement: apply.addressed_statement,
+        open_name: apply.open_name,
+        open_statement: apply.open_statement,
+        tactic_ids: apply.addressed_tactic_ids,
+        open_tactic_ids: apply.open_tactic_ids,
+        actor_name: args.actor.name,
+        actor_function: args.actor.function,
+        note: rationale,
+      });
+    }
+    const saved = await recordEdit({ workspace_id, stage: "S6", entity_type: "gap", entity_id: gap.id, field: "split", action: args.decision === "reject" ? "reject" : "split", before: original ? JSON.stringify(original) : gap.statement, after: args.decision === "reject" ? null : JSON.stringify(final), rationale, actor: args.actor });
+    markWritten();
+    return saved;
+  });
   if (original) await captureResidualDecision({ workspace_id, run_id: args.originating_run_id, capture_key: edit.id, actor: args.actor, parent_gap_id: gap.id, proposed: original, final: args.decision === "reject" ? null : final, decision: args.decision === "reject" ? "reject" : edited ? "edit" : "accept", rationale });
   return { edit_id: edit.id };
 }

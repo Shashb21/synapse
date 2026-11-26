@@ -1,5 +1,5 @@
 import { modelMappingSupport } from "./support/model-mapping";
-import { priorityDecision } from "./support/priority-decision";
+import { priorityDecision, reviewInventoryForPriorities } from "./support/priority-decision";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db as workspaceDb, withWorkspaceTransaction } from "@/lib/iegp/db";
@@ -214,6 +214,7 @@ describe("KAN-75 merge", () => {
 
   beforeEach(async () => {
     gapId = await newGap();
+    await reviewInventoryForPriorities(ACTOR);
     // Prioritize places Open gaps only: validate the band before a tactic changes the status.
     await validatePlacement({ ...await priorityDecision(gapId, "blocks the HTA decision"), gap_id: gapId, band: "high", rationale: "blocks the HTA decision", actor: ACTOR });
     await recordMissedTactic({ name: `Registry ${gapId}`, type: "registry", evidence_question: "q", status: "ongoing", ...who });

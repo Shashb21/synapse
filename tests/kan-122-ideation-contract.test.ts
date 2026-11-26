@@ -6,7 +6,7 @@ import type { IdeationGapBrief } from "@/modules/stages/s9-ideation/context";
 import { ideationModule } from "@/modules/stages/s9-ideation/module";
 
 type PromptBody = {
-  gaps: {id: string; brief: IdeationGapBrief; revise?: {id: string}[]; candidates: {id: string}[]}[];
+  gaps: {id: string; brief: IdeationGapBrief; revise?: {id: string}[]; outcome_requested?: boolean; candidates: {id: string}[]}[];
   tactics: {id: string}[];
 };
 
@@ -33,14 +33,14 @@ function setup(kind: "reuse" | "expansion" | "new" = "reuse") {
     deadline: {status:"conditional", explanation:"Confirm existing output availability against the evidence deadline."},
   };
   const scope = {name:"Added comparison",evidence_question:"Can compatible data support comparison?",population:"Adults",outcomes:"OS",geography:"",data_cut:"",analysis:"Post-hoc comparative analysis",instrument:"",study_design:"Post-hoc compatible cohort analysis",gap_coverage:"Added comparator analysis",cost_effort:"Analyst effort",timing:"After access approval",feasibility_risks:"Confirm comparator data compatibility",post_hoc:true,prospective_enrolment:false,protocol_amendment:false,start_date:null,evidence_available:null};
-  const candidate = {id:"slot", gap_id:gap.id,references:[{entity_type:"gap",entity_id:gap.id,reason:"The supplied gap defines this remaining evidence question"}],contract_version:2,proposal_kind:kind,target_tactic_id:kind === "new" ? null : target.id,expansion_scope:kind === "expansion" ? scope : null,comparative_rationale:recommendation.alternatives_rationale,name:kind === "expansion" ? scope.name : "Use recorded output",type:"rwe_study",evidence_question:kind === "expansion" ? scope.evidence_question : "Use the unchanged planned evidence",rationale:"Request coverage review without claiming evidence is delivered.",population:"Adults",comparator:"Unconfirmed",outcomes:"OS",data_source:"Existing planned dataset",study_design:kind === "expansion" ? scope.study_design : "Existing recorded design",duration_months:6,readout_lag_months:1,timing_rationale:"Original planned timing remains authoritative",recommendation};
+  const candidate = {id:`${gap.id}:proposal:1`, gap_id:gap.id,references:[{entity_type:"gap",entity_id:gap.id,reason:"The supplied gap defines this remaining evidence question"}],contract_version:2,proposal_kind:kind,target_tactic_id:kind === "new" ? null : target.id,expansion_scope:kind === "expansion" ? scope : null,comparative_rationale:recommendation.alternatives_rationale,name:kind === "expansion" ? scope.name : "Use recorded output",type:"rwe_study",evidence_question:kind === "expansion" ? scope.evidence_question : "Use the unchanged planned evidence",rationale:"Request coverage review without claiming evidence is delivered.",population:"Adults",comparator:"Unconfirmed",outcomes:"OS",data_source:"Existing planned dataset",study_design:kind === "expansion" ? scope.study_design : "Existing recorded design",duration_months:6,readout_lag_months:1,timing_rationale:"Original planned timing remains authoritative",recommendation};
   if (kind === "reuse") Object.assign(candidate, {type:target.type,evidence_question:target.evidence_question,population:target.population,comparator:target.comparator,outcomes:target.outcomes,data_source:target.data_source,study_design:target.study_design});
   const calls: {purpose:string; body:PromptBody; system:string}[] = [];
   const ctx: ModuleContext = {ai:true,workspace_id:"default",actor:{name:"Test",function:"medical_affairs"},role:"medical_affairs",route:{stage:"S9",provider_id:"test",provider_label:"Test",model:"test",auth:"api_key",connected:true,params:{temperature:0,max_tokens:4096},fallbacks:[],degraded:false,reason:null},run:{id:"controlled",step:async(_name,fn)=>fn(),note:()=>{},steps:()=>[]},replay:{evaluation:true,input:{},facts:{state,placements:[{gap_id:gap.id,band:"high",validated:true,rationale:"Blocks decision"}]},module_id:"s9-ideation.pcj",module_version:"2.3.0",prompt_version:"test"},complete:async({purpose,user,system})=>{
     const body=JSON.parse(user) as PromptBody; calls.push({purpose,body,system});
     if(purpose==="ideation-proposer") return {tactics:[{...candidate,id:body.gaps[0]?.revise?.[0]?.id ?? candidate.id}]};
     if(purpose==="ideation-critic") return {reviews:body.tactics.map((p)=>({id:p.id,references:candidate.references,verdict:"keep",confidence:70,note:"Conditional on the specified compatibility and coverage checks",issues:[],duplicate_of:null}))};
-    return {gaps:body.gaps.map((g)=>({gap_id:g.id,decisions:g.candidates.map((p)=>({id:p.id,references:candidate.references,verdict:"accept",confidence:70,rank:1,reason:"Review relevance without changing recorded coverage"}))}))};
+    return {gaps:body.gaps.map((g)=>({gap_id:g.id,outcome:g.outcome_requested === false ? undefined : {status:"options",explanation:"The accepted options need human review."},decisions:g.candidates.map((p)=>({id:p.id,references:candidate.references,verdict:"accept",confidence:70,rank:1,reason:"Review relevance without changing recorded coverage"}))}))};
   }};
   return {state,gap,target,candidate,recommendation,calls,ctx};
 }
@@ -55,6 +55,8 @@ describe("KAN-122 controlled recommendation contract",()=>{
     expect(proposer.body.gaps[0].brief.requirements.unknown_dimensions).toContain("comparator");
     expect(calls.find(call=>call.purpose==="ideation-critic")!.body.tactics[0]).toMatchObject({recommendation,gap:{brief:{priority:{rationale:"Blocks decision"}}}});
     expect(calls.find(call=>call.purpose==="ideation-judge")!.body.gaps[0].brief.mapped_tactics[0].coverage.overall).toBe("partial");
+    // KAN-263: the write precondition stays with the proposal, across all model roles.
+    expect(JSON.stringify(calls)).not.toContain("supporting_context_basis");
   });
 
   it("allows fewer useful candidates than frozen slots instead of filling a route quota", async () => {

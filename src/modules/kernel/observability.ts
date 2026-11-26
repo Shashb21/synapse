@@ -3,6 +3,7 @@ import { HISTORICAL_FAILURE_MESSAGE, projectFailureDiagnostics, projectRunSteps 
 import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { currentSchemaName, transactionLivenessCheck, withIndependentAdvisoryLock, withWorkspaceTransaction } from "@/lib/iegp/db";
 import { DEFAULT_WORKSPACE_ID, scopedWorkspaceId } from "@/modules/workspaces/context";
+import { DEMO_REPLAY_PROVIDER } from "@/lib/demo/replay-provider";
 import { db, ensurePlatformSchema } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "./ids";
@@ -163,8 +164,8 @@ export async function withRunningRun<T>(recorder: RunRecorder, execute: (assertL
 
 export const SOURCE_COMPARISON_MODULE = "incoming-source-comparison";
 
-function comparisonRunLock(schema: string, id: string): string {
-  return `source-comparison-run:${schema}:${id}`;
+function independentRunLock(schema: string, id: string): string {
+  return `workspace-run:${schema}:${id}`;
 }
 
 type ComparisonRunOwnership = {
@@ -175,13 +176,23 @@ type ComparisonRunOwnership = {
 /** Keep a source comparison recoverable while it awaits a model outside workspace transactions. */
 export async function withRunningSourceComparison<T>(recorder: RunRecorder, execute: (ownership: ComparisonRunOwnership) => Promise<T>): Promise<T> {
   const schema = await currentSchemaName();
-  return withIndependentAdvisoryLock(schema, comparisonRunLock(schema, recorder.id), async ({ assertLive, withOwnership }) => {
+  return withIndependentAdvisoryLock(schema, independentRunLock(schema, recorder.id), async ({ assertLive, withOwnership }) => {
     const [row] = await withOwnership(() => db().select({ id: t.moduleRuns.id }).from(t.moduleRuns).where(runningRun(recorder)).execute());
     if (!row) throw new Error("The module run is already finalized.");
     return execute({
       assertLive,
       finalize: (args) => withOwnership(() => closeRun({ ...args, recorder })),
     });
+  });
+}
+
+/** Keep a phased stage recoverable while its model calls run outside workspace transactions. */
+export async function withRunningStagePublication<T>(recorder: RunRecorder, execute: (assertLive: () => Promise<void>) => Promise<T>): Promise<T> {
+  const schema = await currentSchemaName();
+  return withIndependentAdvisoryLock(schema, independentRunLock(schema, recorder.id), async ({ assertLive, withOwnership }) => {
+    const [row] = await withOwnership(() => db().select({ id: t.moduleRuns.id }).from(t.moduleRuns).where(runningRun(recorder)).execute());
+    if (!row) throw new Error("The module run is already finalized.");
+    return execute(assertLive);
   });
 }
 
@@ -245,7 +256,7 @@ export async function recoverInterruptedRuns(id?: string): Promise<void> {
     id === undefined ? undefined : eq(t.moduleRuns.id, id),
   );
   await withWorkspaceTransaction(async () => {
-    const rows = await db().select({ id: t.moduleRuns.id, stage: t.moduleRuns.stage, module: t.moduleRuns.module_id }).from(t.moduleRuns)
+    const rows = await db().select({ id: t.moduleRuns.id, stage: t.moduleRuns.stage }).from(t.moduleRuns)
       .where(expired).orderBy(asc(t.moduleRuns.started_at), asc(t.moduleRuns.id))
       .limit(id === undefined ? MAX_RECOVERY_ROWS : 1).for("update", { skipLocked: true });
     let recoverable = rows;
@@ -259,13 +270,10 @@ export async function recoverInterruptedRuns(id?: string): Promise<void> {
     }
     const unlockedIds: string[] = [];
     for (const row of recoverable) {
-      if (row.module === SOURCE_COMPARISON_MODULE) {
-        const [lock] = await db().execute(sql`
-          select pg_try_advisory_xact_lock(hashtextextended(${comparisonRunLock(schema, row.id)}, 0)) as locked
-        `);
-        if (!lock?.locked) continue;
-      }
-      unlockedIds.push(row.id);
+      const [lock] = await db().execute(sql`
+        select pg_try_advisory_xact_lock(hashtextextended(${independentRunLock(schema, row.id)}, 0)) as locked
+      `);
+      if (lock?.locked) unlockedIds.push(row.id);
     }
     if (unlockedIds.length === 0) return;
     await db().update(t.moduleRuns).set({
@@ -312,6 +320,20 @@ export async function getRun(id: string): Promise<RunRecord | null> {
   await ensurePlatformSchema();
   const rows = await db().select().from(t.moduleRuns).where(eq(t.moduleRuns.id, id)).limit(1);
   return rows[0] ? toRecord(rows[0]) : null;
+}
+
+/** Check the recorded origins of already-saved suggestions in the current workspace. */
+export async function hasCompletedDemoReplay(stage: StageId, runIds: string[]): Promise<boolean> {
+  if (!runIds.length) return false;
+  await ensurePlatformSchema();
+  const rows = await db().select({ id: t.moduleRuns.id }).from(t.moduleRuns).where(and(
+    inArray(t.moduleRuns.id, runIds),
+    eq(t.moduleRuns.stage, stage),
+    eq(t.moduleRuns.status, "ok"),
+    sql`${t.moduleRuns.route}->>'provider_id' = ${DEMO_REPLAY_PROVIDER.id}`,
+    sql`exists (select 1 from jsonb_array_elements(${t.moduleRuns.steps}) as steps(value) where value->>'name' like 'llm:%')`,
+  )).limit(1);
+  return rows.length > 0;
 }
 
 export type StageHealth = {

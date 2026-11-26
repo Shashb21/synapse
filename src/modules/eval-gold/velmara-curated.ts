@@ -1,6 +1,9 @@
+import { isDeepStrictEqual } from "node:util";
+import { buildSeed } from "@/lib/iegp/seed";
+import type { IegpState } from "@/lib/iegp/types";
 import type { StageId } from "@/modules/kernel/contracts";
 import { demoSourceById } from "@/lib/iegp/demo-pack";
-import { listParsedDocuments } from "@/modules/stages/s1-parse/module";
+import { listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
 import { listSourceFiles } from "@/modules/stages/s0-upload/module";
 import type { CuratedGoldMeta } from "./types";
 
@@ -61,12 +64,6 @@ export const CURATED_SOURCES: SourceGold[] = [
   },
 ];
 
-export async function parsedDocumentIdForSource(source_id: string): Promise<string | null> {
-  const documents = await listParsedDocuments();
-  const match = documents.find((doc) => doc.source_id === source_id);
-  return match?.id ?? null;
-}
-
 export async function sourceFileIdForSource(source_id: string): Promise<string | null> {
   const files = await listSourceFiles();
   const direct = files.find((file) => file.source_id === source_id);
@@ -95,4 +92,25 @@ export function goldMetaForSource(source: SourceGold): CuratedGoldMeta {
 
 export function sourcesForStage(stage: StageId): SourceGold[] {
   return CURATED_SOURCES.filter((row) => row.stages.includes(stage));
+}
+
+const curatedSeed = buildSeed();
+
+/** Certify the source generation and every ordered block supplied to the extraction stage. */
+export function extractionGold(
+  stage: "S2" | "S3",
+  document: ParsedDocumentRecord,
+  sources: IegpState["sources"],
+): CuratedGoldMeta | undefined {
+  const source = sourcesForStage(stage).find((row) => row.source_id === document.source_id);
+  if (!source) return;
+  const expectedSource = curatedSeed.sources.find((row) => row.id === source.source_id);
+  const actualSource = sources.find((row) => row.id === source.source_id);
+  const expectedBlocks = curatedSeed.blocks.filter((block) => block.source_id === source.source_id);
+  if (
+    expectedSource &&
+    expectedBlocks.length > 0 &&
+    isDeepStrictEqual(actualSource, expectedSource) &&
+    isDeepStrictEqual(document.blocks, expectedBlocks)
+  ) return goldMetaForSource(source);
 }

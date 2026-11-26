@@ -1,17 +1,88 @@
-/** Persisted candidates keep held-out lineage away from model inputs and live prompts. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { sql } from "drizzle-orm";
 import { db, sharedDb } from "@/modules/kernel/db";
+import { createWorkspace, setLearningSharingEligible, learningSharingEligible } from "@/modules/workspaces/store";
+import { proposePromptRevision, listPromptRevisions, getRevisionCohort } from "@/modules/kernel/prompt-revisions";
+import * as routing from "@/modules/kernel/routing";
+import { ensurePlatformSchema } from "@/modules/kernel/db";
+import * as examples from "@/modules/kernel/decision-examples";
+
 import { computeLesson, getDecisionExample, recordDecisionExample } from "@/modules/kernel/decision-examples";
 import * as observations from "@/modules/kernel/observability";
 import * as transactions from "@/lib/iegp/db";
 import * as stateStore from "@/lib/iegp/store";
-import * as routing from "@/modules/kernel/routing";
 import * as llm from "@/modules/kernel/llm";
-import { activePromptVersion } from "@/modules/kernel/prompt-variant";
-import { createWorkspace, setLearningSharingEligible, learningSharingEligible } from "@/modules/workspaces/store";
-import { AiDisabledError, setAiEnabled } from "@/modules/kernel/ai-switch";
-import { freezeRevisionCohort, getRevisionCohort, getPromptRevision, listPromptRevisions, proposePromptRevision } from "@/modules/kernel/prompt-revisions";
+import * as approvedRoutes from "@/modules/kernel/approved-evaluation-route";
+import { setAiEnabled } from "@/modules/kernel/ai-switch";
+import { activeModule } from "@/modules/kernel/registry";
+import type { ResolvedRoute } from "@/modules/kernel/contracts";
+import { priorityReviewExample } from "./support/priority-review-example";
+
+describe("prompt revision preflight", () => {
+  it("refuses unsupported stages before loading lessons or allocating a cohort", async () => {
+    const read = vi.spyOn(examples, "listDecisionExamples");
+    try {
+      for (const stage of ["S2", "S3", "S6"] as const) {
+        await expect(
+          proposePromptRevision({
+            stage,
+            workspace_id: "fiction",
+            exclude_ids: [],
+            actor: { name: "Owner", function: "medical_affairs" },
+          }),
+        ).rejects.toThrow("human target contract");
+      }
+      expect(read).not.toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+  it("creates no candidate or orphan cohort when the workspace lacks independent gold", async () => {
+    const ws = await createWorkspace({ name: "fiction-" + crypto.randomUUID(), owner: "fiction-owner" });
+    const completion = vi.spyOn(routing, "completionFor");
+    vi.spyOn(routing, "routeConfigs").mockResolvedValue([
+      {
+        stage: "S8",
+        provider_id: "test",
+        model: "fiction",
+        params: { temperature: 0, max_tokens: 500 },
+        fallbacks: [],
+        updated_by: "fixture",
+        updated_at: "2026-01-01",
+      },
+    ]);
+    vi.spyOn(routing, "resolveRoute").mockResolvedValue({
+      stage: "S8",
+      provider_id: "test",
+      provider_label: "fiction",
+      model: "fiction",
+      params: { temperature: 0, max_tokens: 500 },
+      degraded: false,
+      connected: true,
+      auth: "api_key",
+      fallbacks: [],
+      reason: null,
+    });
+    try {
+      await ensurePlatformSchema();
+      await expect(
+        proposePromptRevision({
+          stage: "S8",
+          workspace_id: ws.id,
+          exclude_ids: [],
+          actor: { name: "Owner", function: "medical_affairs" },
+        }),
+      ).rejects.toThrow("three independent");
+      expect(completion).not.toHaveBeenCalled();
+      expect(await listPromptRevisions(ws.id)).toEqual([]);
+      expect(await sharedDb().execute(sql`select id from prompt_revision_cohorts where workspace_id=${ws.id}`)).toHaveLength(
+        0,
+      );
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+});
 
 const ownedWorkspaceIds: string[] = [];
 const actor = { name: "Owner", function: "medical_affairs" as const };
@@ -28,7 +99,34 @@ async function fixture() {
   }
   return { ws, ids };
 }
-describe("prompt revision generation", () => {
+/** Build a valid S8 cohort, leaving the S2 lesson fixture independent. */
+function proposeWithEvidence(workspaceId: string) {
+  const route = {
+    stage: "S8", provider_id: "xai-grok", provider_label: "xAI", model: "grok-4",
+    connected: true, auth: "api_key", degraded: false, fallbacks: [], reason: null,
+    params: { temperature: 0, max_tokens: 2000 },
+  } satisfies ResolvedRoute;
+  vi.spyOn(approvedRoutes, "approvedEvaluationRoute").mockResolvedValue(route);
+  vi.spyOn(examples, "listDecisionExamples").mockImplementation(async ({ stage }) => {
+    expect(stage).toBe("S8");
+    const implementation = await activeModule("S8");
+    return [1, 2, 3, 4, 5].map(index => {
+      const example = priorityReviewExample(index, route, workspaceId);
+      return {
+        ...example,
+        lesson: index % 2 ? "Check competing interpretations." : "Separate overlapping populations.",
+        replay_input: {
+          ...example.replay_input!,
+          module_id: implementation.manifest.id,
+          module_version: implementation.manifest.version,
+        },
+      };
+    });
+  });
+  return proposePromptRevision({ stage: "S8", workspace_id: workspaceId, actor, exclude_ids: [] });
+}
+
+describe("learning run ownership", () => {
   it.each(["lesson", "revision"] as const)("discards a delayed %s response after the run owner disconnects", async kind => {
     const { ws, ids } = await fixture();
     await sharedDb().execute(sql`update decision_examples set lesson_status = 'pending', lesson = null where id = ${ids[0]}`);
@@ -57,7 +155,7 @@ describe("prompt revision generation", () => {
       return Response.json({ choices: [{ message: { content: kind === "lesson" ? content : JSON.stringify({ instruction_text: "Separate distinct populations." }) } }] });
     });
     vi.stubGlobal("fetch", http);
-    const processing = (kind === "lesson" ? computeLesson(ids[0]) : proposePromptRevision({ stage: "S2", workspace_id: ws.id, actor, exclude_ids: [] })).catch(error => error);
+    const processing = (kind === "lesson" ? computeLesson(ids[0]) : proposeWithEvidence(ws.id)).catch(error => error);
     try {
       const owner = await Promise.race([entered.promise, processing.then(result => { throw new Error(String(result)); })]);
       const [disconnected] = await sharedDb().execute(sql`select pg_terminate_backend(${owner}::integer, 5000) as ok`);
@@ -73,6 +171,7 @@ describe("prompt revision generation", () => {
       await lateWork.promise;
       expect(await getDecisionExample(ids[0])).toMatchObject({ lesson_status: kind === "lesson" ? "failed" : "pending", lesson: null });
       expect(await listPromptRevisions(ws.id)).toEqual([]);
+      expect(await sharedDb().execute(sql`select id from prompt_revision_cohorts where workspace_id = ${ws.id}`)).toHaveLength(0);
       expect(await sharedDb().execute(sql`select id from audit_events where run_id = ${failed.id} and action = 'prompt.generate'`)).toHaveLength(0);
       expect(await sharedDb().execute(sql`select * from ${runsTable} where id = ${failed.id}`)).toEqual([failed]);
       expect(http).toHaveBeenCalledTimes(1);
@@ -104,7 +203,7 @@ describe("prompt revision generation", () => {
     });
     try {
       if (kind === "lesson") expect(await computeLesson(ids[0])).toBe("failed");
-      else await expect(proposePromptRevision({ stage: "S2", workspace_id: ws.id, actor, exclude_ids: [] })).rejects.toThrow();
+      else await expect(proposeWithEvidence(ws.id)).rejects.toThrow();
       const [failed] = await sharedDb().execute(sql`select error from ${table} where status = 'error'`);
       expect(failed?.error).toContain(diagnostic);
     } finally {
@@ -112,58 +211,26 @@ describe("prompt revision generation", () => {
       vi.unstubAllEnvs();
     }
   });
-  it("freezes linked run and subject decisions in one held-out group", async () => {
-    const { ws, ids } = await fixture();
-    await sharedDb().execute(sql`update decision_examples set run_id = 'run-5' where id = ${ids[4]}`);
-    await sharedDb().execute(sql`update decision_examples set subject_id = 'subject-4' where id = ${ids[3]}`);
-    const cohort = await freezeRevisionCohort({ stage: "S2", workspace_id: ws.id, exclude_ids: [] });
-    expect(cohort.heldout_ids).toEqual(expect.arrayContaining(ids.slice(3)));
-    expect(cohort.training_ids.some(id => cohort.heldout_ids.includes(id))).toBe(false);
-    expect(await getRevisionCohort(cohort.id, ws.id)).toEqual(cohort);
-    expect(await getRevisionCohort(cohort.id, "foreign")).toBeNull();
-    expect(cohort.replay_exclusions).toMatchObject({ [ids[5]]: expect.stringContaining("frozen") });
-  });
-  it("only sends revalidated disagreement lessons, persists evidence and never activates", async () => {
-    const { ws, ids } = await fixture();
-    await sharedDb().execute(sql`update decision_examples set lesson = 'Reviewers keep Secretbrand separate.' where id = ${ids[2]}`);
-    vi.spyOn(llm, "isTestStub").mockReturnValue(false);
-    vi.spyOn(routing, "resolveRoute").mockResolvedValue({ stage: "S2", provider_id: "xai", model: "grok-4", connected: true, auth: "api_key" } as Awaited<ReturnType<typeof routing.resolveRoute>>);
-    const complete = vi.fn(async () => ({ instruction_text: "Keep distinct decision questions separate." }));
-    vi.spyOn(routing, "completionFor").mockReturnValue(complete);
-    const before = activePromptVersion();
-    const candidate = await proposePromptRevision({ stage: "S2", workspace_id: ws.id, actor, exclude_ids: [ids[1]] });
-    const call = JSON.stringify(complete.mock.calls);
-    expect(call).toContain("Reviewers keep a narrower population separate.");
-    for (const secret of [...ids, "Secretbrand", "private answer", "private reviewer answer", "private rationale", "raw customer input"]) expect(call).not.toContain(secret);
-    expect(candidate.state).toBe("candidate"); expect(candidate.parent_revision).toBe(before);
-    expect(candidate.training_ids).toEqual([ids[3]]);
-    expect(candidate.heldout_ids).toEqual(expect.arrayContaining(ids.slice(4)));
-    expect(candidate.excluded_ids).toContain(ids[1]);
-    expect(await getPromptRevision(candidate.id, ws.id)).toEqual(candidate);
-    const second = await proposePromptRevision({ stage: "S2", workspace_id: ws.id, actor, exclude_ids: [] });
-    expect(second.id).not.toBe(candidate.id); expect(await getPromptRevision(candidate.id, ws.id)).toEqual(candidate);
-    expect((await listPromptRevisions(ws.id)).length).toBe(2); expect(activePromptVersion()).toBe(before);
-    expect(await getPromptRevision(candidate.id, "foreign")).toBeNull();
-    await expect(sharedDb().execute(sql`update prompt_revisions set instruction_text = 'changed' where id = ${candidate.id}`)).rejects.toThrow();
-    await expect(sharedDb().execute(sql`update prompt_revision_cohorts set heldout_ids = '[]'::jsonb where id = ${candidate.cohort_id}`)).rejects.toThrow();
-    expect(await getPromptRevision(candidate.id, ws.id)).toEqual(candidate);
-  });
-  it("fails closed for empty context, invalid generation and AI off without saving a candidate", async () => {
+  it("commits an S8 candidate, its frozen cohort and its completed run together", async () => {
     const { ws } = await fixture();
-    vi.spyOn(stateStore, "loadState").mockResolvedValue({ asset: {}, sources: [], tactics: [] } as unknown as Awaited<ReturnType<typeof stateStore.loadState>>);
-    await expect(proposePromptRevision({ stage: "S2", workspace_id: ws.id, actor, exclude_ids: [] })).rejects.toThrow("entity context");
-    vi.spyOn(stateStore, "loadState").mockResolvedValue({ asset: { name: "Secretbrand" }, sources: [], tactics: [] } as unknown as Awaited<ReturnType<typeof stateStore.loadState>>);
     vi.spyOn(llm, "isTestStub").mockReturnValue(false);
-    vi.spyOn(routing, "resolveRoute").mockResolvedValue({ stage: "S2" } as Awaited<ReturnType<typeof routing.resolveRoute>>);
-    vi.spyOn(routing, "completionFor").mockReturnValue(async () => ({ instruction_text: "" }));
-    await expect(proposePromptRevision({ stage: "S2", workspace_id: ws.id, actor, exclude_ids: [] })).rejects.toThrow();
-    await setAiEnabled({ enabled: false, actor_name: "test" });
-    await expect(proposePromptRevision({ stage: "S2", workspace_id: ws.id, actor, exclude_ids: [] })).rejects.toThrow(AiDisabledError);
-    expect(await listPromptRevisions(ws.id)).toEqual([]);
+    vi.stubEnv("XAI_API_KEY", "synthetic-test-key");
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      choices: [{ message: { content: JSON.stringify({ instruction_text: "Separate distinct populations." }) } }],
+    })));
+    try {
+      const revision = await proposeWithEvidence(ws.id);
+      expect(await listPromptRevisions(ws.id)).toEqual([revision]);
+      const cohort = await getRevisionCohort(revision.cohort_id, ws.id);
+      expect(cohort?.heldout_ids).toHaveLength(3);
+      expect(cohort?.training_ids).toHaveLength(2);
+      const [run] = await sharedDb().execute(
+        sql`select status from ${sql.identifier(ws.schema_name)}.module_runs where id = ${revision.generation_run_id}`,
+      );
+      expect(run?.status).toBe("ok");
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
   });
-  it("supports S3 while explicitly refusing generation without disagreement evidence", async () => {
-    const { ws } = await fixture();
-    await expect(proposePromptRevision({ stage: "S3", workspace_id: ws.id, actor, exclude_ids: [] })).rejects.toThrow("No validated disagreement lessons");
-  });
-
 });

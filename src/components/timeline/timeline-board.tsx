@@ -93,15 +93,17 @@ export function layoutLabel(ai: boolean, empty: boolean): string {
  * count from this date; it is prefilled with today and the person can change
  * it before running (KAN-16: nothing is assumed out of sight).
  */
-export function AnchoredLayoutButton({ label, identity }: { label: string; identity: ActionIdentity }) {
-  const [anchor, setAnchor] = useState(() => new Date().toISOString().slice(0, 10));
+export function AnchoredLayoutButton({ label, identity, demoAnchor }: { label: string; identity: ActionIdentity; demoAnchor?: string }) {
+  const [editableAnchor, setAnchor] = useState(() => new Date().toISOString().slice(0, 10));
+  const anchor = demoAnchor ?? editableAnchor;
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
       <label className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-        Plan starts
+        {demoAnchor ? "Velmara demo starts" : "Plan starts"}
         <input
           type="date"
           value={anchor}
+          readOnly={Boolean(demoAnchor)}
           onChange={(event) => setAnchor(event.target.value)}
           title="Model start estimates count from this date"
           data-testid="timeline-anchor"
@@ -126,6 +128,7 @@ export function TimelineBoard({
   model,
   view,
   today,
+  demoAnchor,
   identity,
   plan,
   history,
@@ -145,6 +148,7 @@ export function TimelineBoard({
   /** The gap-grouped view the chart draws (KAN-25). */
   view: GapTimelineView;
   today: string;
+  demoAnchor?: string;
   identity: ActionIdentity;
   plan: PlanView | null;
   history: PlanView[];
@@ -247,7 +251,7 @@ export function TimelineBoard({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {canRun ? (
-            <AnchoredLayoutButton label={layoutLabel(ai, false)} identity={identity} />
+            <AnchoredLayoutButton label={layoutLabel(ai, false)} identity={identity} demoAnchor={demoAnchor} />
           ) : null}
           {canReschedule && addable.length > 0 ? (
             <ManualDatesDialog
@@ -405,7 +409,7 @@ export function TimelineBoard({
       ) : null}
 
       {!hasRows ? (
-        <EmptyTimeline identity={identity} unscheduled={model.unscheduled} ai={ai} canRun={canRun} />
+        <EmptyTimeline identity={identity} unscheduled={model.unscheduled} ai={ai} canRun={canRun} demoAnchor={demoAnchor} />
       ) : (
         <>
         <div
@@ -812,11 +816,13 @@ function EmptyTimeline({
   unscheduled,
   ai,
   canRun,
+  demoAnchor,
 }: {
   identity: ActionIdentity;
   unscheduled: TimelineModel["unscheduled"];
   ai: boolean;
   canRun: boolean;
+  demoAnchor?: string;
 }) {
   return (
     <section className="border border-border bg-card p-4 rounded-lg">
@@ -834,7 +840,7 @@ function EmptyTimeline({
       ) : null}
       {canRun ? (
         <div className="mt-3">
-          <AnchoredLayoutButton label={layoutLabel(ai, true)} identity={identity} />
+          <AnchoredLayoutButton label={layoutLabel(ai, true)} identity={identity} demoAnchor={demoAnchor} />
         </div>
       ) : null}
     </section>

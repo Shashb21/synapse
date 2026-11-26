@@ -53,6 +53,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   for (const name of KEY_ENVS) {
     if (savedEnv[name] === undefined) delete process.env[name];
     else process.env[name] = savedEnv[name];
@@ -211,10 +212,14 @@ describe("a provider with no key is not configured", () => {
     await expect(resolveRoute("S2")).rejects.toThrow(/server environment/);
   });
 
-  it("a fallback with a key serves instead, and the route names the missing one", async () => {
+  it("a saved fallback with a key serves only after approval, and the route names the missing key", async () => {
     clearKeys();
     process.env.OPENAI_API_KEY = SECRET;
     await setRouteConfig({ stage: "S2", provider_id: "openrouter", model: "", fallbacks: ["openai"], actor_name: ACTOR });
+    vi.stubEnv("SYNAPSE_APPROVED_FALLBACK_PAIRS", "");
+    await expect(resolveRoute("S2")).rejects.toThrow("OPENROUTER_API_KEY");
+
+    vi.stubEnv("SYNAPSE_APPROVED_FALLBACK_PAIRS", "openrouter>openai");
     const route = await resolveRoute("S2");
     expect(route).toMatchObject({ provider_id: "openai", auth: "api_key", connected: true, degraded: true });
     expect(route.reason).toContain("OPENROUTER_API_KEY");

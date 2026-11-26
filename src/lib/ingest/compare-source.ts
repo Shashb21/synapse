@@ -14,6 +14,7 @@ import { createSourceDiscrepancy, linkSourceSupport, sourceReviewCitationCurrent
 import { aiSectionEnabled } from "@/modules/kernel/ai-switch";
 import { completionFor, resolveRoute } from "@/modules/kernel/routing";
 import { closeRun, openRun, RunRecorder, SOURCE_COMPARISON_MODULE, withRunningSourceComparison } from "@/modules/kernel/observability";
+import { currentModelRun, ModelRunStop } from "@/modules/kernel/model-run";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { scopedWorkspaceId } from "@/modules/workspaces/context";
 import type { Actor, ResolvedRoute } from "@/modules/kernel/contracts";
@@ -146,11 +147,13 @@ Use only supplied target IDs; identify affected relationships where present. Whe
 async function lockedCurrent(sourceId: string, version: string, expectedBasis: string) {
   // Join source review and S4 before reserving either source or target owners.
   await lockRelationships();
+  currentModelRun()?.check();
   const selected = await facts(await loadState(), sourceId);
   for (const id of selected.provenance_source_ids) await db().execute(sql`select id from sources where id = ${id} for update`);
   await lockAssessmentOwners({ source_ids: selected.provenance_source_ids,
     tactic_ids: selected.tactics.map(t => t.id), gap_ids: selected.gaps.map(g => g.id) });
   const [saved] = await db().select().from(sourceComparisons).where(eq(sourceComparisons.source_id, sourceId)).for("update");
+  currentModelRun()?.check();
   if (!saved || saved.version !== version) return null;
   const state = await loadState();
   const currentFacts = await facts(state, sourceId);
@@ -163,14 +166,27 @@ async function lockedCurrent(sourceId: string, version: string, expectedBasis: s
 async function write(row: SourceComparison): Promise<void> {
   await db().update(sourceComparisons).set({ record: row }).where(and(eq(sourceComparisons.source_id, row.source_id), eq(sourceComparisons.version, row.version)));
 }
+
+/** Each comparison checkpoint or review stays reversible until its last cancellation check. */
+function comparisonTransaction<T>(operation: () => Promise<T>): Promise<T> {
+  return withWorkspaceTransaction(async () => {
+    currentModelRun()?.check();
+    const result = await operation();
+    currentModelRun()?.check();
+    return result;
+  });
+}
+
 /** Resume saved outcomes; model calls run outside workspace transactions and never affect parse success. */
 export async function compareSource(sourceId: string, actor: Actor): Promise<void> {
   if (inWorkspaceTransaction()) throw new Error("Comparison must run after the parse transaction commits.");
+  currentModelRun()?.check();
   await ensureSchema();
   let attempt: SourceComparison | null = null;
   try {
-    attempt = await withWorkspaceTransaction(async () => {
+    attempt = await comparisonTransaction(async () => {
       await db().execute(sql`select id from sources where id = ${sourceId} for update`);
+      currentModelRun()?.check();
       const state = await loadState();
       if (!state.sources.some(s => s.id === sourceId)) throw new TrustedApplicationError("Comparison source not found in this plan.", "not_found", 404);
       const old = state.source_comparisons?.find(row => row.source_id === sourceId);
@@ -190,6 +206,7 @@ export async function compareSource(sourceId: string, actor: Actor): Promise<voi
     if (pendingOutcomes === null) {
       const state = await loadState();
       const recorder = new RunRecorder({ workspace_id: await scopedWorkspaceId() ?? "default", stage: "S1", module_id: SOURCE_COMPARISON_MODULE, module_version: "1", actor, input: { source_id: sourceId, basis_version } }, version);
+      currentModelRun()?.check();
       await openRun(recorder);
       let route: ResolvedRoute | null = null;
       let result: { outcomes: ComparisonOutcome[] } | { error: unknown };
@@ -197,6 +214,7 @@ export async function compareSource(sourceId: string, actor: Actor): Promise<voi
         result = await withRunningSourceComparison(recorder, async ({ assertLive, finalize }) => {
           let reply: z.infer<typeof replySchema>;
           try {
+            currentModelRun()?.check();
             route = await resolveRoute("S1");
             const complete = completionFor(route, recorder, { beforeSend: assertLive });
             reply = replySchema.parse(await complete({ system: SYSTEM, user: JSON.stringify(await facts(state, sourceId)), purpose: "incoming-source-comparison" }));
@@ -204,6 +222,7 @@ export async function compareSource(sourceId: string, actor: Actor): Promise<voi
             await finalize({ status: "error", route, error: error instanceof Error ? error.message : String(error) });
             return { error };
           }
+          currentModelRun()?.check();
           await finalize({ status: "ok", route, output: reply, summary: "Incoming comparison provider reply received." });
           return reply;
         });
@@ -218,7 +237,7 @@ export async function compareSource(sourceId: string, actor: Actor): Promise<voi
     }
     // Normalize and validate the entire reply under current owner locks before saving or applying it.
     // This also upgrades pre-normalization saved outcomes without calling the model on durable retry.
-    const outcomes = await withWorkspaceTransaction(async () => {
+    const outcomes = await comparisonTransaction(async () => {
       const current = await lockedCurrent(sourceId, version, basis_version);
       if (!current) return null;
       if (!(await aiSectionEnabled("ingestion"))) { await write({ ...current.row, status: "ai_disabled", updated_at: nowIso() }); return null; }
@@ -229,7 +248,7 @@ export async function compareSource(sourceId: string, actor: Actor): Promise<voi
     });
     if (!outcomes) return;
     for (const outcome of outcomes) {
-      const applied = await withWorkspaceTransaction(async () => {
+      const applied = await comparisonTransaction(async () => {
         const current = await lockedCurrent(sourceId, version, basis_version);
         if (!current) return false;
         if (!(await aiSectionEnabled("ingestion"))) { await write({ ...current.row, status: "ai_disabled", updated_at: nowIso() }); return false; }
@@ -252,21 +271,33 @@ export async function compareSource(sourceId: string, actor: Actor): Promise<voi
       });
       if (!applied) return;
     }
-    await withWorkspaceTransaction(async () => {
+    await comparisonTransaction(async () => {
       const current = await lockedCurrent(sourceId, version, basis_version);
       if (current) await write({ ...current.row, status: await aiSectionEnabled("ingestion") ? "completed" : "ai_disabled", error: null, updated_at: nowIso() });
     });
   } catch (error) {
+    // A stopped attempt stays pending with its last committed outcomes and reviews.
+    currentModelRun()?.check();
+    if (error instanceof ModelRunStop) throw error;
     if (!attempt) throw error;
     // CAS prevents an older worker's error from replacing a newer attempt or completion.
-    const [current] = await db().select().from(sourceComparisons).where(and(eq(sourceComparisons.source_id, sourceId), eq(sourceComparisons.version, attempt.version)));
-    if (current) await write({ ...current.record, outcomes: error instanceof InvalidComparisonOutcomes ? null : current.record.outcomes, status: "failed", error: error instanceof Error ? error.message : String(error), updated_at: nowIso() });
+    const { version } = attempt;
+    await comparisonTransaction(async () => {
+      const [current] = await db().select().from(sourceComparisons)
+        .where(and(eq(sourceComparisons.source_id, sourceId), eq(sourceComparisons.version, version))).for("update");
+      currentModelRun()?.check();
+      if (current) await write({ ...current.record, outcomes: error instanceof InvalidComparisonOutcomes ? null : current.record.outcomes, status: "failed", error: error instanceof Error ? error.message : String(error), updated_at: nowIso() });
+    });
   }
 }
 /** Post-commit runner used by direct S1 runs and the outer ingestion checkpoint owner. */
 export async function compareParsedSources(sourceIds: string[], actor: Actor): Promise<void> {
   for (const id of new Set(sourceIds)) {
     try { await compareSource(id, actor); }
-    catch (error) { console.error("Incoming comparison could not save its checkpoint; parsed content is retained", { source_id: id, error }); }
+    catch (error) {
+      // Parsing has already committed. An explicit comparison retry can resume this work.
+      if (error instanceof ModelRunStop) return;
+      console.error("Incoming comparison could not save its checkpoint; parsed content is retained", { source_id: id, error });
+    }
   }
 }

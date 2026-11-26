@@ -93,8 +93,8 @@ async function runPrioritization(args: {
   yAxis: string;
   setting: string;
   onlyMissing: boolean;
-}): Promise<{ ok: boolean; error?: string; summary?: string; mode?: string }> {
-  const res = await postJson("/api/modules", {
+}): Promise<{ ok: boolean; error?: string; summary?: string; replayed?: boolean }> {
+  const res = await postJson<{ summary?: string; execution_source?: "demo_replay" }>("/api/modules", {
       stage: "S8",
       input: {
         gap_ids: args.gapIds,
@@ -106,8 +106,15 @@ async function runPrioritization(args: {
       actor_name: args.identity.actor_name,
       actor_function: args.identity.actor_function,
     });
-  const json = res.json as { error?: string; summary?: string; mode?: string };
-  return res.ok ? { ok: true, summary: json.summary, mode: json.mode } : { ok: false, error: json.error ?? "Prioritization failed" };
+  const { json } = res;
+  return res.ok
+    ? { ok: true, summary: json.summary, replayed: json.execution_source === "demo_replay" }
+    : { ok: false, error: json.error ?? "Prioritization failed" };
+}
+
+function priorityRunSummary(result: { summary?: string; replayed?: boolean }) {
+  if (result.replayed) return result.summary ? `${result.summary} · Recorded Velmara demo` : "Recorded Velmara demo";
+  return result.summary;
 }
 
 async function saveAxes(scope: string, xAxis: string, yAxis: string): Promise<string | null> {
@@ -277,7 +284,7 @@ export function AxisChooser({
           </button>
         ) : null}
         {!mayPrioritize ? (
-          <span className="text-[11px] text-muted-foreground">Your role may not prioritize.</span>
+          <span className="text-[11px] text-muted-foreground">Priority editing is unavailable.</span>
         ) : (
           <span className="text-[11px] text-muted-foreground">
             {gapIds.length} Open gap{gapIds.length === 1 ? "" : "s"} in {scopeLabel}
@@ -401,6 +408,7 @@ export function PrioritizeMatrix({
       refresh(() => {
         setBusy(null);
         if (!result.ok) setMessage({ text: result.error ?? "Could not place the new gaps.", error: true });
+        else if (result.replayed) setMessage({ text: priorityRunSummary(result)!, error: false });
       });
     });
   }, [ai, unplaced, mayPrioritize, identity, xAxis.id, yAxis.id, scope, refresh]);
@@ -556,7 +564,10 @@ export function PrioritizeMatrix({
     refresh(() => {
       setBusy(null);
       if (!result.ok) showError(result.error ?? "Re-suggest failed");
-      else setMessage(result.summary ? { text: result.summary, error: false } : null);
+      else {
+        const text = priorityRunSummary(result);
+        setMessage(text ? { text, error: false } : null);
+      }
     });
   }
 
@@ -582,6 +593,7 @@ export function PrioritizeMatrix({
         onlyMissing: true,
       });
       if (!result.ok) showError(`Axes saved, but gap suggestions could not finish. Review the matrix and continue with manual placement. ${result.error ?? "Check current placements before running suggestions again."}`);
+      else if (result.replayed) setMessage({ text: priorityRunSummary(result)!, error: false });
     }
     refresh(() => setBusy(null));
   }
@@ -651,7 +663,10 @@ export function PrioritizeMatrix({
       </div>
       <div>
         <h2 className="text-[15px] font-medium text-foreground">2. Review placement</h2>
-        <p className="mt-1 text-[12px] leading-5 text-muted-foreground">Select a gap to review its context and scores. Save a draft placement, then validate priority with your own reason in the gap details.</p>
+        <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+          Select a gap to review its context and scores.
+          {mayPrioritize ? " Save a draft placement, then validate priority with your own reason in the gap details." : null}
+        </p>
       </div>
       <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Highlight a priority">
         {BANDS.map((b) => {
@@ -792,7 +807,7 @@ export function PrioritizeMatrix({
           <GapPanel gapId={selectedId} onClose={() => setSelectedId(null)}
             returnFocusRef={gapTriggerRef}
             refreshVersion={JSON.stringify([gaps.find(gap => gap.gap_id === selectedId)?.version, gaps.find(gap => gap.gap_id === selectedId)?.context_version, tacticsUnlocked])}
-            priorityEditor={{ xAxis, yAxis, identity, mayPrioritize }} />
+            priorityEditor={{ xAxis, yAxis, setting: scope === "all" ? undefined : scope, identity, mayPrioritize }} />
           <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">
             {unplaced.length > 0 && !busy ? (
               <section aria-label="Gaps not placed yet">
@@ -802,7 +817,7 @@ export function PrioritizeMatrix({
                 <p className="mb-1 text-[11px] leading-4 text-muted-foreground">
                   {mayPrioritize
                     ? "Drag a gap onto the matrix: where you drop it sets its two scores. Or select it to type them."
-                    : "Your role may view the matrix but not place gaps."}
+                    : "Select a gap to review its details."}
                 </p>
                 <ul className="grid grid-cols-[minmax(0,1fr)] gap-0.5">
                   {unplaced.map((gap) => (
@@ -813,7 +828,7 @@ export function PrioritizeMatrix({
                         data-gap-id={gap.gap_id}
                         onPointerDown={(event) => onListPointerDown(event, gap.gap_id)}
                         onClick={(event) => { if (suppressGapClick.current) { suppressGapClick.current = false; return; } gapTriggerRef.current = event.currentTarget; setSelectedId(gap.gap_id); }}
-                        aria-label={`${gap.gap_name}: not placed. Drag onto the matrix, or select to type its scores.`}
+                        aria-label={`${gap.gap_name}: not placed. ${mayPrioritize ? "Drag onto the matrix, or select to type its scores." : "Select to review details."}`}
                         className={cn(
                           "flex w-full touch-none select-none items-center gap-1.5 rounded px-1.5 py-1 text-left text-[12px] hover:bg-muted",
                           mayPrioritize && "cursor-grab active:cursor-grabbing",

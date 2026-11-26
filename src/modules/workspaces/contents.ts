@@ -5,7 +5,7 @@ import type { IegpState } from "@/lib/iegp/types";
 import { resetWorkspaceModules } from "@/modules/kernel/db";
 import { recordAuditVia } from "@/modules/kernel/audit";
 import { loadDemoPlan } from "./demo-plan";
-import { getWorkspace, setWorkspaceDemo, withWorkspace } from "./store";
+import { getWorkspace, setWorkspaceDemo, setWorkspaceDemoMode, withWorkspace } from "./store";
 
 /** What the audit log keeps of a workspace's contents: counts, never the contents. */
 function contentCounts(state: IegpState) {
@@ -44,6 +44,7 @@ export async function replaceContents(
   workspaceId: string | null,
   contents: WorkspaceContents,
   actor?: { name: string; function: ActorFunction },
+  enableDemoMode = false,
 ): Promise<void> {
   const before = contentCounts(await loadState());
   // All or nothing (KAN-15): a failure part-way leaves the workspace as it was.
@@ -53,6 +54,7 @@ export async function replaceContents(
     // The full demo also opens prioritized, with a dated timeline to try.
     if (contents === "demo") await loadDemoPlan(workspaceId ?? undefined);
     if (workspaceId) await setWorkspaceDemo(workspaceId, contents !== "blank", db());
+    if (workspaceId && contents === "client_demo" && enableDemoMode) await setWorkspaceDemoMode(workspaceId, true, db());
     await recordAuditVia(db(), {
       category: "workspace",
       action: RESET_ACTIONS[contents],
@@ -66,7 +68,7 @@ export async function replaceContents(
 }
 
 /** Same, for a workspace that is not the one this request is scoped to (e.g. one just created). */
-export async function replaceContentsOf(workspaceId: string, contents: WorkspaceContents): Promise<void> {
+export async function replaceContentsOf(workspaceId: string, contents: WorkspaceContents, enableDemoMode = false): Promise<void> {
   const workspace = await getWorkspace(workspaceId);
   if (!workspace) throw new Error(`Unknown workspace ${workspaceId}`);
   await withWorkspace(workspaceId, async () => {
@@ -75,7 +77,7 @@ export async function replaceContentsOf(workspaceId: string, contents: Workspace
     if (schema !== workspace.schema_name) {
       throw new Error(`Refusing to replace contents: queries resolve to ${schema}, not ${workspace.schema_name}.`);
     }
-    await replaceContents(workspaceId, contents);
+    await replaceContents(workspaceId, contents, undefined, enableDemoMode);
   });
 }
 

@@ -20,10 +20,10 @@ plan the team keeps outside this repo. This file describes what the code does.
 | `observability.ts` | Run records: input, output, steps with payloads, route, timings, errors, eval scores. Stage health. |
 | `edit-records.ts` | Every user edit with its mandatory rationale. |
 | `hillclimb.ts` | Signals derived from edits, evals and parse quality, plus the digest each agentic stage reads before it proposes. |
-| `hillclimb-loop.ts` | Prompt-variant sweep: score variants against curated gold, update baselines, file promotion signals. |
-| `baselines.ts` | Per-stage, per-prompt-version metric baselines (`prompt_baselines`). |
+| `hillclimb-loop.ts` | Runs isolated owner diagnostics and compares distinct variants on the same frozen curated cases. |
+| `baselines.ts` | Append-only sweep history scoped to workspace, actual route, module, effective prompt and case set (`prompt_baseline_observations`). |
 | `prompt-versions.ts` / `prompt-variant.ts` | Registered variants and `AsyncLocalStorage` scope for hillclimb evals. |
-| `evals.ts` | Per-stage eval runs and the harness runner. |
+| `evals.ts` | Workspace-scoped diagnostics, case and aggregate records, and target scoring. |
 | `agentic.ts` | The shared loop: propose → critique → revise, three exchanges, then judge. Model calls only; the local proposers run solely under the test stub. |
 | `llm.ts` / `no-llm.ts` / `stage-errors.ts` | `requireLlm`, `completeAll` (re-ask, never fill in), the test-stub guard, and the customer- vs owner-facing wording when a model is missing or fails. |
 | `ai-switch.ts` / `ai-sections.ts` / `stage-ai.ts` | The admin's AI master switch and per-section switches, and which stages the kernel refuses while AI is off. |

@@ -1,8 +1,12 @@
+import type { IegpState } from "@/lib/iegp/types";
+import { loadState } from "@/lib/iegp/store";
+import { withEvaluationIsolation } from "@/modules/kernel/evaluation-isolation";
+import { listExtractionDocuments, listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
 import type { StageId } from "@/modules/kernel/contracts";
 import type { CuratedEvalCase } from "./types";
 import {
+  extractionGold,
   goldMetaForSource,
-  parsedDocumentIdForSource,
   sourceFileIdForSource,
   sourcesForStage,
 } from "./velmara-curated";
@@ -26,27 +30,48 @@ export async function curatedS1Cases(): Promise<CuratedEvalCase<{ file_ids: stri
   return out;
 }
 
-export async function curatedS2Cases(): Promise<
-  CuratedEvalCase<{ document_ids: string[]; dry_run: boolean }>[]
-> {
-  const out: CuratedEvalCase<{ document_ids: string[]; dry_run: boolean }>[] = [];
-  for (const source of sourcesForStage("S2")) {
-    const document_id = await parsedDocumentIdForSource(source.source_id);
-    if (!document_id) continue;
-    out.push({
-      name: `${source.source_id} · ${source.label}`,
-      input: { document_ids: [document_id], dry_run: true },
-      gold: goldMetaForSource(source),
-    });
-  }
-  return out;
+type ExtractionStage = "S2" | "S3";
+type ExtractionInput = { document_ids?: string[]; dry_run: boolean };
+type ExtractionCase = CuratedEvalCase<ExtractionInput>;
+
+function extractionCase(document: ParsedDocumentRecord): ExtractionCase {
+  return { name: document.source_id, input: { document_ids: [document.id], dry_run: true } };
 }
 
-export async function curatedS3Cases(): Promise<
-  CuratedEvalCase<{ document_ids: string[]; dry_run: boolean }>[]
-> {
-  return (await curatedS2Cases()).filter((caseRow) => caseRow.gold?.source_id === "SRC-INT-MED");
+export function extractionEvalCases(stage: ExtractionStage) {
+  return {
+    async cases(facts?: Record<string, unknown>): Promise<ExtractionCase[]> {
+      const documents = facts ? (facts.documents as ParsedDocumentRecord[]) : await listParsedDocuments();
+      const candidates = sourcesForStage(stage).flatMap((source) => {
+        const document = documents.find((row) => row.source_id === source.source_id);
+        return document ? [document] : [];
+      });
+      return (candidates.length ? candidates : documents.slice(0, 3)).map(extractionCase);
+    },
+    goldForCase(test: ExtractionCase, facts: Record<string, unknown>) {
+      const documents = facts.documents as ParsedDocumentRecord[];
+      const sources = (facts.state as IegpState).sources;
+      const ids = test.input.document_ids;
+      if (ids?.length !== 1) return;
+      const document = documents.find((row) => row.id === ids[0]);
+      if (document) return extractionGold(stage, document, sources);
+    },
+  };
 }
+
+async function curatedExtractionCases(stage: ExtractionStage): Promise<ExtractionCase[]> {
+  return withEvaluationIsolation(async () => {
+    const harness = extractionEvalCases(stage);
+    const facts = { documents: await listExtractionDocuments(), state: await loadState() };
+    return (await harness.cases(facts)).flatMap((test) => {
+      const gold = harness.goldForCase(test, facts);
+      return gold ? [{ ...test, gold }] : [];
+    });
+  });
+}
+
+export const curatedS2Cases = () => curatedExtractionCases("S2");
+export const curatedS3Cases = () => curatedExtractionCases("S3");
 
 export async function curatedCasesForStage(stage: StageId): Promise<CuratedEvalCase<unknown>[]> {
   if (stage === "S1") return curatedS1Cases();

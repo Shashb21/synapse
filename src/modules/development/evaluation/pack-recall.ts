@@ -9,14 +9,14 @@ export type IdRecallSlice = {
   targets: number;
   found: string[];
   missing: string[];
-  recall: number;
+  recall: number | null;
 };
 
 export type NumberRecallSlice = {
   targets: number;
   found: number[];
   missing: number[];
-  recall: number;
+  recall: number | null;
 };
 
 export type PackRecallTargets = {
@@ -30,7 +30,7 @@ export type PackRecallScore = {
   tactic_numbers: NumberRecallSlice;
   tactic_identifiers: IdRecallSlice;
   /** Micro-average over target sets that have at least one must_find row. */
-  overall_recall: number;
+  overall_recall: number | null;
 };
 
 function normalizeIds(values: Array<string | null | undefined> | undefined): Set<string> {
@@ -53,14 +53,14 @@ function normalizeNumbers(values: Array<number | null | undefined> | undefined):
 function scoreIdTargets(targets: string[], foundSet: Set<string>): IdRecallSlice {
   const found = targets.filter((id) => foundSet.has(id));
   const missing = targets.filter((id) => !foundSet.has(id));
-  const recall = targets.length === 0 ? 1 : found.length / targets.length;
+  const recall = targets.length === 0 ? null : found.length / targets.length;
   return { targets: targets.length, found, missing, recall };
 }
 
 function scoreNumberTargets(targets: number[], foundSet: Set<number>): NumberRecallSlice {
   const found = targets.filter((n) => foundSet.has(n));
   const missing = targets.filter((n) => !foundSet.has(n));
-  const recall = targets.length === 0 ? 1 : found.length / targets.length;
+  const recall = targets.length === 0 ? null : found.length / targets.length;
   return { targets: targets.length, found, missing, recall };
 }
 
@@ -100,7 +100,7 @@ export function scoreRecallAgainstTargets(
   const slices = [gap_ids, tactic_numbers, tactic_identifiers].filter((s) => s.targets > 0);
   const hit = slices.reduce((sum, s) => sum + s.found.length, 0);
   const total = slices.reduce((sum, s) => sum + s.targets, 0);
-  const overall_recall = total === 0 ? 1 : hit / total;
+  const overall_recall = total === 0 ? null : hit / total;
 
   return { gap_ids, tactic_numbers, tactic_identifiers, overall_recall };
 }

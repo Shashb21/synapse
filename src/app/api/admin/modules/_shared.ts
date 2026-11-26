@@ -35,3 +35,14 @@ export async function peekBody(request: Request): Promise<Record<string, unknown
   const parsed = (await request.clone().json().catch(() => null)) as unknown;
   return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
 }
+
+/** Diagnostic actions are bound to the signed console selection; the body can only confirm it. */
+export function inSelectedDiagnosticWorkspace(request: Request, fn: () => Promise<NextResponse>) {
+  return inAdminWorkspace(null, async workspace => {
+    const body = await peekBody(request);
+    if (body && "workspace_id" in body && body.workspace_id !== workspace.id) {
+      return NextResponse.json({ safe_error: true, code: "no_workspace", error: "Select this workspace in the owner console before running diagnostics." }, { status: 404 });
+    }
+    return fn();
+  });
+}

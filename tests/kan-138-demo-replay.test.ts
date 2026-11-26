@@ -1,153 +1,142 @@
 import { describe, expect, it } from "vitest";
-import {
-  DemoReplayMissError,
-  findRecordedCall,
-  idMapping,
-  idsIn,
-  normalizePrompt,
-  recordedCallFrom,
-  replayReply,
-  similarity,
-  type Recording,
-} from "@/lib/demo/replay";
+import historicalRecording from "@/lib/demo/recording.json";
+import { judgementReferenceSchema } from "@/lib/iegp/judgement-references";
+import { DemoReplayMissError, recordedCallFrom, replayReply, type Recording, type ReplayRequest } from "@/lib/demo/replay";
+import { VELMARA_DEMO_FIXTURE } from "@/lib/demo/replay-provider";
 import { clientDemoFileFor } from "@/lib/demo/client-files";
 import { CLIENT_DEMO_PACK } from "@/lib/demo/client-pack";
 import { DEMO_PACK, demoSourceById } from "@/lib/iegp/demo-pack";
 
-/** KAN-138: a client-demo workspace answers every AI step from the recorded run. */
-
 const DOC_A = "DOC_20261016T101500_0001_ab12";
 const DOC_B = "DOC_20261118T093000_0042_zz99";
-
-describe("ids and prompts", () => {
-  it("finds the ids the app mints, and leaves content tokens alone", () => {
-    const text = `Gap GAP-012 cites NEED-104 from ${DOC_A} (file FILE-0123456789); VEL-301, EGFR-mutant and QLQ-C30 are content.`;
-    expect(idsIn(text)).toEqual(["GAP-012", "NEED-104", DOC_A, "FILE-0123456789"]);
-    expect(normalizePrompt(text)).toBe(
-      "Gap ⟨GAP⟩ cites ⟨NEED⟩ from ⟨DOC⟩ (file ⟨FILE⟩); VEL-301, EGFR-mutant and QLQ-C30 are content.",
-    );
-  });
-
-  it("maps the recorded run's ids onto this run's by kind and order", () => {
-    const map = idMapping(["GAP-001", "NEED-001", "GAP-002", DOC_A], ["GAP-031", "NEED-090", "GAP-032", DOC_B]);
-    expect(Object.fromEntries(map)).toEqual({ "GAP-001": "GAP-031", "NEED-001": "NEED-090", "GAP-002": "GAP-032", [DOC_A]: DOC_B });
-  });
-
-  it("scores identical prompts 1 and unrelated ones low", () => {
-    expect(similarity("elderly comparative effectiveness", "elderly comparative effectiveness")).toBe(1);
-    expect(similarity("elderly comparative effectiveness versus chemotherapy", "intracranial response brain metastases")).toBeLessThan(0.2);
-  });
-});
-
-const recording: Recording = {
-  recorded_at: "2026-10-16T10:00:00Z",
-  calls: [
-    recordedCallFrom({
-      stage: "S2",
-      purpose: `gap-proposer:${DOC_A}`,
-      system_prompt: "You propose evidence gaps.",
-      user_prompt: `Document ${DOC_A}: payer interviews on the economic burden of recurrence and elderly comparative effectiveness.`,
-      reply: JSON.stringify({ candidates: [{ id: `${DOC_A}-L001`, statement: "Economic burden of recurrence" }] }),
-    }),
-    recordedCallFrom({
-      stage: "S2",
-      purpose: `gap-proposer:${DOC_A}`,
-      system_prompt: "You propose evidence gaps.",
-      user_prompt: `Document ${DOC_A}: KOL advisory board on intracranial response and brain metastases.`,
-      reply: JSON.stringify({ candidates: [{ id: `${DOC_A}-L001`, statement: "Intracranial duration of response" }] }),
-    }),
-    recordedCallFrom({
-      stage: "S8",
-      purpose: "priority-suggester",
-      system_prompt: "You suggest priority bands.",
-      user_prompt: "Gaps: GAP-001 economic burden; GAP-002 elderly comparative effectiveness.",
-      reply: JSON.stringify({ placements: [{ gap_id: "GAP-001", band: "high" }, { gap_id: "GAP-002", band: "high" }] }),
-    }),
-  ],
+const request: ReplayRequest = {
+  stage: "S2",
+  purpose: `gap-reviser:${DOC_A}`,
+  system: "You propose evidence gaps.",
+  user: JSON.stringify({
+    candidates: [{ id: `${DOC_A}-L001`, subject: `${DOC_A}-L001`, source_quote: "Payer interviews report study TAC-001." }],
+    plan_gaps: [{ id: "GAP-001", name: "Primary burden" }, { id: "GAP-002", name: "Comparator" }],
+  }),
 };
+const call = recordedCallFrom({
+  stage: "S2",
+  purpose: request.purpose,
+  system_prompt: request.system,
+  user_prompt: request.user,
+  reply: JSON.stringify({ gaps: [{ id: `${DOC_A}-L001`, statement: "Economic burden of recurrence", source_quote: "Payer interviews report study TAC-001." }] }),
+});
+const recording = { version: 3, fixture: VELMARA_DEMO_FIXTURE, recorded_at: null, calls: [call] } satisfies Recording;
 
-describe("replaying a call", () => {
-  it("answers each document's call with that document's recorded reply, under this run's ids", () => {
-    const reply = replayReply(
-      {
-        stage: "S2",
-        purpose: `gap-proposer:${DOC_B}`,
-        system: "You propose evidence gaps.",
-        user: `Document ${DOC_B}: KOL advisory board on intracranial response and brain metastases.`,
-      },
-      recording,
-    );
-    expect(JSON.parse(reply)).toEqual({ candidates: [{ id: `${DOC_B}-L001`, statement: "Intracranial duration of response" }] });
+describe("KAN-263 exact fixture replay", () => {
+  it("rebinds S9 proposal slots across two resets while preserving the same text in a quote", () => {
+    const literal = "The written source refers to GAP-001:proposal:1.";
+    function ask(gap: string): ReplayRequest {
+      return { stage: "S9", purpose: "ideation-proposer", system: "Use the supplied slots.",
+        user: JSON.stringify({ gaps: [{ id: gap, proposal_slots: [`${gap}:proposal:1`], statement: literal }] }) };
+    }
+    const first = ask("GAP-001");
+    const entry = recordedCallFrom({ stage: "S9", purpose: first.purpose, system_prompt: first.system, user_prompt: first.user,
+      reply: '{"tactics":[{"id":"GAP-001:proposal:1","gap_id":"GAP-001","rationale":"The written source refers to GAP-001:proposal:1."}]}' });
+    const fixture = { ...recording, calls: [entry] };
+    for (const gap of ["GAP-043", "GAP-105"]) {
+      const current = ask(gap);
+      expect(JSON.parse(replayReply(current, fixture))).toEqual({ tactics: [{ id: `${gap}:proposal:1`, gap_id: gap, rationale: literal }] });
+      expect(() => replayReply({ ...current, user: current.user.replace(`${gap}:proposal:1`, `${gap}:proposal:2`) }, fixture)).toThrow(DemoReplayMissError);
+    }
   });
 
-  it("maps gap ids in a later stage's reply onto the gaps this run has", () => {
-    const reply = replayReply(
-      {
-        stage: "S8",
-        purpose: "priority-suggester",
-        system: "You suggest priority bands.",
-        user: "Gaps: GAP-047 economic burden; GAP-048 elderly comparative effectiveness.",
-      },
-      recording,
-    );
-    expect(JSON.parse(reply).placements.map((p: { gap_id: string }) => p.gap_id)).toEqual(["GAP-047", "GAP-048"]);
+  it("rebinds a timeline expansion and object dependency across two resets while keeping the reason literal", () => {
+    const reason = "The text cites ACT-TAC-001.";
+    const ids = ["EXP_20261019T080538_0008_8qr6", "EXP_20261125T120000_4321_abcd", "EXP_20261201T120000_98765_3dk4"];
+    function ask(expansion: string, parent: string): ReplayRequest {
+      return { stage: "S10", purpose: "timeline-estimates", system: "Use the named activities.",
+        user: JSON.stringify({ activities: [{ id: `ACT-EXP-${expansion}`, depends_on: [{ id: `ACT-${parent}`, reason }] }],
+          other_activities: [{ id: `ACT-${parent}` }] }) };
+    }
+    const first = ask(ids[0]!, "TAC-001");
+    const entry = recordedCallFrom({ stage: "S10", purpose: first.purpose, system_prompt: first.system, user_prompt: first.user,
+      reply: JSON.stringify({ activities: [{ id: `ACT-EXP-${ids[0]}`, depends_on: [{ id: "ACT-TAC-001", reason }] }] }) });
+    const fixture = { ...recording, calls: [entry] };
+    for (const [expansion, parent] of [[ids[1]!, "TAC-034"], [ids[2]!, "TAC-108"]] as const) {
+      const current = ask(expansion, parent);
+      expect(JSON.parse(replayReply(current, fixture))).toEqual({
+        activities: [{ id: `ACT-EXP-${expansion}`, depends_on: [{ id: `ACT-${parent}`, reason }] }],
+      });
+      expect(() => replayReply({ ...current, user: current.user.replace(reason, "The text cites ACT-TAC-002.") }, fixture)).toThrow(DemoReplayMissError);
+    }
   });
 
-  it("keeps each gap's answer on that gap when this run lists the gaps in another order", () => {
-    const recordedPrompt = JSON.stringify({ gaps: [{ id: "GAP-001", name: "Economic burden" }, { id: "GAP-002", name: "Elderly comparison" }] });
-    const shuffled: Recording = {
-      recorded_at: null,
-      calls: [
-        recordedCallFrom({
-          stage: "S4",
-          purpose: "mapping-table-critic",
-          system_prompt: "",
-          user_prompt: recordedPrompt,
-          reply: JSON.stringify({ reviews: [{ gap_id: "GAP-001", verdict: "keep burden" }, { gap_id: "GAP-002", verdict: "keep elderly" }] }),
-        }),
-      ],
+  it("treats ID-shaped study codes and quoted source text as literal content", () => {
+    const source = { stage: "S1" as const, purpose: "parse-structure:1", system: "Keep study codes verbatim.",
+      user: JSON.stringify({ units: [{ unit: "u1", text: "Study TAC-001" }] }) };
+    const exact = recordedCallFrom({ stage: "S1", purpose: source.purpose, system_prompt: source.system,
+      user_prompt: source.user, reply: '{"units":[{"unit":"u1","blocks":[{"text":"Study TAC-001"}]}]}' });
+    const fixture = { ...recording, calls: [exact] };
+    expect(replayReply(source, fixture)).toContain("Study TAC-001");
+    expect(() => replayReply({ ...source, user: source.user.replace("TAC-001", "TAC-002") }, fixture)).toThrow(DemoReplayMissError);
+  });
+
+  it("keeps document and identifier references consistent across the purpose, prompt and reply", () => {
+    const result = replayReply({
+      ...request,
+      purpose: request.purpose.replace(DOC_A, DOC_B),
+      user: request.user.replaceAll(DOC_A, DOC_B).replaceAll("GAP-001", "GAP-057").replaceAll("GAP-002", "GAP-053"),
+    }, recording);
+    expect(JSON.parse(result)).toEqual({
+      gaps: [{ id: `${DOC_B}-L001`, statement: "Economic burden of recurrence", source_quote: "Payer interviews report study TAC-001." }],
+    });
+  });
+
+  it.each([
+    { system: "You may invent evidence gaps." },
+    { user: request.user.replace("Payer interviews", "Medical interviews") },
+    { user: request.user.replace("TAC-001", "TAC-002") },
+    { user: request.user.replace(`"subject":"${DOC_A}-L001"`, `"subject":"${DOC_A}-L002"`) },
+    { user: request.user.replace(DOC_A, DOC_B) },
+    { user: request.user.replace("Primary burden", "Primary  burden") },
+    { user: request.user.replace("GAP-002", "GAP-001") },
+    { purpose: `gap-reviser:${DOC_B}` },
+    { purpose: "another-purpose" },
+    { stage: "S3" as const },
+    { stage: null },
+    { user: undefined } as unknown as Partial<ReplayRequest>,
+  ])("rejects a changed or malformed request (%j)", (change) => {
+    expect(() => replayReply({ ...request, ...change }, recording)).toThrow(DemoReplayMissError);
+  });
+
+  it("does not normalize deterministic file IDs or move another row's response", () => {
+    const fileRequest = { ...request, user: JSON.stringify({ ...JSON.parse(request.user), file_id: "FILE-0123456789" }) };
+    const fileRecording = {
+      ...recording,
+      calls: [recordedCallFrom({ stage: "S2", purpose: request.purpose, system_prompt: request.system, user_prompt: fileRequest.user, reply: "{}" })],
     };
-    // This run: the elderly gap is listed first, and both have new ids.
-    const user = JSON.stringify({ gaps: [{ id: "GAP-031", name: "Elderly comparison" }, { id: "GAP-030", name: "Economic burden" }] });
-    const reply = JSON.parse(replayReply({ stage: "S4", purpose: "mapping-table-critic", system: "", user }, shuffled));
-    expect(reply.reviews).toEqual([
-      { gap_id: "GAP-030", verdict: "keep burden" },
-      { gap_id: "GAP-031", verdict: "keep elderly" },
-    ]);
+    expect(() => replayReply({ ...fileRequest, user: fileRequest.user.replace("0123456789", "1123456789") }, fileRecording)).toThrow(DemoReplayMissError);
+    expect(() => replayReply({ ...request, user: request.user.replace('"name":"Primary burden"', '"name":"Comparator"') }, recording)).toThrow(DemoReplayMissError);
   });
 
-  it("finds an id defined inside a wrapping id, such as a timeline activity", () => {
-    const recorded: Recording = {
-      recorded_at: null,
-      calls: [
-        recordedCallFrom({
-          stage: "S10",
-          purpose: "timeline-estimates",
-          system_prompt: "",
-          user_prompt: JSON.stringify({ activities: [{ id: "ACT-TAC-001", name: "Registry" }, { id: "ACT-TAC-002", name: "CNS sub-study" }] }),
-          reply: JSON.stringify({ activities: [{ id: "ACT-TAC-001", start_offset_months: 6 }, { id: "ACT-TAC-002", start_offset_months: 0 }] }),
-        }),
-      ],
-    };
-    const user = JSON.stringify({ activities: [{ id: "ACT-TAC-041", name: "CNS sub-study" }, { id: "ACT-TAC-040", name: "Registry" }] });
-    const reply = JSON.parse(replayReply({ stage: "S10", purpose: "timeline-estimates", system: "", user }, recorded));
-    expect(reply.activities).toEqual([
-      { id: "ACT-TAC-040", start_offset_months: 6 },
-      { id: "ACT-TAC-041", start_offset_months: 0 },
-    ]);
+  it("rejects malformed and ambiguous fixtures before returning any reply", () => {
+    for (const invalid of [
+      { ...recording, calls: [{ ...call, ids: [DOC_A, "GAP-001", "GAP-001"] }] },
+      { ...recording, calls: [{ ...call, ids: [DOC_A, "NEED-001", "GAP-002"] }] },
+      { ...recording, calls: [{ ...call, ids: [DOC_A, "GAP-001"] }] },
+      { ...recording, calls: [{ ...call, reply: "bad answer" }] },
+      { ...recording, calls: [{ ...call, reply: '{"gaps":[{"id":"GAP-412"}]}' }] },
+      { ...recording, calls: [{ ...call, reply: undefined, historical_reply: { index: 2, sha256: "changed original" } }] },
+      { ...recording, calls: [call, call] },
+      { ...recording, fixture: "another-pack" } as unknown as Recording,
+    ]) {
+      expect(() => replayReply(request, invalid)).toThrow(DemoReplayMissError);
+    }
   });
 
-  it("still finds the closest recorded call when this prompt differs a little", () => {
-    const found = findRecordedCall(
-      { stage: "S2", purpose: `gap-proposer:${DOC_B}`, system: "x", user: `Document ${DOC_B}: payer interviews about the burden of recurrence.` },
-      recording,
-    );
-    expect(found?.reply).toContain("Economic burden of recurrence");
-  });
-
-  it("says so, in plain words, for a step the recording does not have", () => {
-    expect(() => replayReply({ stage: "S9", purpose: "ideation-proposer", system: "", user: "" }, recording)).toThrow(DemoReplayMissError);
-    expect(() => replayReply({ stage: "S9", purpose: "ideation-proposer", system: "", user: "" }, recording)).toThrow(/not part of the recorded client demo/);
+  it("gives fixed recovery copy without printing request content", () => {
+    const requestSecret = "private-wrong-purpose";
+    expect(() => replayReply({ ...request, purpose: requestSecret }, recording)).toThrow(/Reset demo/);
+    try {
+      replayReply({ ...request, purpose: requestSecret }, recording);
+    } catch (error) {
+      expect(String(error)).not.toContain(requestSecret);
+    }
   });
 });
 
@@ -170,4 +159,23 @@ describe("demo document ids", () => {
       expect(demoSourceById(file.id)?.text).toBe(file.text);
     }
   });
+});
+
+it("records a supplied gap reference for each relevant demo mapping", () => {
+  const calls = historicalRecording.calls.filter((call) => call.stage === "S4" && call.purpose === "mapping-table-proposer");
+  expect(calls.length).toBeGreaterThan(0);
+  for (const call of calls) {
+    const { rows } = JSON.parse(call.reply);
+    for (const row of rows) {
+      expect(call.ids).toContain(row.gap_id);
+      for (const mapping of row.mappings) {
+        if (mapping.coverage === "not_relevant") continue;
+        const [reference] = mapping.references ?? [];
+        expect(judgementReferenceSchema.parse(reference)).toMatchObject({
+          entity_type: "gap",
+          entity_id: row.gap_id,
+        });
+      }
+    }
+  }
 });
