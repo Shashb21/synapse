@@ -314,7 +314,9 @@ export async function tracedCompletion(args: {
           });
         }
       } catch (error) {
-        if (error instanceof TrustedApplicationError && sends === 0) throw error;
+        // An authorized replay lookup is a call even though it never sends an HTTP request.
+        const replayMiss = replay && approvedDemo && error instanceof DemoReplayMissError;
+        if (error instanceof TrustedApplicationError && sends === 0 && !replayMiss) throw error;
         usage = callUsage({ usage, status: "error", reply: null, system_prompt: args.request.system, user_prompt: args.request.user });
         const window = { at: new Date(began), through: new Date() };
         const id = await record(null, error instanceof Error ? error.message : String(error), window);
