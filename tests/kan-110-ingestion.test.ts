@@ -20,6 +20,7 @@ import { setAiSection } from "@/modules/kernel/ai-switch";
 import * as routing from "@/modules/kernel/routing";
 import { stageOf } from "@/modules/kernel/stage-errors";
 import { completedIngestSourceIds } from "@/lib/ingest/status";
+import { priorityDecision, reviewInventoryForPriorities } from "./support/priority-decision";
 
 const actor = { name: "Ingestion test", function: "medical_affairs" } as const;
 const file = { filename: "recovery.txt", title: "Recovery test", source_type: "advisory_board", stakeholder_function: "market_access", text: "Payers need comparative evidence versus standard of care. A registry study will collect real-world persistence data." } as const;
@@ -270,19 +271,20 @@ describe("KAN-262 run-wide outcomes across stage and checkpoint boundaries", () 
     const { runStage } = await import("@/modules/kernel/run");
     const { resetDemoSetup, createGap } = await import("@/lib/iegp/store");
     const priorities = await import("@/modules/stages/s8-prioritization/module");
-    const evals = await import("@/modules/kernel/evals");
+    const runs = await import("@/modules/kernel/observability");
     const context = await import("@/lib/iegp/store");
     await resetDemoSetup();
     const gap = await createGap({ statement: "Comparative safety remains unknown.", actor_name: actor.name, actor_function: actor.function });
+    await reviewInventoryForPriorities(actor);
     const controller = new AbortController();
     const lock = context.lockObjectiveContext;
     const lockSpy = vi.spyOn(context, "lockObjectiveContext").mockImplementation(async (...params) => {
       await lock(...params);
       if (timing === "before") controller.abort();
     });
-    const record = evals.recordEvalRun;
-    const evalSpy = vi.spyOn(evals, "recordEvalRun").mockImplementationOnce(async (...params) => {
-      const result = await record(...params);
+    const run = runs.withRunningRun;
+    const commitSpy = vi.spyOn(runs, "withRunningRun").mockImplementationOnce(async (recorder, execute) => {
+      const result = await run(recorder, execute);
       if (timing === "after") controller.abort();
       return result;
     });
@@ -299,7 +301,7 @@ describe("KAN-262 run-wide outcomes across stage and checkpoint boundaries", () 
       expect(metrics).toHaveLength(timing === "before" ? 0 : 1);
     } finally {
       lockSpy.mockRestore();
-      evalSpy.mockRestore();
+      commitSpy.mockRestore();
     }
   }));
 
@@ -315,6 +317,7 @@ describe("KAN-262 run-wide outcomes across stage and checkpoint boundaries", () 
     await resetDemoSetup();
     if (stage === "S8") {
       await createGap({ statement: "Comparative safety remains unknown.", actor_name: actor.name, actor_function: actor.function });
+      await reviewInventoryForPriorities(actor);
       const initial = await runStage({ stage: "S8", input: {}, actor, role: args.role });
       expect(await listPlacements()).toMatchObject([{ run_id: initial.run_id }]);
     }
@@ -342,11 +345,11 @@ describe("KAN-262 run-wide outcomes across stage and checkpoint boundaries", () 
     const { runStage } = await import("@/modules/kernel/run");
     const { resetDemoSetup, createGap } = await import("@/lib/iegp/store");
     const { validatePlacement } = await import("@/modules/stages/s8-prioritization/module");
-    const { priorityDecision } = await import("./support/priority-decision");
     const evals = await import("@/modules/kernel/evals");
     await resetDemoSetup();
     const gap = await createGap({ statement: "Comparative safety remains unknown.", actor_name: actor.name, actor_function: actor.function });
     const rationale = "Comparative safety blocks the decision.";
+    await reviewInventoryForPriorities(actor);
     await validatePlacement({ ...await priorityDecision(gap, rationale), gap_id: gap, actor, band: "high", rationale });
     const controller = new AbortController();
     const record = evals.recordEvalRun;

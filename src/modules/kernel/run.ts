@@ -266,7 +266,7 @@ async function executeStage<O>(args: StageRunArgs): Promise<StageRunResult<O>> {
       evals,
     });
     signals = result.signals ?? [];
-    if (ingestStage) await recordFollowUps(evals, result.summary);
+    await recordFollowUps(evals, result.summary);
     currentModelRun()?.check();
     return {
       run_id: recorder.id,
@@ -348,7 +348,6 @@ async function executeStage<O>(args: StageRunArgs): Promise<StageRunResult<O>> {
   const { result } = outcome;
 
   try {
-    if (!ingestStage) await recordFollowUps(result.evals, result.summary);
     // Direct S1 runs own their commit; pipeline S1 is compared after its checkpoint commits.
     const isDryRun = Boolean(args.input && typeof args.input === "object" && "dry_run" in args.input && args.input.dry_run === true);
     if (ownsParseCommit && !isDryRun) {
