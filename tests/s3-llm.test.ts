@@ -114,7 +114,7 @@ describe("S3 on the model path", () => {
         title: "Fictional activity descriptions",
         source_type: "stakeholder_interview",
         stakeholder_function: ACTOR.function,
-        text: `Fictional activity descriptions.\n\n${QUOTE}\n\n${CLAIMS_QUOTE}`,
+        text: `Fictional activity descriptions.\n\n${QUOTE}\n\n${CLAIMS_QUOTE}\n\nA systematic literature review was completed last year.`,
       }] },
       actor: ACTOR,
       role: "medical_affairs",
@@ -161,6 +161,24 @@ describe("S3 on the model path", () => {
   });
 
   const input = (dry_run = true) => tacticExtractModule.inputSchema.parse({ document_ids: [documentId], dry_run });
+
+  it("checks a revised quotation before it can become a tactic", async () => {
+    let firstReview = true;
+    const { ctx } = context((call) => {
+      if (call.purpose.startsWith("tactic-proposer-revise:")) {
+        return { tactics: idsOf(call, "rows").map((id) => ({ id, ...good({ source_quote: "The fictional pilot enrolled twelve volunteers." }) })) };
+      }
+      if (call.purpose.startsWith("tactic-proposer:")) return { tactics: [good()] };
+      if (call.purpose === "tactic-critic") {
+        if (!firstReview) return keepAll(call);
+        firstReview = false;
+        return { reviews: idsOf(call, "candidates").map((id) => ({ id, verdict: "revise", confidence: 70, note: "Clarify the documented activity" })) };
+      }
+      return acceptAll(call);
+    });
+    await expect(tacticExtractModule.run(input(false), ctx)).rejects.toThrow(/source_quote.*verbatim/i);
+    expect(commitExtractedRecords).not.toHaveBeenCalled();
+  });
 
   it("throws before doing anything when no LLM is connected", async () => {
     const { ctx, calls } = context(() => ({}), false);
@@ -268,7 +286,12 @@ describe("S3 on the model path", () => {
     const request = input(false);
     const facts = await tacticExtractModule.freeze!(request) as { documents: ParsedDocumentRecord[] };
     const first = facts.documents[0]!;
-    const second = { ...first, id: "second-document", source_id: "second-source" };
+    const second = {
+      ...first, id: "second-document", source_id: "second-source",
+      blocks: first.blocks.map(block => ({ ...block, id: `second-${block.id}`, source_id: "second-source" })),
+    };
+    const { state } = facts as typeof facts & { state: Awaited<ReturnType<typeof loadState>> };
+    state.blocks.push(...second.blocks);
     facts.documents.push(second);
     request.document_ids = [first.id, second.id];
     let attempts = 0;
@@ -335,6 +358,7 @@ describe("S3 on the model path", () => {
     const facts = await tacticExtractModule.freeze!(request) as { documents: ParsedDocumentRecord[] };
     const document = facts.documents[0]!;
     const template = document.blocks[0]!;
+    const { state } = facts as typeof facts & { state: Awaited<ReturnType<typeof loadState>> };
     const firstFragment = "The planned registry excludes";
     const secondFragment = "patients without consent.";
     const stitched = `${firstFragment} ${secondFragment}`;
@@ -342,6 +366,7 @@ describe("S3 on the model path", () => {
       { ...template, heading: "Registry", text: `${QUOTE} ${firstFragment}` },
       { ...template, id: `${template.id}-claims`, heading: "Claims", text: `${secondFragment} ${CLAIMS_QUOTE}` },
     ];
+    state.blocks = [...state.blocks.filter(block => block.source_id !== document.source_id), ...document.blocks];
     const { ctx, calls } = context(call => {
       if (call.purpose.startsWith("tactic-proposer:")) {
         return { tactics: [good(), good({ name: "Claims study", source_quote: stitched })] };
@@ -583,7 +608,8 @@ describe("S3 on the model path", () => {
     await run();
     await run();
     const refs = (await listTacticSourceReferences(libraryId)).filter(r => r.source_quote === unique || r.source_quote === repeated);
-    expect(refs).toHaveLength(2);
+    expect(refs).toHaveLength(4);
+    expect(refs.filter(r => r.source_quote === repeated && r.block_id).map(r => r.block_id).sort()).toEqual(["first", "second"]);
     expect(refs.find(r => r.id === "old-0")).toMatchObject({ created_at: "2020-01-01", block_id: "unique" });
     expect(refs.find(r => r.id === "old-1")).toMatchObject({ created_at: "2020-01-01", block_id: null, observed_block_ids: ["first", "second"] });
     const later = block("later", unique);

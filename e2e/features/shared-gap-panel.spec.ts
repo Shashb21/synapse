@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { freshWorkspace } from "../support/session";
-import { coverageOpeningTokens, iegpAction, planAction } from "../support/synapse";
+import { coverageOpeningTokens, iegpAction, planAction, preparePrioritizationInventory } from "../support/synapse";
 
 let gapId = "";
 freshWorkspace({ name: "KAN133 shared gap panel", seed: async request => {
@@ -260,8 +260,8 @@ test("Partial and unconfirmed panels share coverage context and full-record next
 
 
 test("priority drafts survive automatic placement refresh and changed saved priority revalidation", async ({ page, request }) => {
-  const added = await iegpAction(request, { action: "create_gap", name: "Automatic placement refresh trigger", statement: "A new evidence need awaits placement", domain: "unmet_need", settings: "1L" });
-  await iegpAction(request, { action: "validate_gap", gap_id: String(added.id) });
+  await iegpAction(request, { action: "create_gap", name: "Automatic placement refresh trigger", statement: "A new evidence need awaits placement", domain: "unmet_need", settings: "1L" });
+  await preparePrioritizationInventory(request);
   let release!: () => void;
   const pending = new Promise<void>(resolve => { release = resolve; });
   let started = false;

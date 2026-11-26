@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { E2E_FALLBACK_WORKSPACE, demoSignIn, listWorkspaces, selectWorkspace } from "../support/session";
-import { consolidate, controlAction, planState, seedMapped, validateBandHigh } from "../support/synapse";
+import { consolidate, controlAction, planState, seedPrioritizable, validateBandHigh } from "../support/synapse";
 
 /**
  * KAN-25: the owner builds the timeline by hand, with AI off and no S10 run.
@@ -62,7 +62,7 @@ test.describe("KAN-25 manual timeline", () => {
   let gapName: string;
 
   test.beforeAll(async ({ request }) => {
-    await seedMapped(request);
+    await seedPrioritizable(request);
     const lists = await consolidate(request);
     expect(lists.open.length).toBeGreaterThan(0);
     gapId = lists.open[0]!.gap_id;

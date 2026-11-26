@@ -6,7 +6,7 @@ import '@/modules';
 import { eq } from 'drizzle-orm';
 import * as core from '@/lib/iegp/schema';
 import { db, wipePlatform } from '@/modules/kernel/db';
-import { createGap, createProposedTactic, loadState, resetDemoSetup, assignTacticToGap } from '@/lib/iegp/store';
+import { createGap, createProposedTactic, loadState, resetDemoSetup, assignTacticToGap, validateGap } from '@/lib/iegp/store';
 import { validatePlacement } from '@/modules/stages/s8-prioritization/module';
 import { ideationModule, addIdeationProposal, decideIdeationProposal, editIdeationProposal, listIdeationProposals, restoreIdeationProposal, acceptedIdeationContexts } from '@/modules/stages/s9-ideation/module';
 const actor = { name: 'Expansion reviewer', function: 'medical_affairs' as const };
@@ -17,6 +17,7 @@ beforeEach(async () => {
     await resetDemoSetup();
     await wipePlatform();
     gapId = await createGap({ statement: 'Long-term safety in elderly patients is unknown.', actor_name: actor.name, actor_function: actor.function });
+    await validateGap({ gap_id: gapId, actor_name: actor.name, actor_function: actor.function, note: "Confirm the evidence assessment" });
     await validatePlacement({ ...await priorityDecision(gapId, 'Blocks dossier'), gap_id: gapId, band: 'high', rationale: 'Blocks dossier', actor });
     targetId = await createProposedTactic({ name: 'Completed trial', type: 'phase3_trial', description: 'Original trial', evidence_question: 'Overall safety', population: 'Adults', intervention: 'Asset', comparator: 'SOC', outcomes: 'AE', owner: actor.name, function: actor.function, residual_ids: [], status: 'completed', actor_name: actor.name, actor_function: actor.function });
 });

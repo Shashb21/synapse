@@ -558,6 +558,7 @@ describe("KAN-201 owner Development setup", () => {
       },
       dropped: [],
       dropped_units: [],
+      split_units: {},
       stakeholder_rationale: "Test fixture",
     });
     const response = await reference(

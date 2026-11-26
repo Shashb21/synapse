@@ -94,7 +94,7 @@ test.describe("S3 overlap source review", () => {
     await iegpAction(request, {action: "create_gap", domain: "safety", name: "Source expansion gap", statement: "Subgroup evidence needed", rationale: "Browser fixture"});
     await iegpAction(request, {action: "record_missed_tactic", name: "Reviewed parent registry", type: "registry", status: "ongoing", evidence_question: "Original parent scope", rationale: "Locked source parent"});
   }});
-  test("compares current and proposed scope, saves edits and gap, and records expand/separate/reject outcomes", async ({page, request}) => {
+  test("compares current and proposed scope, saves edits and gap, and records expand/separate/reject outcomes", async ({page}) => {
     test.setTimeout(90_000); page.setDefaultTimeout(10_000);
     const pg = postgres(process.env.DATABASE_URL!);
     try {
@@ -104,12 +104,23 @@ test.describe("S3 overlap source review", () => {
       parent!.lock = {locked: true, actor_name: "Feature E2E", actor_function: "medical_affairs", locked_at: "2026-10-07T12:00:00.000Z", note: "Reviewed locked protocol"};
       await pg`update ${pg(`${schema}.tactics`)} set lock=${pg.json({...parent!.lock})} where id=${parent!.id}`;
       const [source] = await pg`select * from ${pg(`${schema}.sources`)} limit 1`;
+      const citation = {
+        block_id: "S3-BROWSER-SOURCE-BLOCK",
+        source_quote: "The source describes a subgroup analysis.",
+        source_context: { heading: "Subgroup analysis", location: "Page 2" },
+      };
+      await pg`insert into ${pg(`${schema}.source_blocks`)} ${pg({
+        id: citation.block_id,
+        source_id: source!.id,
+        text: citation.source_quote,
+        ...citation.source_context,
+      })}`;
       const [gap] = await pg`select * from ${pg(`${schema}.gaps`)} where name='Source expansion gap'`;
       const version = tacticVersion(parent!);
       const scope = {name: "Source subgroup", evidence_question: "Added subgroup question", population: "Subgroup patients", outcomes: "Safety", geography: "", data_cut: "", analysis: "Post-hoc subgroup", instrument: "", study_design: "Retrospective analysis", gap_coverage: "Subgroup evidence", cost_effort: "Two analyst weeks", timing: "Next quarter", feasibility_risks: "Small subgroup", post_hoc: true, prospective_enrolment: false, protocol_amendment: false, start_date: null, evidence_available: null};
       for (const id of ["S3-BROWSER-EXPAND", "S3-BROWSER-SEPARATE", "S3-BROWSER-REJECT"]) {
         const separate = {name: `Separate ${id}`, type: "rwe_study", status: "planned", evidence_question: "Independent subgroup question"};
-        const payload = {id, version: id, run_id: "browser-source-run", document_id: "browser-document", source_id: source!.id, source_quote: "The source describes a subgroup analysis.", target_tactic_id: parent!.id, expected_tactic_version: version, reviewed_parent: parent, shared_scope: "Existing registry population", new_scope: "Added subgroup population", expansion: scope, original_expansion: scope, separate, original_separate: separate, gap_id: null, status: "pending", result_expansion_id: null, result_tactic_id: null, history: [], created_at: "2026-10-07T12:00:00.000Z", updated_at: "2026-10-07T12:00:00.000Z"};
+        const payload = {id, version: id, run_id: "browser-source-run", document_id: "browser-document", source_id: source!.id, ...citation, target_tactic_id: parent!.id, expected_tactic_version: version, reviewed_parent: parent, shared_scope: "Existing registry population", new_scope: "Added subgroup population", expansion: scope, original_expansion: scope, separate, original_separate: separate, gap_id: null, status: "pending", result_expansion_id: null, result_tactic_id: null, history: [], created_at: "2026-10-07T12:00:00.000Z", updated_at: "2026-10-07T12:00:00.000Z"};
         await pg`insert into ${pg(`${schema}.tactic_suggestions`)} ${pg({id, source_key: id, target_tactic_id: parent!.id, source_id: source!.id, status: "pending", payload: pg.json(payload), created_at: payload.created_at, updated_at: payload.updated_at})}`;
       }
       await page.goto("/tactics");
@@ -117,6 +128,7 @@ test.describe("S3 overlap source review", () => {
       const expand = region.locator("article").filter({hasText: "S3-BROWSER-EXPAND"});
       await expect(expand.getByText("Original parent scope", {exact: true})).toBeVisible();
       await expect(expand.locator("p").filter({hasText: /^Added subgroup question$/})).toBeVisible();
+      await expect(expand).toContainText("Subgroup analysis · Page 2");
       await expand.getByRole("button", {name: "Edit expansion scope"}).click();
       let dialog = page.getByRole("dialog");
       await dialog.getByRole("textbox", {name: "Name (required)", exact: true}).fill("Human-reviewed subgroup");
@@ -145,7 +157,7 @@ test.describe("S3 overlap source review", () => {
       expect(child).toMatchObject({status: "proposed", scope: {name: "Human-reviewed subgroup"}});
       expect(await pg`select * from ${pg(`${schema}.tactics`)} where id=${parent!.id}`).toEqual([parent]);
       const [separateRef] = await pg`select * from ${pg(`${schema}.tactic_source_references`)} limit 1`;
-      expect(separateRef).toMatchObject({source_id: source!.id, source_quote: "The source describes a subgroup analysis."});
+      expect(separateRef).toMatchObject({source_id: source!.id, ...citation});
       await page.setViewportSize({width: 390, height: 844});
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await page.evaluate(() => window.scrollTo(0, 0));

@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 // Route handlers read the session cookie; outside a request scope, act as the demo typed actor.
@@ -12,8 +13,8 @@ vi.mock("@/modules/auth/request", () => ({
 import "@/modules";
 import { runStage } from "@/modules/kernel/run";
 import { wipePlatform, db } from "@/modules/kernel/db";
-import { listEdits } from "@/modules/kernel/edit-records";
-import { loadState, persistSourceAndBlocks, resetDemoSetup } from "@/lib/iegp/store";
+import { listEdits, recordEdit } from "@/modules/kernel/edit-records";
+import { loadState, commitExtractedRecords, editNeed, persistSourceAndBlocks, recordMissedTactic, resetDemoSetup } from "@/lib/iegp/store";
 import * as t from "@/lib/iegp/schema";
 import { GET as blocksGet, POST as blocksPost } from "@/app/api/sources/blocks/route";
 import {
@@ -26,6 +27,7 @@ import {
   mergeSourceBlocks,
   persistDroppedSourceUnits,
   readSourceStakeholder,
+  reparseSourceBlocks,
   recordLlmSourceStakeholder,
   restoreDroppedSourceUnit,
   setSourceStakeholder,
@@ -127,6 +129,79 @@ describe("S1 source blocks: human edit, add, split, merge, delete", () => {
     expect((await listSourceBlocks(source_id)).map((b) => b.id)).toEqual([blocks[0]!.id, blocks[1]!.id]);
   });
 
+  it("protects the identified model need block even when its quote is repeated", async () => {
+    const { source_id, blocks } = await source("repeated need quote");
+    const quote = blocks[0]!.text;
+    const duplicate = await addSourceBlock({ source_id, text: quote, after_block_id: null, rationale: "Record a repeat", actor: ACTOR });
+    const id = `NEED-S2-${source_id}`;
+    await citeNeed(id, source_id, quote);
+    await db().update(t.needs).set({ block_id: blocks[0]!.id, run_id: "fictional-s2-run" }).where(eq(t.needs.id, id));
+    const human = { actor_name: ACTOR.name, actor_function: ACTOR.function, rationale: "Review the quote" };
+    await expect(editNeed({ need_id: id, source_quote: "An unrelated sentence.", ...human })).rejects.toThrow(/quote.*source block/i);
+    await editNeed({ need_id: id, source_quote: "OS data versus docetaxel", ...human });
+    await expect(deleteSourceBlock({ block_id: blocks[0]!.id, rationale: "Remove duplicate", actor: ACTOR })).rejects.toBeInstanceOf(SourceQuoteConflictError);
+    await deleteSourceBlock({ block_id: duplicate.id, rationale: "Remove uncited duplicate", actor: ACTOR });
+    expect((await loadState()).needs.find((row) => row.id === id)?.block_id).toBe(blocks[0]!.id);
+  });
+
+  it("keeps existing tactic citations through source edits and reparse", async () => {
+    const { source_id, blocks } = await source("legacy tactic quote");
+    const quote = blocks[2]!.text;
+    await commitExtractedRecords({
+      source_id, title: "Notes legacy tactic quote", stakeholder_function: ACTOR.function,
+      actor_name: ACTOR.name, actor_function: ACTOR.function, needs: [], gaps: [],
+      tactics: [{ id: "study", name: "Chart review", type: "rwe_study", status: "planned",
+        evidence_question: "What does routine care show?", source_id, source_quote: quote }],
+    });
+    await expect(editSourceBlock({ block_id: blocks[2]!.id, text: "The interview ended.", rationale: "Shorter notes", actor: ACTOR })).rejects.toBeInstanceOf(SourceQuoteConflictError);
+    const reparsed = await reparseSourceBlocks({ source_id, sections: [{ heading: "Wrap-up", text: "The interview ended.", location: "p.3" }] });
+    expect(reparsed.blocks.find((row) => row.id === blocks[2]!.id)).toMatchObject({ text: quote });
+  });
+
+  it.each(["id", "title"] as const)("protects a historical tactic's primary passage identified by source %s alongside a later reference", async identity => {
+    const { source_id, blocks } = await source(`legacy primary ${identity}`);
+    const [primary, secondary] = blocks;
+    const state = await loadState();
+    const storedSource = state.sources.find(row => row.id === source_id)!;
+    const result = await commitExtractedRecords({
+      source_id, title: storedSource.title, stakeholder_function: ACTOR.function,
+      actor_name: ACTOR.name, actor_function: ACTOR.function, needs: [], gaps: [],
+      tactics: [{ id: "study", name: "Fictional primary activity", type: "rwe_study", status: "planned",
+        evidence_question: "What does routine care show?", source_id, source_quote: "" }],
+    });
+    const tacticId = result.tactic_ids[0]!;
+    await db().update(t.tactics).set({ source_quote: primary!.text, data_source: storedSource[identity] }).where(eq(t.tactics.id, tacticId));
+    const { attachTacticSource } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    await attachTacticSource({ tactic_id: tacticId, source_id, source_quote: secondary!.text, block_id: secondary!.id });
+
+    await expect(editSourceBlock({ block_id: primary!.id, text: "A different passage.", rationale: "Edit main source", actor: ACTOR }))
+      .rejects.toBeInstanceOf(SourceQuoteConflictError);
+    const reparsed = await reparseSourceBlocks({ source_id, sections: [{ heading: "Other", text: "A different passage.", location: "p.3" }] });
+    expect(reparsed.blocks.map(row => row.id)).toEqual(expect.arrayContaining([primary!.id, secondary!.id]));
+  });
+
+  it.each(["id", "title"] as const)("protects a historically promoted tactic using source %s", async identity => {
+    const { source_id, blocks } = await source(`legacy promotion ${identity}`);
+    const block = blocks[2]!;
+    const storedSource = (await loadState()).sources.find(row => row.id === source_id)!;
+    const tacticId = await recordMissedTactic({
+      name: "Historically promoted chart review", type: "rwe_study", status: "ongoing",
+      evidence_question: "What does routine care show?", source_quote: block.text,
+      data_source: storedSource[identity], actor_name: ACTOR.name, actor_function: ACTOR.function,
+    });
+    await recordEdit({
+      stage: "S3", entity_type: "tactic_candidate", entity_id: `old-${tacticId}`, field: "verdict",
+      action: "accept", before: "reject", after: tacticId, rationale: "Confirmed from source", actor: ACTOR,
+    });
+
+    await expect(editSourceBlock({ block_id: block.id, text: "Interview concluded.", rationale: "Edit notes", actor: ACTOR }))
+      .rejects.toBeInstanceOf(SourceQuoteConflictError);
+    await expect(deleteSourceBlock({ block_id: block.id, rationale: "Delete notes", actor: ACTOR }))
+      .rejects.toBeInstanceOf(SourceQuoteConflictError);
+    const reparsed = await reparseSourceBlocks({ source_id, sections: [{ heading: "Other", text: "Interview concluded.", location: "p.3" }] });
+    expect(reparsed.blocks.find(row => row.id === block.id)).toMatchObject({ text: block.text });
+  });
+
   it("splits, merges and adds in reading order, labelling human blocks", async () => {
     const { source_id, blocks } = await source("split");
     const split = await splitSourceBlock({
@@ -168,6 +243,57 @@ describe("S1 source blocks: human edit, add, split, merge, delete", () => {
     expect(state.sources.find((s) => s.id === source_id)!.stakeholder_function).toBe("hta");
   });
 
+  it("restores the second of two identical dropped occurrences without suppressing the first", async () => {
+    const { source_id } = await source("duplicate-drop");
+    const text = "Repeated footer text.";
+    await persistDroppedSourceUnits(source_id, [
+      { location: "p.9", reason: "Footer", text, occurrence_id: "u1" },
+      { location: "p.10", reason: "Footer", text, occurrence_id: "u2" },
+    ]);
+    const dropped = await listDroppedSourceUnits(source_id);
+    await restoreDroppedSourceUnit({ dropped_id: dropped.find((unit) => unit.occurrence_id === "u2")!.id, rationale: "Relevant result", actor: ACTOR });
+
+    await persistDroppedSourceUnits(source_id, [
+      { location: "p.9", reason: "Footer", text, occurrence_id: "u1" },
+      { location: "p.10", reason: "Footer", text, occurrence_id: "u2" },
+    ]);
+
+    const remaining = await listDroppedSourceUnits(source_id);
+    expect(remaining).toHaveLength(2);
+    expect(remaining.find((unit) => unit.restored_block_id)?.occurrence_id).toBe("u2");
+    expect(remaining.find((unit) => !unit.restored_block_id)).toMatchObject({ occurrence_id: "u1", text });
+  });
+
+  it("matches legacy dropped rows by normalized text one occurrence at a time", async () => {
+    const { source_id } = await source("legacy-duplicate-drop");
+    const text = "Legacy repeated footer text.";
+    await persistDroppedSourceUnits(source_id, [
+      { location: "p.9", reason: "Footer", text },
+      { location: "p.10", reason: "Footer", text },
+    ]);
+    const dropped = await listDroppedSourceUnits(source_id);
+    await restoreDroppedSourceUnit({ dropped_id: dropped[1]!.id, rationale: "Relevant result", actor: ACTOR });
+
+    await persistDroppedSourceUnits(source_id, [
+      { location: "p.9", reason: "Footer", text },
+      { location: "p.10", reason: "Footer", text },
+    ]);
+
+    const remaining = await listDroppedSourceUnits(source_id);
+    expect(remaining.filter((unit) => !unit.restored_block_id)).toHaveLength(1);
+  });
+
+  it("keeps whitespace-only dropped units verbatim but does not restore them as blank blocks", async () => {
+    const { source_id } = await source("whitespace-drop");
+    await persistDroppedSourceUnits(source_id, [{ location: "p.11", reason: "Formatting", text: "   ", occurrence_id: "u1" }]);
+    const [unit] = await listDroppedSourceUnits(source_id);
+
+    await expect(restoreDroppedSourceUnit({ dropped_id: unit!.id, rationale: "Inspect formatting", actor: ACTOR })).rejects.toThrow(
+      /Block text is required/,
+    );
+    expect(await listDroppedSourceUnits(source_id)).toEqual(expect.arrayContaining([expect.objectContaining({ text: "   ", restored_block_id: null })]));
+  });
+
   it("creates a typed source with human-entered blocks via the API, no AI", async () => {
     const res = await post({
       action: "manual_source",
@@ -186,6 +312,66 @@ describe("S1 source blocks: human edit, add, split, merge, delete", () => {
     const body = (await get.json()) as { stakeholder: { set_by: string }; edits: unknown[] };
     expect(body.stakeholder.set_by).toBe("human");
     expect(body.edits.length).toBeGreaterThan(0);
+  });
+});
+
+describe("S1 re-parse preserves duplicate occurrences", () => {
+  beforeAll(async () => {
+    await resetDemoSetup();
+  }, 60_000);
+
+  it.each(["edited", "deleted"] as const)("preserves a legacy %s block when its raw unit is split", async (decision) => {
+    const first = "Original evidence. ".repeat(700);
+    const second = "Additional observations. ".repeat(300);
+    const text = first + second;
+    const { source_id, blocks } = await persistSourceAndBlocks({
+      title: "Oversized legacy evidence", source_type: "stakeholder_interview",
+      stakeholder_function: "medical_affairs", text,
+      sections: [{ heading: "Evidence", text, location: "p.1" }],
+    });
+    const block_id = blocks[0]!.id;
+    const corrected = "Reviewed evidence replaces the original observations.";
+    if (decision === "edited") {
+      await editSourceBlock({ block_id, text: corrected, rationale: "Correct the source", actor: ACTOR });
+    } else {
+      await deleteSourceBlock({ block_id, rationale: "Remove duplicate evidence", actor: ACTOR });
+    }
+
+    const slices = (index: number) => [first, second].map((text) => ({
+      heading: "Evidence", text, location: "p.1", split_unit: { index, text: first + second },
+    }));
+    const identicalIndependentOccurrence = decision === "edited" ? slices(1) : [];
+    const result = await reparseSourceBlocks({ source_id, sections: [...slices(0), ...identicalIndependentOccurrence] });
+    expect(result.skipped_duplicates).toBe(2);
+    expect(result.inserted).toBe(identicalIndependentOccurrence.length);
+    expect(result.blocks.map(block => block.text)).toEqual(decision === "edited" ? [corrected, first, second] : []);
+  });
+
+  it("keeps one new peer when one identical block occurrence is human-retained", async () => {
+    const repeated = "Repeated evidence.";
+    const { source_id, blocks } = await persistSourceAndBlocks({
+      title: "Duplicate reparse",
+      source_type: "stakeholder_interview",
+      stakeholder_function: "medical_affairs",
+      text: `${repeated}\n\n${repeated}`,
+      sections: [
+        { heading: "Evidence", text: repeated, location: "p.1" },
+        { heading: "Evidence", text: repeated, location: "p.2" },
+      ],
+    });
+    await editSourceBlock({ block_id: blocks[0]!.id, text: `${repeated} (reviewed)`, rationale: "Review duplicate", actor: ACTOR });
+
+    const result = await reparseSourceBlocks({
+      source_id,
+      sections: [
+        { heading: "Evidence", text: `${repeated} (reviewed)`, location: "p.1" },
+        { heading: "Evidence", text: `${repeated} (reviewed)`, location: "p.2" },
+      ],
+    });
+
+    expect(result.skipped_duplicates).toBe(1);
+    expect(result.inserted).toBe(1);
+    expect((await listSourceBlocks(source_id)).filter((block) => block.text === `${repeated} (reviewed)`).length).toBe(2);
   });
 });
 

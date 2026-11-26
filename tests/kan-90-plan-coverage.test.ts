@@ -25,6 +25,7 @@ import { promoteGapCandidate } from "@/app/api/iegp/promote-candidates";
 
 const ACTOR = { name: "KAN-90 Test", function: "medical_affairs" as const };
 const who = { actor_name: ACTOR.name, actor_function: ACTOR.function };
+const ELDERLY_QUOTE = "Insufficient evidence in patients aged 65 and over remains an open question for HTA.";
 let sourceId = "";
 
 async function overlapOn(gapId: string, candidateRowId: string | null = null): Promise<string> {
@@ -45,7 +46,7 @@ async function overlapOn(gapId: string, candidateRowId: string | null = null): P
         name: "Over-75s versus SoC",
         statement: "How does it compare with SoC in patients over 75?",
         domain: "comparative_effectiveness",
-        source_quote: "Nobody has looked at the over-75s.",
+        source_quote: ELDERLY_QUOTE,
         shared_part: "Comparative effectiveness versus standard of care is unknown.",
         new_part: "Nothing is known for patients over 75.",
         merged_name: "Comparative effectiveness incl. over-75s",
@@ -105,7 +106,7 @@ describe("KAN-90 plan action coverage", () => {
       name: "Over-75s versus SoC",
       statement: "How does it compare with SoC in patients over 75?",
       domain: "comparative_effectiveness",
-      source_quote: "Nobody has looked at the over-75s.",
+      source_quote: ELDERLY_QUOTE,
       score: 70,
       verdict: "accept",
       critic_note: "overlaps",

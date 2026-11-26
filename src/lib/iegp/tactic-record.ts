@@ -45,7 +45,7 @@ export async function tacticRecord(id: string, preloaded?: IegpState) {
     expansions,
     source_references: references.flatMap(reference => {
       const source = state.sources.find(row => row.id === reference.source_id);
-      return source ? [{ id: reference.id, source_id: source.id, title: source.title, quote: reference.source_quote }] : [];
+      return source ? [{ id: reference.id, source_id: source.id, title: source.title, quote: reference.source_quote, source_context: reference.source_context }] : [];
     }),
     history: history.map(entry => {
       const coverage = coverages.find(row => row.id === entry.entity_id);

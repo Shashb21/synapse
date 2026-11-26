@@ -12,7 +12,7 @@ import { runStage } from "@/modules/kernel/run";
 import { wipePlatform } from "@/modules/kernel/db";
 import { listEdits } from "@/modules/kernel/edit-records";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
-import { createGap, loadState, resetDemoSetup } from "@/lib/iegp/store";
+import { completeWizard, createGap, loadState, parkGap, resetDemoSetup, validateGap } from "@/lib/iegp/store";
 import {
   listPlacements,
   movePlacement,
@@ -36,6 +36,7 @@ import { splitPayload } from "@/components/split-gap-dialog";
 const ACTOR = { name: "Manual Planner", function: "medical_affairs" as const };
 const X = "effort_cost";
 const Y = "decision_impact";
+const reviewActor = { actor_name: ACTOR.name, actor_function: ACTOR.function };
 
 async function post(body: Record<string, unknown>) {
   if (["edit_proposal", "decide_proposal", "restore_proposal"].includes(String(body.action))) {
@@ -69,7 +70,8 @@ beforeAll(async () => {
     "Long-term safety beyond two years is not characterised.",
     "Treatment sequencing after progression is not described.",
   ]) {
-    await createGap({ statement, actor_name: ACTOR.name, actor_function: ACTOR.function });
+    const gap_id = await createGap({ statement, ...reviewActor });
+    await validateGap({ gap_id, ...reviewActor });
   }
   const state = await loadState();
   ids = state.gaps
@@ -79,6 +81,24 @@ beforeAll(async () => {
 }, 60_000);
 
 describe("S8 manual placement", () => {
+  it("refuses a manual API placement when new evidence reopens inventory review after preparation", async () => {
+    await completeWizard(reviewActor);
+    const gap_id = ids[0]!;
+    const blocker = await createGap({ statement: "A new assessment is needed after the initial review", ...reviewActor });
+    try {
+      const before = await placementOf(gap_id);
+      const { status, json } = await post({
+        action: "set_placement", gap_id, band: "high", rationale: "Priority reviewed by Medical Affairs",
+      });
+      expect(status).toBe(400);
+      expect(String(json.error)).toMatch(new RegExp(`${blocker}.*confirm`, "i"));
+      expect(await placementOf(gap_id)).toEqual(before);
+      expect((await loadState()).asset.wizard_complete).toBe(true);
+    } finally {
+      await parkGap({ gap_id: blocker, reason: "Remove test blocker from the live inventory", ...reviewActor });
+    }
+  });
+
   it("places a gap by typed scores with no model run, audited with the rationale", async () => {
     const gapId = ids[0]!;
     expect(await placementOf(gapId)).toBeUndefined();
@@ -191,6 +211,7 @@ describe("S8 manual placement", () => {
       actor_name: ACTOR.name,
       actor_function: ACTOR.function,
     });
+    await validateGap({ gap_id: fresh, ...reviewActor });
     await runStage({
       stage: "S8",
       input: { gap_ids: [fresh], x_axis: X, y_axis: Y },

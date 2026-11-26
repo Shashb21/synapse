@@ -1,5 +1,5 @@
 import { priorityDecision } from "./support/priority-decision";
-import { makeFinalReady } from "./support/final-ready";
+import { makeFinalReady, reviewInventoryForFinal } from "./support/final-ready";
 import { beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import "@/modules";
@@ -177,6 +177,7 @@ describe("modular pipeline, S0 to S10", () => {
   }, 60_000);
 
   it("suggests priority bands on the configured axes and keeps a validated band on re-run", async () => {
+    await reviewInventoryForFinal(ACTOR);
     const suggested = await run<PrioritizationOutput>("S8", {});
     expect(suggested.output.placements.length).toBeGreaterThan(0);
     expect(suggested.output.axes.length).toBeGreaterThanOrEqual(2);

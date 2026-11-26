@@ -1,14 +1,19 @@
+/** Owns source-block edits and preserves the provenance of existing evidence records. */
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, exists, inArray, isNull, or, sql } from "drizzle-orm";
 import { boolean, doublePrecision, pgTable, text } from "drizzle-orm/pg-core";
 import { db, ensureCurrentSchemaTables, withWorkspaceTransaction } from "./db";
 import * as t from "./schema";
 import { ACTOR_FUNCTIONS, SOURCE_TYPES, type ActorFunction, type SourceType } from "./enums";
 import { appendAudit, persistSourceAndBlocks, loadState, lockAssessmentOwners, invalidateRelationshipAssessments } from "./store";
-import type { IegpState } from "./types";
+import type { IegpState, TacticSuggestion } from "./types";
+import { lockSourceCitationOwner } from "./source-citations";
+import { tacticCandidates, tacticSourceReferences, tacticSuggestions } from "@/modules/stages/s3-tactic-extract/schema";
+import { tacticPromotionEdit } from "@/modules/stages/s3-tactic-extract/promotions";
+import { validateQuoteAgainstBlock } from "@/lib/ingest/quote-validator";
 import { recordEdit } from "@/modules/kernel/edit-records";
+import { editRecords } from "@/modules/kernel/schema";
 import { moveTacticSourceCitations } from "@/modules/stages/s3-tactic-extract/suggestions";
-import { tacticSourceReferences, tacticSuggestions } from "@/modules/stages/s3-tactic-extract/schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { Actor } from "@/modules/kernel/contracts";
 import {
@@ -36,9 +41,8 @@ import {
  *   rationale, and the human override.
  * Every change writes an edit record (rationale required) and an audit row.
  *
- * Provenance policy: needs quote their source (`needs.source_quote`). A change
- * that would leave a quote with no block of that source containing it is
- * refused, naming the needs. Merges keep both texts, so they never orphan one.
+ * Extraction citations retain their exact block. Legacy quotes without an
+ * identified block remain protected wherever they occur in the same source.
  */
 
 export const sourceBlockMeta = pgTable("source_block_meta", {
@@ -63,6 +67,7 @@ export const sourceDroppedUnits = pgTable("source_dropped_units", {
   location: text("location").notNull(),
   reason: text("reason").notNull(),
   text: text("text").notNull(),
+  occurrence_id: text("occurrence_id"),
   restored_block_id: text("restored_block_id"),
   created_at: text("created_at").notNull(),
   source_generation: text("source_generation"),
@@ -151,12 +156,65 @@ async function metasFor(source_id: string): Promise<MetaRow[]> {
   return db().select().from(sourceBlockMeta).where(eq(sourceBlockMeta.source_id, source_id));
 }
 
-async function quotesFor(source_id: string): Promise<QuoteDependent[]> {
-  const rows = await db()
-    .select({ id: t.needs.id, quote: t.needs.source_quote })
-    .from(t.needs)
-    .where(eq(t.needs.source_id, source_id));
-  return rows.filter((row) => row.quote.trim());
+type SourceQuote = QuoteDependent & { citationKey: string; block_id: string | null };
+type RecordCitationConsolidation = (removedId: string, retainedId: string) => void;
+
+/** Use exact identity for model records and quote-only matching for older records. */
+function citesBlock(citation: SourceQuote, block: BlockRow): boolean {
+  if (!citation.block_id) return containsQuote(block.text, citation.quote);
+  return citation.block_id === block.id && validateQuoteAgainstBlock({ block, quote: citation.quote }).ok;
+}
+
+async function quotesFor(source_id: string): Promise<SourceQuote[]> {
+  const d = db();
+  const tacticNamesSource = or(eq(t.tactics.data_source, t.sources.id), eq(t.tactics.data_source, t.sources.title));
+  // Early promotions only saved a primary quote and an edit record. Use the
+  // candidate's source ID when it is still available.
+  const promotedFromSource = d.select({ id: editRecords.id }).from(editRecords)
+    .leftJoin(tacticCandidates, eq(tacticCandidates.id, editRecords.entity_id))
+    .where(and(
+      tacticPromotionEdit,
+      eq(editRecords.after, t.tactics.id),
+      or(eq(tacticCandidates.source_id, source_id), and(isNull(tacticCandidates.id), tacticNamesSource)),
+    ));
+  const [needs, references, gapSuggestions, tacticSuggestionsForSource, legacyTactics] = await Promise.all([
+    d.select({ id: t.needs.id, quote: t.needs.source_quote, block_id: t.needs.block_id,
+      run_id: t.needs.run_id, source_context: t.needs.source_context })
+      .from(t.needs).where(eq(t.needs.source_id, source_id)),
+    d.select({ id: tacticSourceReferences.tactic_id, referenceId: tacticSourceReferences.id, quote: tacticSourceReferences.source_quote,
+      block_id: tacticSourceReferences.block_id })
+      .from(tacticSourceReferences).where(eq(tacticSourceReferences.source_id, source_id)),
+    d.select().from(t.gapSuggestions).where(eq(t.gapSuggestions.status, "pending")),
+    d.select({ payload: tacticSuggestions.payload, status: tacticSuggestions.status })
+      .from(tacticSuggestions).where(eq(tacticSuggestions.source_id, source_id)),
+    d.select({ id: t.tactics.id, quote: t.tactics.source_quote, block_id: t.tactics.block_id })
+      .from(t.tactics).innerJoin(t.sources, eq(t.sources.id, source_id))
+      .where(or(
+        and(eq(t.tactics.lifecycle_stage, "extracted"), tacticNamesSource),
+        and(eq(t.tactics.lifecycle_stage, "recorded"), exists(promotedFromSource)),
+      )),
+  ]);
+  const pendingGapQuotes = gapSuggestions.flatMap((suggestion) =>
+    [suggestion, ...(Array.isArray(suggestion.extra_sources) ? suggestion.extra_sources : [])]
+      .map((source, index) => ({
+        id: suggestion.id, citationKey: `gap-suggestion:${suggestion.id}:${index}`,
+        quote: source.source_quote, block_id: source.block_id ?? null, source_id: source.source_id,
+      }))
+      .filter((source) => source.source_id === source_id),
+  );
+  const citations = [
+    ...needs.map((need) => ({
+      ...need, citationKey: `need:${need.id}`, block_id: need.run_id || need.source_context ? need.block_id : null,
+    })),
+    ...references.map((reference) => ({ ...reference, citationKey: `tactic-reference:${reference.referenceId}` })),
+    ...legacyTactics.map((tactic) => ({ ...tactic, citationKey: `tactic:${tactic.id}` })),
+    ...pendingGapQuotes,
+    ...tacticSuggestionsForSource.filter(({ status }) => status !== "rejected").map(({ payload }) => {
+      const row = payload as TacticSuggestion;
+      return { id: row.id, citationKey: `tactic-suggestion:${row.id}`, quote: row.source_quote, block_id: row.block_id ?? null };
+    }),
+  ].filter((row) => row.quote?.trim());
+  return citations;
 }
 
 /** Blocks of one source in reading order, with human/model provenance and citing needs. */
@@ -177,7 +235,7 @@ export async function listSourceBlocks(source_id: string): Promise<SourceBlockVi
         original_heading: human ? (meta?.original_heading ?? null) : null,
         edited_by: human ? (meta?.edited_by ?? null) : null,
         edited_at: human ? (meta?.edited_at ?? null) : null,
-        cited_by: quotes.filter((q) => containsQuote(block.text, q.quote)).map((q) => q.id),
+        cited_by: [...new Set(quotes.filter((quote) => citesBlock(quote, block)).map((quote) => quote.id))],
       };
     })
     .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
@@ -256,7 +314,7 @@ export class SourceQuoteConflictError extends Error {
 
 /** Refuses when a need's quote that was in the source would be found in no block afterwards. */
 async function guardQuotes(source_id: string, before: SourceBlockView[], afterTexts: string[]) {
-  const quotes = (await quotesFor(source_id)).filter((q) => before.some((b) => containsQuote(b.text, q.quote)));
+  const quotes = (await quotesFor(source_id)).filter((quote) => !quote.block_id && before.some((block) => citesBlock(quote, block)));
   const orphans = orphanedQuotes(quotes, afterTexts);
   if (orphans.length) throw new SourceQuoteConflictError(orphans);
 }
@@ -286,7 +344,7 @@ function toBlock(view: SourceBlockView): BlockRow {
 
 /** Keep source edits, provenance logs and affected assessments in the same transaction. */
 function assessmentSourceEdit<A extends { source_id?: string; block_id?: string; actor?: Actor }, R>(
-  edit: (args: A) => Promise<R>,
+  edit: (args: A, recordConsolidation: RecordCitationConsolidation) => Promise<R>,
   preserveSupportingText = false,
 ): (args: A) => Promise<R> {
   return async (args: A) => {
@@ -296,16 +354,31 @@ function assessmentSourceEdit<A extends { source_id?: string; block_id?: string;
         ? (await db().select().from(t.sourceBlocks).where(eq(t.sourceBlocks.id, args.block_id)))[0]?.source_id
         : undefined);
       if (!sourceId) throw new TrustedApplicationError("Source block not found.", "not_found", 404);
-      await db().execute(sql`select id from sources where id = ${sourceId} for update`);
+      await lockSourceCitationOwner(sourceId);
       const assessmentGapIds = await lockAssessmentOwners({ source_ids: [sourceId] });
       const before = await loadState();
-      const result = await edit(args);
+      const quotes = await quotesFor(sourceId);
+      const exactCitations = quotes.filter((quote) => quote.block_id && before.blocks.some((block) => citesBlock(quote, block)));
+      const consolidated = new Map<string, string>();
+      const result = await edit(args, (removedId, retainedId) => {
+        consolidated.set(`tactic-reference:${removedId}`, `tactic-reference:${retainedId}`);
+      });
       // Resolve citations against the actual post-edit reading order. A retained
       // legacy passage may span newly split blocks, but must still occur verbatim
       // (apart from whitespace); changed or missing support drops the retention.
       const blocks = await listSourceBlocks(sourceId);
+      const currentCitations = new Map((await quotesFor(sourceId)).map(quote => [quote.citationKey, quote]));
+      const lost = exactCitations.filter(quote => {
+        const retainedKey = consolidated.get(quote.citationKey);
+        const current = currentCitations.get(retainedKey ?? quote.citationKey);
+        return !current?.block_id ||
+          (retainedKey ? squashText(current.quote) !== squashText(quote.quote) : current.quote !== quote.quote) ||
+          !blocks.some(block => citesBlock(current, block));
+      });
+      if (lost.length) throw new SourceQuoteConflictError(lost);
       const sourceText = squashText(blocks.map(block => block.text).join(" "));
       for (const need of before.needs.filter(need => need.source_id === sourceId)) {
+        if (need.block_id && (need.run_id || need.source_context)) continue;
         const quote = squashText(need.source_quote ?? "");
         // A source edit cannot establish which occurrence a historical need cited.
         if (!need.block_id && (need.observed_block_ids?.length || (quote &&
@@ -442,13 +515,68 @@ export const deleteSourceBlock = assessmentSourceEdit(async function deleteSourc
   return { deleted: block.id };
 });
 
+/** Move citations only when the entire quotation has one destination. */
+async function moveSplitOrMergedCitations(
+  sourceId: string, original: BlockRow, replacements: BlockRow[], recordConsolidation: RecordCitationConsolidation,
+) {
+  const movedCitation = (quote: string) => {
+    if (!validateQuoteAgainstBlock({ block: original, quote }).ok) return;
+    if (replacements.some(block => block.id === original.id && validateQuoteAgainstBlock({ block, quote }).ok)) return;
+    const matches = replacements.filter(block => validateQuoteAgainstBlock({ block, quote }).ok);
+    if (matches.length !== 1) return;
+    const block = matches[0]!;
+    return { block_id: block.id, source_context: { heading: block.heading, location: block.location } };
+  };
+  const d = db();
+  const needs = await d.select().from(t.needs).where(and(eq(t.needs.source_id, sourceId), eq(t.needs.block_id, original.id)));
+  for (const need of needs) {
+    if (!need.source_context && !need.run_id) continue;
+    const citation = movedCitation(need.source_quote);
+    if (citation) await d.update(t.needs).set(citation).where(eq(t.needs.id, need.id));
+  }
+  const tactics = await d.select().from(t.tactics).where(eq(t.tactics.block_id, original.id));
+  for (const tactic of tactics) {
+    const citation = movedCitation(tactic.source_quote ?? "");
+    if (citation) await d.update(t.tactics).set(citation).where(eq(t.tactics.id, tactic.id));
+  }
+  // Edits to different sources can share a suggestion. Lock its current row
+  // before reading the array, in the same source-first order as decisions.
+  const extraCitation = JSON.stringify([{ source_id: sourceId, block_id: original.id }]);
+  const suggestions = await d.select().from(t.gapSuggestions).where(and(
+    eq(t.gapSuggestions.status, "pending"),
+    or(
+      and(eq(t.gapSuggestions.source_id, sourceId), eq(t.gapSuggestions.block_id, original.id)),
+      sql`${t.gapSuggestions.extra_sources} @> ${extraCitation}::jsonb`,
+    ),
+  )).orderBy(t.gapSuggestions.id).for("update");
+  for (const suggestion of suggestions) {
+    const primary = suggestion.source_id === sourceId && suggestion.block_id === original.id
+      ? movedCitation(suggestion.source_quote)
+      : undefined;
+    const sources = Array.isArray(suggestion.extra_sources) ? suggestion.extra_sources : [];
+    let changed = false;
+    const extra_sources = sources.map(source => {
+      if (source.source_id !== sourceId || source.block_id !== original.id) return source;
+      const citation = movedCitation(source.source_quote);
+      if (!citation) return source;
+      changed = true;
+      return { ...source, ...citation };
+    });
+    if (primary || changed) {
+      await d.update(t.gapSuggestions).set({ ...primary, ...(changed ? { extra_sources } : {}) })
+        .where(eq(t.gapSuggestions.id, suggestion.id));
+    }
+  }
+  await moveTacticSourceCitations(sourceId, original, replacements, recordConsolidation);
+}
+
 export const splitSourceBlock = assessmentSourceEdit(async function splitSourceBlock(args: {
   block_id: string;
   offset?: number;
   at_text?: string;
   rationale: string;
   actor: Actor;
-}) {
+}, recordConsolidation) {
   const rationale = requireEditRationale(args.rationale);
   const { block, blocks } = await requireBlock(args.block_id);
   const [first, second] = splitAtOffset(block.text, resolveSplitOffset(block.text, args));
@@ -461,7 +589,7 @@ export const splitSourceBlock = assessmentSourceEdit(async function splitSourceB
   const secondRow: BlockRow = { ...toBlock(block), id: nextHumanId(block.source_id), text: second };
   await db().update(t.sourceBlocks).set({ text: first }).where(eq(t.sourceBlocks.id, block.id));
   await db().insert(t.sourceBlocks).values(secondRow);
-  await moveTacticSourceCitations(block.source_id, block, [{ id: block.id, text: first }, secondRow]);
+  await moveSplitOrMergedCitations(block.source_id, block, [{ ...block, text: first }, secondRow], recordConsolidation);
   await markHuman({ block: toBlock(block), current_text: first, position: block.position, actor: args.actor });
   await markHuman({ block: secondRow, current_text: second, origin: "human", position: positionAfter(blocks, at), actor: args.actor });
   await logEdit({
@@ -477,7 +605,9 @@ export const splitSourceBlock = assessmentSourceEdit(async function splitSourceB
   return { first_id: block.id, second_id: secondRow.id };
 }, true);
 
-export const mergeSourceBlocks = assessmentSourceEdit(async function mergeSourceBlocks(args: { block_id: string; rationale: string; actor: Actor }) {
+export const mergeSourceBlocks = assessmentSourceEdit(async function mergeSourceBlocks(
+  args: { block_id: string; rationale: string; actor: Actor }, recordConsolidation,
+) {
   const rationale = requireEditRationale(args.rationale);
   const { block, blocks } = await requireBlock(args.block_id);
   const next = blocks[blocks.findIndex((b) => b.id === block.id) + 1];
@@ -485,7 +615,7 @@ export const mergeSourceBlocks = assessmentSourceEdit(async function mergeSource
   const merged = `${block.text}\n\n${next.text}`;
   await db().update(t.sourceBlocks).set({ text: merged }).where(eq(t.sourceBlocks.id, block.id));
   await db().delete(t.sourceBlocks).where(eq(t.sourceBlocks.id, next.id));
-  await moveTacticSourceCitations(block.source_id, next, [{ id: block.id, text: merged }]);
+  await moveSplitOrMergedCitations(block.source_id, next, [{ ...block, text: merged }], recordConsolidation);
   await markHuman({ block: toBlock(block), current_text: merged, position: block.position, actor: args.actor });
   await markHuman({ block: toBlock(next), current_text: next.text, position: next.position, deleted: true, actor: args.actor });
   await logEdit({
@@ -512,16 +642,25 @@ export async function listDroppedSourceUnits(source_id: string) {
 
 export async function persistDroppedSourceUnits(
   source_id: string,
-  units: { location: string; reason: string; text: string }[],
+  units: { location: string; reason: string; text: string; occurrence_id?: string }[],
 ) {
   const existing = await listDroppedSourceUnits(source_id);
   const source_generation = await generationOf(source_id);
   const stale = existing.filter((row) => !row.restored_block_id).map((row) => row.id);
   if (stale.length) await db().delete(sourceDroppedUnits).where(inArray(sourceDroppedUnits.id, stale));
-  const restored = new Set(existing.filter((row) => row.restored_block_id).map((row) => squashText(row.text)));
+  const restored = existing.filter((row) => row.restored_block_id);
+  const matchedRestored = new Set<string>();
   const created_at = nowIso();
   for (const unit of units) {
-    if (restored.has(squashText(unit.text))) continue;
+    const matchingRestored = restored.find((row) => {
+      if (matchedRestored.has(row.id)) return false;
+      if (unit.occurrence_id && row.occurrence_id) return row.occurrence_id === unit.occurrence_id;
+      return squashText(row.text) === squashText(unit.text);
+    });
+    if (matchingRestored) {
+      matchedRestored.add(matchingRestored.id);
+      continue;
+    }
     await db().insert(sourceDroppedUnits).values({ id: newId("drop"), source_id, ...unit, restored_block_id: null, created_at, source_generation });
   }
 }
@@ -762,7 +901,7 @@ export type ReparseResult = {
  */
 export const reparseSourceBlocks = assessmentSourceEdit(async function reparseSourceBlocks(args: {
   source_id: string;
-  sections: { heading: string; text: string; location: string }[];
+  sections: { heading: string; text: string; location: string; split_unit?: { index: number; text: string } }[];
 }): Promise<ReparseResult> {
   await requireSourceRow(args.source_id);
   const current = await listSourceBlocks(args.source_id);
@@ -800,7 +939,7 @@ export const reparseSourceBlocks = assessmentSourceEdit(async function reparseSo
     if (block.human) {
       kept.push(block);
       kept_human += 1;
-    } else if (quotes.some((q) => containsQuote(block.text, q.quote)) || citedBlockIds.has(block.id)) {
+    } else if (quotes.some((quote) => citesBlock(quote, block)) || citedBlockIds.has(block.id)) {
       kept.push(block);
       kept_cited += 1;
     } else replaced.push(block.id);
@@ -809,11 +948,26 @@ export const reparseSourceBlocks = assessmentSourceEdit(async function reparseSo
     await db().delete(t.sourceBlocks).where(and(eq(t.sourceBlocks.source_id, args.source_id), inArray(t.sourceBlocks.id, replaced)));
     await db().delete(sourceBlockMeta).where(and(inArray(sourceBlockMeta.block_id, replaced), eq(sourceBlockMeta.locked, false)));
   }
-  const covered = new Set<string>(kept.map((b) => squashText(b.text)));
+  const covered = new Map<string, number>();
+  const cover = (text: string) => {
+    const key = squashText(text);
+    covered.set(key, (covered.get(key) ?? 0) + 1);
+  };
+  kept.forEach((block) => cover(block.text));
   for (const meta of metas) {
     if (!meta.locked) continue;
-    if (meta.original_text) covered.add(squashText(meta.original_text));
-    if (meta.deleted) covered.add(squashText(meta.current_text));
+    if (meta.original_text && squashText(meta.original_text) !== squashText(meta.current_text)) cover(meta.original_text);
+    if (meta.deleted) cover(meta.current_text);
+  }
+  // Reconcile a legacy whole block before checking individual new slices.
+  // Consume its text once per raw occurrence, even when the model dropped part of it.
+  const matchedSplitUnits = new Map<number, boolean>();
+  for (const { split_unit } of args.sections) {
+    if (!split_unit || matchedSplitUnits.has(split_unit.index)) continue;
+    const key = squashText(split_unit.text);
+    const remaining = covered.get(key) ?? 0;
+    matchedSplitUnits.set(split_unit.index, remaining > 0);
+    if (remaining > 0) covered.set(key, remaining - 1);
   }
   const usedIds = new Set([...kept.map((b) => b.id), ...metas.map((m) => m.block_id)]);
   let ordinal = Math.max(0, ...[...usedIds].map(idOrdinal).filter((n) => n < 1_000_000));
@@ -821,7 +975,14 @@ export const reparseSourceBlocks = assessmentSourceEdit(async function reparseSo
   let inserted = 0;
   for (const [index, section] of args.sections.entries()) {
     if (!section.text.trim()) continue;
-    if (covered.has(squashText(section.text))) {
+    if (section.split_unit && matchedSplitUnits.get(section.split_unit.index)) {
+      skipped_duplicates += 1;
+      continue;
+    }
+    const key = squashText(section.text);
+    const remaining = covered.get(key) ?? 0;
+    if (remaining > 0) {
+      covered.set(key, remaining - 1);
       skipped_duplicates += 1;
       continue;
     }
