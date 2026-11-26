@@ -10,6 +10,7 @@ import { requestIdentity } from "@/modules/auth/request";
 import { apiErrorResponse, readJsonBody } from "@/modules/auth/api-guard";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 /**

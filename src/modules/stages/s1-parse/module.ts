@@ -9,6 +9,7 @@ import { registerModule } from "@/modules/kernel/registry";
 import type { SynapseModule } from "@/modules/kernel/contracts";
 import { persistSourceAndBlocks } from "@/lib/iegp/store";
 import {
+  listSourceBlocks,
   persistDroppedSourceUnits,
   recordLlmSourceStakeholder,
   reparseSourceBlocks,
@@ -145,7 +146,7 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
                 stakeholder: null,
               };
             }
-            const { document, dropped, dropped_units, stakeholder_rationale } = await parseWithLlm({
+            const { document, dropped, dropped_units, split_units, stakeholder_rationale } = await parseWithLlm({
               filename: record.filename,
               buffer,
               mime: record.mime,
@@ -154,10 +155,11 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
             if (dropped.length > 0) ctx.run.note(`parse:dropped:${file_id}`, dropped);
             return {
               text: document.blocks.map((block) => block.text).join("\n\n"),
-              sections: document.blocks.map((block) => ({
+              sections: document.blocks.map((block, index) => ({
                 heading: block.heading ?? block.location.ref,
                 text: block.text,
                 location: block.location.ref,
+                split_unit: split_units[index],
               })),
               parser: "llm" as const,
               dropped_units,
@@ -370,6 +372,17 @@ export async function listParsedDocuments(ids?: string[]): Promise<ParsedDocumen
   }
   const rows = await db().select().from(parsedDocuments).orderBy(desc(parsedDocuments.parsed_at));
   return rows.map(toRecord);
+}
+
+/** Load current editor blocks for extraction while retaining the selected parse IDs. */
+export async function listExtractionDocuments(ids?: string[]): Promise<ParsedDocumentRecord[]> {
+  const documents: ParsedDocumentRecord[] = [];
+  for (const document of await listParsedDocuments(ids)) {
+    const blocks = (await listSourceBlocks(document.source_id)).map(({ id, source_id, heading, text, location }) =>
+      ({ id, source_id, heading, text, location }));
+    if (blocks.length) documents.push({ ...document, blocks });
+  }
+  return documents;
 }
 
 export async function parsedDocument(id: string): Promise<ParsedDocumentRecord | null> {

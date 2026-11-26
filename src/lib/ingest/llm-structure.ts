@@ -1,4 +1,7 @@
 import { extractText, getDocumentProxy } from "unpdf";
+import type { ProviderRequestBudget } from "@/modules/llm/provider";
+import type { JsonCompletion } from "@/modules/kernel/contracts";
+import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { completeAll } from "@/modules/kernel/llm";
 import { STAKEHOLDER_FUNCTIONS, type ParsedBlock, type ParsedDocument, type StakeholderFunction } from "@/lib/schema";
 import { hashId } from "@/lib/text";
@@ -11,9 +14,18 @@ import { mimeForFilename, parseLocalDocument } from "./local-parse";
  * and the chosen LLM makes it. LlamaParse is not used.
  */
 
-export type RawUnit = { location: ParsedBlock["location"]; text: string };
+export type RawUnit = {
+  location: ParsedBlock["location"];
+  text: string;
+  /** Internal marker for slices whose edge whitespace is part of source fidelity. */
+  preserveBoundaryWhitespace?: boolean;
+};
 
-type Ask = (args: { system: string; user: string; purpose: string }) => Promise<unknown>;
+/** One pre-split raw unit occurrence, local to this parse. */
+type SplitUnit = { index: number; text: string };
+type ParseUnit = RawUnit & { split_unit?: SplitUnit };
+
+type Ask = JsonCompletion;
 
 const BLOCK_KINDS = [
   "title",
@@ -50,6 +62,26 @@ export function parseLimits(env: Record<string, string | undefined> = process.en
   };
 }
 
+/** One allowance shared by every provider request for a single document upload. */
+export function createParseRequestBudget(): ProviderRequestBudget {
+  const limit = parseLimits().calls;
+  let sent = 0;
+  return {
+    check(lastFailure) {
+      if (sent < limit) return;
+      const detail = lastFailure ? ` The last provider request returned HTTP ${lastFailure.status} (${lastFailure.kind}).` : "";
+      throw new TrustedApplicationError(
+        `This document reached its limit of ${limit} model calls before parsing finished.${detail} Split it into smaller files, or paste only the part you need.`,
+        "parse_limit", 422,
+      );
+    },
+    consume() {
+      this.check();
+      sent += 1;
+    },
+  };
+}
+
 /** Plain-English refusal for a document over the parse limits, or null when it fits. */
 export function parseLimitError(filename: string, units: number, calls: number, limits = parseLimits()): string | null {
   if (units > limits.units) {
@@ -74,6 +106,93 @@ Return every unit you are given. Return JSON only: {"units":[{"unit":"u1","block
 
 function squash(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+type SourceRange = { start: number; end: number };
+
+/** Build normalized text while retaining the original range of each character. */
+function normalizedSourceRanges(text: string): { text: string; ranges: SourceRange[] } {
+  let normalized = "";
+  const ranges: SourceRange[] = [];
+  let index = 0;
+  while (index < text.length) {
+    if (/\s/.test(text[index]!)) {
+      const start = index;
+      while (index < text.length && /\s/.test(text[index]!)) index += 1;
+      if (normalized && index < text.length) {
+        normalized += " ";
+        ranges.push({ start, end: index });
+      }
+      continue;
+    }
+    normalized += text[index];
+    ranges.push({ start: index, end: index + 1 });
+    index += 1;
+  }
+  return { text: normalized, ranges };
+}
+
+/** Recover exact source slices for split-unit blocks after normalized validation. */
+function materializeSplitBlocks(unit: RawUnit, blocks: UnitAnswer["blocks"]): string[] | undefined {
+  const source = normalizedSourceRanges(unit.text);
+  let cursor = 0;
+  const matches: { start: number; end: number; normalizedStart: number; normalizedEnd: number }[] = [];
+  for (const block of blocks) {
+    const normalizedBlock = squash(block.text);
+    const normalizedStart = source.text.indexOf(normalizedBlock, cursor);
+    if (normalizedStart < 0) return undefined;
+    const normalizedEnd = normalizedStart + normalizedBlock.length;
+    const first = source.ranges[normalizedStart];
+    const last = source.ranges[normalizedEnd - 1];
+    if (!first || !last) return undefined;
+    matches.push({ start: first.start, end: last.end, normalizedStart, normalizedEnd });
+    cursor = normalizedEnd;
+  }
+  return matches.map((match, index) => {
+    const start = index === 0 && match.normalizedStart === 0 ? 0 : match.start;
+    const next = matches[index + 1];
+    const gap = next ? unit.text.slice(match.end, next.start) : "";
+    const end = next && /^\s*$/.test(gap)
+      ? next.start
+      : index === matches.length - 1 && match.normalizedEnd === source.text.length
+        ? unit.text.length
+        : match.end;
+    return unit.text.slice(start, end);
+  });
+}
+
+/** Split oversized extracted units without changing their source text or location. */
+function splitOversizedUnits(units: RawUnit[]): ParseUnit[] {
+  return units.flatMap((unit, index) => {
+    if (unit.text.length <= CHUNK_CHARS) return [unit];
+
+    const parts: ParseUnit[] = [];
+    const split_unit = { index, text: unit.text };
+    let start = 0;
+    while (start < unit.text.length) {
+      let end = Math.min(start + CHUNK_CHARS, unit.text.length);
+      // String indexes are UTF-16 code-unit offsets. Move the boundary back
+      // when it would leave a surrogate pair split across two prompts.
+      if (
+        end < unit.text.length &&
+        end > start &&
+        unit.text.charCodeAt(end - 1) >= 0xd800 &&
+        unit.text.charCodeAt(end - 1) <= 0xdbff &&
+        unit.text.charCodeAt(end) >= 0xdc00 &&
+        unit.text.charCodeAt(end) <= 0xdfff
+      ) {
+        end -= 1;
+      }
+      parts.push({
+        location: unit.location,
+        text: unit.text.slice(start, end),
+        preserveBoundaryWhitespace: true,
+        split_unit,
+      });
+      start = end;
+    }
+    return parts;
+  });
 }
 
 /** Mechanical extraction: raw text with its location, no structure decided. */
@@ -107,7 +226,7 @@ export async function extractRawUnits(args: {
 }
 
 /** A unit the model judged to be noise, kept verbatim so a human can restore it. */
-export type DroppedUnit = { location: string; reason: string; text: string };
+export type DroppedUnit = { location: string; reason: string; text: string; occurrence_id?: string };
 
 type UnitAnswer = { blocks: Omit<ParsedBlock, "id" | "location">[]; dropped_reason: string | null };
 
@@ -129,7 +248,9 @@ function readAnswer(unit: RawUnit, row: unknown): UnitAnswer | undefined {
     if (typeof kind !== "string" || !(BLOCK_KINDS as readonly string[]).includes(kind)) return undefined;
     if (heading !== null && heading !== undefined && typeof heading !== "string") return undefined;
     out.push({
-      text: text.trim(),
+      // Ordinary units retain their historical trimmed materialization. Split
+      // units need their source edge whitespace for exact reconstruction.
+      text: unit.preserveBoundaryWhitespace ? text : text.trim(),
       kind: kind as ParsedBlock["kind"],
       heading: typeof heading === "string" && heading.trim() ? heading.trim() : undefined,
     });
@@ -137,6 +258,14 @@ function readAnswer(unit: RawUnit, row: unknown): UnitAnswer | undefined {
   const reason = typeof dropped_reason === "string" ? dropped_reason.trim() : "";
   // An omission reason is only sufficient when the entire unit is dropped.
   if (out.length === 0 ? !reason : offset !== source.length) return undefined;
+  if (unit.preserveBoundaryWhitespace) {
+    const materialized = materializeSplitBlocks(unit, out);
+    if (!materialized) return undefined;
+    return {
+      blocks: out.map((block, index) => ({ ...block, text: materialized[index]! })),
+      dropped_reason: reason || null,
+    };
+  }
   return { blocks: out, dropped_reason: reason || null };
 }
 
@@ -161,17 +290,26 @@ function chunk(units: { id: string; unit: RawUnit }[]): { id: string; unit: RawU
 export async function structureWithLlm(args: {
   filename: string;
   units: RawUnit[];
+  /** Full document parsing also needs one classification request after structuring. */
+  includeStakeholder?: boolean;
   ask: Ask;
 }): Promise<{
   blocks: Omit<ParsedBlock, "id">[];
   dropped: { location: string; reason: string }[];
   /** The same dropped units with their raw text, so a human can restore one as a block. */
   dropped_units: DroppedUnit[];
+  split_units: Partial<Record<number, SplitUnit>>;
 }> {
-  const entries = args.units.map((unit, index) => ({ id: `u${index + 1}`, unit }));
+  const entries = splitOversizedUnits(args.units).map((unit, index) => ({ id: `u${index + 1}`, unit }));
   const groups = chunk(entries);
-  const tooLong = parseLimitError(args.filename, entries.length, groups.length);
-  if (tooLong) throw new Error(tooLong);
+  const requiredCalls = groups.length + (args.includeStakeholder ? 1 : 0);
+  const label = args.includeStakeholder ? "This document" : args.filename;
+  const tooLong = parseLimitError(label, entries.length, requiredCalls);
+  if (tooLong) {
+    // Only fixed copy and counts are suitable for customer-facing stage errors.
+    if (args.includeStakeholder) throw new TrustedApplicationError(tooLong, "parse_limit", 422);
+    throw new Error(tooLong);
+  }
   const answers = new Map<string, UnitAnswer>();
   for (const [index, group] of groups.entries()) {
     const byId = new Map(group.map((entry) => [entry.id, entry.unit]));
@@ -208,16 +346,25 @@ export async function structureWithLlm(args: {
   const blocks: Omit<ParsedBlock, "id">[] = [];
   const dropped: { location: string; reason: string }[] = [];
   const dropped_units: DroppedUnit[] = [];
+  const split_units: Partial<Record<number, SplitUnit>> = {};
   for (const entry of entries) {
     const answer = answers.get(entry.id)!;
     if (answer.dropped_reason && answer.blocks.length === 0) {
       dropped.push({ location: entry.unit.location.ref, reason: answer.dropped_reason });
-      dropped_units.push({ location: entry.unit.location.ref, reason: answer.dropped_reason, text: entry.unit.text });
+      dropped_units.push({
+        location: entry.unit.location.ref,
+        reason: answer.dropped_reason,
+        text: entry.unit.text,
+        ...(entry.unit.preserveBoundaryWhitespace ? { occurrence_id: entry.id } : {}),
+      });
     }
-    for (const block of answer.blocks) blocks.push({ ...block, location: entry.unit.location });
+    for (const block of answer.blocks) {
+      if (entry.unit.split_unit) split_units[blocks.length] = entry.unit.split_unit;
+      blocks.push({ ...block, location: entry.unit.location });
+    }
   }
   if (blocks.length === 0) throw new Error(`The model found no content blocks in ${args.filename}.`);
-  return { blocks, dropped, dropped_units };
+  return { blocks, dropped, dropped_units, split_units };
 }
 
 const STAKEHOLDER_SYSTEM = `You read the opening of a pharma evidence-planning document and say which stakeholder function it comes from or speaks for.
@@ -265,17 +412,21 @@ export async function parseWithLlm(args: {
   filename: string;
   buffer: Buffer;
   mime?: string;
+  requestBudget?: ProviderRequestBudget;
   ask: Ask;
 }): Promise<{
   document: ParsedDocument;
   dropped: { location: string; reason: string }[];
   dropped_units: DroppedUnit[];
+  split_units: Partial<Record<number, SplitUnit>>;
   stakeholder_rationale: string;
 }> {
   const mime = args.mime || mimeForFilename(args.filename);
   const units = await extractRawUnits({ filename: args.filename, buffer: args.buffer, mime });
-  const { blocks, dropped, dropped_units } = await structureWithLlm({ filename: args.filename, units, ask: args.ask });
-  const stakeholder = await classifyStakeholder({ filename: args.filename, blocks, ask: args.ask });
+  const requestBudget = args.requestBudget ?? createParseRequestBudget();
+  const ask: Ask = (request) => args.ask({ ...request, requestBudget });
+  const { blocks, dropped, dropped_units, split_units } = await structureWithLlm({ filename: args.filename, units, includeStakeholder: true, ask });
+  const stakeholder = await classifyStakeholder({ filename: args.filename, blocks, ask });
   const id = hashId("DOC", `${args.filename}:${args.buffer.length}`);
   const numbered = blocks.map((block, index) => ({ ...block, id: `${id}-B${String(index + 1).padStart(2, "0")}` }));
   return {
@@ -292,6 +443,7 @@ export async function parseWithLlm(args: {
     },
     dropped,
     dropped_units,
+    split_units,
     stakeholder_rationale: stakeholder.rationale,
   };
 }

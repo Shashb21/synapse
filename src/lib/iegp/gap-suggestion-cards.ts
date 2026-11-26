@@ -1,3 +1,4 @@
+import type { SourceContext } from "@/lib/ingest/source-citation";
 import type { IegpState } from "./types";
 
 /** One overlap suggestion, as the Gaps place shows it (KAN-75). */
@@ -9,6 +10,7 @@ export type GapSuggestionCard = {
   gap_statement: string;
   source_title: string;
   source_quote: string;
+  source_context?: SourceContext | null;
   /** Other sources in the same run that said the same thing. */
   extra_source_count: number;
   shared_part: string;
@@ -41,6 +43,7 @@ export function pendingSuggestionCards(state: IegpState): GapSuggestionCard[] {
           gap_statement: gap.statement,
           source_title: source?.title ?? row.source_id,
           source_quote: row.source_quote,
+          source_context: row.source_context,
           extra_source_count: row.extra_sources.length,
           shared_part: row.shared_part,
           new_part: row.new_part,

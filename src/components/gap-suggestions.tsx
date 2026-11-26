@@ -43,6 +43,12 @@ function SuggestionItem({ suggestion }: { suggestion: GapSuggestionCard }) {
               ? ` and ${suggestion.extra_source_count} more saying the same`
               : ""}
           </p>
+          {suggestion.source_context ? (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {suggestion.source_context.heading ? `${suggestion.source_context.heading} · ` : ""}
+              {suggestion.source_context.location}
+            </p>
+          ) : null}
           <blockquote className="mt-1 border-l-2 border-border pl-2 text-[13px] leading-5 text-foreground">
             “{suggestion.source_quote}”
           </blockquote>

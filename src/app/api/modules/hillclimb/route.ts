@@ -11,6 +11,7 @@ import { apiErrorResponse, readJsonBody } from "@/modules/auth/api-guard";
 import { HILLCLIMB_STAGES } from "@/modules/kernel/prompt-versions";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 /** Scores prompt variants against curated gold and updates per-version baselines. */

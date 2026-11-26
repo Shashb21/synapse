@@ -1,5 +1,8 @@
+/** Persist module runs and project their traces for workspace readers. */
 import { HISTORICAL_FAILURE_MESSAGE, projectFailureDiagnostics, projectRunSteps } from "./failure-presentation";
-import { desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { currentSchemaName, transactionLivenessCheck, withIndependentAdvisoryLock, withWorkspaceTransaction } from "@/lib/iegp/db";
+import { DEFAULT_WORKSPACE_ID, scopedWorkspaceId } from "@/modules/workspaces/context";
 import { db, ensurePlatformSchema } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "./ids";
@@ -49,6 +52,7 @@ function trim(data: unknown, max = MAX_STEP_BYTES): unknown {
   return { truncated: true, bytes: json.length, preview: json.slice(0, 2_000) };
 }
 
+/** Collect the steps and timing for one module run. */
 export class RunRecorder implements RunHandle {
   readonly id: string;
   private readonly collected: RunStep[] = [];
@@ -70,6 +74,11 @@ export class RunRecorder implements RunHandle {
 
   get workspace_id(): string {
     return this.meta.workspace_id;
+  }
+
+  /** The original start time, also used when recording a rolled-back run. */
+  get started_at(): string {
+    return new Date(this.startedAtMs).toISOString();
   }
 
   async step<T>(name: string, fn: () => Promise<T> | T, detail?: string): Promise<T> {
@@ -119,6 +128,7 @@ export class RunRecorder implements RunHandle {
   }
 }
 
+/** Create the run before starting setup so failures have a trace. */
 export async function openRun(recorder: RunRecorder) {
   await ensurePlatformSchema();
   await db()
@@ -130,7 +140,7 @@ export async function openRun(recorder: RunRecorder) {
       module_id: recorder.meta.module_id,
       module_version: recorder.meta.module_version,
       status: "running",
-      started_at: nowIso(),
+      started_at: recorder.started_at,
       actor_name: recorder.meta.actor.name,
       actor_function: recorder.meta.actor.function,
       input: trim(recorder.meta.input, MAX_IO_BYTES),
@@ -138,15 +148,63 @@ export async function openRun(recorder: RunRecorder) {
     });
 }
 
-export async function closeRun(args: {
+/**
+ * Keep ownership of this running row through execution and its workspace
+ * commit. The operator skips the locked row even on self-hosted Next.js.
+ */
+export async function withRunningRun<T>(recorder: RunRecorder, execute: (assertLive: () => Promise<void>) => Promise<T>): Promise<T> {
+  return withWorkspaceTransaction(async () => {
+    const [row] = await db().select({ id: t.moduleRuns.id }).from(t.moduleRuns)
+      .where(runningRun(recorder)).for("update");
+    if (!row) throw new Error("The module run is already finalized.");
+    return execute(transactionLivenessCheck());
+  });
+}
+
+export const SOURCE_COMPARISON_MODULE = "incoming-source-comparison";
+
+function comparisonRunLock(schema: string, id: string): string {
+  return `source-comparison-run:${schema}:${id}`;
+}
+
+type ComparisonRunOwnership = {
+  assertLive: () => Promise<void>;
+  finalize: (args: Omit<CloseRunArgs, "recorder">) => Promise<void>;
+};
+
+/** Keep a source comparison recoverable while it awaits a model outside workspace transactions. */
+export async function withRunningSourceComparison<T>(recorder: RunRecorder, execute: (ownership: ComparisonRunOwnership) => Promise<T>): Promise<T> {
+  const schema = await currentSchemaName();
+  return withIndependentAdvisoryLock(schema, comparisonRunLock(schema, recorder.id), async ({ assertLive, withOwnership }) => {
+    const [row] = await withOwnership(() => db().select({ id: t.moduleRuns.id }).from(t.moduleRuns).where(runningRun(recorder)).execute());
+    if (!row) throw new Error("The module run is already finalized.");
+    return execute({
+      assertLive,
+      finalize: (args) => withOwnership(() => closeRun({ ...args, recorder })),
+    });
+  });
+}
+
+function runningRun(recorder: RunRecorder) {
+  return and(
+    eq(t.moduleRuns.id, recorder.id),
+    eq(t.moduleRuns.workspace_id, recorder.workspace_id),
+    eq(t.moduleRuns.status, "running"),
+  );
+}
+
+type CloseRunArgs = {
   recorder: RunRecorder;
-  status: RunStatus;
+  status: Exclude<RunStatus, "running">;
   summary?: string;
   output?: unknown;
   error?: string;
   route?: ResolvedRoute | null;
   evals?: EvalScore[];
-}) {
+};
+
+/** Preserve the first terminal result, including across concurrent recovery. */
+export async function closeRun(args: CloseRunArgs) {
   await db()
     .update(t.moduleRuns)
     .set({
@@ -160,7 +218,63 @@ export async function closeRun(args: {
       route: args.route ?? null,
       evals: args.evals ?? [],
     })
-    .where(eq(t.moduleRuns.id, args.recorder.id));
+    .where(runningRun(args.recorder));
+}
+
+/** Longer than the 300-second host limit, including deployment drain slack. */
+const RUN_RECOVERY_AGE_MS = 10 * 60_000;
+const MAX_RECOVERY_ROWS = 100;
+const INGESTION_STAGES = ["S0", "S1", "S2", "S3", "S4"];
+
+/**
+ * Recover overdue, unlocked traces from the operator's current schema.
+ * Return after one bounded batch and leave successful and active rows alone.
+ */
+export async function recoverInterruptedRuns(id?: string): Promise<void> {
+  await ensurePlatformSchema();
+  const schema = await currentSchemaName();
+  // Named schemas predate reliable workspace ID stamping. Their old rows can
+  // say "default", but their schema still identifies their actual workspace.
+  const workspaceId = await scopedWorkspaceId() ?? DEFAULT_WORKSPACE_ID;
+  const workspaceIds = schema === "public" ? [workspaceId] : [workspaceId, DEFAULT_WORKSPACE_ID];
+  const now = new Date();
+  const expired = and(
+    inArray(t.moduleRuns.workspace_id, workspaceIds),
+    eq(t.moduleRuns.status, "running"),
+    lt(t.moduleRuns.started_at, new Date(now.getTime() - RUN_RECOVERY_AGE_MS).toISOString()),
+    id === undefined ? undefined : eq(t.moduleRuns.id, id),
+  );
+  await withWorkspaceTransaction(async () => {
+    const rows = await db().select({ id: t.moduleRuns.id, stage: t.moduleRuns.stage, module: t.moduleRuns.module_id }).from(t.moduleRuns)
+      .where(expired).orderBy(asc(t.moduleRuns.started_at), asc(t.moduleRuns.id))
+      .limit(id === undefined ? MAX_RECOVERY_ROWS : 1).for("update", { skipLocked: true });
+    let recoverable = rows;
+    if (rows.some((row) => INGESTION_STAGES.includes(row.stage))) {
+      // Respect the pre-existing lock for ingestion rows opened before
+      // module runs held their own row lock. A try-lock never waits for work.
+      const [ingest] = await db().execute(sql`
+        select pg_try_advisory_xact_lock(hashtextextended(${`ingest:${schema}`}, 0)) as locked
+      `);
+      if (!ingest?.locked) recoverable = rows.filter((row) => !INGESTION_STAGES.includes(row.stage));
+    }
+    const unlockedIds: string[] = [];
+    for (const row of recoverable) {
+      if (row.module === SOURCE_COMPARISON_MODULE) {
+        const [lock] = await db().execute(sql`
+          select pg_try_advisory_xact_lock(hashtextextended(${comparisonRunLock(schema, row.id)}, 0)) as locked
+        `);
+        if (!lock?.locked) continue;
+      }
+      unlockedIds.push(row.id);
+    }
+    if (unlockedIds.length === 0) return;
+    await db().update(t.moduleRuns).set({
+      status: "error",
+      error: "Module run ended without a terminal record.",
+      finished_at: now.toISOString(),
+      // Elapsed time at interruption is unknown.
+    }).where(and(expired, inArray(t.moduleRuns.id, unlockedIds)));
+  });
 }
 
 function toRecord(row: typeof t.moduleRuns.$inferSelect): RunRecord {

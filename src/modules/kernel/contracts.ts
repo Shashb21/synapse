@@ -1,3 +1,4 @@
+import type { ProviderRequestBudget } from "@/modules/llm/provider";
 import type { ZodType } from "zod";
 import type { ActorFunction } from "@/lib/iegp/enums";
 
@@ -223,6 +224,7 @@ export type JsonCompletion = (args: {
   user: string;
   purpose: string;
   maxTokens?: number;
+  requestBudget?: ProviderRequestBudget;
 }) => Promise<unknown>;
 
 export type ModuleContext = {
