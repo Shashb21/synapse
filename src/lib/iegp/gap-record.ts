@@ -62,7 +62,8 @@ export type GapRecord = {
   })[];
   expansions: IegpState["expansions"];
   mapping_rejections: IegpState["mapping_suggestions"];
-  priority: (typeof kernel.priorityPlacements.$inferSelect & { version?: string; human_axes?: string[]; human_band?: boolean }) | null;
+  priority: (Omit<typeof kernel.priorityPlacements.$inferSelect, "human_axes" | "human_band">
+    & { version?: string; human_axes?: string[]; human_band?: boolean }) | null;
   ideas: (typeof kernel.ideationProposals.$inferSelect)[];
   /** Shared S9 presentation, including authorised model support. Raw ideas remain compatible. */
   options?: IdeationProposalRecord[];

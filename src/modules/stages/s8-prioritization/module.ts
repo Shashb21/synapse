@@ -1,10 +1,11 @@
+import { commitStageMutation } from "@/modules/kernel/stage-publication";
 import { TrustedApplicationError } from "@/modules/kernel/stage-errors";
 import { createHash } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { ensureCurrentSchemaTables } from "@/lib/iegp/db";
-import { boolean, jsonb, pgTable, text } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
+import { priorityPlacements as placementsTable } from "@/modules/kernel/schema";
 import { nowIso } from "@/modules/kernel/ids";
 import { registerModule } from "@/modules/kernel/registry";
 import { PROPOSER_CRITIC_EXCHANGES, runAgenticCycle } from "@/modules/kernel/agentic";
@@ -12,7 +13,7 @@ import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import { NoRouteError } from "@/modules/llm/provider";
 import { recordEdit } from "@/modules/kernel/edit-records";
 import type { Actor, ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
-import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
+import { displayedGapStatus, gapPrioritizationReadiness, isLiveGap } from "@/lib/iegp/engine";
 import { enteredAssetDetails } from "@/lib/iegp/asset";
 import { prioritizationContextFromState } from "@/lib/iegp/planning-context";
 import { gaps } from "@/lib/iegp/schema";
@@ -31,32 +32,6 @@ import {
 import { plural } from "@/lib/plural";
 import { inspectJudgementReferences, inspectSuppliedJudgementReferences, judgementReferenceSchema, suppliedJudgementRecords, type JudgementReference } from "@/lib/iegp/judgement-references";
 import { captureBandDecision } from "@/lib/iegp/learning-capture";
-
-/**
- * The kernel's `priority_placements` table plus the human markers S8 owns:
- * `human_axes` lists the axis ids a person set (by drag or by typing a score)
- * and `human_band` says the working band is a person's. A re-run never
- * overwrites either; the model only refreshes its own suggestion.
- */
-const placementsTable = pgTable("priority_placements", {
-  gap_id: text("gap_id").primaryKey(),
-  run_id: text("run_id"),
-  axis_scores: jsonb("axis_scores").notNull(),
-  suggested_band: text("suggested_band").notNull(),
-  suggested_rationale: text("suggested_rationale").notNull(),
-  suggested_references: jsonb("suggested_references").$type<JudgementReference[]>().notNull().default([]),
-  band: text("band"),
-  validated: boolean("validated").notNull().default(false),
-  needs_review: boolean("needs_review").notNull().default(false),
-  review_reason: text("review_reason"),
-  review_event_id: text("review_event_id"),
-  rationale: text("rationale"),
-  actor_name: text("actor_name"),
-  actor_function: text("actor_function"),
-  at: text("at").notNull(),
-  human_axes: jsonb("human_axes").$type<string[]>().notNull().default([]),
-  human_band: boolean("human_band").notNull().default(false),
-});
 
 /**
  * The placement columns (human_axes, human_band) are part of every workspace
@@ -279,8 +254,13 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
   outputSchema,
   freeze: freezeFacts,
   async run(input, ctx) {
-    requireLlm(ctx, "Prioritization");
     const { state, axesConfig } = (ctx.replay?.facts as Awaited<ReturnType<typeof freezeFacts>> | undefined) ?? await freezeFacts(input);
+    const ownerEvaluation = input.dry_run && ctx.purpose === "owner_evaluation";
+    if (!ctx.replay?.evaluation && !ownerEvaluation) {
+      requirePrioritizationReadiness(state);
+      for (const gapId of input.gap_ids ?? []) requireOpenGap(state, gapId);
+    }
+    requireLlm(ctx, "Prioritization");
     const axisById = (id: string | undefined) => axesConfig.axes.find((axis) => axis.id === id);
     const xAxis = axisById(input.x_axis) ?? axisById(axesConfig.x_axis) ?? axesConfig.axes[0]!;
     const yAxis =
@@ -463,12 +443,15 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
 
     if (!ctx.replay?.evaluation && !input.dry_run) {
       await ensurePlacementSchema();
-      await db().transaction(async (tx) => {
+      await commitStageMutation(ctx, async (markWritten) => {
+        const tx = db();
+        // Protect inventory membership and status throughout the short placement write.
+        await tx.execute(sql`LOCK TABLE gaps IN EXCLUSIVE MODE`);
         await lockObjectiveContext();
+        const latest = await loadState();
+        requirePrioritizationReadiness(latest);
         for (const placement of [...outcome.accepted].sort((a, b) => a.gap_id.localeCompare(b.gap_id))) {
-          await tx.execute(sql`SELECT id FROM gaps WHERE id = ${placement.gap_id} FOR UPDATE`);
-          const latest = await loadState();
-          const gap = await requireOpenGap(placement.gap_id);
+          const gap = requireOpenGap(latest, placement.gap_id);
           const original = gapById.get(placement.gap_id)!;
           if (gap.statement !== original.statement || gap.objective_id !== original.objective_id || gap.priority_context_version !== original.priority_context_version) throw new TrustedApplicationError("Priority context changed. Regenerate suggestions against the current context.");
           const references = inspectJudgementReferences(latest, [placement.gap_id], placement.references);
@@ -540,6 +523,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
             .insert(placementsTable)
             .values(values)
             .onConflictDoUpdate({ target: placementsTable.gap_id, set: values });
+          markWritten();
         }
       });
     }
@@ -770,13 +754,22 @@ async function currentPlacement(gapId: string): Promise<PlacementRow | undefined
   return rows[0];
 }
 
-/** A hand-placed gap must be a live Open gap, the same set S8 places. */
-async function requireOpenGap(gapId: string) {
-  const state = await loadState();
+/** Checks the whole inventory even when a priority action targets one gap. */
+function requirePrioritizationReadiness(state: IegpState): void {
+  const [blocker] = gapPrioritizationReadiness(state).blockers;
+  if (!blocker) return;
+  const gap = blocker.gapId ? `Gap ${blocker.gapId} (${blocker.gapName}). ` : "";
+  throw new TrustedApplicationError(`Prioritization is paused. ${gap}${blocker.reason}`);
+}
+
+/** A priority target must be a live Open gap after the inventory is ready. */
+function requireOpenGap(state: IegpState, gapId: string) {
   const gap = state.gaps.find((row) => row.id === gapId);
-  if (!gap || !isLiveGap(gap)) throw new Error(`Unknown gap ${gapId}.`);
+  if (!gap || !isLiveGap(gap)) {
+    throw new TrustedApplicationError("A selected gap is missing from the live inventory. Review Evidence Inventory and select an Open gap.");
+  }
   if (displayedGapStatus(gap) !== "validated_open") {
-    throw new Error(`${gapId} is not an Open gap; only Open gaps are prioritized.`);
+    throw new TrustedApplicationError(`Selected gap ${gapId} (${gap.name}) is not Open. Select an Open gap to prioritize.`);
   }
   return gap;
 }
@@ -816,11 +809,11 @@ async function saveManualDecision(args: ManualDecision, decide: (current: Placem
   const reason = requireDecisionReason(args.reason);
   await ensurePlacementSchema();
   const result = await db().transaction(async (tx) => {
+    await tx.execute(sql`LOCK TABLE gaps IN EXCLUSIVE MODE`);
     await lockObjectiveContext();
-    // Lock the gap even when it has no placement yet. S8 reruns use this same lock.
-    await tx.execute(sql`SELECT id FROM gaps WHERE id = ${args.gap_id} FOR UPDATE`);
-    const gap = await requireOpenGap(args.gap_id);
     const state = await loadState();
+    requirePrioritizationReadiness(state);
+    const gap = requireOpenGap(state, args.gap_id);
     const [current] = await tx.select().from(placementsTable).where(eq(placementsTable.gap_id, args.gap_id)).for("update");
     if (args.expected_version === undefined || args.expected_version !== (current ? placementVersion(current) : null)) {
       throw new TrustedApplicationError("Priority changed or its version is missing. Your values and reason have not been saved. Close this dialog, refresh the page and review the latest priority, then retry with your reason.");

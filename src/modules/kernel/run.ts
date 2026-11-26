@@ -1,4 +1,5 @@
 /** Execute a kernel stage and record its workspace result. */
+import { withModelRun, currentModelRun } from "./model-run";
 import { compareParsedSources } from "@/lib/ingest/compare-source";
 import { sql } from "drizzle-orm";
 import { currentSchemaName, inWorkspaceTransaction, withWorkspaceTransaction } from "@/lib/iegp/db";
@@ -129,12 +130,15 @@ const CAPABILITY_BY_STAGE: Record<StageId, Capability> = {
  * caller's role, resolves routing, records the run, validates both ends of the
  * contract, and files evals and hillclimb signals.
  */
-export async function runStage<O = unknown>(args: {
+type StageRunArgs = {
+  signal?: AbortSignal;
   stage: StageId;
   input: unknown;
   actor: Actor;
   role: Role;
   workspace_id?: string;
+  /** Server-owned purpose supplied by the owner evaluation routes. */
+  purpose?: ModuleContext["purpose"];
   /**
    * Admin AI harness only (KAN-54): run the stage's AI whatever the customer-facing
    * switches say, so a section can be tried before it is turned on. Needs a routed model.
@@ -143,7 +147,14 @@ export async function runStage<O = unknown>(args: {
   force_ai?: boolean;
   /** The ingestion checkpoint owner runs this write after its outer rollback. */
   deferFailureRecord?: (persist: () => Promise<void>) => void;
-}): Promise<StageRunResult<O>> {
+};
+
+/** Run a stage under one cancellable model budget, inherited from an enclosing request. */
+export function runStage<O = unknown>(args: StageRunArgs): Promise<StageRunResult<O>> {
+  return withModelRun(args.signal, () => executeStage<O>(args));
+}
+
+async function executeStage<O>(args: StageRunArgs): Promise<StageRunResult<O>> {
   assertCan(args.role, CAPABILITY_BY_STAGE[args.stage]);
   const scopedWorkspace = await scopedWorkspaceId() ?? DEFAULT_WORKSPACE;
   if (args.workspace_id && args.workspace_id !== scopedWorkspace) throw new Error("Stage workspace does not match the authorised database scope.");
@@ -199,6 +210,7 @@ export async function runStage<O = unknown>(args: {
     recorder.note("route", route, route.degraded ? (route.reason ?? "degraded") : undefined);
 
     const ctx: ModuleContext = {
+      purpose: args.purpose,
       workspace_id,
       actor: args.actor,
       role: args.role,
@@ -218,6 +230,8 @@ export async function runStage<O = unknown>(args: {
       const locked = await db().execute(sql`select pg_try_advisory_xact_lock(hashtextextended(${`ingest:${schema}`}, 0)) as locked`);
       if (!locked[0]?.locked) throw new ApiGuardError(409, "ingest_busy", "An ingestion step or clear is still running. Wait for it to finish, then retry.");
     }
+    const writes: (() => Promise<void>)[] = [];
+    if (args.stage === "S9") ctx.deferWrite = write => { writes.push(write); };
 
     const pointer = await activeRevisionPointer(workspace_id, args.stage);
     const revision = pointer.revision_id ? await getPromptRevision(pointer.revision_id, workspace_id) : null;
@@ -229,7 +243,9 @@ export async function runStage<O = unknown>(args: {
       evaluation: false, input: parsedInput.data, facts: await implementation.freeze(parsedInput.data),
       module_id: manifest.id, module_version: manifest.version, prompt_version: selected.id ?? activePromptVersion(),
     };
+    currentModelRun()?.check();
     const result = await implementation.run(parsedInput.data as never, ctx);
+    currentModelRun()?.check();
     const parsedOutput = implementation.outputSchema.safeParse(result.output);
     if (!parsedOutput.success) {
       throw new Error(
@@ -238,6 +254,8 @@ export async function runStage<O = unknown>(args: {
           .join("; ")}`,
       );
     }
+    for (const write of writes) await write();
+    currentModelRun()?.check();
     const evals = result.evals ?? [];
     await closeRun({
       recorder,
@@ -248,7 +266,8 @@ export async function runStage<O = unknown>(args: {
       evals,
     });
     signals = result.signals ?? [];
-    if (ingestStage) await recordFollowUps(evals, result.summary);
+    await recordFollowUps(evals, result.summary);
+    currentModelRun()?.check();
     return {
       run_id: recorder.id,
       stage: args.stage,
@@ -258,7 +277,7 @@ export async function runStage<O = unknown>(args: {
       summary: result.summary,
       output: parsedOutput.data as O,
       evals,
-    };
+      };
   };
 
   async function recordFollowUps(evals: EvalScore[], summary: string) {
@@ -292,12 +311,14 @@ export async function runStage<O = unknown>(args: {
       try {
         return { result: await withWorkspaceTransaction(() => execute(assertLive)) };
       } catch (error) {
+        currentModelRun()?.cancel();
         stageFailure = { error };
         await closeFailedRun(error);
         return stageFailure;
       }
     });
   } catch (transactionError) {
+    currentModelRun()?.cancel();
     const error = stageFailure ? stageFailure.error : transactionError;
     const persist = async () => {
       try {
@@ -327,7 +348,6 @@ export async function runStage<O = unknown>(args: {
   const { result } = outcome;
 
   try {
-    if (!ingestStage) await recordFollowUps(result.evals, result.summary);
     // Direct S1 runs own their commit; pipeline S1 is compared after its checkpoint commits.
     const isDryRun = Boolean(args.input && typeof args.input === "object" && "dry_run" in args.input && args.input.dry_run === true);
     if (ownsParseCommit && !isDryRun) {

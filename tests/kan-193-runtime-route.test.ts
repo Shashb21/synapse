@@ -15,6 +15,7 @@ it("uses the configured primary and its saved model ahead of configured fallback
 });
 it("uses the first permitted configured fallback and its default model", async () => {
   vi.stubEnv("XAI_API_KEY", ""); vi.stubEnv("ANTHROPIC_API_KEY", ""); vi.stubEnv("OPENAI_API_KEY", "test-alternate");
+  vi.stubEnv("SYNAPSE_APPROVED_FALLBACK_PAIRS", "xai-grok>openai");
   const route = await resolveRoute("S2", config);
   expect(route.provider_id).toBe("openai");
   expect(route.model).toBe(findProvider("openai")!.default_model);
@@ -30,13 +31,27 @@ it("excludes legacy, unknown and non-model providers from credential selection",
     { id: "local", label: "Local", default_model: "none", auth: "none", status: "configured" },
     { id: "cloud", label: "Cloud", default_model: "default-model", auth: "api_key", status: "configured" },
   ]);
-  expect(result.selected?.provider.id).toBe("cloud");
-  expect(result.selected?.model).toBe("default-model");
-  expect(result.rejected).toEqual([{ id: "unknown", reason: "unknown" }, { id: "local", reason: "not_llm" }]);
+  expect(result.selected).toBeNull();
+  expect(result.rejected).toEqual([{ id: "unknown", reason: "unknown" }]);
 });
 it("requires routes for model stages and never for ingestion or human stages", () => {
   expect(stageHasRoute("S2")).toBe(true);
   expect(stageHasRoute("S0")).toBe(false);
   expect(stageHasRoute("S1")).toBe(false);
   expect(stageHasRoute("S5")).toBe(false);
+});
+
+it("requires current approval to resume a previously frozen Development fallback", async () => {
+  const { freezeRoute, frozenRouteAllowed } = await import("@/modules/development/routes");
+  vi.stubEnv("XAI_API_KEY", "");
+  vi.stubEnv("OPENAI_API_KEY", "fictional");
+  vi.stubEnv("SYNAPSE_APPROVED_FALLBACK_PAIRS", "");
+  const requested = { provider_id: "xai-grok", model: "grok-4", temperature: 0, max_tokens: 100, fallbacks: ["openai"] };
+  expect(() => freezeRoute("gap_extraction", requested)).toThrow();
+  vi.stubEnv("SYNAPSE_APPROVED_FALLBACK_PAIRS", "xai-grok>openai");
+  const frozen = freezeRoute("gap_extraction", requested);
+  expect(frozen.actual.provider_id).toBe("openai");
+  expect(frozenRouteAllowed(frozen)).toBe(true);
+  vi.stubEnv("SYNAPSE_APPROVED_FALLBACK_PAIRS", "openai>xai-grok");
+  expect(frozenRouteAllowed(frozen)).toBe(false);
 });

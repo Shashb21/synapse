@@ -1,5 +1,6 @@
-import { desc, eq } from "drizzle-orm";
-import { ensurePlatformSchema, sharedDb } from "./db";
+import { desc, eq, sql } from "drizzle-orm";
+import { inWorkspaceTransaction } from "@/lib/iegp/db";
+import { db, ensurePlatformSchema, sharedDb } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "./ids";
 import type { EvalScore, StageId, SynapseModule } from "./contracts";
@@ -40,17 +41,15 @@ export async function recordEvalRun(args: {
     metrics: args.metrics,
     note: args.note ?? null,
   };
-  await sharedDb().insert(t.evalRuns).values({
-    id: record.id,
-    at: record.at,
-    stage: record.stage,
-    module_id: record.module_id,
-    module_version: record.module_version,
-    run_id: record.run_id,
-    passed: record.passed,
-    metrics: record.metrics,
-    note: record.note,
-  });
+  if (inWorkspaceTransaction()) {
+    // A discarded publication must also discard its successful platform eval.
+    await db().execute(sql`insert into public.eval_runs
+      (id, at, stage, module_id, module_version, run_id, passed, metrics, note)
+      values (${record.id}, ${record.at}, ${record.stage}, ${record.module_id}, ${record.module_version},
+        ${record.run_id}, ${record.passed}, ${JSON.stringify(record.metrics)}::jsonb, ${record.note})`);
+  } else {
+    await sharedDb().insert(t.evalRuns).values(record);
+  }
   return record;
 }
 

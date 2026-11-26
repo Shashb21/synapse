@@ -219,6 +219,7 @@ export function GapsWorkbench({
   cards,
   availableTactics,
   readyForPrioritize,
+  readiness,
   initialFilter,
   initialAttention = false,
   settingOptions = [],
@@ -228,6 +229,7 @@ export function GapsWorkbench({
   cards: ReviewGapCard[];
   availableTactics: TacticLibraryItem[];
   readyForPrioritize: boolean;
+  readiness?: Parameters<typeof InventoryReadiness>[0]["readiness"];
   initialFilter?: ReviewGapFilter;
   initialAttention?: boolean;
   settingOptions?: string[];
@@ -545,7 +547,7 @@ export function GapsWorkbench({
         <AddTacticsButton variant="outline" inUse={customTypesInUse(availableTactics)} />
       </div>
       <p className="-mt-2 text-[11px] text-muted-foreground">{GAPS_TACTIC_HELPER}</p>
-      <InventoryReadiness cards={cards} readyForPrioritize={readyForPrioritize} />
+      <InventoryReadiness cards={cards} readyForPrioritize={readyForPrioritize} readiness={readiness} />
       <div className="rounded-lg border border-border bg-card p-4">
         {readyForPrioritize ? (
           <>
@@ -560,7 +562,7 @@ export function GapsWorkbench({
               href="/?place=plan"
             />
           </>
-        ) : cards.length === 0 ? (
+        ) : cards.length === 0 && !readiness?.liveCount ? (
           // No gaps: there is nothing to confirm yet, so name the first step, not "0 unconfirmed" (KAN-68).
           <>
             <h2 className="text-[13px] font-semibold">Add gaps first</h2>
@@ -573,8 +575,7 @@ export function GapsWorkbench({
           <>
             <h2 className="text-[13px] font-semibold">Review outstanding gap assessments</h2>
             <p className="mt-1 text-[12px] text-muted-foreground">
-              You can open the
-              Prioritization Matrix now, but it only has the gaps already confirmed as Open.
+              You can view saved placements in the Prioritization Matrix. Resolve the blockers above before scoring, placing or validating gaps.
             </p>
           </>
         )}

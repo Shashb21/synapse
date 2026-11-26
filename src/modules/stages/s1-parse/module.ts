@@ -31,7 +31,8 @@ import {
   sourceFileContent,
   unparsedFileIds,
 } from "@/modules/stages/s0-upload/module";
-import { ProviderError } from "@/modules/llm/provider-error";
+import { currentModelRun, ModelRunStop } from "@/modules/kernel/model-run";
+import { ModelAnswerError, ProviderError } from "@/modules/llm/provider-error";
 import {
   PARSED_DOCUMENTS_DDL,
   parsedDocuments,
@@ -119,6 +120,7 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
     const failures: ParseOutput["failures"] = [];
 
     for (const file_id of ids) {
+      currentModelRun()?.check();
       const loaded = await sourceFileContent(file_id);
       if (!loaded) {
         failures.push({ file_id, reason: "file not found" });
@@ -244,7 +246,7 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
       } catch (error) {
         // A provider error (billing, key, rate limit, outage) fails every file the same
         // way: stop the stage so the run fails and the cause reaches the person (KAN-68).
-        if (error instanceof ProviderError) throw error;
+        if (error instanceof ProviderError || error instanceof ModelAnswerError || error instanceof ModelRunStop) throw error;
         const reason = customerErrorMessage(error);
         await markFileFailed({ id: file_id, note: reason });
         failures.push({ file_id, reason });

@@ -51,6 +51,8 @@ export async function completeAll<T>(args: {
   what: string;
   ask: (missing: string[], attempt: number) => Promise<Map<string, T>>;
   describe?: (id: string) => string;
+  /** Latest validation problem for each unanswered item. */
+  problems?: ReadonlyMap<string, string>;
   /** What to tell the user to do next. */
   remedy?: string;
 }): Promise<Map<string, T>> {
@@ -69,7 +71,10 @@ export async function completeAll<T>(args: {
     const describe = args.describe ?? ((id: string) => id);
     // The remedy is the owner's; customers get plain wording (see stage-errors.ts).
     throw new IncompleteAnswerError(
-      `The model did not return a complete ${args.what} for ${unanswered.map(describe).join(", ")} after ${COMPLETION_ATTEMPTS} attempts. Nothing was saved; ${
+      `The model did not return a complete ${args.what} for ${unanswered.map(id => {
+        const problem = args.problems?.get(id);
+        return problem ? `${describe(id)} (${problem})` : describe(id);
+      }).join(", ")} after ${COMPLETION_ATTEMPTS} attempts. Nothing was saved; ${
         args.remedy ?? "run the stage again or switch its route in /admin/control."
       }`,
       args.what,
