@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm';
 import * as core from '@/lib/iegp/schema';
 import * as tables from '@/modules/kernel/schema';
 import { db, wipePlatform } from '@/modules/kernel/db';
-import { assignTacticToGap, createGap, createProposedTactic, loadState, resetDemoSetup, unassignTacticFromGap } from '@/lib/iegp/store';
+import { assignTacticToGap, createGap, createProposedTactic, loadState, resetDemoSetup, unassignTacticFromGap, validateGap } from '@/lib/iegp/store';
 import { validatePlacement } from '@/modules/stages/s8-prioritization/module';
 import { addIdeationProposal, decideIdeationProposal, editIdeationProposal, listIdeationProposals, acceptedIdeationContexts, listIdeationGapOutcomes, ideationProposalReadback } from '@/modules/stages/s9-ideation/module';
 import { addTimelineActivity, planVersion, savePlan, tacticDesigns, timelineModel } from '@/modules/stages/s10-timeline/module';
@@ -23,6 +23,7 @@ async function addReuse() { return addIdeationProposal({gap_id:gapId,fields:{pro
 beforeEach(async()=>{
  await resetDemoSetup(); await wipePlatform();
  gapId=await createGap({statement:'Comparative elderly safety remains unknown',actor_name:actor.name,actor_function:actor.function});
+ await validateGap({ gap_id: gapId, actor_name: actor.name, actor_function: actor.function, note: "Confirm the evidence assessment" });
  await validatePlacement({...await priorityDecision(gapId,'Blocks decision'),gap_id:gapId,band:'high',rationale:'Blocks decision',actor});
  tacticId=await createProposedTactic({name:'Existing cohort',type:'rwe_study',description:'Existing evidence',evidence_question:'Safety',population:'Adults',intervention:'Asset',comparator:'SOC',outcomes:'AE',owner:actor.name,function:actor.function,residual_ids:[],status:'ongoing',actor_name:actor.name,actor_function:actor.function});
 });

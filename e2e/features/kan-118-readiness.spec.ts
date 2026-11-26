@@ -4,7 +4,8 @@ import { iegpAction, planAction } from "../support/synapse";
 
 test.describe("KAN-118 inventory readiness", () => {
   freshWorkspace({ name: "KAN-118" });
-  test("new unresolved evidence leaves validated priority work available", async ({ page, request }) => {
+  test("new unresolved evidence preserves saved priorities and blocks new decisions", async ({ page, request }) => {
+    test.setTimeout(60_000);
     await iegpAction(request, { action: "reset" });
     const first = await iegpAction(request, { action: "create_gap", statement: "Missing comparative survival evidence", domain: "comparative_effectiveness" });
     const gap_id = String(first.id);
@@ -12,7 +13,7 @@ test.describe("KAN-118 inventory readiness", () => {
     await iegpAction(request, { action: "complete_wizard" });
     await planAction(request, { action: "validate_band", gap_id, band: "high", rationale: "Needed for submission" });
     await iegpAction(request, { action: "unlock_tactics" });
-    await iegpAction(request, { action: "create_gap", statement: "New evidence identifies an unresolved safety question", domain: "unmet_need" });
+    const pending = await iegpAction(request, { action: "create_gap", statement: "New evidence identifies an unresolved safety question", domain: "unmet_need" });
     await page.goto("/?place=gaps");
     const readiness = page.getByRole("region", { name: "Inventory review readiness" });
     await expect(readiness).toContainText("2 live gaps · 1 gaps needing attention");
@@ -25,10 +26,17 @@ test.describe("KAN-118 inventory readiness", () => {
     await expect(strip).toContainText("1 of 2 Open gaps with validated priority · Tactics open");
     await page.goto("/?place=plan");
     await expect(page.getByText("1 of 2 Open gaps with priority validated across all settings").first()).toBeVisible();
-    await expect(page.getByText("Tactics is unlocked. You can keep adjusting priorities here.")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Waiting on Gaps" })).toHaveCount(0);
+    await expect(page.getByText("Tactics is unlocked.", { exact: true })).toBeVisible();
+    const toolbar = page.getByTestId("prioritize-toolbar");
+    await expect(toolbar.getByText(/Confirm the evidence assessment with your reason/)).toBeVisible();
+    await expect(toolbar.locator(`a[href="/gaps/${pending.id}"]`)).toBeVisible();
+    await expect(page.getByText("Tactics is unlocked. You can keep adjusting priorities here.")).toHaveCount(0);
     await page.goto("/?place=tactics");
     await expect(page.getByRole("heading", { name: "Tactic Ideation", exact: true })).toBeVisible();
     await expect(page.getByText("Missing comparative survival evidence", { exact: true }).first()).toBeVisible();
+
+    await iegpAction(request, { action: "validate_gap", gap_id: pending.id, note: "Reviewed the new evidence" });
+    await page.goto("/?place=plan");
+    await expect(page.getByText("Tactics is unlocked. You can keep adjusting priorities here.")).toBeVisible();
   });
 });

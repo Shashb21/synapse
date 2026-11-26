@@ -368,8 +368,13 @@ describe("audited direct gap edits", () => {
     expect((await post({ action: "validate_band", gap_id: gap.id, band: "high", reason: "Reconfirmed for the revised statement", expected_version: latest.version }, true)).status).toBe(200);
     expect(ideationBandOrder(await placements()).has(gap.id)).toBe(true);
     const id = await scoped(() => createGap({ ...auditActor, statement: "Unplaced gap", objective_id: ctx.objectives[0]!.id }));
+    expect((await post({ action: "validate_gap", gap_id: id, note: "Confirm the new evidence assessment" })).status).toBe(200);
     const unplaced = (await scoped(loadState)).gaps.find(row => row.id === id)!;
     expect((await post({ action: "modify_gap", gap_id: id, expected_gap: unplaced, statement: "Unplaced revised statement", rationale: "Clarify before the first priority review" })).status).toBe(200);
+    const revised = (await scoped(loadState)).gaps.find(row => row.id === id)!;
+    if (!revised.human_validated) {
+      expect((await post({ action: "validate_gap", gap_id: id, note: "Confirm the revised assessment" })).status).toBe(200);
+    }
     const stale = await post({ action: "set_placement", gap_id: id, band: "high", validate: true, reason: "First judgement on the previous statement", expected_version: null, expected_context_version: unplaced.priority_context_version ?? null }, true);
     expect(stale.status).toBe(400);
     expect(stale.body.error).toMatch(/context changed/i);

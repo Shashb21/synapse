@@ -135,6 +135,8 @@ export async function runStage<O = unknown>(args: {
   actor: Actor;
   role: Role;
   workspace_id?: string;
+  /** Server-owned purpose supplied by the owner evaluation routes. */
+  purpose?: ModuleContext["purpose"];
   /**
    * Admin AI harness only (KAN-54): run the stage's AI whatever the customer-facing
    * switches say, so a section can be tried before it is turned on. Needs a routed model.
@@ -199,6 +201,7 @@ export async function runStage<O = unknown>(args: {
     recorder.note("route", route, route.degraded ? (route.reason ?? "degraded") : undefined);
 
     const ctx: ModuleContext = {
+      purpose: args.purpose,
       workspace_id,
       actor: args.actor,
       role: args.role,

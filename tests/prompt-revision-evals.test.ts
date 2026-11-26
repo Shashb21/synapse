@@ -42,12 +42,19 @@ import { prioritizationModule } from '@/modules/stages/s8-prioritization/module'
 import type { ResolvedRoute, SynapseModule } from '@/modules/kernel/contracts';
 import { newId } from '@/modules/kernel/ids';
 const actor = { name: 'Evaluation Owner', function: 'medical_affairs' as const };
+/** Adds a reviewed evidence question to the live replay source workspace. */
+async function createReviewedGap(name: string, statement: string) {
+    const reviewer = { actor_name: actor.name, actor_function: actor.function };
+    const id = await store.createGap({ name, statement, ...reviewer });
+    await store.validateGap({ gap_id: id, note: "Reviewed before running the live stage", ...reviewer });
+}
+
 const route: ResolvedRoute = { stage: 'S8', provider_id: 'anthropic-claude', provider_label: 'test', model: 'scripted-model', auth: 'api_key', connected: true, params: { temperature: 0, max_tokens: 4000 }, fallbacks: [], degraded: false, reason: null };
 afterEach(() => vi.restoreAllMocks());
 async function evaluationFixture() {
     const ws = await createWorkspace({ name: `eval-${crypto.randomUUID()}`, owner: 'eval-test' });
     return runInWorkspace({ workspace_id: ws.id, schema: ws.schema_name }, async () => {
-        await store.createGap({ name: 'Missing comparative evidence', statement: 'Evidence for the payer decision is missing.', actor_name: actor.name, actor_function: actor.function });
+        await createReviewedGap('Missing comparative evidence', 'Evidence for the payer decision is missing.');
         const live = await runStage({ stage: 'S8', input: { x_axis: 'decision_impact', y_axis: 'time_pressure' }, actor, role: 'medical_affairs' });
         const snapshot = await originatingSnapshot(live.run_id, ws.id, 'S8') as unknown as FrozenReplayCase;
         expect(snapshot.facts.state).toBeTruthy();
@@ -286,7 +293,7 @@ it('preserves future S9 pre-generation slots through a rationale-only edit and f
 it('reserves held-out gold before real proposal generation and never trains on its subjects', async () => {
     const f = await evaluationFixture();
     await runInWorkspace({ workspace_id: f.ws.id, schema: f.ws.schema_name }, async () => {
-        await store.createGap({ name: 'Withheld safety comparison', statement: 'The withheld safety answer is unknown.', actor_name: actor.name, actor_function: actor.function });
+        await createReviewedGap('Withheld safety comparison', 'The withheld safety answer is unknown.');
         const heldGap = (await store.loadState()).gaps.find(g => g.name === 'Withheld safety comparison')!;
         const trainingRun = await runStage({ stage: 'S8', input: { gap_ids: [f.gap.id] }, actor, role: 'medical_affairs' });
         const trainingId = (await examples.recordDecisionExample({ workspace_id: f.ws.id, stage: 'S8', kind: 's8_band', subject_id: f.gap.id, run_id: trainingRun.run_id, ai_input: {}, ai_output: { band: 'high' }, outcome: 'edited', final: { band: 'defer' } }))!;
@@ -318,7 +325,7 @@ it('reserves held-out gold before real proposal generation and never trains on i
         const retrieved = await examples.withLearningExclusions(revision.excluded_ids, () => examples.similarExamples({ stage: 'S8', workspace_id: f.ws.id, text: 'priority decision', take: 100 }));
         expect(retrieved.some(e => revision.excluded_ids.includes(e.id))).toBe(false);
         // New snapshots after generation cannot be chosen as extra gold or change its facts.
-        await store.createGap({ name: 'Later gap', statement: 'A later snapshot must never enter this cohort.', actor_name: actor.name, actor_function: actor.function });
+        await createReviewedGap('Later gap', 'A later snapshot must never enter this cohort.');
         await runStage({ stage: 'S8', input: { dry_run: true }, actor, role: 'medical_affairs' });
         const result = await evaluatePromptRevision({ revision_id: revision.id, workspace_id: f.ws.id, actor });
         expect(result.failures).toEqual([]);

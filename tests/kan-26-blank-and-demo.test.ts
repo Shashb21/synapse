@@ -24,6 +24,7 @@ import { iegpActionCapability } from "@/app/api/iegp/capabilities";
 import { GET as workspacesGet, POST as workspacesPost } from "@/app/api/workspaces/route";
 import type { Role } from "@/modules/auth/roles";
 import { createSession, type Session } from "@/modules/auth/session";
+import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
 import { timelineMarkers } from "@/modules/stages/s10-timeline/gap-view";
 import { WORKSPACE_COOKIE, workspaceCookieValue } from "@/modules/workspaces/context";
 import { startChoice } from "@/modules/workspaces/contents";
@@ -280,7 +281,11 @@ describe("KAN-26: the demo opens with a prioritized plan and a timeline", () => 
       expect(placements.filter((row) => row.validated).map((row) => [row.gap_id, row.band]).sort()).toEqual(
         [["GAP-CAREGIVER", "low"], ["GAP-CNS", "high"], ["GAP-IRA", "medium"], ["GAP-PERSIST", "high"]],
       );
+      for (const placement of placements) {
+        expect(placement).toMatchObject({ human_band: true, actor_name: "Synapse demo data" });
+      }
       const [state, model] = await Promise.all([loadState(), timelineModel()]);
+      expect(state.gaps.filter(isLiveGap).some(gap => displayedGapStatus(gap) === "validated_partial")).toBe(true);
       const view = gapTimelineView({ state, placements, model });
       expect(view.prioritized.map((group) => group.gap_id)).toEqual(["GAP-CNS", "GAP-PERSIST", "GAP-IRA", "GAP-CAREGIVER"]);
       const dated = view.prioritized.flatMap((group) => group.items).filter((item) => item.activity);

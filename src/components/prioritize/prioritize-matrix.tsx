@@ -277,7 +277,7 @@ export function AxisChooser({
           </button>
         ) : null}
         {!mayPrioritize ? (
-          <span className="text-[11px] text-muted-foreground">Your role may not prioritize.</span>
+          <span className="text-[11px] text-muted-foreground">Priority editing is unavailable.</span>
         ) : (
           <span className="text-[11px] text-muted-foreground">
             {gapIds.length} Open gap{gapIds.length === 1 ? "" : "s"} in {scopeLabel}
@@ -651,7 +651,10 @@ export function PrioritizeMatrix({
       </div>
       <div>
         <h2 className="text-[15px] font-medium text-foreground">2. Review placement</h2>
-        <p className="mt-1 text-[12px] leading-5 text-muted-foreground">Select a gap to review its context and scores. Save a draft placement, then validate priority with your own reason in the gap details.</p>
+        <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+          Select a gap to review its context and scores.
+          {mayPrioritize ? " Save a draft placement, then validate priority with your own reason in the gap details." : null}
+        </p>
       </div>
       <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Highlight a priority">
         {BANDS.map((b) => {
@@ -802,7 +805,7 @@ export function PrioritizeMatrix({
                 <p className="mb-1 text-[11px] leading-4 text-muted-foreground">
                   {mayPrioritize
                     ? "Drag a gap onto the matrix: where you drop it sets its two scores. Or select it to type them."
-                    : "Your role may view the matrix but not place gaps."}
+                    : "Select a gap to review its details."}
                 </p>
                 <ul className="grid grid-cols-[minmax(0,1fr)] gap-0.5">
                   {unplaced.map((gap) => (
@@ -813,7 +816,7 @@ export function PrioritizeMatrix({
                         data-gap-id={gap.gap_id}
                         onPointerDown={(event) => onListPointerDown(event, gap.gap_id)}
                         onClick={(event) => { if (suppressGapClick.current) { suppressGapClick.current = false; return; } gapTriggerRef.current = event.currentTarget; setSelectedId(gap.gap_id); }}
-                        aria-label={`${gap.gap_name}: not placed. Drag onto the matrix, or select to type its scores.`}
+                        aria-label={`${gap.gap_name}: not placed. ${mayPrioritize ? "Drag onto the matrix, or select to type its scores." : "Select to review details."}`}
                         className={cn(
                           "flex w-full touch-none select-none items-center gap-1.5 rounded px-1.5 py-1 text-left text-[12px] hover:bg-muted",
                           mayPrioritize && "cursor-grab active:cursor-grabbing",

@@ -9,7 +9,7 @@ import { AI_SECTIONS, type AiSectionId } from "@/modules/kernel/ai-sections";
 import { AiDisabledError, platformAiEnabled } from "@/modules/kernel/ai-switch";
 import { replaceContentsOf } from "@/modules/workspaces/contents";
 import { createWorkspace, getWorkspace, withWorkspace } from "@/modules/workspaces/store";
-import { createGap, loadState } from "@/lib/iegp/store";
+import { createGap, loadState, parkGap, validateGap } from "@/lib/iegp/store";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
 import { DEMO_PACK } from "@/lib/iegp/demo-pack";
 import { SOURCE_TYPES, type EvidenceDomain } from "@/lib/iegp/enums";
@@ -221,7 +221,7 @@ export async function runHarness(args: { case: AiSectionId; input: HarnessInput;
       return { document_ids: parse.output.documents.map((document) => document.id), described };
     };
 
-    /** The admin's own gap, created in the sandbox as a validated Open gap. */
+    /** Creates the admin's gap in the sandbox. */
     const customGap = async (): Promise<string> => {
       const statement = input.gap_statement?.trim() || input.gap_name?.trim();
       if (!statement) throw new Error("Write the gap to run on your own input.");
@@ -232,6 +232,19 @@ export async function runHarness(args: { case: AiSectionId; input: HarnessInput;
         actor_name: args.actor.name,
         actor_function: args.actor.function,
       });
+    };
+
+    /** Prepares the sandbox inventory for a case that scores or places gaps. */
+    const preparePriorityInventory = async () => {
+      const reviewer = { actor_name: args.actor.name, actor_function: args.actor.function };
+      for (const gap of (await loadState()).gaps.filter(isLiveGap)) {
+        const status = displayedGapStatus(gap);
+        if (status === "validated_partial" || status === "candidate") {
+          await parkGap({ gap_id: gap.id, reason: "AI harness: set aside this sandbox gap for the priority case", ...reviewer });
+        } else if (!gap.human_validated) {
+          await validateGap({ gap_id: gap.id, note: "AI harness: confirm this sandbox evidence assessment", ...reviewer });
+        }
+      }
     };
 
     switch (args.case) {
@@ -272,15 +285,18 @@ export async function runHarness(args: { case: AiSectionId; input: HarnessInput;
         const y_axis = axes.y_axis;
         if (mode === "custom") {
           const gapId = await customGap();
+          await preparePriorityInventory();
           await run("S8", { gap_ids: [gapId], x_axis, y_axis });
           return `Your gap “${input.gap_name || input.gap_statement}” on ${y_axis} × ${x_axis}`;
         }
+        await preparePriorityInventory();
         await run("S8", { x_axis, y_axis });
         return `Every Velmara Open gap on ${y_axis} × ${x_axis}`;
       }
       case "ideation": {
         if (mode === "custom") {
           const gapId = await customGap();
+          await preparePriorityInventory();
           const axes = await loadAxes();
           // Ideation serves gaps a person validated as High, so the sandbox copy is placed and validated High.
           const contextVersion = (await loadState()).gaps.find(gap => gap.id === gapId)?.priority_context_version ?? null;

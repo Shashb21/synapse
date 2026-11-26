@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { InventoryReadiness } from "@/components/inventory-readiness";
 import { buildSeed } from "@/lib/iegp/seed";
-import { buildPlanWorkspace, gapsReadyForPrioritize, planGates } from "@/lib/iegp/engine";
+import { buildPlanWorkspace, gapPrioritizationReadiness, gapsReadyForPrioritize, planGates } from "@/lib/iegp/engine";
 
 it("updates review counts after new unresolved evidence without relocking eligible stages", () => {
   const state = buildSeed();
@@ -14,6 +14,7 @@ it("updates review counts after new unresolved evidence without relocking eligib
   state.gaps = live;
   for (const gap of live) {
     gap.status = "validated_open";
+    gap.computed_status = "validated_open";
     gap.human_validated = true;
     gap.new_source_at = undefined;
   }
@@ -23,7 +24,7 @@ it("updates review counts after new unresolved evidence without relocking eligib
   const render = () => renderToStaticMarkup(createElement(InventoryReadiness, {
     cards: buildPlanWorkspace(state).review.map((card, index) => ({
       ...card, gap_status: "validated_open" as const, needs_review: index === 0, tactics: [],
-    })), readyForPrioritize: gapsReadyForPrioritize(state),
+    })), readyForPrioritize: gapsReadyForPrioritize(state), readiness: gapPrioritizationReadiness(state),
   }));
   const beforeHtml = render();
   expect(beforeHtml).toContain("2 live gaps · 1 gaps needing attention");
@@ -37,7 +38,27 @@ it("updates review counts after new unresolved evidence without relocking eligib
   expect(html).toContain("2 gaps needing new source review");
   expect(html).toContain("Review categories can overlap; each gap counts once in gaps needing attention.");
   expect(html).toContain("Previously unlocked stages remain available for eligible work.");
+  expect(html).toContain("Confirm the evidence assessment");
+  expect(html).toContain(`href="/gaps/${live[0].id}"`);
   expect(planGates(state)).toEqual(before);
+});
+
+it("shows a Candidate blocker even though the workbench omits it from its cards", () => {
+  const state = buildSeed();
+  const candidate = state.gaps.find(gap => !gap.retired)!;
+  candidate.status = "candidate";
+  candidate.human_validated = false;
+  state.gaps = [candidate];
+  const cards = buildPlanWorkspace(state).review;
+  expect(cards).toEqual([]);
+
+  const html = renderToStaticMarkup(createElement(InventoryReadiness, {
+    cards, readyForPrioritize: gapsReadyForPrioritize(state), readiness: gapPrioritizationReadiness(state),
+  }));
+
+  expect(html).toContain("1 live gap");
+  expect(html).toContain("Review this Candidate");
+  expect(html).toContain(`href="/gaps/${candidate.id}"`);
 });
 
 it("distinguishes completed human review from evidence closure and handles an empty inventory", () => {

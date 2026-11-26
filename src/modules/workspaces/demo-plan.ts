@@ -1,6 +1,7 @@
-import { loadState } from "@/lib/iegp/store";
+import { db } from "@/lib/iegp/db";
+import { nowIso } from "@/modules/kernel/ids";
+import { priorityPlacements } from "@/modules/kernel/schema";
 import type { Actor } from "@/modules/kernel/contracts";
-import { listPlacements, validatePlacement } from "@/modules/stages/s8-prioritization/module";
 import {
   addTimelineActivity,
   createTimelineActivity,
@@ -10,8 +11,8 @@ import {
 /**
  * The Velmara demo's prioritized plan: validated bands and a dated timeline,
  * so a demo workspace opens with Prioritize, Tactics and Timeline populated.
- * This is fixture data for the demo only, written through the same S8/S10
- * edit paths a person uses; nothing here runs for a real workspace.
+ * These historical bands are fixture rows loaded with the demo inventory,
+ * which intentionally includes unresolved gaps for visitors to review.
  */
 const DEMO_ACTOR: Actor = { name: "Synapse demo data", function: "medical_affairs" };
 const WHY = "Velmara demo plan";
@@ -23,13 +24,23 @@ export const DEMO_BANDS = [
   { gap_id: "GAP-CAREGIVER", band: "low" },
 ] as const;
 
+/** Loads the fixed fixture after the workspace's previous module rows are cleared. */
 export async function loadDemoPlan(workspaceId?: string): Promise<void> {
   const common = { rationale: WHY, actor: DEMO_ACTOR, workspace_id: workspaceId };
-  for (const { gap_id, band } of DEMO_BANDS) {
-    const current = (await listPlacements()).find((row) => row.gap_id === gap_id);
-    const contextVersion = (await loadState()).gaps.find(gap => gap.id === gap_id)?.priority_context_version ?? null;
-    await validatePlacement({ gap_id, band, ...common, reason: WHY, expected_version: current?.version ?? null, expected_context_version: contextVersion });
-  }
+  const at = nowIso();
+  await db().insert(priorityPlacements).values(DEMO_BANDS.map(({ gap_id, band }) => ({
+    gap_id,
+    axis_scores: {},
+    suggested_band: band,
+    suggested_rationale: "",
+    band,
+    validated: true,
+    human_band: true,
+    rationale: WHY,
+    actor_name: DEMO_ACTOR.name,
+    actor_function: DEMO_ACTOR.function,
+    at,
+  })));
   // Mapped tactics, dated from their start to when evidence is available.
   const claims = await addTimelineActivity({
     tactic_id: "TAC-CLAIMS",

@@ -42,6 +42,7 @@ test("schedules nested children, changes only child status, preserves scope and 
     }
     const beforeParents = await pg`select * from ${pg(`${schema}.tactics`)}`;
     const beforeScope = await pg`select id,scope from ${pg(`${schema}.tactic_expansions`)} order by id`;
+    await iegpAction(request, { action: "validate_gap", gap_id: String(gap!.id), note: "Confirmed the gap after recording both expansion links" });
     await validateBandHigh(request, String(gap!.id), "Timeline acceptance priority");
     await page.goto("/timeline");
     await expect.soft(page.locator(`[data-activity-id="ACT-${tacticId}"]`).first()).toContainText("Parent context");

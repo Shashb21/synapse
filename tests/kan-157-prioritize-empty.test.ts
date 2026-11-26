@@ -16,6 +16,6 @@ it.each([false, true])("offers inventory recovery for zero Open gaps, preserving
   expect(html).not.toContain("Set and validate priority for every Open gap");
   expect(html).not.toContain("Continue to tactics");
   if (unlocked) expect(html).toContain("Tactics is unlocked");
-  else expect(html).toContain("Review evidence assessments");
+  else expect(html).toContain("Add and confirm at least one live gap in Evidence Inventory.");
   expect(state.asset.tactics_unlocked).toBe(unlocked);
 });
